@@ -18,12 +18,13 @@
       <object class="AdwBreakpoint">
         <condition>max-width: 400sp</condition>
         <setter object="split_view" property="collapsed">True</setter>
+        <setter object="sidebar_toggle_button" property="visible">True</setter>
       </object>
     </child>
 
     <!-- Window content -->
     <property name="content">
-      <object class="AdwNavigationSplitView" id="split_view">
+      <object class="AdwOverlaySplitView" id="split_view">
 
         <!-- Sidebar Area -->
         <property name="sidebar">
@@ -49,6 +50,16 @@
                   <!-- Top: Header Bar -->
                   <child type="top">
                     <object class="AdwHeaderBar">
+
+                      <!-- Add button to toggle sidebar -->
+                      <child type="start">
+                        <object class="GtkButton" id="sidebar_toggle_button">
+                          <property name="icon-name">sidebar-show-symbolic</property>
+                          <property name="tooltip-text" translatable="yes">Toggle sidebar</property>
+                          <property name="action-name">win.toggle-sidebar</property>
+                          <property name="visible">False</property>
+                        </object>
+                      </child>
 
                       <!-- Title Area -->
                       <property name="title-widget">
@@ -115,4 +126,3 @@
   </menu>
 
 </interface>
-
