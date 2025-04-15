@@ -5,7 +5,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Gio, Adw
-from .mainwindow import CatalystlabWindow
+from .main_window import CatalystlabWindow
 
 
 class CatalystlabApplication(Adw.Application):

@@ -2,7 +2,7 @@ from gi.repository import Adw
 from gi.repository import Gtk
 from gi.repository import Gio
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/mainwindow/mainwindow.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window.ui')
 class CatalystlabWindow(Adw.ApplicationWindow):
     __gtype_name__ = 'CatalystlabWindow'
 
