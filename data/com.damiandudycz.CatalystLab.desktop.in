@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=catalystlab
+Exec=catalystlab
+Icon=com.damiandudycz.CatalystLab
+Terminal=false
+Type=Application
+Categories=GTK;
+StartupNotify=true
