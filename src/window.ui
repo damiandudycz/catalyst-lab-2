@@ -1,35 +1,99 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
+
+  <!-- Libraries -->
   <requires lib="gtk" version="4.0"/>
   <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
   <template class="CatalystlabWindow" parent="AdwApplicationWindow">
-    <property name="default-width">600</property>
-    <property name="default-height">300</property>
+    <!-- Window properties -->
+    <property name="width-request">280</property>
+    <property name="height-request">200</property>
+    <property name="default-width">800</property>
+    <property name="default-height">800</property>
+
+    <!-- Automatically collapse sidebar when width is too small -->
+    <child>
+      <object class="AdwBreakpoint">
+        <condition>max-width: 400sp</condition>
+        <setter object="split_view" property="collapsed">True</setter>
+      </object>
+    </child>
+
+    <!-- Window content -->
     <property name="content">
-      <object class="AdwToolbarView">
-        <child type="top">
-          <object class="AdwHeaderBar" id="header_bar">
-            <child type="end">
-              <object class="GtkMenuButton">
-                <property name="primary">True</property>
-                <property name="icon-name">open-menu-symbolic</property>
-                <property name="tooltip-text" translatable="yes">Menu</property>
-                <property name="menu-model">primary_menu</property>
+      <object class="AdwNavigationSplitView" id="split_view">
+
+        <!-- Sidebar Area -->
+        <property name="sidebar">
+          <object class="AdwNavigationPage">
+            <property name="child">
+              <object class="GtkLabel">
+                <property name="label">Sidebar Content</property>
               </object>
-            </child>
-          </object>
-        </child>
-        <property name="content">
-          <object class="GtkLabel" id="label">
-            <property name="label">Hello, World!</property>
-            <style>
-              <class name="title-1"/>
-            </style>
+            </property>
           </object>
         </property>
+
+        <!-- Main Content Area -->
+        <property name="content">
+          <object class="AdwNavigationPage">
+             <property name="child">
+
+               <!-- ToolbarView holds HeaderBar + Main View Area -->
+               <object class="AdwToolbarView">
+
+                  <!-- Top: Header Bar -->
+                  <child type="top">
+                    <object class="AdwHeaderBar">
+
+                      <!-- Title Area -->
+                      <property name="title-widget">
+                        <object class="AdwWindowTitle">
+                            <property name="title">Catalyst Lab</property>
+                        </object>
+                      </property>
+
+                      <!-- Additional window buttons -->
+                      <child type="end">
+                        <!--
+                        Uncomment to add more than one button
+                        <object class="GtkBox">
+                          <child>
+                        -->
+                            <object class="GtkMenuButton">
+                              <property name="icon-name">open-menu-symbolic</property>
+                              <property name="tooltip-text">Menu</property>
+                              <property name="menu-model">primary_menu</property>
+                            </object>
+                        <!--
+                          </child>
+                        </object>
+                        -->
+                      </child>
+
+                    </object>
+                  </child>
+
+                  <!-- Content: Main File View Area (Placeholder) -->
+                  <property name="content">
+                    <object class="GtkLabel">
+                      <property name="label">Main Content</property>
+                    </object>
+                  </property>
+
+               </object>
+             </property>
+          </object>
+        </property>
+
       </object>
     </property>
+
   </template>
+
+  <!-- Menu -->
   <menu id="primary_menu">
     <section>
       <item>
@@ -46,4 +110,6 @@
       </item>
     </section>
   </menu>
+
 </interface>
+
