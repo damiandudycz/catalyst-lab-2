@@ -29,7 +29,7 @@ configure_file(
 catalystlab_sources = [
   '__init__.py',
   'main.py',
-  'window.py',
+  'mainwindow/mainwindow.py',
 ]
 
 install_data(catalystlab_sources, install_dir: moduledir)

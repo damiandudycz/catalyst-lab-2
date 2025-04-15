@@ -2,5 +2,5 @@ data/com.damiandudycz.CatalystLab.desktop.in
 data/com.damiandudycz.CatalystLab.metainfo.xml.in
 data/com.damiandudycz.CatalystLab.gschema.xml
 src/main.py
-src/window.py
-src/window.ui
+src/mainwindow/mainwindow.py
+src/mainwindow/mainwindow.ui
