@@ -17,6 +17,13 @@
                     <property name="title">Menu</property>
                 </object>
               </property>
+              <child type="end">
+                <object class="GtkMenuButton">
+                  <property name="icon-name">open-menu-symbolic</property>
+                  <property name="tooltip-text">Menu</property>
+                  <property name="menu-model">primary_menu</property>
+                </object>
+              </child>
             </object>
           </child>
           <property name="content">
@@ -25,5 +32,23 @@
        </object>
     </property>
   </template>
+
+    <!-- Menu -->
+  <menu id="primary_menu">
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">_Preferences</attribute>
+        <attribute name="action">app.preferences</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">_Keyboard Shortcuts</attribute>
+        <attribute name="action">win.show-help-overlay</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">_About CatalystLab</attribute>
+        <attribute name="action">app.about</attribute>
+      </item>
+    </section>
+  </menu>
 
 </interface>
