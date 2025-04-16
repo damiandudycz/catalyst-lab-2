@@ -21,3 +21,4 @@ class CatalystlabWindowContent(Gtk.Box):
         """Replace the current content with a new widget."""
         self.remove(self.content)
         self.append(new_widget)
+        self.content = new_widget
