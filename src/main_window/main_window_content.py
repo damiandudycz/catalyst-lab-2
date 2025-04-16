@@ -11,12 +11,9 @@ class CatalystlabWindowContent(Gtk.Box):
 
     def load_main_page(self, page: MainPage):
         """Load content of selected main section."""
-        # Get view for given page. TODO: Move to MainPage as method
-        builder = Gtk.Builder()
-        builder.add_from_resource("/com/damiandudycz/CatalystLab/welcome_page/welcome_page.ui")
-        view = builder.get_objects()[0]
         # Display page.
-        self.replace_content(view)
+        page_widget = page.create_page()
+        self.replace_content(page_widget)
 
     def replace_content(self, new_widget: Gtk.Widget):
         """Replace the current content with a new widget."""
