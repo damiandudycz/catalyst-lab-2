@@ -4,3 +4,7 @@ data/com.damiandudycz.CatalystLab.gschema.xml
 src/main.py
 src/main_window/main_window.py
 src/main_window/main_window.ui
+src/main_window/main_window_side_menu.py
+src/main_window/main_window_side_menu.ui
+src/main_window/main_window_side_bar.py
+src/main_window/main_window_side_bar.ui

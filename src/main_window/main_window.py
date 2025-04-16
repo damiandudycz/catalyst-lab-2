@@ -1,6 +1,8 @@
 from gi.repository import Adw
 from gi.repository import Gtk
 
+from .main_window_side_bar import CatalystlabWindowSideBar
+
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window.ui')
 class CatalystlabWindow(Adw.ApplicationWindow):
     __gtype_name__ = 'CatalystlabWindow'
