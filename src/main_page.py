@@ -16,12 +16,9 @@ class MainPage(Enum):
 
     def create_page(self) -> Gtk.Widget:
         """Create and return a GTK widget for this page."""
+        ui_resource_path = f"/com/damiandudycz/CatalystLab/main_sections/{self.name.lower()}.ui"
+        ui_not_implemented_resource_path = f"/com/damiandudycz/CatalystLab/main_sections/not_implemented.ui"
         builder = Gtk.Builder()
-        resource_path = f"/com/damiandudycz/CatalystLab/main_sections/{self.name.lower()}.ui"
-        try:
-            builder.add_from_resource(resource_path)
-        except GLib.Error as e:
-            print(f"Failed to load resource for {self.name}: {e}")
-            # Optionally fall back to a default page
-            builder.add_from_resource("/com/damiandudycz/CatalystLab/main_sections/not_implemented.ui")
+        builder.add_from_resource(ui_resource_path)
         return builder.get_objects()[0]
+
