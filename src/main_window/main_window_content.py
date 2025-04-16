@@ -6,6 +6,7 @@ class CatalystlabWindowContent(Gtk.Box):
     """Wrapper container used to display the main content."""
     __gtype_name__ = 'CatalystlabWindowContent'
 
+    # View elements:
     content = Gtk.Template.Child()
 
     def load_main_page(self, page: MainPage):
@@ -17,7 +18,7 @@ class CatalystlabWindowContent(Gtk.Box):
         # Display page.
         self.replace_content(view)
 
-    def replace_content(self, new_widget):
+    def replace_content(self, new_widget: Gtk.Widget):
         """Replace the current content with a new widget."""
         self.remove(self.content)
         self.append(new_widget)

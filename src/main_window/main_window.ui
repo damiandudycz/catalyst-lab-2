@@ -50,7 +50,9 @@
                     </child>
                     <property name="content">
                       <!-- Load CatalystlabWindowSideMenu -->
-                      <object class="CatalystlabWindowSideMenu" id="side_menu"/>
+                      <object class="CatalystlabWindowSideMenu" id="side_menu">
+                        <signal name="row-selected" handler="side_menu_row_selected"/>
+                      </object>
                     </property>
                  </object>
               </property>

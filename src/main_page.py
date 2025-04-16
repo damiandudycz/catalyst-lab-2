@@ -5,14 +5,9 @@ class MainPage(Enum):
     PROJECTS = ("Projects", "folder-symbolic")
     BUILDS = ("Builds", "build-symbolic")
 
-    def __init__(self, label, icon):
-        self._label = label
-        self._icon = icon
+    initial_page = WELCOME
 
-    @property
-    def name(self):
-        return self._label
+    def __init__(self, label: str, icon: str):
+        self.label = label
+        self.icon = icon
 
-    @property
-    def icon(self):
-        return self._icon

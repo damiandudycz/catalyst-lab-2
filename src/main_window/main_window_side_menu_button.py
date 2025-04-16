@@ -12,7 +12,7 @@ class MainWindowSideMenuButton(Gtk.ListBoxRow):
     def __init__(self, page: MainPage):
         super().__init__()
         self.page = page
-        self.set_tooltip_text(page.name)
-        self.label.set_label(page.name)
+        self.set_tooltip_text(page.label)
+        self.label.set_label(page.label)
         self.icon.set_from_icon_name(page.icon)
 
