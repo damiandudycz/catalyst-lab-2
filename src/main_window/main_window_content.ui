@@ -9,9 +9,10 @@
   <template class="CatalystlabWindowContent" parent="GtkBox">
     <property name="orientation">vertical</property>
     <child>
-      <object class="GtkLabel">
-        <property name="label">Main Content Area</property>
-        <property name="vexpand">True</property>
+      <!-- Currently displayed content - it's child to be replaced in code -->
+      <object class="GtkBox" id="content">
+        <property name="orientation">vertical</property>
+        <!-- Child is not set here, it will be set in code by the user of this template -->
       </object>
     </child>
   </template>

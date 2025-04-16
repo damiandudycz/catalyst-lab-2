@@ -1,6 +1,5 @@
 from gi.repository import Adw
 from gi.repository import Gtk
-
 from .main_window_side_menu import CatalystlabWindowSideMenu
 from .main_window_content import CatalystlabWindowContent
 
@@ -10,6 +9,7 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     # Main view - overlay split view.
     split_view = Gtk.Template.Child()
+    content_view = Gtk.Template.Child() # Call .replace_content to set current content.
 
     # Toggle sidebar visiblity with button.
     @Gtk.Template.Callback()

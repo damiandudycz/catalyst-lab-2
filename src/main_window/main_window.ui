@@ -50,7 +50,7 @@
                     </child>
                     <property name="content">
                       <!-- Load CatalystlabWindowSideMenu -->
-                      <object class="CatalystlabWindowSideMenu"/>
+                      <object class="CatalystlabWindowSideMenu" id="side_menu_view"/>
                     </property>
                  </object>
               </property>
@@ -82,7 +82,7 @@
                   </child>
                   <property name="content">
                     <!-- Load CatalystlabWindowContent -->
-                    <object class="CatalystlabWindowContent"/>
+                    <object class="CatalystlabWindowContent" id="content_view"/>
                   </property>
                </object>
              </property>
