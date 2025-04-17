@@ -34,6 +34,8 @@ catalystlab_sources = [
   'main_window/main_window_side_menu_button.py',
   'main_window/main_window_content.py',
   'main_sections/main_section.py',
+  'main_sections/welcome_section.py',
+  'helper_types/gtkboxabcmeta.py',
 ]
 
 install_data(catalystlab_sources, install_dir: moduledir)

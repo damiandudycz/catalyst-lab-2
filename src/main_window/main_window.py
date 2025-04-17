@@ -1,5 +1,6 @@
 from gi.repository import Adw
 from gi.repository import Gtk
+from typing import Type
 from .main_window_side_menu import CatalystlabWindowSideMenu
 from .main_window_content import CatalystlabWindowContent
 from .main_section import MainSection
@@ -26,6 +27,6 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     # Bind displayed content to side menu selected page.
     @Gtk.Template.Callback()
-    def side_menu_row_selected(self, _, section: MainSection):
+    def side_menu_row_selected(self, _, section: Type[MainSection]):
         self.content_view.load_main_section(section)
 

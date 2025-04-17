@@ -4,7 +4,7 @@
   <requires lib="gtk" version="4.0"/>
 
   <!-- Template -->
-  <object class="GtkBox">
+  <template class="WelcomeSection" parent="MainSection">
     <property name="orientation">vertical</property>
     <child>
       <object class="GtkLabel">
@@ -12,6 +12,6 @@
         <property name="vexpand">True</property>
       </object>
     </child>
-  </object>
+  </template>
 
 </interface>

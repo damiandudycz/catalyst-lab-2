@@ -1,5 +1,7 @@
 from gi.repository import Gtk, GObject
+from typing import Type
 from .main_section import MainSection
+from .welcome_section import WelcomeSection
 from .main_window_side_menu_button import MainWindowSideMenuButton
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_side_menu.ui')
@@ -9,6 +11,9 @@ class CatalystlabWindowSideMenu(Gtk.Box):
     # View elements:
     section_list = Gtk.Template.Child()
 
+    # Setup initial section displayed by the application.
+    initial_section: Type[MainSection] = WelcomeSection
+
     # Define signals emitted by this widget.
     __gsignals__ = {
         'row-selected': (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
@@ -17,19 +22,20 @@ class CatalystlabWindowSideMenu(Gtk.Box):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Load main sections and add buttons for them.
-        for section in MainSection:
+        main_sections = MainSection.list_sections()
+        for section in main_sections:
             button = MainWindowSideMenuButton(section)
             self.section_list.append(button)
         # Set initial selected page
-        self._selected_section: MainSection = None
-        self.selected_section = MainSection.initial_section
+        self._selected_section: Type[MainSection] = None
+        self.selected_section = CatalystlabWindowSideMenu.initial_section
 
     @property
     def selected_section(self):
         return self._selected_section
     @selected_section.setter
-    def selected_section(self, section: MainSection):
-        if self._selected_section == section:
+    def selected_section(self, section: Type[MainSection]):
+        if self.selected_section == section:
             return
         self._selected_section = section
         # Pass signal to user of this control
