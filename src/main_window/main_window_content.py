@@ -1,5 +1,5 @@
 from gi.repository import Gtk
-from .main_page import MainPage
+from .main_section import MainSection
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_content.ui')
 class CatalystlabWindowContent(Gtk.Box):
@@ -9,11 +9,11 @@ class CatalystlabWindowContent(Gtk.Box):
     # View elements:
     content = Gtk.Template.Child()
 
-    def load_main_page(self, page: MainPage):
+    def load_main_section(self, section: MainSection):
         """Load content of selected main section."""
-        # Display page.
-        page_widget = page.create_page()
-        self.replace_content(page_widget)
+        # Display section.
+        section_widget = section.create_section()
+        self.replace_content(section_widget)
 
     def replace_content(self, new_widget: Gtk.Widget):
         """Replace the current content with a new widget."""
