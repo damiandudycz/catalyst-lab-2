@@ -36,6 +36,8 @@ class CatalystlabWindowSideMenu(Gtk.Box):
         # Pass signal to user of this control
         self.emit("row-selected", section)
         # Highlight the correct button in side menu
+        # Deselect all sections first
+        self.section_list.select_row(None)
         row = self.section_list.get_first_child()
         while row:
             if hasattr(row, "section") and row.section == section:

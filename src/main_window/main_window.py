@@ -3,6 +3,7 @@ from gi.repository import Gtk
 from .main_window_side_menu import CatalystlabWindowSideMenu
 from .main_window_content import CatalystlabWindowContent
 from .app_section import AppSection
+from .app_events import EventBus, AppEvents
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window.ui')
 class CatalystlabWindow(Adw.ApplicationWindow):
@@ -15,8 +16,12 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Connect views
+        self.content_view.side_menu = self.side_menu
         # Load initial section page.
         self.content_view.load_main_section(self.side_menu.selected_section)
+        EventBus.subscribe(AppEvents.OPEN_ABOUT, self.open_about_section)
+
 
     # Toggle sidebar visibility with button.
     @Gtk.Template.Callback()
@@ -29,3 +34,5 @@ class CatalystlabWindow(Adw.ApplicationWindow):
     def side_menu_row_selected(self, _, section: AppSection):
         self.content_view.load_main_section(section)
 
+    def open_about_section(self, *args, **kwargs):
+        self.content_view.load_main_section(AppSection.WELCOME)

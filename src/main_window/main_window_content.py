@@ -1,5 +1,6 @@
 from gi.repository import Gtk
 from .app_section import AppSection
+from .main_window_side_menu import CatalystlabWindowSideMenu
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_content.ui')
 class CatalystlabWindowContent(Gtk.Box):
@@ -8,12 +9,15 @@ class CatalystlabWindowContent(Gtk.Box):
 
     # View elements:
     content = Gtk.Template.Child()
+    side_menu: CatalystlabWindowSideMenu
 
     def load_main_section(self, section: AppSection):
         """Load content of selected main section."""
         # Display section.
         section_widget = section.create_section()
         self.replace_content(section_widget)
+        # TODO: Pass new selection to side menu
+        self.side_menu.selected_section = section
 
     def replace_content(self, new_widget: Gtk.Widget):
         """Replace the current content with a new widget."""
