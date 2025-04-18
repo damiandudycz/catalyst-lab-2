@@ -2,7 +2,6 @@ from enum import Enum, auto
 
 class AppEvents(Enum):
     OPEN_APP_SECTION = auto()
-    SET_SIDEBAR_VISIBLE = auto()
 
 class EventBus:
     _subscribers = {}
