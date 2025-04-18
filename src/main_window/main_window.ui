@@ -15,10 +15,8 @@
 
     <!-- Breakpoint controls side bar collapsed state and toggle button visibility -->
     <child>
-      <object class="AdwBreakpoint">
+      <object class="AdwBreakpoint" id="sidebar_toggle_breakpoint">
         <condition>max-width: 400sp</condition>
-        <setter object="split_view" property="collapsed">True</setter>
-        <setter object="sidebar_toggle_button" property="visible">True</setter>
       </object>
     </child>
 
