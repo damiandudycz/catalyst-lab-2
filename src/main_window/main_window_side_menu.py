@@ -18,8 +18,9 @@ class CatalystlabWindowSideMenu(Gtk.Box):
         super().__init__(**kwargs)
         # Load main sections and add buttons for them.
         for section in AppSection:
-            button = MainWindowSideMenuButton(section)
-            self.section_list.append(button)
+            if section.show_in_side_bar:
+                button = MainWindowSideMenuButton(section)
+                self.section_list.append(button)
         # Set initial selected page
         self._selected_section: AppSection = None
         self.selected_section = AppSection.initial_section

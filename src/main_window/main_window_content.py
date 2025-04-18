@@ -20,3 +20,7 @@ class CatalystlabWindowContent(Gtk.Box):
         self.remove(self.content)
         self.append(new_widget)
         self.content = new_widget
+        # Content bindings:
+        # Detect if displayed content has special properties used for binding application elements and connect them.
+        # For example passing reference to content_view, side_menu, app, etc.
+        # These bindings can be used to manage app navigation from within displayed content.

@@ -5,18 +5,20 @@ from .welcome_section import WelcomeSection
 
 class AppSection(Enum):
     # Main sections of the application, as displayed in side menu:
-    WELCOME  = (WelcomeSection, "Welcome" , "go-home-symbolic"         )
-    PROJECTS = (WelcomeSection, "Projects", "folder-documents-symbolic")
-    BUILDS   = (WelcomeSection, "Builds"  , "emblem-ok-symbolic"       )
-    HELP     = (WelcomeSection, "Help"    , "help-faq-symbolic"        )
-    ABOUT    = (WelcomeSection, "About"   , "help-about-symbolic"      )
+    #           Class           Title       Icon                         Show in side bar
+    WELCOME  = (WelcomeSection, "Welcome" , "go-home-symbolic"         , False)
+    PROJECTS = (Gtk.Button,     "Projects", "folder-documents-symbolic", True)
+    BUILDS   = (WelcomeSection, "Builds"  , "emblem-ok-symbolic"       , True)
+    HELP     = (WelcomeSection, "Help"    , "help-faq-symbolic"        , True)
+    ABOUT    = (WelcomeSection, "About"   , "help-about-symbolic"      , True)
 
     initial_section = WELCOME
 
-    def __init__(self, module: Type, label: str, icon: str):
+    def __init__(self, module: Type, label: str, icon: str, show_in_side_bar: bool):
         self.label = label
         self.icon = icon
         self.module = module
+        self.show_in_side_bar = show_in_side_bar
 
     def create_section(self) -> Gtk.Widget:
         """Create and return a GTK widget for this page."""

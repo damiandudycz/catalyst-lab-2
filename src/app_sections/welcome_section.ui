@@ -26,6 +26,8 @@
     <child>
       <object class="GtkLabel">
         <property name="label">Welcome to Catalyst Lab</property>
+        <property name="halign">center</property>
+        <property name="wrap">True</property>
         <style>
           <class name="title-1"/>
         </style>
@@ -50,6 +52,7 @@
         <style>
           <class name="suggested-action"/>
         </style>
+        <signal name="clicked" handler="on_start_button_pressed" swapped="no"/>
       </object>
     </child>
 
