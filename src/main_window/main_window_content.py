@@ -1,6 +1,7 @@
 from gi.repository import Gtk
 from .app_section import AppSection
 from .main_window_side_menu import CatalystlabWindowSideMenu
+from .app_events import EventBus, AppEvents
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_content.ui')
 class CatalystlabWindowContent(Gtk.Box):
@@ -16,8 +17,10 @@ class CatalystlabWindowContent(Gtk.Box):
         # Display section.
         section_widget = section.create_section()
         self.replace_content(section_widget)
-        # TODO: Pass new selection to side menu
+        print(f"Section {section}")
+        # Pass new selection to side menu
         self.side_menu.selected_section = section
+        EventBus.emit(AppEvents.SET_SIDEBAR_VISIBLE, section.show_side_bar)
 
     def replace_content(self, new_widget: Gtk.Widget):
         """Replace the current content with a new widget."""

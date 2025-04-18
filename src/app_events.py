@@ -1,8 +1,9 @@
-from enum import Enum
+from enum import Enum, auto
 
 class AppEvents(Enum):
-    OPEN_ABOUT = "open_about"
-    SAVE_DATA = "save_data"
+    OPEN_ABOUT = auto()
+    SAVE_DATA = auto()
+    SET_SIDEBAR_VISIBLE = auto()
 
 class EventBus:
     _subscribers = {}

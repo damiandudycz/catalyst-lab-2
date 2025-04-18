@@ -18,10 +18,10 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
         # Connect views
         self.content_view.side_menu = self.side_menu
+        EventBus.subscribe(AppEvents.SET_SIDEBAR_VISIBLE, self.set_sidebar_visible)
+        EventBus.subscribe(AppEvents.OPEN_ABOUT, self.open_about_section)
         # Load initial section page.
         self.content_view.load_main_section(self.side_menu.selected_section)
-        EventBus.subscribe(AppEvents.OPEN_ABOUT, self.open_about_section)
-
 
     # Toggle sidebar visibility with button.
     @Gtk.Template.Callback()
@@ -35,4 +35,9 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         self.content_view.load_main_section(section)
 
     def open_about_section(self, *args, **kwargs):
-        self.content_view.load_main_section(AppSection.WELCOME)
+        print("Open Abot")
+        self.content_view.load_main_section(AppSection.PROJECTS)
+
+    def set_sidebar_visible(self, visible: bool):
+        self.split_view.set_show_sidebar(visible)
+
