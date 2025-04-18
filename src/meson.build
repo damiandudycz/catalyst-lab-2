@@ -35,6 +35,7 @@ catalystlab_sources = [
   'main_window/main_window_side_menu_button.py',
   'main_window/main_window_content.py',
   'app_sections/app_section.py',
+  'app_sections/app_section_details.py',
   'app_sections/welcome_section.py',
 ]
 

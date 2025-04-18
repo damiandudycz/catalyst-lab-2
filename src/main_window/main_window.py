@@ -3,6 +3,7 @@ from gi.repository import Gtk
 from .main_window_side_menu import CatalystlabWindowSideMenu
 from .main_window_content import CatalystlabWindowContent
 from .app_section import AppSection
+from .app_section_details import AppSectionDetails
 from .app_events import EventBus, AppEvents
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window.ui')
@@ -18,12 +19,9 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # Connect views
-        self.content_view.side_menu = self.side_menu
-        EventBus.subscribe(AppEvents.SET_SIDEBAR_VISIBLE, self.set_sidebar_visible)
-        EventBus.subscribe(AppEvents.OPEN_ABOUT, self.open_about_section)
-        # Load initial section page.
-        self.content_view.load_main_section(self.side_menu.selected_section)
+        EventBus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
+        # Load initial section page:
+        EventBus.emit(AppEvents.OPEN_APP_SECTION, AppSectionDetails.initial_section)
         # Connect sidebar_toggle_breakpoint actions
         self.sidebar_toggle_breakpoint.connect("apply", self._on_sidebar_toggle_breakpoint_apply)
         self.sidebar_toggle_breakpoint.connect("unapply", self._on_sidebar_toggle_breakpoint_unapply)
@@ -35,21 +33,13 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         if self.allow_side_menu:
             self.split_view.set_show_sidebar(not self.split_view.get_show_sidebar())
 
-    # Bind displayed content to side menu selected page.
-    @Gtk.Template.Callback()
-    def side_menu_row_selected(self, _, section: AppSection):
-        self.content_view.load_main_section(section)
-
-    def open_about_section(self, *args, **kwargs):
-        self.content_view.load_main_section(AppSection.PROJECTS)
-
     # Managing side bar and toggle side bar button visibility for selected section and collapsed state:
 
-    def set_sidebar_visible(self, visible: bool):
-        self.allow_side_menu = visible
-        if (visible and self.allow_side_menu) or not visible:
-            self.split_view.set_show_sidebar(visible and not self.split_view.get_collapsed())
-            self.sidebar_toggle_button.set_visible(self.allow_side_menu and self.split_view.get_collapsed())
+    def opened_app_section(self, section: AppSection):
+        section_details = AppSectionDetails(section)
+        self.allow_side_menu = section_details.show_side_bar
+        self.split_view.set_show_sidebar(self.allow_side_menu and not self.split_view.get_collapsed())
+        self.sidebar_toggle_button.set_visible(self.allow_side_menu and self.split_view.get_collapsed())
 
     def _on_sidebar_toggle_breakpoint_apply(self, breakpoint):
         self.split_view.set_collapsed(True)
