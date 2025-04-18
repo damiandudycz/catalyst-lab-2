@@ -1,5 +1,5 @@
 from gi.repository import Gtk, GObject
-from .main_section import MainSection
+from .app_section import AppSection
 from .main_window_side_menu_button import MainWindowSideMenuButton
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_side_menu.ui')
@@ -17,18 +17,18 @@ class CatalystlabWindowSideMenu(Gtk.Box):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Load main sections and add buttons for them.
-        for section in MainSection:
+        for section in AppSection:
             button = MainWindowSideMenuButton(section)
             self.section_list.append(button)
         # Set initial selected page
-        self._selected_section: MainSection = None
-        self.selected_section = MainSection.initial_section
+        self._selected_section: AppSection = None
+        self.selected_section = AppSection.initial_section
 
     @property
     def selected_section(self):
         return self._selected_section
     @selected_section.setter
-    def selected_section(self, section: MainSection):
+    def selected_section(self, section: AppSection):
         if self._selected_section == section:
             return
         self._selected_section = section

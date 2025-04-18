@@ -33,7 +33,8 @@ catalystlab_sources = [
   'main_window/main_window_side_menu.py',
   'main_window/main_window_side_menu_button.py',
   'main_window/main_window_content.py',
-  'main_sections/main_section.py',
+  'app_sections/app_section.py',
+  'app_sections/welcome_section.py',
 ]
 
 install_data(catalystlab_sources, install_dir: moduledir)
