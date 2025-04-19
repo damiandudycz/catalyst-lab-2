@@ -29,13 +29,14 @@ configure_file(
 catalystlab_sources = [
   '__init__.py',
   'main.py',
+  'app_events.py',
   'main_window/main_window.py',
   'main_window/main_window_side_menu.py',
   'main_window/main_window_side_menu_button.py',
   'main_window/main_window_content.py',
-  'main_sections/main_section.py',
-  'main_sections/welcome_section.py',
-  'helper_types/gtkboxabcmeta.py',
+  'app_sections/app_section.py',
+  'app_sections/app_section_details.py',
+  'app_sections/welcome_section.py',
 ]
 
 install_data(catalystlab_sources, install_dir: moduledir)

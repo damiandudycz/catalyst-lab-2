@@ -11,20 +11,19 @@
     <property name="width-request">280</property>
     <property name="height-request">200</property>
     <property name="default-width">800</property>
-    <property name="default-height">800</property>
+    <property name="default-height">500</property>
 
     <!-- Breakpoint controls side bar collapsed state and toggle button visibility -->
     <child>
-      <object class="AdwBreakpoint">
+      <object class="AdwBreakpoint" id="sidebar_toggle_breakpoint">
         <condition>max-width: 400sp</condition>
-        <setter object="split_view" property="collapsed">True</setter>
-        <setter object="sidebar_toggle_button" property="visible">True</setter>
       </object>
     </child>
 
     <!-- Window content -->
     <property name="content">
       <object class="AdwOverlaySplitView" id="split_view">
+        <!-- <property name="collapsed">True</property> -->
 
         <!-- SideBar -->
         <property name="sidebar">
@@ -50,9 +49,7 @@
                     </child>
                     <property name="content">
                       <!-- Load CatalystlabWindowSideMenu -->
-                      <object class="CatalystlabWindowSideMenu" id="side_menu">
-                        <signal name="row-selected" handler="side_menu_row_selected"/>
-                      </object>
+                      <object class="CatalystlabWindowSideMenu" id="side_menu"/>
                     </property>
                  </object>
               </property>

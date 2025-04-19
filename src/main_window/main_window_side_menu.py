@@ -1,8 +1,8 @@
 from gi.repository import Gtk, GObject
-from typing import Type
-from .main_section import MainSection
-from .welcome_section import WelcomeSection
+from .app_section import AppSection
+from .app_section_details import AppSectionDetails
 from .main_window_side_menu_button import MainWindowSideMenuButton
+from .app_events import EventBus, AppEvents
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_side_menu.ui')
 class CatalystlabWindowSideMenu(Gtk.Box):
@@ -11,36 +11,25 @@ class CatalystlabWindowSideMenu(Gtk.Box):
     # View elements:
     section_list = Gtk.Template.Child()
 
-    # Setup initial section displayed by the application.
-    initial_section: Type[MainSection] = WelcomeSection
-
-    # Define signals emitted by this widget.
-    __gsignals__ = {
-        'row-selected': (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
-    }
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Load main sections and add buttons for them.
-        main_sections = MainSection.list_sections()
-        for section in main_sections:
-            button = MainWindowSideMenuButton(section)
-            self.section_list.append(button)
+        for section in AppSection:
+            section_details = AppSectionDetails.get(section)
+            if section_details.show_in_side_bar:
+                button = MainWindowSideMenuButton(section)
+                self.section_list.append(button)
+        EventBus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
         # Set initial selected page
-        self._selected_section: Type[MainSection] = None
-        self.selected_section = CatalystlabWindowSideMenu.initial_section
+        self.selected_section: AppSectionDetails = None
 
-    @property
-    def selected_section(self):
-        return self._selected_section
-    @selected_section.setter
-    def selected_section(self, section: Type[MainSection]):
+    def opened_app_section(self, section: AppSection):
         if self.selected_section == section:
             return
-        self._selected_section = section
-        # Pass signal to user of this control
-        self.emit("row-selected", section)
+        self.selected_section = section
         # Highlight the correct button in side menu
+        # Deselect all sections first
+        self.section_list.select_row(None)
         row = self.section_list.get_first_child()
         while row:
             if hasattr(row, "section") and row.section == section:
@@ -52,5 +41,7 @@ class CatalystlabWindowSideMenu(Gtk.Box):
     @Gtk.Template.Callback()
     def row_selected(self, _, row):
         if row and hasattr(row, "section"):
-            self.selected_section = row.section
+            if row.section != self.selected_section:
+                self.selected_section = row.section
+                EventBus.emit(AppEvents.OPEN_APP_SECTION, row.section)
 

@@ -1,6 +1,6 @@
 from gi.repository import Gtk
-from typing import Type
-from .main_section import MainSection
+from .app_section import AppSection
+from .app_section_details import AppSectionDetails
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_side_menu_button.ui')
 class MainWindowSideMenuButton(Gtk.ListBoxRow):
@@ -10,10 +10,11 @@ class MainWindowSideMenuButton(Gtk.ListBoxRow):
     label = Gtk.Template.Child()
     icon = Gtk.Template.Child()
 
-    def __init__(self, section: Type[MainSection]):
+    def __init__(self, section: AppSection):
         super().__init__()
         self.section = section
-        self.set_tooltip_text(section.label)
-        self.label.set_label(section.label)
-        self.icon.set_from_icon_name(section.icon)
+        section_details = AppSectionDetails.get(section)
+        self.set_tooltip_text(section_details.label)
+        self.label.set_label(section_details.label)
+        self.icon.set_from_icon_name(section_details.icon)
 

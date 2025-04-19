@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+
+  <!-- Libraries -->
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
+  <template class="WelcomeSection" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="valign">center</property>
+    <property name="vexpand">True</property>
+    <property name="spacing">24</property>
+    <property name="margin-start">24</property>
+    <property name="margin-end">24</property>
+    <property name="margin-top">24</property>
+    <property name="margin-bottom">24</property>
+
+    <child>
+      <object class="GtkImage">
+        <property name="icon-name">computer</property>
+        <property name="pixel-size">128</property>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkLabel">
+        <property name="label">Welcome to Catalyst Lab</property>
+        <property name="halign">center</property>
+        <property name="wrap">True</property>
+        <style>
+          <class name="title-1"/>
+        </style>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkLabel">
+        <property name="label">Configure and generate custom Gentoo Linux stage tarballs, Live images, and other system builds using the power of Catalyst.</property>
+        <property name="halign">center</property>
+        <property name="wrap">True</property>
+        <attributes>
+          <attribute name="foreground" value="grey"/>
+        </attributes>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkButton">
+        <property name="label">Create new project</property>
+        <property name="halign">center</property>
+        <style>
+          <class name="suggested-action"/>
+        </style>
+        <signal name="clicked" handler="on_start_button_pressed" swapped="no"/>
+      </object>
+    </child>
+
+  </template>
+</interface>
