@@ -5,17 +5,17 @@ from .app_section import AppSection
 # This needs to be kept in separate file, otherwise there will be circular dependencies with modules created by it.
 class AppSectionDetails:
 
-    initial_section = AppSection.WELCOME
+    initial_section = AppSection.HOME
 
     _cache = {}
 
     SECTION_CONFIG = {
         #                    .module,         .label,     .icon,                       .show_in_side_bar, .show_side_bar
-        AppSection.WELCOME:  (WelcomeSection, "Welcome",  "go-home-symbolic",          True,  False),
+        AppSection.HOME:     (WelcomeSection, "Home",     "go-home-symbolic",          True,  False),
         AppSection.PROJECTS: (Gtk.Button,     "Projects", "folder-documents-symbolic", True,  True),
         AppSection.BUILDS:   (Gtk.Button,     "Builds",   "emblem-ok-symbolic",        True,  True),
         AppSection.HELP:     (Gtk.Button,     "Help",     "help-faq-symbolic",         True,  True),
-        AppSection.ABOUT:    (Gtk.Button,     "About",    "help-about-symbolic",       True,  True),
+        AppSection.ABOUT:    (WelcomeSection,     "About",    "help-about-symbolic",       True,  True),
     }
 
     def __init__(self, section: AppSection):
