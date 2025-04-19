@@ -7,6 +7,10 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Gio, Adw
 from .main_window import CatalystlabWindow
 
+# - Added to default project main.py:
+from .environment import Env, EnvType
+# Print app runtime environment
+Env.runtime_env.verbose()
 
 class CatalystlabApplication(Adw.Application):
     """The main application singleton class."""
