@@ -19,7 +19,7 @@ class CatalystlabWindowContent(Gtk.Box):
     def open_app_section(self, section: AppSection):
         """Load content of selected main section."""
         # Display section.
-        section_details = AppSectionDetails.get(section)
+        section_details = AppSectionDetails.init_from(section)
         section_widget = section_details.create_section()
         self.replace_content(section_widget)
 

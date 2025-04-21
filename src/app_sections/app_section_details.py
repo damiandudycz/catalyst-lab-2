@@ -10,12 +10,12 @@ class AppSectionDetails:
     _cache = {}
 
     SECTION_CONFIG = {
-        #                    .module,         .label,     .icon,                       .show_in_side_bar, .show_side_bar
-        AppSection.HOME:     (WelcomeSection, "Home",     "go-home-symbolic",          True,  False),
-        AppSection.PROJECTS: (Gtk.Button,     "Projects", "folder-documents-symbolic", True,  True),
-        AppSection.BUILDS:   (Gtk.Button,     "Builds",   "emblem-ok-symbolic",        True,  True),
-        AppSection.HELP:     (Gtk.Button,     "Help",     "help-faq-symbolic",         True,  True),
-        AppSection.ABOUT:    (WelcomeSection,     "About",    "help-about-symbolic",       True,  True),
+        #                        .module,         .label,         .icon,                        .show_in_side_bar, .show_side_bar
+        AppSection.HOME:         (WelcomeSection, "Home",         "go-home-symbolic",           True,  False),
+        AppSection.ENVIRONMENTS: (Gtk.Button,     "Environments", "preferences-other-symbolic", True,  True),
+        AppSection.BUILDS:       (Gtk.Button,     "Builds",       "emblem-ok-symbolic",         True,  True),
+        AppSection.HELP:         (Gtk.Button,     "Help",         "help-faq-symbolic",          True,  True),
+        AppSection.ABOUT:        (WelcomeSection, "About",        "help-about-symbolic",        True,  True),
     }
 
     def __init__(self, section: AppSection):
@@ -23,7 +23,7 @@ class AppSectionDetails:
         self.module, self.label, self.icon, self.show_in_side_bar, self.show_side_bar = self.SECTION_CONFIG.get(section)
 
     @classmethod
-    def get(cls, section: AppSection) -> "AppSectionDetails":
+    def init_from(cls, section: AppSection) -> "AppSectionDetails":
         # Return cached details for given app section
         if section not in cls._cache:
             cls._cache[section] = cls(section)

@@ -13,7 +13,7 @@ class MainWindowSideMenuButton(Gtk.ListBoxRow):
     def __init__(self, section: AppSection):
         super().__init__()
         self.section = section
-        section_details = AppSectionDetails.get(section)
+        section_details = AppSectionDetails.init_from(section)
         self.set_tooltip_text(section_details.label)
         self.label.set_label(section_details.label)
         self.icon.set_from_icon_name(section_details.icon)

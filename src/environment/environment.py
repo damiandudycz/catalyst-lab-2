@@ -4,51 +4,76 @@
 # some code might run from detected app environment, while other parts
 # can run from user specified or host environment.
 
+from __future__ import annotations
 import os
-from enum import Enum
+from enum import Enum, auto
+import json
 
-class EnvType:
+class RuntimeEnv(Enum):
     """Describes different runtime environment types"""
-    HOST    = "HOST"
-    FLATPAK = "FLATPAK"
-    CHROOT  = "CHROOT"
+    HOST    = auto()
+    FLATPAK = auto()
 
-class Env:
-    """Contains runtime environment properties - root location, permissions, etc."""
+    @staticmethod
+    def is_app_running_in_flatpak() -> bool:
+        return bool(RuntimeEnv.flatpak_id())
 
-    # Note: To create custom chroot env use:
-    # Env(EnvType.CHROOT, location="/mnt/chroot_root")
+    @staticmethod
+    def flatpak_id() -> str | None:
+        """Returns the flatpak ID if running in a Flatpak environment, or None otherwise."""
+        return os.environ.get('FLATPAK_ID')
 
-    def __init__(self, env_type: EnvType, **kwargs):
-        self.env_type = env_type
+    @classmethod
+    def current(cls) -> "RuntimeEnv":
+        """Returns the current runtime environment (FLATPAK or HOST)."""
+        return cls.FLATPAK if cls.is_app_running_in_flatpak() else cls.HOST
 
-        match env_type:
+class ToolsetEnv(Enum):
+    SYSTEM   = auto() # Using tools from system, either through HOST or FLATPAK RuntimeEnv.
+    EXTERNAL = auto() # Using tools from given .squashfs installation.
 
-            case EnvType.HOST:
-                self.fs_root = "/"
-
-            case EnvType.FLATPAK:
-                self.fs_root = "/run/host/"
-
-            case EnvType.CHROOT:
-                location = kwargs.get("location")
-                if not isinstance(location, str):
-                    raise ValueError("CHROOT requires a 'location' keyword argument (str)")
-                self.fs_root = location
-
+class ToolsetEnvHelper:
+    """Class used to manage toolset access - catalyst, qemu, releng, etc."""
+    def __init__(self, env: ToolsetEnv, **kwargs):
+        self.env = env
+        match env:
+            case ToolsetEnv.SYSTEM:
+                pass
+            case ToolsetEnv.EXTERNAL:
+                self.squashfs_file = kwargs.get("squashfs_file")
+                if not isinstance(self.squashfs_file, str):
+                    raise ValueError("EXTERNAL requires a 'squashfs_file' keyword argument (str)")
             case _:
-                raise ValueError(f"Unknown env type: {envType}")
+                raise ValueError(f"Unknown env: {env}")
 
-    def verbose(self):
-        """Prints details about this environment"""
-        print(f"Environment details of {self}:")
-        print(f"Env type: {self.env_type}")
-        print(f"Env fs_root: {self.fs_root}")
+    @classmethod
+    def init_from(cls, data: dict) -> ToolsetEnvHelper:
+        try:
+            env = ToolsetEnv[data["env"]]
+        except KeyError:
+            raise ValueError(f"Invalid 'env' value: {data['env']}")
+        kwargs = {}
+        if env == ToolsetEnv.EXTERNAL:
+            squashfs_file = data.get("squashfs_file")
+            if not isinstance(squashfs_file, str):
+                raise ValueError("Missing or invalid 'squashfs_file' for EXTERNAL environment")
+            kwargs["squashfs_file"] = squashfs_file
+        return cls(env, **kwargs)
 
-def is_app_running_in_flatpak() -> bool:
-    # Check environment variable used by Flatpak
-    return "FLATPAK_ID" in os.environ
+    @staticmethod
+    def system() -> ToolsetEnvHelper:
+        """Create a ToolsetEnvHelper with the SYSTEM environment."""
+        return ToolsetEnvHelper(ToolsetEnv.SYSTEM)
 
-EnvType.runtime_env_type: EnvType = EnvType.FLATPAK if is_app_running_in_flatpak() else EnvType.HOST
-Env.runtime_env: Env = Env(EnvType.runtime_env_type)
+    @staticmethod
+    def external(squashfs_file: str) -> ToolsetEnvHelper:
+        """Create a ToolsetEnvHelper with the EXTERNAL environment and a specified squashfs file."""
+        return ToolsetEnvHelper(ToolsetEnv.EXTERNAL, squashfs_file=squashfs_file)
 
+    def serialize(self) -> dict:
+        data = {
+            "env": self.env.value,
+        }
+        if self.env == ToolsetEnv.EXTERNAL:
+            data["squashfs_file"] = self.squashfs_file
+        return data

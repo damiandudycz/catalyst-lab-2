@@ -15,7 +15,7 @@ class CatalystlabWindowSideMenu(Gtk.Box):
         super().__init__(**kwargs)
         # Load main sections and add buttons for them.
         for section in AppSection:
-            section_details = AppSectionDetails.get(section)
+            section_details = AppSectionDetails.init_from(section)
             if section_details.show_in_side_bar:
                 button = MainWindowSideMenuButton(section)
                 self.section_list.append(button)

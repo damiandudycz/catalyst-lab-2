@@ -56,5 +56,14 @@
       </object>
     </child>
 
+    <child>
+      <object class="GtkLabel" id="status_label">
+        <property name="halign">center</property>
+        <attributes>
+          <attribute name="foreground" value="grey"/>
+        </attributes>
+      </object>
+    </child>
+
   </template>
 </interface>
