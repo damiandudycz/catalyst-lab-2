@@ -1,8 +1,11 @@
 from enum import Enum, auto
+from typing import Final, final
 
+@final
 class AppEvents(Enum):
     OPEN_APP_SECTION = auto()
 
+@final
 class EventBus:
     _subscribers = {}
 

@@ -3,7 +3,9 @@ from typing import List
 import json
 import os
 from .environment import RuntimeEnv, ToolsetEnvHelper
+from typing import Final, final
 
+@final
 class Settings:
     """Represents application settings, including toolset environments."""
 

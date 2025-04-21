@@ -18,7 +18,6 @@ class WelcomeSection(Gtk.Box):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.status_label.set_text(f"Runtime: {RuntimeEnv.current()}")
-        print(f"Settings: {Settings.current}")
+        self.status_label.set_text(f"Runtime: {RuntimeEnv.current()}, gentoo: {RuntimeEnv.is_running_in_gentoo_host()}")
         Settings.current.save()
 
