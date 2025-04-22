@@ -50,8 +50,5 @@ class CatalystlabWindow(Adw.ApplicationWindow):
     def _on_sidebar_toggle_breakpoint_unapply(self, breakpoint):
         self.split_view.set_collapsed(False)
         self.sidebar_toggle_button.set_visible(False)
-        if self.allow_side_menu:
-            self.split_view.set_show_sidebar(True)
-        else:
-            self.split_view.set_show_sidebar(False)
+        self.split_view.set_show_sidebar(self.allow_side_menu)
 
