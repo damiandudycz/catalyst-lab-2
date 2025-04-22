@@ -123,3 +123,7 @@ class ToolsetEnvHelper:
     def is_allowed_in_current_host() -> bool:
         return self.env.is_running_in_gentoo_host()
 
+    def validate(self) -> bool:
+        # TODO: Validate if environment contains all required apps and if they are configured correctly.
+        # Return errors and warnings if detected.
+        pass

@@ -61,7 +61,7 @@
         </child>
 
         <child>
-          <object class="GtkListBox">
+          <object class="GtkListBox" id="external_toolsets_container">
             <property name="selection-mode">none</property>
             <style>
               <class name="boxed-list"/>
@@ -72,6 +72,7 @@
                 <property name="title">Add environment</property>
                 <property name="start-icon-name">list-add-symbolic</property>
                 <property name="activatable">True</property>
+                <signal name="activated" handler="on_add_toolset_activated" swapped="no"/>
               </object>
             </child>
 

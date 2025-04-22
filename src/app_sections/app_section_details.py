@@ -6,7 +6,7 @@ from .app_section import AppSection
 # This needs to be kept in separate file, otherwise there will be circular dependencies with modules created by it.
 class AppSectionDetails:
 
-    initial_section = AppSection.ENVIRONMENTS
+    initial_section = AppSection.HOME
 
     _cache = {}
 
