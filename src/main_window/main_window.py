@@ -11,6 +11,9 @@ from .app_events import EventBus, AppEvents
 class CatalystlabWindow(Adw.ApplicationWindow):
     __gtype_name__ = 'CatalystlabWindow'
 
+    # Static config:
+    allow_side_menu_toggle = True # Only for sections that allows that at all.
+
     # View elements:
     split_view = Gtk.Template.Child()
     side_menu = Gtk.Template.Child()
@@ -40,7 +43,7 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         section_details = AppSectionDetails(section)
         self.allow_side_menu = section_details.show_side_bar
         self.split_view.set_show_sidebar(self.allow_side_menu and not self.split_view.get_collapsed())
-        self.sidebar_toggle_button.set_visible(self.allow_side_menu and self.split_view.get_collapsed())
+        self.sidebar_toggle_button.set_visible(self.allow_side_menu and ( self.split_view.get_collapsed() or CatalystlabWindow.allow_side_menu_toggle ))
 
     def _on_sidebar_toggle_breakpoint_apply(self, breakpoint):
         self.split_view.set_collapsed(True)
@@ -49,6 +52,5 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     def _on_sidebar_toggle_breakpoint_unapply(self, breakpoint):
         self.split_view.set_collapsed(False)
-        self.sidebar_toggle_button.set_visible(False)
         self.split_view.set_show_sidebar(self.allow_side_menu)
-
+        self.sidebar_toggle_button.set_visible(self.allow_side_menu and CatalystlabWindow.allow_side_menu_toggle)
