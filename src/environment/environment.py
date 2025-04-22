@@ -122,3 +122,4 @@ class ToolsetEnvHelper:
 
     def is_allowed_in_current_host() -> bool:
         return self.env.is_running_in_gentoo_host()
+

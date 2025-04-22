@@ -74,7 +74,7 @@
                       </child>
                       <property name="title-widget">
                         <object class="AdwWindowTitle">
-                            <property name="title">Catalyst Lab</property>
+                          <property name="title">Catalyst Lab</property>
                         </object>
                       </property>
                     </object>

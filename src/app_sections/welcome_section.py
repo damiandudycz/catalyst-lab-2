@@ -10,14 +10,22 @@ class WelcomeSection(Gtk.Box):
 
     label = "Welcome"
     icon = "aaa"
-    status_label = Gtk.Template.Child()
+    actions_section = Gtk.Template.Child()
+    action_button_environments = Gtk.Template.Child()
+    action_button_builds = Gtk.Template.Child()
+    action_button_help = Gtk.Template.Child()
+    suggested_actions_section = Gtk.Template.Child()
+    setup_environments_section = Gtk.Template.Child()
 
     @Gtk.Template.Callback()
-    def on_start_button_pressed(self, button):
+    def on_start_row_activated(self, button):
         EventBus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.status_label.set_text(f"Runtime: {RuntimeEnv.current()}, gentoo: {RuntimeEnv.is_running_in_gentoo_host()}")
-        Settings.current.save()
-
+        # Setup buttons
+        if Settings.current.toolsets:
+            # Hides setup environments button at bottom, if some environments are already set
+            self.setup_environments_section.set_visible(False)
+        else:
+            self.suggested_actions_section.set_visible(False)
