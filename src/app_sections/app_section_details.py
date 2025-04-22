@@ -1,21 +1,22 @@
 from gi.repository import Gtk, GLib
 from .welcome_section import WelcomeSection
+from .environments_section import EnvironmentsSection
 from .app_section import AppSection
 
 # This needs to be kept in separate file, otherwise there will be circular dependencies with modules created by it.
 class AppSectionDetails:
 
-    initial_section = AppSection.HOME
+    initial_section = AppSection.ENVIRONMENTS
 
     _cache = {}
 
     SECTION_CONFIG = {
-        #                        .module,         .label,         .icon,                        .show_in_side_bar, .show_side_bar
-        AppSection.HOME:         (WelcomeSection, "Home",         "go-home-symbolic",           True,  False),
-        AppSection.ENVIRONMENTS: (Gtk.Button,     "Environments", "preferences-other-symbolic", True,  True),
-        AppSection.BUILDS:       (Gtk.Button,     "Builds",       "emblem-ok-symbolic",         True,  True),
-        AppSection.HELP:         (Gtk.Button,     "Help",         "help-faq-symbolic",          True,  True),
-        AppSection.ABOUT:        (WelcomeSection, "About",        "help-about-symbolic",        True,  True),
+        #                        .module,              .label,         .icon,                        .show_in_side_bar, .show_side_bar
+        AppSection.HOME:         (WelcomeSection,      "Home",         "go-home-symbolic",           True,  False),
+        AppSection.ENVIRONMENTS: (EnvironmentsSection, "Environments", "preferences-other-symbolic", True,  True),
+        AppSection.BUILDS:       (Gtk.Button,          "Builds",       "emblem-ok-symbolic",         True,  True),
+        AppSection.HELP:         (Gtk.Button,          "Help",         "help-faq-symbolic",          True,  True),
+        AppSection.ABOUT:        (WelcomeSection,      "About",        "help-about-symbolic",        True,  True),
     }
 
     def __init__(self, section: AppSection):

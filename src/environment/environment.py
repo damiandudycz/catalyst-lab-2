@@ -114,7 +114,7 @@ class ToolsetEnvHelper:
 
     def serialize(self) -> dict:
         data = {
-            "env": self.env.value,
+            "env": self.env.name,
         }
         if self.env == ToolsetEnv.EXTERNAL:
             data["squashfs_file"] = self.squashfs_file

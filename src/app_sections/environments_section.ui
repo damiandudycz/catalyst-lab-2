@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+
+  <!-- Libraries -->
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
+  <template class="EnvironmentsSection" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="spacing">24</property>
+    <property name="margin-start">24</property>
+    <property name="margin-end">24</property>
+    <property name="margin-top">24</property>
+    <property name="margin-bottom">24</property>
+
+    <child>
+      <object class="GtkLabel">
+        <property name="label">Manage toolset environments.</property>
+        <property name="halign">center</property>
+        <property name="wrap">True</property>
+        <attributes>
+          <attribute name="foreground" value="grey"/>
+        </attributes>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkBox" id="actions_section">
+        <property name="orientation">vertical</property>
+        <property name="halign">center</property>
+        <property name="width-request">350</property>
+        <property name="spacing">20</property>
+
+        <child>
+          <object class="GtkListBox">
+            <property name="selection-mode">none</property>
+            <style>
+              <class name="boxed-list"/>
+            </style>
+
+            <!-- Rows buttons -->
+
+            <child>
+              <object class="AdwActionRow" id="toolset_system">
+                <property name="title">Host system environment</property>
+                <property name="subtitle">Use toolset directly from gentoo host</property>
+                <property name="icon-name">start-here</property>
+                <!-- <property name="activatable">True</property> -->
+                <!-- <property name="sensitive">False</property> -->
+                <child type="suffix">
+                  <object class="GtkCheckButton" id="toolset_system_checkbox">
+                    <property name="valign">center</property>
+                    <signal name="toggled" handler="toolset_system_checkbox_toggled"/>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkListBox">
+            <property name="selection-mode">none</property>
+            <style>
+              <class name="boxed-list"/>
+            </style>
+
+            <child>
+              <object class="AdwButtonRow" id="toolset_add_button">
+                <property name="title">Add environment</property>
+                <property name="start-icon-name">list-add-symbolic</property>
+                <property name="activatable">True</property>
+              </object>
+            </child>
+
+          </object>
+        </child>
+
+      </object>
+    </child>
+
+  </template>
+</interface>
+
