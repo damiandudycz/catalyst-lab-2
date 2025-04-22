@@ -18,7 +18,12 @@ class WelcomeSection(Gtk.Box):
     setup_environments_section = Gtk.Template.Child()
 
     @Gtk.Template.Callback()
-    def on_start_row_activated(self, button):
+    def on_environments_row_activated(self, _):
+        #EventBus.emit(AppEvents.PUSH_VIEW, EnvironmentsSection(), title="Environments")
+        EventBus.emit(AppEvents.PUSH_SECTION, AppSection.ENVIRONMENTS)
+
+    @Gtk.Template.Callback()
+    def on_start_row_activated(self, _):
         EventBus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
 
     def __init__(self, **kwargs):

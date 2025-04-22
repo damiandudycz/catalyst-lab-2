@@ -30,7 +30,6 @@ class EnvironmentsSection(Gtk.Box):
         external_toolsets = [toolset for toolset in Settings.current.toolsets if toolset.env == ToolsetEnv.EXTERNAL]
         # Now print each of the filtered toolsets
         for toolset in external_toolsets:
-            print(toolset)
             # Create a new AdwActionRow for the toolset
             action_row = Adw.ActionRow()
             action_row.set_title("External toolset")  # Customize the title

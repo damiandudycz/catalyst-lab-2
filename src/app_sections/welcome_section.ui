@@ -67,7 +67,7 @@
                 <property name="subtitle">Add or remove toolset environments</property>
                 <property name="icon-name">preferences-other-symbolic</property>
                 <property name="activatable">True</property>
-                <signal name="activated" handler="on_start_row_activated" swapped="no"/>
+                <signal name="activated" handler="on_environments_row_activated" swapped="no"/>
               </object>
             </child>
 

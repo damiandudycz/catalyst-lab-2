@@ -4,6 +4,8 @@ from typing import Final, final
 @final
 class AppEvents(Enum):
     OPEN_APP_SECTION = auto()
+    PUSH_VIEW = auto() # Push on Main Navigation View (Full window mode).
+    PUSH_SECTION = auto() # Like PUSH_VIEW but for pushing by AppSection enum.
 
 @final
 class EventBus:

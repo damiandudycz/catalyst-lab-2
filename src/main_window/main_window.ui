@@ -20,73 +20,89 @@
 
     <!-- Window content -->
     <property name="content">
-      <object class="AdwOverlaySplitView" id="split_view">
-        <!-- <property name="collapsed">True</property> -->
 
-        <!-- SideBar -->
-        <property name="sidebar">
+      <!-- Main navigation view -->
+      <object class="AdwNavigationView" id="navigation_view">
+        <child>
           <object class="AdwNavigationPage">
-            <property name="title">Sidebar</property>
-              <property name="child">
-                <object class="AdwToolbarView">
-                    <child type="top">
-                      <object class="AdwHeaderBar">
-                        <property name="title-widget">
-                          <object class="AdwWindowTitle">
-                            <property name="title">Menu</property>
-                          </object>
-                        </property>
-                        <child type="end">
-                          <object class="GtkMenuButton">
-                            <property name="icon-name">open-menu-symbolic</property>
-                            <property name="tooltip-text">Menu</property>
-                            <property name="menu-model">primary_menu</property>
+            <property name="title">Catalyst Lab</property>
+            <property name="tag">root</property>
+            <child>
+
+              <!-- Main split view -->
+              <object class="AdwOverlaySplitView" id="split_view">
+                <!-- <property name="collapsed">True</property> -->
+
+                <!-- SideBar -->
+                <property name="sidebar">
+                  <object class="AdwNavigationPage">
+                    <property name="title">Sidebar</property>
+                      <property name="child">
+                        <object class="AdwToolbarView">
+                            <child type="top">
+                              <object class="AdwHeaderBar">
+                                <property name="title-widget">
+                                  <object class="AdwWindowTitle">
+                                    <property name="title">Menu</property>
+                                  </object>
+                                </property>
+                                <child type="end">
+                                  <object class="GtkMenuButton">
+                                    <property name="icon-name">open-menu-symbolic</property>
+                                    <property name="tooltip-text">Menu</property>
+                                    <property name="menu-model">primary_menu</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                            <property name="content">
+                              <!-- Load CatalystlabWindowSideMenu -->
+                              <object class="CatalystlabWindowSideMenu" id="side_menu"/>
+                            </property>
+                         </object>
+                      </property>
+                  </object>
+                </property>
+
+                <!-- Main Content Area -->
+                <property name="content">
+                  <object class="AdwNavigationPage">
+                    <property name="title">Content</property>
+                    <property name="child">
+                      <object class="AdwToolbarView">
+                        <child type="top">
+                          <object class="AdwHeaderBar">
+                            <child type="start">
+                              <object class="GtkButton" id="sidebar_toggle_button">
+                                <property name="icon-name">sidebar-show-symbolic</property>
+                                <property name="tooltip-text" translatable="yes">Toggle sidebar</property>
+                                <property name="visible">False</property>
+                                <signal name="clicked" handler="sidebar_toggle_button_clicked"/>
+                              </object>
+                            </child>
+                            <property name="title-widget">
+                              <object class="AdwWindowTitle">
+                                <property name="title">Catalyst Lab</property>
+                              </object>
+                            </property>
                           </object>
                         </child>
-                      </object>
-                    </child>
-                    <property name="content">
-                      <!-- Load CatalystlabWindowSideMenu -->
-                      <object class="CatalystlabWindowSideMenu" id="side_menu"/>
-                    </property>
-                 </object>
-              </property>
-          </object>
-        </property>
-
-        <!-- Main Content Area -->
-        <property name="content">
-          <object class="AdwNavigationPage">
-            <property name="title">Content</property>
-            <property name="child">
-              <object class="AdwToolbarView">
-                <child type="top">
-                  <object class="AdwHeaderBar">
-                    <child type="start">
-                      <object class="GtkButton" id="sidebar_toggle_button">
-                        <property name="icon-name">sidebar-show-symbolic</property>
-                        <property name="tooltip-text" translatable="yes">Toggle sidebar</property>
-                        <property name="visible">False</property>
-                        <signal name="clicked" handler="sidebar_toggle_button_clicked"/>
-                      </object>
-                    </child>
-                    <property name="title-widget">
-                      <object class="AdwWindowTitle">
-                        <property name="title">Catalyst Lab</property>
+                        <property name="content">
+                          <!-- Load CatalystlabWindowContent -->
+                          <object class="CatalystlabWindowContent" id="content_view"/>
+                        </property>
                       </object>
                     </property>
                   </object>
-                </child>
-                <property name="content">
-                  <!-- Load CatalystlabWindowContent -->
-                  <object class="CatalystlabWindowContent" id="content_view"/>
                 </property>
-              </object>
-            </property>
-          </object>
-        </property>
 
+              </object>
+
+            </child>
+          </object>
+        </child>
       </object>
+
     </property>
 
   </template>
