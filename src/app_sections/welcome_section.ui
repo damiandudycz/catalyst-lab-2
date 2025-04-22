@@ -91,17 +91,6 @@
               </object>
             </child>
 
-            <!--
-            <child>
-              <object class="AdwButtonRow" id="action_button_help">
-                <property name="title">Learn how to use</property>
-                <property name="start-icon-name">help-faq-symbolic</property>
-                <property name="activatable">True</property>
-                <signal name="activated" handler="on_start_row_activated" swapped="no"/>
-              </object>
-            </child>
-            -->
-
           </object>
         </child>
 
