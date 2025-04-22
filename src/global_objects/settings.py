@@ -9,6 +9,8 @@ from typing import Final, final
 class Settings:
     """Represents application settings, including toolset environments."""
 
+    # TODO: Store opened section here and restore after app relaunch. Default will be Welcome, and it can be moved here from app_section_details.
+
     _current_instance: Settings | None = None  # Internal cache
 
     def __init__(self, toolsets: List[ToolsetEnvHelper]):

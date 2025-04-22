@@ -14,6 +14,7 @@ class AppSectionDetails:
         #                        .module,              .label,         .icon,                        .show_in_side_bar, .show_side_bar
         AppSection.HOME:         (WelcomeSection,      "Home",         "go-home-symbolic",           True,  False),
         AppSection.ENVIRONMENTS: (EnvironmentsSection, "Environments", "preferences-other-symbolic", True,  True),
+        AppSection.SNAPSHOTS:    (EnvironmentsSection, "Snapshots",    "preferences-other-symbolic", True,  True),
         AppSection.BUILDS:       (Gtk.Button,          "Builds",       "emblem-ok-symbolic",         True,  True),
         AppSection.HELP:         (Gtk.Button,          "Help",         "help-faq-symbolic",          True,  True),
         AppSection.ABOUT:        (WelcomeSection,      "About",        "help-about-symbolic",        True,  True),
