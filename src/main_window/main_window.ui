@@ -8,8 +8,6 @@
   <!-- Template -->
   <template class="CatalystlabWindow" parent="AdwApplicationWindow">
     <!-- Window properties -->
-    <property name="width-request">280</property>
-    <property name="height-request">200</property>
     <property name="default-width">800</property>
     <property name="default-height">500</property>
 
