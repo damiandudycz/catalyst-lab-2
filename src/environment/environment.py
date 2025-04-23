@@ -9,6 +9,7 @@ import os
 from enum import Enum, auto
 import json
 from typing import Final, final
+import uuid
 
 @final
 class RuntimeEnv(Enum):
@@ -73,7 +74,8 @@ class ToolsetEnv(Enum):
 @final
 class ToolsetEnvHelper:
     """Class used to manage toolset access - catalyst, qemu, releng, etc."""
-    def __init__(self, env: ToolsetEnv, **kwargs):
+    def __init__(self, env: ToolsetEnv, uuid: UUID, **kwargs):
+        self.uuid = uuid
         self.env = env
         match env:
             case ToolsetEnv.SYSTEM:
@@ -88,9 +90,10 @@ class ToolsetEnvHelper:
     @classmethod
     def init_from(cls, data: dict) -> ToolsetEnvHelper:
         try:
+            uuid_value = uuid.UUID(data["uuid"])
             env = ToolsetEnv[data["env"]]
         except KeyError:
-            raise ValueError(f"Invalid 'env' value: {data['env']}")
+            raise ValueError(f"Failed to parse {data}")
         kwargs = {}
         match env:
             case ToolsetEnv.SYSTEM:
@@ -100,21 +103,22 @@ class ToolsetEnvHelper:
                 if not isinstance(squashfs_file, str):
                     raise ValueError("Missing or invalid 'squashfs_file' for EXTERNAL environment")
                 kwargs["squashfs_file"] = squashfs_file
-        return cls(env, **kwargs)
+        return cls(env, uuid_value, **kwargs)
 
     @staticmethod
     def system() -> ToolsetEnvHelper:
         """Create a ToolsetEnvHelper with the SYSTEM environment."""
-        return ToolsetEnvHelper(ToolsetEnv.SYSTEM)
+        return ToolsetEnvHelper(ToolsetEnv.SYSTEM, uuid.uuid4())
 
     @staticmethod
     def external(squashfs_file: str) -> ToolsetEnvHelper:
         """Create a ToolsetEnvHelper with the EXTERNAL environment and a specified squashfs file."""
-        return ToolsetEnvHelper(ToolsetEnv.EXTERNAL, squashfs_file=squashfs_file)
+        return ToolsetEnvHelper(ToolsetEnv.EXTERNAL, uuid.uuid4(), squashfs_file=squashfs_file)
 
     def serialize(self) -> dict:
         data = {
-            "env": self.env.name,
+            "uuid": str(self.uuid),
+            "env": self.env.name
         }
         if self.env == ToolsetEnv.EXTERNAL:
             data["squashfs_file"] = self.squashfs_file

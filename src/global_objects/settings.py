@@ -4,6 +4,7 @@ import json
 import os
 from .environment import RuntimeEnv, ToolsetEnvHelper
 from typing import final
+from typing import Callable
 
 @final
 class Settings:
@@ -14,7 +15,9 @@ class Settings:
     _current_instance: Settings | None = None  # Internal cache
 
     def __init__(self, toolsets: List[ToolsetEnvHelper]):
-        self.toolsets = toolsets
+        self._toolsets = toolsets
+
+    # Lifecycle and access:
 
     @staticmethod
     def config_file() -> str:
@@ -35,7 +38,7 @@ class Settings:
     def serialize(self) -> dict:
         """Convert the settings to a serializable dictionary."""
         return {
-            "toolsets": [toolset.serialize() for toolset in self.toolsets]
+            "toolsets": [toolset.serialize() for toolset in self._toolsets]
         }
 
     @classmethod
@@ -72,6 +75,30 @@ class Settings:
             cls._current_instance = cls.load()
         return cls._current_instance
 
-    def __repr__(self):
-        return f"Settings(toolsets={self.toolsets})"
+    # Toolsets managemtent:
 
+    def get_toolsets(self) -> List[ToolsetEnvHelper]:
+        return self._toolsets
+
+    def get_toolset_by_id(self, uuid: UUID) -> ToolsetEnvHelper | None:
+        """Return the toolset that matches the given UUID, or None if not found."""
+        for toolset in self._toolsets:
+            if getattr(toolset, "uuid", None) == uuid:
+                return toolset
+        return None
+
+    def get_toolset_matching(self, matching: Callable[[ToolsetEnvHelper], bool]) -> ToolsetEnvHelper | None:
+        for toolset in self._toolsets:
+            if matching(toolset):
+                return toolset
+        return None
+
+    def add_toolset(self, toolset: ToolsetEnvHelper):
+        self._toolsets.append(toolset)
+        self.save()
+
+    def remove_toolset(self, toolset: ToolsetEnvHelper):
+        """Remove the specified toolset if it exists in the list."""
+        if toolset in self._toolsets:
+            self._toolsets.remove(toolset)
+            self.save()

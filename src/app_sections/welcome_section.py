@@ -30,7 +30,7 @@ class WelcomeSection(Gtk.Box):
         super().__init__(**kwargs)
         self.content_navigation_view = content_navigation_view
         # Setup buttons
-        if Settings.current.toolsets:
+        if Settings.current.get_toolsets():
             # Hides setup environments button at bottom, if some environments are already set
             self.setup_environments_section.set_visible(False)
         else:
