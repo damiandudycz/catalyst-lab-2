@@ -16,14 +16,11 @@ class CatalystlabWindow(Adw.ApplicationWindow):
     allow_side_menu_toggle = True # Only for sections that allows that at all.
 
     # View elements:
-    navigation_view = Gtk.Template.Child()
+    navigation_view = Gtk.Template.Child() # Main full window navigation_view
     split_view = Gtk.Template.Child()
     content_view = Gtk.Template.Child()
-    content_window_title = Gtk.Template.Child()
-    content_navigation_view = Gtk.Template.Child()
     side_menu = Gtk.Template.Child()
     sidebar_toggle_breakpoint = Gtk.Template.Child()
-    sidebar_toggle_button = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -38,7 +35,7 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     # Toggle sidebar visibility with button.
     @Gtk.Template.Callback()
-    def sidebar_toggle_button_clicked(self, _):
+    def sidebar_toggle_button_clicked(self, window_content, button):
         """Callback function that is called when we click the button"""
         if self.allow_side_menu:
             self.split_view.set_show_sidebar(not self.split_view.get_show_sidebar())
@@ -47,19 +44,18 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     def opened_app_section(self, section: AppSection):
         section_details = AppSectionDetails(section)
-        self.content_view.open_app_section(section, self.content_navigation_view)
+        self.content_view.open_app_section(section)
         self.allow_side_menu = section_details.show_side_bar
         self.split_view.set_show_sidebar(self.allow_side_menu and not self.split_view.get_collapsed())
-        self.sidebar_toggle_button.set_visible(self.allow_side_menu and ( self.split_view.get_collapsed() or CatalystlabWindow.allow_side_menu_toggle ))
-        self.content_window_title.set_title(section_details.label)
+        self.content_view.sidebar_toggle_button_visible = self.allow_side_menu and ( self.split_view.get_collapsed() or CatalystlabWindow.allow_side_menu_toggle )
         self.navigation_view.pop_to_tag("root")
 
     def _on_sidebar_toggle_breakpoint_apply(self, breakpoint):
         self.split_view.set_collapsed(True)
         self.split_view.set_show_sidebar(False)
-        self.sidebar_toggle_button.set_visible(self.allow_side_menu)
+        self.content_view.sidebar_toggle_button_visible = self.allow_side_menu
 
     def _on_sidebar_toggle_breakpoint_unapply(self, breakpoint):
         self.split_view.set_collapsed(False)
         self.split_view.set_show_sidebar(self.allow_side_menu)
-        self.sidebar_toggle_button.set_visible(self.allow_side_menu and CatalystlabWindow.allow_side_menu_toggle)
+        self.content_view.sidebar_toggle_button_visible = self.allow_side_menu and CatalystlabWindow.allow_side_menu_toggle

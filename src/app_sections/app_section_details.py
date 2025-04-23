@@ -12,18 +12,18 @@ class AppSectionDetails:
     _cache = {}
 
     SECTION_CONFIG = {
-        #                        .module,              .label,         .icon,                        .show_in_side_bar, .show_side_bar
-        AppSection.HOME:         (WelcomeSection,      "Home",         "go-home-symbolic",           True,  False),
-        AppSection.ENVIRONMENTS: (EnvironmentsSection, "Environments", "preferences-other-symbolic", True,  True),
-        AppSection.SNAPSHOTS:    (EnvironmentsSection, "Snapshots",    "preferences-other-symbolic", True,  True),
-        AppSection.BUILDS:       (Gtk.Button,          "Builds",       "emblem-ok-symbolic",         True,  True),
-        AppSection.HELP:         (Gtk.Button,          "Help",         "help-faq-symbolic",          True,  True),
-        AppSection.ABOUT:        (WelcomeSection,      "About",        "help-about-symbolic",        True,  True),
+        #                        .module,              .label,         .title,         .icon,                        .show_in_side_bar, .show_side_bar
+        AppSection.HOME:         (WelcomeSection,      "Home",         "Catalyst Lab", "go-home-symbolic",           True,  False),
+        AppSection.ENVIRONMENTS: (EnvironmentsSection, "Environments", "Environments", "preferences-other-symbolic", True,  True),
+        AppSection.SNAPSHOTS:    (EnvironmentsSection, "Snapshots",    "Snapshots",    "preferences-other-symbolic", True,  True),
+        AppSection.BUILDS:       (Gtk.Button,          "Builds",       "Builds",       "emblem-ok-symbolic",         True,  True),
+        AppSection.HELP:         (Gtk.Button,          "Help",         "Help",         "help-faq-symbolic",          True,  True),
+        AppSection.ABOUT:        (WelcomeSection,      "About",        "About",        "help-about-symbolic",        True,  True),
     }
 
     def __init__(self, section: AppSection):
         # Load config from SECTION_CONFIG and create instance.
-        self.module, self.label, self.icon, self.show_in_side_bar, self.show_side_bar = self.SECTION_CONFIG.get(section)
+        self.module, self.label, self.title, self.icon, self.show_in_side_bar, self.show_side_bar = self.SECTION_CONFIG.get(section)
 
     @classmethod
     def init_from(cls, section: AppSection) -> "AppSectionDetails":

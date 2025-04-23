@@ -6,7 +6,7 @@ from .app_section_details import AppSectionDetails
 def _push_section(self, section: AppSection):
     section_details = AppSectionDetails(section)
     view = section_details.create_section(content_navigation_view=self)
-    title = section_details.label
+    title = section_details.title
     self.push_view(view, title)
 
 def _push_view(self, view: Gtk.Widget, title: str):
