@@ -103,7 +103,7 @@
 
             <child>
               <object class="AdwButtonRow">
-                <property name="title">Setup environments</property>
+                <property name="title">Get started</property>
                 <property name="start-icon-name">preferences-other-symbolic</property>
                 <property name="activatable">True</property>
                 <signal name="activated" handler="on_environments_row_activated" swapped="no"/>
