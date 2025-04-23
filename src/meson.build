@@ -29,6 +29,7 @@ configure_file(
 catalystlab_sources = [
   '__init__.py',
   'main.py',
+  'navigation_view_extensions.py',
   'global_objects/settings.py',
   'global_objects/app_events.py',
   'environment/environment.py',

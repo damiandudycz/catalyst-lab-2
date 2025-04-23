@@ -1,4 +1,5 @@
 from gi.repository import Gtk, GObject
+from gi.repository import Adw
 from .app_events import EventBus, AppEvents
 from .app_section import AppSection
 from .environment import RuntimeEnv
@@ -21,13 +22,15 @@ class WelcomeSection(Gtk.Box):
     def on_environments_row_activated(self, _):
         #EventBus.emit(AppEvents.PUSH_VIEW, EnvironmentsSection(), title="Environments")
         EventBus.emit(AppEvents.PUSH_SECTION, AppSection.ENVIRONMENTS)
+        #self.content_navigation_view.push_section(AppSection.ENVIRONMENTS)
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
         EventBus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
 
-    def __init__(self, **kwargs):
+    def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
+        self.content_navigation_view = content_navigation_view
         # Setup buttons
         if Settings.current.toolsets:
             # Hides setup environments button at bottom, if some environments are already set

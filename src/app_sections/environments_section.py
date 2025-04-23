@@ -14,7 +14,7 @@ class EnvironmentsSection(Gtk.Box):
     toolset_add_button = Gtk.Template.Child()
     external_toolsets_container = Gtk.Template.Child()
 
-    def __init__(self, **kwargs):
+    def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
         # Setup host env entry
         if ToolsetEnv.SYSTEM.is_allowed_in_current_host():

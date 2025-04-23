@@ -1,4 +1,5 @@
 from gi.repository import Gtk, GLib
+from gi.repository import Adw
 from .welcome_section import WelcomeSection
 from .environments_section import EnvironmentsSection
 from .app_section import AppSection
@@ -31,8 +32,11 @@ class AppSectionDetails:
             cls._cache[section] = cls(section)
         return cls._cache[section]
 
-    def create_section(self) -> Gtk.Widget:
+    def create_section(self, content_navigation_view: Adw.NavigationView) -> Gtk.Widget:
         """Create and return a GTK widget for this page."""
+        """Need to have a reference to embedding content_navigation_view on which it should push it's children."""
+        """This could be global navigation_view or content navigation_view, but usually pass content navigation_view here."""
+        """Modules can still push on global navigation view using AppEvent if desired."""
         # TODO: If fails, load error page instead
-        return self.module()
+        return self.module(content_navigation_view=content_navigation_view)
 
