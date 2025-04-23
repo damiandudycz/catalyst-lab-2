@@ -9,8 +9,6 @@ from .settings import Settings
 class WelcomeSection(Gtk.Box):
     __gtype_name__ = "WelcomeSection"
 
-    label = "Welcome"
-    icon = "aaa"
     actions_section = Gtk.Template.Child()
     action_button_environments = Gtk.Template.Child()
     action_button_builds = Gtk.Template.Child()
@@ -22,11 +20,11 @@ class WelcomeSection(Gtk.Box):
     def on_environments_row_activated(self, _):
         #EventBus.emit(AppEvents.PUSH_VIEW, EnvironmentsSection(), title="Environments")
         #EventBus.emit(AppEvents.PUSH_SECTION, AppSection.ENVIRONMENTS)
-        self.content_navigation_view.push_section(AppSection.ENVIRONMENTS)
+        EventBus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        EventBus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
+        self.content_navigation_view.push_section(AppSection.ENVIRONMENTS)
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)

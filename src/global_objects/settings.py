@@ -3,7 +3,7 @@ from typing import List
 import json
 import os
 from .environment import RuntimeEnv, ToolsetEnvHelper
-from typing import Final, final
+from typing import final
 
 @final
 class Settings:

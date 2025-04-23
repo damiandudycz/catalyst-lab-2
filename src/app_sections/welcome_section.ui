@@ -77,7 +77,7 @@
                 <property name="subtitle">Create and configure stage builds</property>
                 <property name="icon-name">emblem-ok-symbolic</property>
                 <property name="activatable">True</property>
-                <signal name="activated" handler="on_start_row_activated" swapped="no"/>
+                <signal name="activated" handler="on_environments_row_activated" swapped="no"/>
               </object>
             </child>
 
@@ -87,7 +87,7 @@
                 <property name="subtitle">Browse documentation and tutorials</property>
                 <property name="icon-name">help-faq-symbolic</property>
                 <property name="activatable">True</property>
-                <signal name="activated" handler="on_start_row_activated" swapped="no"/>
+                <signal name="activated" handler="on_environments_row_activated" swapped="no"/>
               </object>
             </child>
 
@@ -106,7 +106,7 @@
                 <property name="title">Get started</property>
                 <property name="start-icon-name">preferences-other-symbolic</property>
                 <property name="activatable">True</property>
-                <signal name="activated" handler="on_environments_row_activated" swapped="no"/>
+                <signal name="activated" handler="on_start_row_activated" swapped="no"/>
                 <style>
                   <class name="suggested-action"/>
                 </style>
