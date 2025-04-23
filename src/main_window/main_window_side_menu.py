@@ -2,7 +2,7 @@ from gi.repository import Gtk, GObject
 from .app_section import AppSection
 from .app_section_details import AppSectionDetails
 from .main_window_side_menu_button import MainWindowSideMenuButton
-from .app_events import EventBus, AppEvents
+from .app_events import AppEvents, app_event_bus
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_side_menu.ui')
 class CatalystlabWindowSideMenu(Gtk.Box):
@@ -19,7 +19,7 @@ class CatalystlabWindowSideMenu(Gtk.Box):
             if section_details.show_in_side_bar:
                 button = MainWindowSideMenuButton(section)
                 self.section_list.append(button)
-        EventBus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
+        app_event_bus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
         # Set initial selected page
         self.selected_section: AppSectionDetails = None
 
@@ -43,5 +43,5 @@ class CatalystlabWindowSideMenu(Gtk.Box):
         if row and hasattr(row, "section"):
             if row.section != self.selected_section:
                 self.selected_section = row.section
-                EventBus.emit(AppEvents.OPEN_APP_SECTION, row.section)
+                app_event_bus.emit(AppEvents.OPEN_APP_SECTION, row.section)
 

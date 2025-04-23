@@ -5,7 +5,7 @@ from .main_window_side_menu import CatalystlabWindowSideMenu
 from .main_window_content import CatalystlabWindowContent
 from .app_section import AppSection
 from .app_section_details import AppSectionDetails
-from .app_events import EventBus, AppEvents
+from .app_events import AppEvents, app_event_bus
 from .navigation_view_extensions import *
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window.ui')
@@ -24,11 +24,11 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        EventBus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
-        EventBus.subscribe(AppEvents.PUSH_VIEW, self.navigation_view.push_view)
-        EventBus.subscribe(AppEvents.PUSH_SECTION, self.navigation_view.push_section)
+        app_event_bus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
+        app_event_bus.subscribe(AppEvents.PUSH_VIEW, self.navigation_view.push_view)
+        app_event_bus.subscribe(AppEvents.PUSH_SECTION, self.navigation_view.push_section)
         # Load initial section page:
-        EventBus.emit(AppEvents.OPEN_APP_SECTION, AppSectionDetails.initial_section)
+        app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSectionDetails.initial_section)
         # Connect sidebar_toggle_breakpoint actions
         self.sidebar_toggle_breakpoint.connect("apply", self._on_sidebar_toggle_breakpoint_apply)
         self.sidebar_toggle_breakpoint.connect("unapply", self._on_sidebar_toggle_breakpoint_unapply)

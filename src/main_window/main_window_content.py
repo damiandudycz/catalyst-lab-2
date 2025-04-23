@@ -3,7 +3,6 @@ from gi.repository import Adw
 from .app_section import AppSection
 from .app_section_details import AppSectionDetails
 from .main_window_side_menu import CatalystlabWindowSideMenu
-from .app_events import EventBus, AppEvents
 from functools import partial
 from gi.repository import GObject
 

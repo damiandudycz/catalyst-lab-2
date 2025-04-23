@@ -1,9 +1,9 @@
 from gi.repository import Gtk, GObject
 from gi.repository import Adw
-from .app_events import EventBus, AppEvents
+from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
 from .environment import RuntimeEnv
-from .settings import Settings
+from .settings import Settings, SettingsEvents
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/welcome_section.ui')
 class WelcomeSection(Gtk.Box):
@@ -18,9 +18,9 @@ class WelcomeSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_environments_row_activated(self, _):
-        #EventBus.emit(AppEvents.PUSH_VIEW, EnvironmentsSection(), title="Environments")
-        #EventBus.emit(AppEvents.PUSH_SECTION, AppSection.ENVIRONMENTS)
-        EventBus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
+        #app_event_bus.emit(AppEvents.PUSH_VIEW, EnvironmentsSection(), title="Environments")
+        #app_event_bus.emit(AppEvents.PUSH_SECTION, AppSection.ENVIRONMENTS)
+        app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
@@ -30,8 +30,11 @@ class WelcomeSection(Gtk.Box):
         super().__init__(**kwargs)
         self.content_navigation_view = content_navigation_view
         # Setup buttons
-        if Settings.current.get_toolsets():
-            # Hides setup environments button at bottom, if some environments are already set
-            self.setup_environments_section.set_visible(False)
-        else:
-            self.suggested_actions_section.set_visible(False)
+        self.setup_sections_visibility()
+        # Subscribe to relevant events
+        Settings.current.event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.setup_sections_visibility)
+
+    def setup_sections_visibility(self):
+        initial_setup_done = Settings.current.get_toolsets()
+        self.setup_environments_section.set_visible(not initial_setup_done)
+        self.suggested_actions_section.set_visible(initial_setup_done)

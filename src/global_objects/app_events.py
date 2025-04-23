@@ -1,5 +1,7 @@
+from __future__ import annotations
 from enum import Enum, auto
-from typing import Final, final
+from typing import final
+from .event_bus import EventBus
 
 @final
 class AppEvents(Enum):
@@ -7,18 +9,4 @@ class AppEvents(Enum):
     PUSH_VIEW = auto() # Push on Main Navigation View (Full window mode). Args: (view: Gtk.Widget), kwargs: (title=<title>).
     PUSH_SECTION = auto() # Like PUSH_VIEW but for pushing by AppSection enum. # Args: (section: AppSection)
 
-@final
-class EventBus:
-    _subscribers = {}
-
-    @classmethod
-    def subscribe(cls, event: AppEvents, callback):
-        if event not in cls._subscribers:
-            cls._subscribers[event] = []
-        cls._subscribers[event].append(callback)
-
-    @classmethod
-    def emit(cls, event: AppEvents, *args, **kwargs):
-        for callback in cls._subscribers.get(event, []):
-            callback(*args, **kwargs)
-
+app_event_bus: EventBus[AppEvents] = EventBus[AppEvents]()

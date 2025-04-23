@@ -1,9 +1,8 @@
 from gi.repository import Gtk, GObject
 from gi.repository import Adw
-from .app_events import EventBus, AppEvents
 from .app_section import AppSection
 from .environment import RuntimeEnv, ToolsetEnv, ToolsetEnvHelper
-from .settings import Settings
+from .settings import Settings, SettingsEvents
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
@@ -26,16 +25,33 @@ class EnvironmentsSection(Gtk.Box):
             self._set_toolset_system_checkbox_active(False)
         # Setup external env entries
         self._load_external_toolsets()
+        # Subscribe to relevant events
+        Settings.current.event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
+
+    def toolsets_updated(self):
+        self._load_external_toolsets()
 
     def _load_external_toolsets(self):
-        external_toolsets = [toolset for toolset in Settings.current.get_toolsets() if toolset.env == ToolsetEnv.EXTERNAL]
-        # Now print each of the filtered toolsets
+        # Remove previously added toolset rows
+        if hasattr(self, "_external_toolset_rows"):
+            for row in self._external_toolset_rows:
+                self.external_toolsets_container.remove(row)
+
+        # Refresh the list
+        external_toolsets = [
+            toolset for toolset in Settings.current.get_toolsets()
+            if toolset.env == ToolsetEnv.EXTERNAL
+        ]
+
+        self._external_toolset_rows = []
+
         for toolset in external_toolsets:
-            # Create a new AdwActionRow for the toolset
             action_row = Adw.ActionRow()
-            action_row.set_title("External toolset")  # Customize the title
+            action_row.set_title("External toolset")
             action_row.set_icon_name("user-desktop-symbolic")
+
             self.external_toolsets_container.insert(action_row, 0)
+            self._external_toolset_rows.append(action_row)
 
     # Sets the state without calling a callback.
     def _set_toolset_system_checkbox_active(self, active: bool):

@@ -32,6 +32,7 @@ catalystlab_sources = [
   'extensions/navigation_view_extensions.py',
   'global_objects/settings.py',
   'global_objects/app_events.py',
+  'global_objects/event_bus.py',
   'environment/environment.py',
   'main_window/main_window.py',
   'main_window/main_window_side_menu.py',

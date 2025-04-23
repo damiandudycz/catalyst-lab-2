@@ -5,6 +5,12 @@ import os
 from .environment import RuntimeEnv, ToolsetEnvHelper
 from typing import final
 from typing import Callable
+from enum import Enum, auto
+from .event_bus import EventBus
+
+@final
+class SettingsEvents(Enum):
+    TOOLSETS_CHANGED = auto()
 
 @final
 class Settings:
@@ -16,6 +22,7 @@ class Settings:
 
     def __init__(self, toolsets: List[ToolsetEnvHelper]):
         self._toolsets = toolsets
+        self.event_bus: EventBus[SettingsEvents] = EventBus[SettingsEvents]()
 
     # Lifecycle and access:
 
@@ -95,10 +102,12 @@ class Settings:
 
     def add_toolset(self, toolset: ToolsetEnvHelper):
         self._toolsets.append(toolset)
+        self.event_bus.emit(SettingsEvents.TOOLSETS_CHANGED)
         self.save()
 
     def remove_toolset(self, toolset: ToolsetEnvHelper):
         """Remove the specified toolset if it exists in the list."""
         if toolset in self._toolsets:
             self._toolsets.remove(toolset)
+            self.event_bus.emit(SettingsEvents.TOOLSETS_CHANGED)
             self.save()
