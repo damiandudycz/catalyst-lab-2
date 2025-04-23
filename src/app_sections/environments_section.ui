@@ -53,6 +53,19 @@
               </object>
             </child>
 
+            <child>
+              <object class="AdwButtonRow" id="toolset_system_validate_button">
+                <property name="title">Validate</property>
+                <property name="start-icon-name">emoji-nature-symbolic</property>
+                <property name="activatable">True</property>
+                <property name="visible">False</property>
+                <style>
+                  <class name="suggested-action"/>
+                </style>
+                <signal name="activated" handler="on_validate_system_toolset_pressed" swapped="no"/>
+              </object>
+            </child>
+
           </object>
         </child>
 

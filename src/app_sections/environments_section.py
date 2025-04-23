@@ -11,26 +11,33 @@ class EnvironmentsSection(Gtk.Box):
 
     toolset_system = Gtk.Template.Child()
     toolset_system_checkbox = Gtk.Template.Child()
+    toolset_system_validate_button = Gtk.Template.Child()
     toolset_add_button = Gtk.Template.Child()
     external_toolsets_container = Gtk.Template.Child()
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
-        # Setup host env entry
         self._ignore_toolset_checkbox_signal = False
-        if ToolsetEnv.SYSTEM.is_allowed_in_current_host():
-            system_toolset_initially_selected = any(toolset.env == ToolsetEnv.SYSTEM for toolset in Settings.current.get_toolsets())
-            self._set_toolset_system_checkbox_active(system_toolset_initially_selected)
-        else:
-            self.toolset_system.set_sensitive(False)
-            self._set_toolset_system_checkbox_active(False)
+        # Setup host env entry
+        self._load_system_toolset
         # Setup external env entries
         self._load_external_toolsets()
         # Subscribe to relevant events
         Settings.current.event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
 
     def toolsets_updated(self):
+        self._load_system_toolset()
         self._load_external_toolsets()
+
+    def _load_system_toolset(self):
+        if ToolsetEnv.SYSTEM.is_allowed_in_current_host():
+            system_toolset_selected = any(toolset.env == ToolsetEnv.SYSTEM for toolset in Settings.current.get_toolsets())
+            self._set_toolset_system_checkbox_active(system_toolset_selected)
+            self.toolset_system_validate_button.set_visible(system_toolset_selected)
+        else:
+            self.toolset_system.set_sensitive(False)
+            self._set_toolset_system_checkbox_active(False)
+            self.toolset_system_validate_button.set_visible(False)
 
     def _load_external_toolsets(self):
         # Remove previously added toolset rows
@@ -76,6 +83,10 @@ class EnvironmentsSection(Gtk.Box):
         toolset_env_builder.build_toolset()
 
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
+
+    @Gtk.Template.Callback()
+    def on_validate_system_toolset_pressed(self, button):
+        print("Validate system env")
 
     # TODO: Make actions for toolset add/remove over some method and not direct access. This method should save by default()
     # TODO: Bind changes in settings to refresh views automatically
