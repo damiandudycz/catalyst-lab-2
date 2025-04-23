@@ -33,6 +33,9 @@
                     "type" : "git",
                     "url" : "file:///home/damiandudycz/Developer"
                 }
+            ],
+            "build-commands": [
+                "pip3 install requests"
             ]
         }
     ]

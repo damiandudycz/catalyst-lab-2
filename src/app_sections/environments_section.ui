@@ -15,17 +15,6 @@
     <property name="margin-bottom">24</property>
 
     <child>
-      <object class="GtkLabel">
-        <property name="label">Manage toolset environments.</property>
-        <property name="halign">center</property>
-        <property name="wrap">True</property>
-        <attributes>
-          <attribute name="foreground" value="grey"/>
-        </attributes>
-      </object>
-    </child>
-
-    <child>
       <object class="GtkBox" id="actions_section">
         <property name="orientation">vertical</property>
         <property name="halign">center</property>
@@ -97,6 +86,22 @@
           </object>
         </child>
 
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkSeparator"/>
+    </child>
+
+    <child>
+      <object class="GtkLabel">
+        <property name="label">Toolset environments are essentially Gentoo-based systems equipped with the necessary tools and configurations for building new Gentoo stage files. These environments can either be the host system itself (if running Gentoo) or isolated external environments packaged in a .squashfs file.</property>
+        <property name="halign">center</property>
+        <property name="wrap">True</property>
+        <property name="justify">fill</property>
+        <attributes>
+          <attribute name="foreground" value="grey"/>
+        </attributes>
       </object>
     </child>
 

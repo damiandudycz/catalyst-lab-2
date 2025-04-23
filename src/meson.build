@@ -42,6 +42,7 @@ catalystlab_sources = [
   'app_sections/app_section_details.py',
   'app_sections/welcome_section.py',
   'app_sections/environments_section.py',
+  'toolset_env_builder/toolset_env_builder.py'
 ]
 
 install_data(catalystlab_sources, install_dir: moduledir)

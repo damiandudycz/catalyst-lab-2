@@ -9,7 +9,7 @@
   <template class="CatalystlabWindow" parent="AdwApplicationWindow">
     <!-- Window properties -->
     <property name="default-width">800</property>
-    <property name="default-height">500</property>
+    <property name="default-height">600</property>
 
     <!-- Breakpoint controls side bar collapsed state and toggle button visibility -->
     <child>

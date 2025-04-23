@@ -39,6 +39,7 @@
         <property name="label">Configure and generate custom Gentoo Linux stage tarballs, Live images, and other system builds using the power of Catalyst.</property>
         <property name="halign">center</property>
         <property name="wrap">True</property>
+        <property name="justify">fill</property>
         <attributes>
           <attribute name="foreground" value="grey"/>
         </attributes>

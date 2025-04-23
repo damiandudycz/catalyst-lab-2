@@ -3,6 +3,7 @@ from gi.repository import Adw
 from .app_section import AppSection
 from .environment import RuntimeEnv, ToolsetEnv, ToolsetEnvHelper
 from .settings import Settings, SettingsEvents
+from .toolset_env_builder import ToolsetEnvBuilder
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
@@ -71,7 +72,10 @@ class EnvironmentsSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_add_toolset_activated(self, button):
-        Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
+        toolset_env_builder = ToolsetEnvBuilder()
+        toolset_env_builder.build_toolset()
+
+        #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
 
     # TODO: Make actions for toolset add/remove over some method and not direct access. This method should save by default()
     # TODO: Bind changes in settings to refresh views automatically
