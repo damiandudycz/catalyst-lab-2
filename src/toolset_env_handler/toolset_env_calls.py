@@ -7,6 +7,7 @@ import shutil
 from dataclasses import dataclass
 from typing import List
 from .environment import RuntimeEnv
+from .hotfix_patching import PatchSpec, apply_patch_and_store_for_isolated_system
 
 @dataclass
 class BindMount:
@@ -38,6 +39,15 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
     """Runs the given command in an isolated Linux environment with host tools mounted as read-only."""
 
     # TODO: Make this dynamic or a parameter
+    # Prepare required hotfix patches
+    hotfix_patches = [
+        PatchSpec( # This patch fakes unshare call making it possible to run catalyst inside isolated env.
+            source_path="/usr/lib/python3.12/site-packages/snakeoil/process/namespaces.py",
+            patch_filename="namespaces.patch"  # The patch file inside patches/
+        )
+    ]
+
+    # TODO: Make this dynamic or a parameter
     files_bindings = [
         BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", write_access=True, resolve_host_path=False),
     ]
@@ -46,14 +56,20 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
 
     base = Path(tempfile.mkdtemp(prefix="gentoo_toolset_spawn_"))
     try:
-        fake_root = os.path.join(base, "fake-root")
+        fake_root = os.path.join(base, "fake-root") # Base isolated system structure
         os.makedirs(fake_root, exist_ok=False)
 
-        overlay = os.path.join(base, "overlay")
+        overlay = os.path.join(base, "overlay") # Stores changes in empty creates work dirs
         os.makedirs(overlay, exist_ok=False)
 
-        # Patch isolation-related code in user-space libs
-        patched_namespaces_path = _disable_namespaces_setns_for_isolated_toolset(runtime_env, base)
+        hotfixes = os.path.join(base, "hotfixes") # Stores patched files if needed
+        os.makedirs(hotfixes, exist_ok=False)
+
+        for patch in hotfix_patches:
+            patched_file_path = apply_patch_and_store_for_isolated_system(runtime_env, hotfixes, patch)
+            # Convert patch file to BindMount structure
+            patched_file_binding = BindMount(mount_path=patch.source_path, host_path=patched_file_path, resolve_host_path=False)
+            bindings.append(patched_file_binding)
 
         bind_options = []
         for binding in bindings:
@@ -87,8 +103,6 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
             "--dev", "/dev",
             "--proc", "/proc",
             *bind_options,
-            "--ro-bind", patched_namespaces_path,
-            "/usr/lib/python3.12/site-packages/snakeoil/process/namespaces.py",
             "--setenv", "HOME", "/",
             *command_to_run
         ]
@@ -97,47 +111,6 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
 
     finally:
         shutil.rmtree(base, ignore_errors=True)
-
-
-# Hot fixes / patches:
-
-def _disable_namespaces_setns_for_isolated_toolset(runtime_env: RuntimeEnv, temp_dir: str):
-    """ This function disables setns function in snakeoil/process/namespaces.py library """
-    """ This is needed to avoid issue with nested unshare when using flatpak-spawn and catalyst """
-    """ WARNING! This code is potentially unsafe and might cause some issues """
-    original_namespaces_path = runtime_env.resolve_path_for_host_access('/usr/lib/python3.12/site-packages/snakeoil/process/namespaces.py')
-    with open(original_namespaces_path, 'r') as file:
-        lines = file.readlines()
-
-    func_to_disable = "def setns(fd, nstype):"
-    patched_lines = []
-    skip_block = False
-    inside_setns = False
-
-    for line in lines:
-        stripped = line.strip()
-
-        if not skip_block and stripped.startswith(func_to_disable):
-            patched_lines.append(f"{func_to_disable}\n")
-            patched_lines.append("    pass\n\n")
-            skip_block = True
-            inside_setns = True
-            continue
-
-        if skip_block:
-            if line.startswith(" ") or line.strip() == "":
-                continue
-            else:
-                skip_block = False
-
-        if not skip_block:
-            patched_lines.append(line)
-
-    patched_path = os.path.join(temp_dir, "namespaces.py")
-    with open(patched_path, 'w') as file:
-        file.writelines(patched_lines)
-
-    return patched_path
 
 #run_isolated_system_flatpak_command(command_to_run=["/usr/bin/catalyst", "-s", "stable"])
 
