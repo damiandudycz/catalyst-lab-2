@@ -4,7 +4,7 @@ from .app_section import AppSection
 from .environment import RuntimeEnv, ToolsetEnv, ToolsetEnvHelper
 from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset_env_handler import run_isolated_system_command
+from .toolset_env_calls import run_isolated_system_command
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):

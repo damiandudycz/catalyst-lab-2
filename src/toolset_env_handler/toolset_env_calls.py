@@ -4,64 +4,78 @@ import tempfile
 import uuid
 from pathlib import Path
 import shutil
-from .environment import RuntimeEnv
-import shutil
+from dataclasses import dataclass
 from typing import List
+from .environment import RuntimeEnv
+
+@dataclass
+class BindMount:
+    mount_path: str                # Mount location inside the isolated environment
+    host_path: str | None = None   # None if mount point is an empty dir from overlay
+    write_access: bool = False     # True if writable
+    resolve_host_path: bool = True # Whether to resolve path through runtime_env
+
+_system_bindings = [ # System-related bindings (read-only)
+    BindMount(mount_path="/usr",   host_path="/usr"),
+    BindMount(mount_path="/bin",   host_path="/bin"),
+    BindMount(mount_path="/sbin",  host_path="/sbin"),
+    BindMount(mount_path="/lib",   host_path="/lib"),
+    BindMount(mount_path="/lib32", host_path="/lib32"),
+    BindMount(mount_path="/lib64", host_path="/lib64"),
+]
+_config_bindings = [ # Config bindings
+    BindMount(mount_path="/etc", host_path="/etc"),
+]
+_devices_bindings = [ # Devices
+    BindMount(mount_path="/dev/kvm", host_path="/dev/kvm"),
+]
+_working_bindings = [ # Writable overlays (temp and var)
+    BindMount(mount_path="/tmp", write_access=True, resolve_host_path=False),
+    BindMount(mount_path="/var", write_access=True, resolve_host_path=False),
+]
 
 def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[str]):
-    """ Runs given command in an isolated linux environment, where tools from host system are binded as read only """
-    """ This version is to be run by accessing system host tools """
+    """Runs the given command in an isolated Linux environment with host tools mounted as read-only."""
+
+    # TODO: Make this dynamic or a parameter
+    files_bindings = [
+        BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", write_access=True, resolve_host_path=False),
+    ]
+
+    bindings = ( _system_bindings + _config_bindings + _devices_bindings + _working_bindings + files_bindings )
 
     base = Path(tempfile.mkdtemp(prefix="gentoo_toolset_spawn_"))
     try:
         fake_root = os.path.join(base, "fake-root")
         os.makedirs(fake_root, exist_ok=False)
 
-        # Overlay for write access bindings.
         overlay = os.path.join(base, "overlay")
         os.makedirs(overlay, exist_ok=False)
 
-        # There is an issue with commands that try to further isolate while being called in already isolated environment.
-        # This patches one of libraries so that it ignores isolation call and just returns success.
+        # Patch isolation-related code in user-space libs
         patched_namespaces_path = _disable_namespaces_setns_for_isolated_toolset(runtime_env, base)
 
-        # TODO: Make system bindings rw when initializing new toolset environments, so that it can emerge tools.
-        # Mount them from chroot dir then.
-        host_bindings = [
-            # Host path | # Mount path | # RW access | # Resolve /run/host
-            ("/usr",      "/usr",        False,        True),
-            ("/bin",      "/bin",        False,        True),
-            ("/sbin",     "/sbin",       False,        True),
-            ("/lib",      "/lib",        False,        True),
-            ("/lib32",    "/lib32",      False,        True),
-            ("/lib64",    "/lib64",      False,        True),
-            ("/etc",      "/etc",        False,        True),
-            ("/dev/kvm",  "/dev/kvm",    False,        True),
-            #(None,        "/tmp",        True,         False), # Creates temporary working directories.
-            (None,        "/var",        True,         False), # When host path is none, create it's directory inside temp base. Use this kind of binding when you need to enable write access to some working paths
-            ("/home/damiandudycz/Snapshots", "/var/tmp/catalyst/snapshots", True, False),
-        ]
-
-        # Prepare bind options and directories for bwrap.
         bind_options = []
-        for host_path, mount_path, rw, resolve_path in host_bindings:
-            if host_path is None:
-                # Create an empty directory inside the temporary overlay
-                empty_dir = os.path.join(overlay, mount_path.lstrip("/"))
+        for binding in bindings:
+            if binding.host_path is None:
+                # Mount an empty writable directory
+                empty_dir = os.path.join(overlay, binding.mount_path.lstrip("/"))
                 os.makedirs(empty_dir, exist_ok=True)
                 bind_options.extend([
-                    "--bind" if rw else "--ro-bind",
-                    empty_dir, mount_path
+                    "--bind" if binding.write_access else "--ro-bind",
+                    empty_dir,
+                    binding.mount_path
                 ])
             else:
                 resolved_path = (
-                    runtime_env.resolve_path_for_host_access(host_path)
-                    if resolve_path else host_path
+                    runtime_env.resolve_path_for_host_access(binding.host_path)
+                    if binding.resolve_host_path else binding.host_path
                 )
                 if os.path.exists(resolved_path):
                     bind_options.extend([
-                        "--bind" if rw else "--ro-bind",
-                        host_path, mount_path
+                        "--bind" if binding.write_access else "--ro-bind",
+                        binding.host_path,
+                        binding.mount_path
                     ])
 
         bwrap_cmd = [
@@ -72,10 +86,9 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
             "--bind", fake_root, "/",
             "--dev", "/dev",
             "--proc", "/proc",
-            # Bind selected files and directories:
             *bind_options,
-            # Bind patched files.
-            "--ro-bind", patched_namespaces_path, "/usr/lib/python3.12/site-packages/snakeoil/process/namespaces.py",
+            "--ro-bind", patched_namespaces_path,
+            "/usr/lib/python3.12/site-packages/snakeoil/process/namespaces.py",
             "--setenv", "HOME", "/",
             *command_to_run
         ]
@@ -84,6 +97,9 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
 
     finally:
         shutil.rmtree(base, ignore_errors=True)
+
+
+# Hot fixes / patches:
 
 def _disable_namespaces_setns_for_isolated_toolset(runtime_env: RuntimeEnv, temp_dir: str):
     """ This function disables setns function in snakeoil/process/namespaces.py library """
