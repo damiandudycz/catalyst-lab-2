@@ -11,8 +11,7 @@
         "--device=dri",
         "--socket=wayland",
         "--filesystem=host:ro",
-        "--talk-name=org.freedesktop.Flatpak",
-        "--filesystem=/tmp"
+        "--talk-name=org.freedesktop.Flatpak"
     ],
     "cleanup" : [
         "/include",
@@ -36,15 +35,9 @@
                     "url" : "file:///home/damiandudycz/Developer"
                 }
             ],
-            "build-commands" : [
+            "build-commands": [
                 "pip3 install requests"
-            ],
-            "config-opts" : [
-                "--libdir=lib"
             ]
         }
-    ],
-    "build-options" : {
-        "env" : {        }
-    }
+    ]
 }

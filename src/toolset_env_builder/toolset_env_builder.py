@@ -20,7 +20,7 @@ class ToolsetEnvBuilder:
 
     def _prepare_temp_dir(self) -> Path:
         """Create and return a temporary working directory as a Path object."""
-        temp_dir_path = Path(tempfile.mkdtemp(prefix="gentoo_toolset_"))
+        temp_dir_path = Path(tempfile.mkdtemp(prefix="gentoo_toolset_setup_"))
         print(f"[*] Created temp directory at { temp_dir_path }")
         return temp_dir_path
 
