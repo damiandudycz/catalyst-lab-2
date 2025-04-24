@@ -19,7 +19,7 @@ class EnvironmentsSection(Gtk.Box):
         super().__init__(**kwargs)
         self._ignore_toolset_checkbox_signal = False
         # Setup host env entry
-        self._load_system_toolset
+        self._load_system_toolset()
         # Setup external env entries
         self._load_external_toolsets()
         # Subscribe to relevant events
