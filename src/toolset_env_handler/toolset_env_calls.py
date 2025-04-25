@@ -7,52 +7,43 @@ import shutil
 from dataclasses import dataclass
 from typing import List
 from .environment import RuntimeEnv
-from .hotfix_patching import PatchSpec, apply_patch_and_store_for_isolated_system
+from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
+from typing import Optional
 
 @dataclass
 class BindMount:
-    mount_path: str                # Mount location inside the isolated environment
-    host_path: str | None = None   # None if mount point is an empty dir from overlay
-    write_access: bool = False     # True if writable
-    resolve_host_path: bool = True # Whether to resolve path through runtime_env
+    mount_path: str                               # Mount location inside the isolated environment
+    host_path: str | None = None                  # None if mount point is an empty dir from overlay
+    write_access: bool = False                    # True if writable
+    resolve_host_path: bool = True                # Whether to resolve path through runtime_env
+    try_direct_path_if_not_resolved: bool = False # If not found using resolved version, try accessing directly
 
-_system_bindings = [ # System-related bindings (read-only)
-    BindMount(mount_path="/usr",   host_path="/usr"),
-    BindMount(mount_path="/bin",   host_path="/bin"),
-    BindMount(mount_path="/sbin",  host_path="/sbin"),
-    BindMount(mount_path="/lib",   host_path="/lib"),
-    BindMount(mount_path="/lib32", host_path="/lib32"),
-    BindMount(mount_path="/lib64", host_path="/lib64"),
-]
-_config_bindings = [ # Config bindings
-    BindMount(mount_path="/etc", host_path="/etc"),
-]
-_devices_bindings = [ # Devices
-    BindMount(mount_path="/dev/kvm", host_path="/dev/kvm"),
-]
-_working_bindings = [ # Writable overlays (temp and var)
-    BindMount(mount_path="/tmp", write_access=True, resolve_host_path=False),
-    BindMount(mount_path="/var", write_access=True, resolve_host_path=False),
-]
-
-def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[str]):
+def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, command_to_run: List[str], hot_fixes: Optional[List[HotFix]] = None, additional_bindings: Optional[List[BindMount]] = None):
     """Runs the given command in an isolated Linux environment with host tools mounted as read-only."""
 
-    # TODO: Make this dynamic or a parameter
+    _system_bindings = [ # System-related bindings (read-only)
+        BindMount(mount_path="/usr",   host_path=f"{toolset_root}/usr"),
+        BindMount(mount_path="/bin",   host_path=f"{toolset_root}/bin"),
+        BindMount(mount_path="/sbin",  host_path=f"{toolset_root}/sbin"),
+        BindMount(mount_path="/lib",   host_path=f"{toolset_root}/lib"),
+        BindMount(mount_path="/lib32", host_path=f"{toolset_root}/lib32"),
+        BindMount(mount_path="/lib64", host_path=f"{toolset_root}/lib64"),
+    ]
+    _config_bindings = [ # Config bindings
+        BindMount(mount_path="/etc", host_path=f"{toolset_root}/etc"),
+    ]
+    _devices_bindings = [ # Devices.
+        BindMount(mount_path="/dev/kvm", host_path=f"{toolset_root}/dev/kvm"),
+    ]
+    _working_bindings = [ # Writable overlays (temp and var)
+        BindMount(mount_path="/tmp", write_access=True),
+        BindMount(mount_path="/var", write_access=True),
+    ]
+
     # Prepare required hotfix patches
-    hotfix_patches = [
-        PatchSpec( # This patch fakes unshare call making it possible to run catalyst inside isolated env.
-            source_path="/usr/lib/python3.12/site-packages/snakeoil/process/namespaces.py",
-            patch_filename="namespaces.patch"  # The patch file inside patches/
-        )
-    ]
-
-    # TODO: Make this dynamic or a parameter
-    files_bindings = [
-        BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", write_access=True, resolve_host_path=False),
-    ]
-
-    bindings = ( _system_bindings + _config_bindings + _devices_bindings + _working_bindings + files_bindings )
+    hotfix_patches = [fix.get_patch_spec for fix in (hot_fixes or [])]
+    # Prepare bindings
+    bindings = ( _system_bindings + _config_bindings + _devices_bindings + _working_bindings + (additional_bindings or []) )
 
     base = Path(tempfile.mkdtemp(prefix="gentoo_toolset_spawn_"))
     try:
@@ -66,10 +57,11 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
         os.makedirs(hotfixes, exist_ok=False)
 
         for patch in hotfix_patches:
-            patched_file_path = apply_patch_and_store_for_isolated_system(runtime_env, hotfixes, patch)
-            # Convert patch file to BindMount structure
-            patched_file_binding = BindMount(mount_path=patch.source_path, host_path=patched_file_path, resolve_host_path=False)
-            bindings.append(patched_file_binding)
+            patched_file_path = apply_patch_and_store_for_isolated_system(runtime_env, toolset_root, hotfixes, patch)
+            if patched_file_path is not None:
+                # Convert patch file to BindMount structure
+                patched_file_binding = BindMount(mount_path=patch.source_path, host_path=patched_file_path, resolve_host_path=False)
+                bindings.append(patched_file_binding)
 
         bind_options = []
         for binding in bindings:
@@ -102,8 +94,8 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
             "--bind", fake_root, "/",
             "--dev", "/dev",
             "--proc", "/proc",
-            *bind_options,
             "--setenv", "HOME", "/",
+            *bind_options,
             *command_to_run
         ]
 
@@ -111,6 +103,4 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, command_to_run: List[st
 
     finally:
         shutil.rmtree(base, ignore_errors=True)
-
-#run_isolated_system_flatpak_command(command_to_run=["/usr/bin/catalyst", "-s", "stable"])
 

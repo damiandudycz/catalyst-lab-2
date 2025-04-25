@@ -6,20 +6,39 @@ from pathlib import Path
 from dataclasses import dataclass
 from .environment import RuntimeEnv
 import tempfile
+from enum import Enum, auto
+
+class HotFix(Enum):
+    SNAKEOIL_NAMESPACES_FAKE = auto()
+
+    @classmethod
+    @property
+    def catalyst_fixes(cls):
+        return [HotFix.SNAKEOIL_NAMESPACES_FAKE]
+
+    @property
+    def get_patch_spec(self):
+        match self:
+            case HotFix.SNAKEOIL_NAMESPACES_FAKE:
+                return PatchSpec( # This patch fakes unshare call making it possible to run catalyst inside isolated env.
+                            source_path="/usr/lib/python3.12/site-packages/snakeoil/process/namespaces.py",
+                            patch_filename="namespaces.patch"  # The patch file inside patches/
+                        )
 
 @dataclass
 class PatchSpec:
     source_path: str    # Path to the file to be patched
     patch_filename: str # The name of the patch file (located in resources/patches/)
 
-def apply_patch_and_store_for_isolated_system(runtime_env: RuntimeEnv, storage_root: str, patch_spec: PatchSpec) -> str:
+# TODO: Take path for patch_spec from used toolset and not always from main system
+def apply_patch_and_store_for_isolated_system(runtime_env: RuntimeEnv, toolset_root: str, storage_root: str, patch_spec: PatchSpec) -> str | None:
     """
     Applies a patch file (from project resources) to a copy of the original file
     and stores the result in <storage_root>/<original_relative_path>.
     Returns the path to the patched file.
     """
-    # Resolve the original file's full path using runtime_env
-    original_path = runtime_env.resolve_path_for_host_access(patch_spec.source_path)
+    # Resolve the original file's full path using runtime_env and toolset_root
+    original_path = runtime_env.resolve_path_for_host_access((toolset_root + "/" + patch_spec.source_path).replace("//", "/"))
 
     # Load patch content from GResource
     resource_path = f"/com/damiandudycz/CatalystLab/patches/{patch_spec.patch_filename}"
@@ -31,8 +50,11 @@ def apply_patch_and_store_for_isolated_system(runtime_env: RuntimeEnv, storage_r
     except Exception as e:
         raise FileNotFoundError(f"Failed to load patch from resource '{resource_path}': {e}")
 
+    # If file is not found in toolset_root, skip patching and return None
     if not os.path.isfile(original_path):
-        raise FileNotFoundError(f"Original file not found: {original_path}")
+        print(f"Original file not found: {original_path}")
+        print("Patching skipped")
+        return None
 
     # Compute target path for the patched version
     relative_path = os.path.relpath(patch_spec.source_path, "/")

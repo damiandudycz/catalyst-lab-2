@@ -4,7 +4,8 @@ from .app_section import AppSection
 from .environment import RuntimeEnv, ToolsetEnv, ToolsetEnvHelper
 from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset_env_calls import run_isolated_system_command
+from .toolset_env_calls import run_isolated_system_command, BindMount
+from .hotfix_patching import HotFix
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
@@ -82,14 +83,19 @@ class EnvironmentsSection(Gtk.Box):
     def on_add_toolset_activated(self, button):
         toolset_env_builder = ToolsetEnvBuilder()
         toolset_env_builder.build_toolset()
-
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
         print("Validate system env")
         # Testing only
-        run_isolated_system_command(RuntimeEnv.current(), command_to_run=["/bin/bash"])
+        run_isolated_system_command(
+            runtime_env=RuntimeEnv.current(),
+            toolset_root="/home/damiandudycz/Downloads/gentoo",
+            command_to_run=["/bin/bash"],
+            hot_fixes=HotFix.catalyst_fixes,
+            additional_bindings=[
+                BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", write_access=True, resolve_host_path=False)
+            ]
+        )
 
-    # TODO: Make actions for toolset add/remove over some method and not direct access. This method should save by default()
-    # TODO: Bind changes in settings to refresh views automatically

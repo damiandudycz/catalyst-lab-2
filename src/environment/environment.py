@@ -56,7 +56,15 @@ class RuntimeEnv(Enum):
             case RuntimeEnv.HOST:
                 return path
             case RuntimeEnv.FLATPAK:
-                return f"/run/host/{path}"
+                # Extract the first part of the path (i.e., the directory to check against /run/host)
+                path_parts = path.strip("/").split("/", 1)  # Split into first part and the rest of the path
+                first_part = path_parts[0] if path_parts else ""
+                host_mapped_elements=[ "usr", "bin", "sbin", "lib", "lib64", "lib32", "etc" ]
+                # Check first element of path to know if it should be mapped to /run/host
+                if first_part in host_mapped_elements:
+                    return f"/run/host/{path}".replace("//", "/")
+                else:
+                    return path
 
 @final
 class ToolsetEnv(Enum):
