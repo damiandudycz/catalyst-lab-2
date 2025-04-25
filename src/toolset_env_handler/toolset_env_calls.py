@@ -21,7 +21,7 @@ class BindMount:
 def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, command_to_run: List[str], hot_fixes: Optional[List[HotFix]] = None, additional_bindings: Optional[List[BindMount]] = None):
     """Runs the given command in an isolated Linux environment with host tools mounted as read-only."""
 
-    _system_bindings = [ # System-related bindings (read-only)
+    _system_bindings = [ # System-related bindings
         BindMount(mount_path="/usr",   host_path=f"{toolset_root}/usr"),
         BindMount(mount_path="/bin",   host_path=f"{toolset_root}/bin"),
         BindMount(mount_path="/sbin",  host_path=f"{toolset_root}/sbin"),
@@ -36,7 +36,7 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
     _devices_bindings = [ # Devices.
         BindMount(mount_path="/dev/kvm", host_path=f"{toolset_root}/dev/kvm"),
     ]
-    _working_bindings = [ # Writable temporary overlays (temp and var)
+    _working_bindings = [ # Writable temporary overlays
         BindMount(mount_path="/tmp"),
     ]
 
@@ -63,16 +63,14 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
                 patched_file_binding = BindMount(mount_path=patch.source_path, host_path=patched_file_path, resolve_host_path=False)
                 bindings.append(patched_file_binding)
 
-        OverlayPaths = namedtuple("OverlayPaths", ["upper", "lower", "work"])
+        OverlayPaths = namedtuple("OverlayPaths", ["upper", "work"])
 
         def create_overlay(overlay_path: str, mount_path: str) -> OverlayPaths:
             sub_overlay_upper = (overlay_path + "/upper/" + mount_path).replace("//", "/")
-            sub_overlay_lower = (overlay_path + "/lower/" + mount_path).replace("//", "/")
             sub_overlay_work  = (overlay_path + "/work/"  + mount_path).replace("//", "/")
             os.makedirs(sub_overlay_upper, exist_ok=False)
-            os.makedirs(sub_overlay_lower, exist_ok=False)
             os.makedirs(sub_overlay_work,  exist_ok=False)
-            return OverlayPaths(sub_overlay_upper, sub_overlay_lower, sub_overlay_work)
+            return OverlayPaths(sub_overlay_upper, sub_overlay_work)
 
         bind_options = []
         for binding in bindings:
@@ -88,22 +86,16 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
                 if os.path.exists(resolved_path):
                     if os.path.isfile(resolved_path):
                         # For files, always use --bind/--ro-bind
-                        bind_options.extend([
-                            "--bind" if binding.store_changes else "--ro-bind",
-                            binding.host_path,
-                            binding.mount_path
-                        ])
+                        bind_options.extend(["--bind" if binding.store_changes else "--ro-bind", binding.host_path, binding.mount_path])
                     elif os.path.isdir(resolved_path):
                         if binding.store_changes:
                             # Persistent bind for directories
                             bind_options.extend(["--bind", binding.host_path, binding.mount_path])
                         else:
                             # Overlay for directories
-                            bind_path = create_overlay(overlay, binding.mount_path)
-                            bind_options.extend([
-                                "--overlay-src", binding.host_path,
-                                "--overlay", bind_path.upper, bind_path.lower, binding.mount_path
-                            ])
+                            #bind_path = create_overlay(overlay, binding.mount_path)
+                            #bind_options.extend(["--overlay-src", binding.host_path, "--overlay", bind_path.upper, bind_path.work, binding.mount_path])
+                            bind_options.extend(["--bind" if binding.store_changes else "--ro-bind", binding.host_path, binding.mount_path])
 
         bwrap_cmd = [
             "flatpak-spawn", "--host", "bwrap",
@@ -118,11 +110,8 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
             "--setenv", "HOME", "/",
         ] + bind_options + command_to_run
 
-        print(bwrap_cmd)
-
         subprocess.run(bwrap_cmd)
 
     finally:
-        print("done")
-        #shutil.rmtree(base, ignore_errors=True)
+        shutil.rmtree(base, ignore_errors=True)
 
