@@ -87,15 +87,14 @@ class EnvironmentsSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
-        print("Validate system env")
         # Testing only
         run_isolated_system_command(
             runtime_env=RuntimeEnv.current(),
-            toolset_root="/home/damiandudycz/Downloads/gentoo",
+            toolset_root="",
             command_to_run=["/bin/bash"],
             hot_fixes=HotFix.catalyst_fixes,
             additional_bindings=[
-                BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", write_access=True, resolve_host_path=False)
+                BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
             ]
         )
 
