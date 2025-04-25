@@ -16,7 +16,6 @@ class BindMount:
     host_path: str | None = None                  # None if mount point is an empty dir from overlay
     write_access: bool = False                    # True if writable
     resolve_host_path: bool = True                # Whether to resolve path through runtime_env
-    try_direct_path_if_not_resolved: bool = False # If not found using resolved version, try accessing directly
 
 def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, command_to_run: List[str], hot_fixes: Optional[List[HotFix]] = None, additional_bindings: Optional[List[BindMount]] = None):
     """Runs the given command in an isolated Linux environment with host tools mounted as read-only."""
