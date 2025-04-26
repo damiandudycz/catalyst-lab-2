@@ -9,11 +9,11 @@
         "--share=ipc",
         "--socket=fallback-x11",
         "--device=dri",
+	"--device=kvm",
         "--socket=wayland",
-        "--filesystem=home",
         "--filesystem=host:ro",
-        "--talk-name=org.freedesktop.Flatpak",
-        "--filesystem=/tmp"
+        "--filesystem=/tmp",
+        "--talk-name=org.freedesktop.Flatpak"
     ],
     "cleanup" : [
         "/include",

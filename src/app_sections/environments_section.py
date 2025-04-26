@@ -90,7 +90,7 @@ class EnvironmentsSection(Gtk.Box):
         # Testing only
         run_isolated_system_command(
             runtime_env=RuntimeEnv.current(),
-            toolset_root="",
+            toolset_root="/home/damiandudycz/Downloads/gentoo",
             command_to_run=["/bin/bash"],
             hot_fixes=HotFix.catalyst_fixes,
             additional_bindings=[
