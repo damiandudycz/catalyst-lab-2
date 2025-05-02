@@ -36,6 +36,7 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
     ]
     _config_bindings = [ # Config.
         BindMount(mount_path="/etc", toolset_path="/etc"),
+        BindMount(mount_path="/etc/resolv.conf", host_path="/etc/resolv.conf"), # Take resolv.conf directly from main system
     ]
     _working_bindings = [ # Working.
         BindMount(mount_path="/var", toolset_path="/var"),
@@ -177,23 +178,23 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
         # Clean workdir.
         shutil.rmtree(work_dir, ignore_errors=True)
 
-run_isolated_system_command(
-    runtime_env=RuntimeEnv.current(),
-    toolset_root="/",
-    command_to_run=["/bin/bash"], # TODO: Add source /etc/profile and env-update
-    hot_fixes=HotFix.catalyst_fixes,
-    additional_bindings=[
-        # For catalyst -s
-        BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False),
-        # For emerge --sync.
-        # Note: /var is already binded using overlay, which means changes are not stored in env. By adding specific directories separately
-        # we can make them store inside the toolset itself.
-        # It's also possible to bind them to some completly different directory using /host_path, so that they could be shared across different envs
-        # and even used to create snapshot this way.
-        # If doing so, we could skip news and log, and just store repos
-        BindMount(mount_path="/var/db/repos/gentoo", toolset_path="/var/db/repos/gentoo", store_changes=True),
-        BindMount(mount_path="/var/lib/gentoo/news", toolset_path="/var/lib/gentoo/news", store_changes=True),
-        BindMount(mount_path="/var/log", toolset_path="/var/log", store_changes=True)
-    ]
-)
+#run_isolated_system_command(
+#    runtime_env=RuntimeEnv.current(),
+#    toolset_root="/gentoo_stage3_root",
+#    command_to_run=["/bin/bash"], # TODO: Add source /etc/profile and env-update
+#    #hot_fixes=HotFix.catalyst_fixes,
+#    additional_bindings=[
+#        # For catalyst -s
+#        BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False),
+#        # For emerge --sync.
+#        # Note: /var is already binded using overlay, which means changes are not stored in env. By adding specific directories separately
+#        # we can make them store inside the toolset itself.
+#        # It's also possible to bind them to some completly different directory using /host_path, so that they could be shared across different envs
+#        # and even used to create snapshot this way.
+#        # If doing so, we could skip news and log, and just store repos
+#        BindMount(mount_path="/var/db/repos/gentoo", host_path="/home/damiandudycz/tmp/var/db/repos/gentoo", store_changes=True),
+#        BindMount(mount_path="/var/lib/gentoo/news", host_path="/home/damiandudycz/tmp/var/lib/gentoo/news", store_changes=True),
+#        BindMount(mount_path="/var/log", host_path="/home/damiandudycz/tmp/var/log", store_changes=True)
+#    ]
+#)
 
