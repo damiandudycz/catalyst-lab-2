@@ -2,64 +2,70 @@ import os
 import subprocess
 import tempfile
 import uuid
-from pathlib import Path
 import shutil
+import stat
+from pathlib import Path
 from dataclasses import dataclass
 from typing import List
-from .environment import RuntimeEnv
-from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
 from typing import Optional
 from collections import namedtuple
-import stat
+from .environment import RuntimeEnv
+from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
 
 @dataclass
 class BindMount:
-    mount_path: str                               # Mount location inside the isolated environment
-    host_path: str | None = None                  # None if mount point is an empty dir from overlay
-    store_changes: bool = False                   # True if changes should be stored outside isolated env
-    resolve_host_path: bool = True                # Whether to resolve path through runtime_env
+    mount_path: str                 # Mount location inside the isolated environment
+    host_path: str | None = None    # None if mount point is an empty dir from overlay # TODO: Add alternative toolset_path to reference directly in toolset_dir
+    toolset_path: str | None = None # Host path relative to toolset path when used in run_isolated_system_command.
+    store_changes: bool = False     # True if changes should be stored outside isolated env
+    resolve_host_path: bool = True  # Whether to resolve path through runtime_env
 
 def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, command_to_run: List[str], hot_fixes: Optional[List[HotFix]] = None, additional_bindings: Optional[List[BindMount]] = None):
     """Runs the given command in an isolated Linux environment with host tools mounted as read-only."""
 
     _system_bindings = [ # System.
-        BindMount(mount_path="/usr",   host_path=f"{toolset_root}/usr"),
-        BindMount(mount_path="/bin",   host_path=f"{toolset_root}/bin"),
-        BindMount(mount_path="/sbin",  host_path=f"{toolset_root}/sbin"),
-        BindMount(mount_path="/lib",   host_path=f"{toolset_root}/lib"),
-        BindMount(mount_path="/lib32", host_path=f"{toolset_root}/lib32"),
-        BindMount(mount_path="/lib64", host_path=f"{toolset_root}/lib64"),
+        BindMount(mount_path="/usr",   toolset_path="/usr"),
+        BindMount(mount_path="/bin",   toolset_path="/bin"),
+        BindMount(mount_path="/sbin",  toolset_path="/sbin"),
+        BindMount(mount_path="/lib",   toolset_path="/lib"),
+        BindMount(mount_path="/lib32", toolset_path="/lib32"),
+        BindMount(mount_path="/lib64", toolset_path="/lib64"),
     ]
     _devices_bindings = [ # Devices.
         BindMount(mount_path="/dev/kvm", host_path="/dev/kvm"),
     ]
     _config_bindings = [ # Config.
-        BindMount(mount_path="/etc", host_path=f"{toolset_root}/etc"),
+        BindMount(mount_path="/etc", toolset_path="/etc"),
     ]
     _working_bindings = [ # Working.
-        BindMount(mount_path="/var", host_path=f"{toolset_root}/var"),
+        BindMount(mount_path="/var", toolset_path="/var"),
         BindMount(mount_path="/tmp"), # Create empty tmp when running env
     ]
     # All bindings.
     bindings = ( _system_bindings + _config_bindings + _devices_bindings + _working_bindings + (additional_bindings or []) )
 
-    # NOTE: Paths work correctly with flatpak-spawn --host, because we use --filesystem=/tmp. This means that mappings that are rooted inside /tmp
-    # in flatpak contained code still corresponds also to real host /tmp. Without this we would need to access path related to application container runtime
-    # when using flatpak-spawn --host. It could be better approach to leave flatpak /tmp as isolated inside flatpak, but then we would need to get the real path of /tmp
-    # related to app runtime container, in "--bind", fake_root, "/".
+    # Map bindings using toolset_path to host_path.
+    for bind in bindings:
+        if bind.host_path and bind.toolset_path:
+            raise ValueError(f"BindMount for mount_path '{bind.mount_path}' has both host_path and toolset_path set. Only one is allowed.")
+        if bind.toolset_path:
+            bind.host_path = os.path.join(toolset_root, bind.toolset_path.lstrip("/"))
+
     work_dir = Path(tempfile.mkdtemp(prefix="gentoo_toolset_spawn_"))
     try:
+        OverlayPaths = namedtuple("OverlayPaths", ["upper", "work"])
+
+        # Prepare work dirs:
         fake_root = os.path.join(work_dir, "fake_root")
-        hotfixes_workdir = os.path.join(work_dir, "hotfixes") # Stores patched files if needed
         overlay_root = os.path.join(work_dir, "overlay")
-
+        hotfixes_workdir = os.path.join(work_dir, "hotfixes") # Stores patched files if needed
         os.makedirs(fake_root, exist_ok=False)
-        os.makedirs(hotfixes_workdir, exist_ok=False)
         os.makedirs(overlay_root, exist_ok=False)
-        os.makedirs(os.path.join(overlay_root, "upper"), exist_ok=False)
-        os.makedirs(os.path.join(overlay_root, "work"), exist_ok=False)
+        for field in OverlayPaths._fields: # Creates upper and work subdirectories.
+            os.makedirs(os.path.join(overlay_root, field), exist_ok=False)
+        os.makedirs(hotfixes_workdir, exist_ok=False)
 
-        # Collect required hotfix patches details.
+        # Collect required hotfix patched files and add to bindings:
         hotfix_patches = [fix.get_patch_spec for fix in (hot_fixes or [])]
         for patch in hotfix_patches:
             patched_file_path = apply_patch_and_store_for_isolated_system(runtime_env, toolset_root, hotfixes_workdir, patch)
@@ -68,8 +74,6 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
                 patched_file_binding = BindMount(mount_path=patch.source_path, host_path=patched_file_path, resolve_host_path=False)
                 bindings.append(patched_file_binding)
 
-        OverlayPaths = namedtuple("OverlayPaths", ["upper", "work"])
-
         # Name overlay entries using indexes to avoid overlaps.
         mapping_index=0
 
@@ -77,8 +81,9 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
         def create_overlay_map(mount_path: str) -> OverlayPaths:
             nonlocal mapping_index
             # Create directories for all fields in OverlayPaths with given mount_path (upper, work [lower is considered mapped directory])
+            map_name=mount_path.replace("/", "_")
             values = {
-                field: f"{overlay_root}/{field}/{mapping_index}".replace("//", "/")
+                field: f"{overlay_root}/{field}/{mapping_index}{map_name}".replace("//", "/")
                 for field in OverlayPaths._fields
             }
             for path in values.values():
@@ -88,38 +93,54 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
         # Creates entry in overlay for temp dir, without mapping other directory.
         def create_overlay_temp(mount_path: str) -> str:
             nonlocal mapping_index
-            overlay_mount_path=f"{overlay_root}/{mapping_index}".replace("//", "/")
+            map_name=mount_path.replace("/", "_")
+            overlay_mount_path=f"{overlay_root}/upper/{mapping_index}{map_name}".replace("//", "/")
             os.makedirs(overlay_mount_path, exist_ok=False)
             mapping_index+=1
             return overlay_mount_path
 
+        # Bind files and directories specified in bindings inside fake_root:
         bind_options = []
         for binding in bindings:
-            resolved_path = ( # Used to check if exists through current runtime env (works with flatpak env)
+            resolved_host_path = ( # Used to check if exists through current runtime env (works with flatpak env)
                 None if binding.host_path is None else
                 runtime_env.resolve_path_for_host_access(binding.host_path) if binding.resolve_host_path else binding.host_path
             )
+            # Handle not existing host paths.
+            if binding.host_path is not None and not os.path.exists(resolved_host_path):
+                # Create in host is store_changes is set.
+                if binding.store_changes:
+                    print(f"Path {resolved_host_path} not found. Creating directory in host.")
+                    os.makedirs(resolved_host_path)
+                # Skip not existing bindings with host_path set:
+                else:
+                    print(f"Path {resolved_host_path} not found. Skipping binding.")
+                    continue # or raise an error if that's preferred
+
             # Empty writable dirs:
             if binding.host_path is None:
                 tmp_path = create_overlay_temp(binding.mount_path)
                 bind_options.extend(["--bind", tmp_path, binding.mount_path])
                 continue
-            # Skip not existing bindings with host_path set:
-            if not os.path.exists(resolved_path):
-                print(f"Path {resolved_path} not found. Skipping binding.")
-                continue # or raise an error if that's preferred
-            # Standard files:
-            if os.path.isfile(resolved_path):
+            # Symlinks (keep as symlinks in isolated env):
+            if resolved_host_path is not None and os.path.islink(resolved_host_path):
+                target = os.readlink(resolved_host_path)
+                fake_symlink_path = os.path.join(fake_root, binding.mount_path.lstrip("/"))
+                os.makedirs(os.path.dirname(fake_symlink_path), exist_ok=True)
+                os.symlink(target, fake_symlink_path)
+                continue
+            # Char devices:
+            if stat.S_ISCHR(os.stat(resolved_host_path).st_mode):
                 flag = "--bind" if binding.store_changes else "--ro-bind"
                 bind_options.extend([flag, binding.host_path, binding.mount_path])
                 continue
-            # Char devices:
-            if os.path.exists(resolved_path) and stat.S_ISCHR(os.stat(resolved_path).st_mode):
+            # Standard files:
+            if stat.S_ISREG(os.stat(resolved_host_path).st_mode):
                 flag = "--bind" if binding.store_changes else "--ro-bind"
                 bind_options.extend([flag, binding.host_path, binding.mount_path])
                 continue
             # Directories:
-            if os.path.isdir(resolved_path):
+            if stat.S_ISDIR(os.stat(resolved_host_path).st_mode):
                 if binding.store_changes:
                     bind_options.extend(["--bind", binding.host_path, binding.mount_path])
                 else:
@@ -130,35 +151,49 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
                     ])
                 continue
 
-        # Add special prefix when running from flatpak
-        prefix = ["flatpak-spawn", "--host"] if runtime_env == RuntimeEnv.FLATPAK else []
-
-        exec_call = prefix + [
-            "pkexec", "bwrap",
+        # Add special prefix when running from flatpak.
+        cmd_prefix = ["flatpak-spawn", "--host"] if runtime_env == RuntimeEnv.FLATPAK else []
+        cmd_authorize = ["pkexec"]
+        cmd_bwrap = [
+            "bwrap",
             "--die-with-parent",
-            #"--unshare-user", "--uid", "0", "--gid", "0",
             "--cap-add", "CAP_DAC_OVERRIDE", "--cap-add", "CAP_SYS_ADMIN", "--cap-add", "CAP_FOWNER", "--cap-add", "CAP_SETGID",
             "--unshare-uts", "--unshare-ipc", "--unshare-pid", "--unshare-cgroup",
+            #"--unshare-user", "--uid", "0", "--gid", "0", # Only add when running as user, not root (pkexec)
             "--hostname", "catalyst-lab",
             "--bind", fake_root, "/",
             "--dev", "/dev",
             "--proc", "/proc",
-            "--setenv", "HOME", "/",
-        ] + bind_options + command_to_run
+            "--setenv", "HOME", "/"
+        ]
 
+        exec_call = cmd_prefix + cmd_authorize + cmd_bwrap + bind_options + command_to_run
+
+        # Run process.
         print(' '.join(str(x) for x in exec_call))
         subprocess.run(exec_call)
 
     finally:
-        # Clean workdir
+        # Clean workdir.
         shutil.rmtree(work_dir, ignore_errors=True)
 
 run_isolated_system_command(
     runtime_env=RuntimeEnv.current(),
-    toolset_root="",
-    command_to_run=["/bin/bash"],
+    toolset_root="/",
+    command_to_run=["/bin/bash"], # TODO: Add source /etc/profile and env-update
     hot_fixes=HotFix.catalyst_fixes,
     additional_bindings=[
-        BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
+        # For catalyst -s
+        BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False),
+        # For emerge --sync.
+        # Note: /var is already binded using overlay, which means changes are not stored in env. By adding specific directories separately
+        # we can make them store inside the toolset itself.
+        # It's also possible to bind them to some completly different directory using /host_path, so that they could be shared across different envs
+        # and even used to create snapshot this way.
+        # If doing so, we could skip news and log, and just store repos
+        BindMount(mount_path="/var/db/repos/gentoo", toolset_path="/var/db/repos/gentoo", store_changes=True),
+        BindMount(mount_path="/var/lib/gentoo/news", toolset_path="/var/lib/gentoo/news", store_changes=True),
+        BindMount(mount_path="/var/log", toolset_path="/var/log", store_changes=True)
     ]
 )
+

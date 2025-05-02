@@ -82,9 +82,7 @@ def apply_patch_and_store_for_isolated_system(runtime_env: RuntimeEnv, toolset_r
     os.remove(temp_patch_path)
 
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Failed to apply patch:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-        )
+        raise RuntimeError(f"Failed to apply patch:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
     return target_path
 

@@ -13,6 +13,7 @@
         "--socket=wayland",
         "--filesystem=host:ro",
         "--filesystem=/tmp",
+        "--filesystem=home",
         "--talk-name=org.freedesktop.Flatpak"
     ],
     "cleanup" : [
