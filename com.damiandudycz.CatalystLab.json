@@ -11,6 +11,7 @@
         "--device=dri",
 	"--device=kvm",
         "--socket=wayland",
+        "--filesystem=xdg-run/catalystlab-root-helper:create",
         "--filesystem=host:ro",
         "--filesystem=/tmp",
         "--filesystem=home",

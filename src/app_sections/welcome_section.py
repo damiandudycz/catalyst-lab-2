@@ -4,6 +4,7 @@ from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
 from .environment import RuntimeEnv
 from .settings import Settings, SettingsEvents
+from .root_helper import RootHelperClient
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/welcome_section.ui')
 class WelcomeSection(Gtk.Box):
@@ -24,7 +25,8 @@ class WelcomeSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        self.content_navigation_view.push_section(AppSection.ENVIRONMENTS)
+        print(RootHelperClient.shared().send_command("echo hello back $UID"))
+        #self.content_navigation_view.push_section(AppSection.ENVIRONMENTS)
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)

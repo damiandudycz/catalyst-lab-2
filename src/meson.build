@@ -44,7 +44,8 @@ catalystlab_sources = [
   'app_sections/environments_section.py',
   'toolset_env_builder/toolset_env_builder.py',
   'toolset_env_handler/toolset_env_calls.py',
-  'toolset_env_handler/hotfix_patching.py'
+  'toolset_env_handler/hotfix_patching.py',
+  'root_helper.py'
 ]
 
 install_data(catalystlab_sources, install_dir: moduledir)
