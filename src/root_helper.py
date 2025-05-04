@@ -1,22 +1,43 @@
 #!/usr/bin/env python3
-import os
-import socket
-import subprocess
-import sys
-import uuid
-import time
-import pwd
-import tempfile
-import time
-import struct
-import signal
-from gi.repository import Gio
+import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal, threading, json, inspect
+from enum import Enum
 from typing import Optional
-import threading
+from functools import wraps
+from gi.repository import Gio
 
 # ----------------------------------------
 # Server code
 # ----------------------------------------
+
+class ServerCommand(str, Enum):
+    EXIT = "[EXIT]"
+    INITIALIZE = "[INITIALIZE]"
+
+# Function registry used by injected root functions
+ROOT_FUNCTION_REGISTRY = {}
+
+def root_function(func):
+    """Registers a function and replaces it with a proxy that calls the root server."""
+    # Example:
+    #@root_function
+    #def add(a, b):
+    #    return a + b
+    #
+    # Then in client you can call it directly:
+    # add(1, 2) - it will be actually running on root server
+    # or even with async variant and handler:
+    # add._async(handler, 1, 2)
+    # IMPORTANT: Functions decorated with root_function must be defined in global space and can't accept reference types, including self, cls etc.
+    ROOT_FUNCTION_REGISTRY[func.__name__] = func
+    @wraps(func)
+    def proxy_function(*args, **kwargs):
+        return RootHelperClient.shared().call_root_function(func.__name__, *args, **kwargs)
+    # Attach async variant
+    def async_variant(handler, *args, **kwargs):
+        return RootHelperClient.shared().call_root_function_async(func.__name__, handler, *args, **kwargs)
+    # Add .async_ to the proxy
+    proxy_function._async = async_variant
+    return proxy_function
 
 class RootHelperServer:
     _instance = None  # Class-level variable to store the single instance
@@ -117,39 +138,55 @@ class RootHelperServer:
                     continue
 
                 command = data[len(session_token) + 1:]
-                match command:
-                    case "[EXIT]":
+                try:
+                    cmd_enum = ServerCommand(command)
+                except ValueError:
+                    cmd_enum = None
+                match cmd_enum:
+                    case ServerCommand.EXIT:
                         conn.sendall(b"Exiting.\n")
                         conn.close()
                         break
-                    case "[INITIALIZE]":
+                    case ServerCommand.INITIALIZE:
                         # Used to ping the server to see when it is ready.
                         # Also locks future calls to this server for pid of this connection.
-                        self._pid_lock = pid
-                        conn.sendall(b"[OK]\n")
-                        conn.close()
-                        continue
+                        if self._pid_lock is None:
+                            self._pid_lock = pid
+                            conn.sendall(json.dumps({"status": "ok"}).encode())  # Fixed parentheses and encoding
+                            conn.close()
+                            continue
+                        else:
+                            # Use a server response from the enum for consistency
+                            conn.sendall("[ERROR: Already initialized]\n")  # Standardized response
+                            conn.close()
+                            break
 
                 if self._pid_lock is None:
                     conn.sendall(b"ERROR: Connection initialization not finished.\n")
                     conn.close()
                     continue
-                try:
-                    process = subprocess.Popen(
-                        command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        bufsize=1,
-                        universal_newlines=True,
-                    )
-                    for line in process.stdout:
-                        conn.sendall(line.encode())
-                    process.wait()
-                except subprocess.CalledProcessError as e:
-                    conn.sendall(e.output)
 
+                try:
+                    call = json.loads(command)
+                    function_name = call.get("function")
+                    args = call.get("args", [])
+                    kwargs = call.get("kwargs", {})
+                except json.JSONDecodeError:
+                    conn.sendall(b"ERROR: Invalid JSON\n")
+                    conn.close()
+                    continue
+                if function_name not in ROOT_FUNCTION_REGISTRY:
+                    conn.sendall(b"ERROR: Function not allowed\n")
+                    conn.close()
+                    continue
+                try:
+                    result = ROOT_FUNCTION_REGISTRY[function_name](*args, **kwargs)
+                    response = json.dumps({"status": "ok", "result": result})
+                except Exception as e:
+                    response = json.dumps({"status": "error", "message": str(e)})
+                conn.sendall(response.encode())
                 conn.close()
+
         finally:
             # Ensure server is stopped and resources are cleaned up
             self.stop()  # Gracefully stop the server and remove the socket file
@@ -213,6 +250,79 @@ class RootHelperClient:
             return False
         return self._process.poll() is None
 
+    def call_root_function(self, func_name: str, *args, **kwargs):
+        if not self._ensure_server_ready():
+            return "[WAITING]"
+
+        payload = {
+            "function": func_name,
+            "args": args,
+            "kwargs": kwargs,
+        }
+
+        print(payload)
+
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(self.socket_path)
+            s.sendall(f"{self.token} {json.dumps(payload)}".encode())
+
+            response_chunks = []
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                response_chunks.append(chunk)
+
+            result = json.loads(b"".join(response_chunks).decode())
+            if result["status"] == "ok":
+                return result["result"]
+            else:
+                raise RuntimeError(f"Root function error: {result['message']}")
+        except FileNotFoundError as e:
+            raise ConnectionRefusedError("Socket not available yet") from e
+
+    def call_root_function_async(self, func_name: str, handler: callable, *args, **kwargs) -> threading.Thread | str:
+        """
+        Asynchronously call a root function and pass the decoded response (JSON) to the handler.
+        """
+        if not self._ensure_server_ready():
+            return "[WAITING]"
+
+        payload = {
+            "function": func_name,
+            "args": args,
+            "kwargs": kwargs,
+        }
+
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(self.socket_path)
+            s.sendall(f"{self.token} {json.dumps(payload)}".encode())
+        except FileNotFoundError as e:
+            raise ConnectionRefusedError("Socket not available yet") from e
+
+        def reader_thread(sock, callback):
+            try:
+                buffer = b""
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    buffer += chunk
+                if buffer:
+                    try:
+                        result = json.loads(buffer.decode())
+                    except json.JSONDecodeError:
+                        result = {"status": "error", "message": "Invalid JSON response"}
+                    callback(result)
+            finally:
+                sock.close()
+
+        thread = threading.Thread(target=reader_thread, args=(s, handler), daemon=True)
+        thread.start()
+        return thread
+
     def start_root_helper(self):
         """Start the root helper process."""
         if self.is_server_process_running:
@@ -258,8 +368,8 @@ class RootHelperClient:
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                response = self.send_command("[INITIALIZE]", allow_auto_start=False)
-                if response.strip() == "[OK]":
+                response = self.send_command(ServerCommand.INITIALIZE, allow_auto_start=False)
+                if response.strip() == '{"status": "ok"}': # TODO: Map to json object and get status that way
                     return True
             except (FileNotFoundError, ConnectionRefusedError, socket.error) as e:
                 # If the socket isn't ready yet, retry after short sleep
@@ -280,23 +390,23 @@ class RootHelperClient:
             print(f"Server is already stopped")
             return # Already stopped
         try:
-            self.send_command("[EXIT]")
+            self.send_command(ServerCommand.EXIT)
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
         finally:
             self._process = None
             print("Root helper process stopped.")
 
-    def send_command(self, command, allow_auto_start=True) -> str:
+    def send_command(self, command: ServerCommand, allow_auto_start=True) -> str:
         """Send a command to the root helper server."""
         if not self._ensure_server_ready(allow_auto_start):
             return "[WAITING]"
 
-        print(f"> {command}")
+        print(f"> {command.value}")
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(self.socket_path)
-            s.sendall(f"{self.token} {command}".encode())
+            s.sendall(f"{self.token} {command.value}".encode())
             response_chunks = []
             while True:
                 chunk = s.recv(4096)
@@ -308,16 +418,16 @@ class RootHelperClient:
         except FileNotFoundError as e:
             raise ConnectionRefusedError("Socket not available yet") from e
 
-    def send_command_async(self, command, handler: callable, allow_auto_start=True) -> threading.Thread | str:
+    def send_command_async(self, command: ServerCommand, handler: callable, allow_auto_start=True) -> threading.Thread | str:
         """Send a command to the root helper server in async mode."""
         if not self._ensure_server_ready(allow_auto_start):
             return "[WAITING]"
 
-        print(f"> {command}")
+        print(f"> {command.value}")
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(self.socket_path)
-            s.sendall(f"{self.token} {command}".encode())
+            s.sendall(f"{self.token} {command.value}".encode())
         except FileNotFoundError as e:
             raise ConnectionRefusedError("Socket not available yet") from e
 
@@ -357,20 +467,48 @@ class RootHelperClient:
         return True
 
     def _extract_root_helper_to_run_user(self, uid: int) -> str:
-        """Extract and store the root helper script in /run/user/{uid}/catalystlab-root-helper."""
+        """Extracts root helper server script and appends root-callable functions."""
+        import os
+
+        # Runtime directory where the generated root-helper script will be placed
         runtime_dir = _get_runtime_dir(uid)
         output_path = os.path.join(runtime_dir, "root-helper.py")
+
+        # Ensure the directory exists
         os.makedirs(runtime_dir, exist_ok=True)
+
+        # If the file already exists, remove it
         if os.path.exists(output_path):
             os.remove(output_path)
-        # Load the resource from the bundled Gio resource
+
+        # Load the embedded server code from resources
         resource_path = "/com/damiandudycz/CatalystLab/root_helper.py"
         resource = Gio.Resource.load("/app/share/catalystlab/catalystlab.gresource")
         data = resource.lookup_data(resource_path, Gio.ResourceLookupFlags.NONE)
-        # Write the script to the desired location
-        with open(output_path, "wb") as f:
-            f.write(data.get_data())
-        # Set the appropriate permissions (only the user can execute)
+        server_code = data.get_data().decode()
+
+        # Collect the root functions (dynamically registered)
+        injected_functions = collect_root_function_sources()
+
+        # Combine the server code with the dynamically injected functions
+        full_code = server_code + "\n\n" + injected_functions
+
+        # Add the `if __name__ == "__main__":` block to run the server
+        # This needs to be added bellow dynamic functions.
+        full_code += """
+if __name__ == "__main__":
+    # Set up signal handling using a shared instance for all signals
+    signal.signal(signal.SIGINT, _signal_handler)  # Ctrl+C
+    signal.signal(signal.SIGTERM, _signal_handler)  # Termination
+    signal.signal(signal.SIGQUIT, _signal_handler)  # Quit cleanly
+    RootHelperServer.shared().start()
+"""
+
+        # Write the full code to the output file
+        with open(output_path, "w") as f:
+            f.write(full_code)
+
+        # Make the script executable
         os.chmod(output_path, 0o700)
 
         return output_path
@@ -387,6 +525,19 @@ def _get_socket_path(uid: int, runtime_env_name: str = "XDG_RUNTIME_DIR") -> str
     runtime_dir = _get_runtime_dir(uid, runtime_env_name=runtime_env_name)
     return os.path.join(runtime_dir, "root-service-socket")
 
+def collect_root_function_sources() -> str:
+    """Returns all registered root function sources as a single Python string."""
+    if not ROOT_FUNCTION_REGISTRY:
+        return ""
+
+    sources = []
+    for func in ROOT_FUNCTION_REGISTRY.values():
+        try:
+            sources.append(inspect.getsource(func))
+        except OSError:
+            print(f"Warning: could not get source for function {func.__name__}")
+    return "\n\n# ---- Injected root functions ----\n\n" + "\n\n".join(sources)
+
 # ----------------------------------------
 # Server runtime
 # ----------------------------------------
@@ -394,11 +545,4 @@ def _get_socket_path(uid: int, runtime_env_name: str = "XDG_RUNTIME_DIR") -> str
 def _signal_handler(sig, frame):
     RootHelperServer.shared().stop()
     sys.exit(0)
-
-if __name__ == "__main__":
-    # Set up signal handling using a shared instance for all signals
-    signal.signal(signal.SIGINT, _signal_handler)  # Ctrl+C
-    signal.signal(signal.SIGTERM, _signal_handler)  # Termination
-    signal.signal(signal.SIGQUIT, _signal_handler)  # Quit cleanly
-    RootHelperServer.shared().start()
 

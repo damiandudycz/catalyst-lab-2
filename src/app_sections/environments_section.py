@@ -6,6 +6,7 @@ from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset_env_calls import run_isolated_system_command, BindMount
 from .hotfix_patching import HotFix
+from .root_helper import RootHelperClient
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
@@ -83,7 +84,7 @@ class EnvironmentsSection(Gtk.Box):
     def on_add_toolset_activated(self, button):
         toolset_env_builder = ToolsetEnvBuilder()
         toolset_env_builder.build_toolset()
-        #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
+        Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
