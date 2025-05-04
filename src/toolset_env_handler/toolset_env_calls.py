@@ -172,7 +172,11 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
         exec_call = cmd_prefix + cmd_authorize + cmd_bwrap + bind_options + command_to_run
         exec_call = cmd_bwrap + bind_options + command_to_run
 
-        RootHelperClient.shared().send_command(' '.join(str(x) for x in exec_call))
+        def line_handler(line):
+            print(f"LINE: {line}")
+
+        thread = RootHelperClient.shared().send_command_async("ping google.com", handler=line_handler)
+        print(thread)
 
         # Run process.
 #        print(' '.join(str(x) for x in exec_call))

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import socket
 import subprocess
@@ -11,6 +12,7 @@ import struct
 import signal
 from gi.repository import Gio
 from typing import Optional
+import threading
 
 # ----------------------------------------
 # Server code
@@ -133,8 +135,17 @@ class RootHelperServer:
                     conn.close()
                     continue
                 try:
-                    output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
-                    conn.sendall(output)
+                    process = subprocess.Popen(
+                        command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        bufsize=1,
+                        universal_newlines=True,
+                    )
+                    for line in process.stdout:
+                        conn.sendall(line.encode())
+                    process.wait()
                 except subprocess.CalledProcessError as e:
                     conn.sendall(e.output)
 
@@ -215,9 +226,14 @@ class RootHelperClient:
         if os.path.exists(socket_path):
             os.remove(socket_path)
 
+        from .environment import RuntimeEnv
+        cmd_prefix = ["flatpak-spawn", "--host"] if RuntimeEnv.current() == RuntimeEnv.FLATPAK else []
+        cmd_authorize = ["pkexec"]
+        exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
+
         # Start pkexec and pass token via stdin
         self._process = subprocess.Popen(
-            ["flatpak-spawn", "--host", "pkexec", "python3", helper_host_path],
+            exec_call,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
@@ -273,29 +289,72 @@ class RootHelperClient:
 
     def send_command(self, command, allow_auto_start=True) -> str:
         """Send a command to the root helper server."""
+        if not self._ensure_server_ready(allow_auto_start):
+            return "[WAITING]"
+
+        print(f"> {command}")
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(self.socket_path)
+            s.sendall(f"{self.token} {command}".encode())
+            response_chunks = []
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                response_chunks.append(chunk)
+                print(chunk.decode(), end='')
+            return b"".join(response_chunks).decode()
+        except FileNotFoundError as e:
+            raise ConnectionRefusedError("Socket not available yet") from e
+
+    def send_command_async(self, command, handler: callable, allow_auto_start=True) -> threading.Thread | str:
+        """Send a command to the root helper server in async mode."""
+        if not self._ensure_server_ready(allow_auto_start):
+            return "[WAITING]"
+
+        print(f"> {command}")
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(self.socket_path)
+            s.sendall(f"{self.token} {command}".encode())
+        except FileNotFoundError as e:
+            raise ConnectionRefusedError("Socket not available yet") from e
+
+        def reader_thread(sock, callback):
+            try:
+                buffer = b""
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        if buffer:
+                            callback(buffer.decode())
+                        break
+                    buffer += chunk
+                    while b'\n' in buffer:
+                        line, buffer = buffer.split(b'\n', 1)
+                        callback(line.decode())
+            finally:
+                sock.close()
+
+        thread = threading.Thread(target=reader_thread, args=(s, handler), daemon=True)
+        thread.start()
+        return thread
+
+    def _ensure_server_ready(self, allow_auto_start=True):
+        """Ensure the root helper server is running and the socket is available."""
         if not self.is_server_process_running:
             if allow_auto_start:
                 print("Root helper is not running, attempting to start it.")
                 self.start_root_helper()
             else:
                 raise RuntimeError("Root helper is not running.")
-
         if not self.is_server_process_running:
             raise RuntimeError("Failed to start the root helper server.")
-
         if not os.path.exists(self.socket_path):
             print("Waiting for server socket")
-            return "[WAITING]"
-
-        print(f"SEND {command} with token: {self.token}")
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-                s.connect(self.socket_path)
-                s.sendall(f"{self.token} {command}".encode())
-                response = s.recv(4096)
-            return response.decode()
-        except FileNotFoundError as e:
-            raise ConnectionRefusedError("Socket not available yet") from e
+            return False
+        return True
 
     def _extract_root_helper_to_run_user(self, uid: int) -> str:
         """Extract and store the root helper script in /run/user/{uid}/catalystlab-root-helper."""
