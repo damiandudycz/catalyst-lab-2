@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal, threading, json, inspect
+import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal, threading, json, inspect, re
 from enum import Enum
 from typing import Optional
 from functools import wraps
 from gi.repository import Gio
-from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, _get_socket_path, _get_runtime_dir
+from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerResponse, ServerResponseStatusCode, _get_socket_path, _get_runtime_dir
 
 class RootHelperClient:
     _instance = None  # Class-level variable to store the single instance
@@ -29,17 +29,15 @@ class RootHelperClient:
             return False
         return self._process.poll() is None
 
-    def call_root_function(self, func_name: str, *args, **kwargs):
+    def call_root_function(self, func_name: str, *args, **kwargs) -> str:
         if not self._ensure_server_ready():
-            return "[WAITING]"
+            raise RuntimeError("[SERVER NOT READY]")
 
         payload = {
             "function": func_name,
             "args": args,
             "kwargs": kwargs,
         }
-
-        print(payload)
 
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -54,19 +52,20 @@ class RootHelperClient:
                 response_chunks.append(chunk)
 
             result = json.loads(b"".join(response_chunks).decode())
-            if result["status"] == "ok":
-                return result["result"]
+            if result.get("code") == ServerResponseStatusCode.OK.value:
+                return result.get("response")
             else:
-                raise RuntimeError(f"Root function error: {result['message']}")
+                message = result.get("response")
+                raise RuntimeError(f"Root function error: {message}")
         except FileNotFoundError as e:
             raise ConnectionRefusedError("Socket not available yet") from e
 
-    def call_root_function_async(self, func_name: str, handler: callable, *args, **kwargs) -> threading.Thread | str:
+    def call_root_function_async(self, func_name: str, handler: callable, *args, **kwargs) -> threading.Thread:
         """
         Asynchronously call a root function and pass the decoded response (JSON) to the handler.
         """
         if not self._ensure_server_ready():
-            return "[WAITING]"
+            raise RuntimeError("[SERVER NOT READY]")
 
         payload = {
             "function": func_name,
@@ -148,8 +147,12 @@ class RootHelperClient:
         while time.time() - start_time < timeout:
             try:
                 response = self.send_command(ServerCommand.INITIALIZE, allow_auto_start=False)
-                if response.strip() == '{"status": "ok"}': # TODO: Map to json object and get status that way
-                    return True
+                try:
+                    data = json.loads(response)
+                    return data.get("code") == 0
+                except json.JSONDecodeError:
+                    time.sleep(1)  # Retry delay
+                    continue
             except (FileNotFoundError, ConnectionRefusedError, socket.error) as e:
                 # If the socket isn't ready yet, retry after short sleep
                 if isinstance(e, socket.error) and getattr(e, "errno", None) not in (errno.ECONNREFUSED, errno.ENOENT):
@@ -159,8 +162,13 @@ class RootHelperClient:
                 break
             time.sleep(1)  # Retry delay
 
-        print("Server did not respond with '[OK]' in time.")
-        self._process.kill()
+        print(f"Server did not respond to {ServerCommand.INITIALIZE.value} in time.")
+        self._process.terminate()
+        try:
+            self._process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._process.kill()
+            self._process.wait()
         return False
 
     def stop_root_helper(self):
@@ -179,7 +187,8 @@ class RootHelperClient:
     def send_command(self, command: ServerCommand, allow_auto_start=True) -> str:
         """Send a command to the root helper server."""
         if not self._ensure_server_ready(allow_auto_start):
-            return "[WAITING]"
+            print("[SERVER NOT READY]")
+            return "[SERVER NOT READY]"
 
         print(f"> {command.value}")
         try:
@@ -192,17 +201,16 @@ class RootHelperClient:
                 if not chunk:
                     break
                 response_chunks.append(chunk)
-                print(chunk.decode(), end='')
             return b"".join(response_chunks).decode()
         except FileNotFoundError as e:
             raise ConnectionRefusedError("Socket not available yet") from e
 
-    def send_command_async(self, command: ServerCommand, handler: callable, allow_auto_start=True) -> threading.Thread | str:
+    def send_command_async(self, command: ServerCommand, handler: callable, allow_auto_start=True) -> threading.Thread:
         """Send a command to the root helper server in async mode."""
         if not self._ensure_server_ready(allow_auto_start):
-            return "[WAITING]"
+            print("[SERVER NOT READY]")
+            return "[SERVER NOT READY]" # TODO: Change to excepting and handle in _wait_for_server_ready correctly
 
-        print(f"> {command.value}")
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(self.socket_path)
@@ -234,14 +242,14 @@ class RootHelperClient:
         """Ensure the root helper server is running and the socket is available."""
         if not self.is_server_process_running:
             if allow_auto_start:
-                print("Root helper is not running, attempting to start it.")
+                print("[Root helper is not running, attempting to start it.]")
                 self.start_root_helper()
             else:
                 raise RuntimeError("Root helper is not running.")
         if not self.is_server_process_running:
             raise RuntimeError("Failed to start the root helper server.")
         if not os.path.exists(self.socket_path):
-            print("Waiting for server socket")
+            print("[Waiting for server socket]")
             return False
         return True
 
@@ -274,7 +282,7 @@ class RootHelperClient:
 
         # Add the `if __name__ == "__main__":` block to run the server
         # This needs to be added bellow dynamic functions.
-        full_code += """if __name__ == "__main__":\n    __init_server__()"""
+        full_code += """\n\nif __name__ == "__main__":\n    __init_server__()"""
 
         # Write the full code to the output file
         with open(output_path, "w") as f:
@@ -286,15 +294,40 @@ class RootHelperClient:
         return output_path
 
     def collect_root_function_sources(self) -> str:
-        """Returns all registered root function sources as a single Python string."""
+        """Returns all registered root function sources as a single Python string,
+        with @root_function decorators removed."""
         if not ROOT_FUNCTION_REGISTRY:
             return ""
 
         sources = []
+
         for func in ROOT_FUNCTION_REGISTRY.values():
             try:
-                sources.append(inspect.getsource(func))
+                source = inspect.getsource(func)
+                sources.append(source.strip())
             except OSError:
                 print(f"Warning: could not get source for function {func.__name__}")
         return "\n\n# ---- Injected root functions ----\n\n" + "\n\n".join(sources)
 
+def root_function(func):
+    """Registers a function and replaces it with a proxy that calls the root server."""
+    # Example:
+    #@root_function
+    #def add(a, b):
+    #    return a + b
+    #
+    # Then in client you can call it directly:
+    # add(1, 2) - it will be actually running on root server
+    # or even with async variant and handler:
+    # add._async(handler, 1, 2)
+    # IMPORTANT: Functions decorated with root_function must be defined in global space and can't accept reference types, including self, cls etc.
+    ROOT_FUNCTION_REGISTRY[func.__name__] = func
+    @wraps(func)
+    def proxy_function(*args, **kwargs):
+        return RootHelperClient.shared().call_root_function(func.__name__, *args, **kwargs)
+    # Attach async variant
+    def async_variant(handler, *args, **kwargs):
+        return RootHelperClient.shared().call_root_function_async(func.__name__, handler, *args, **kwargs)
+    # Add .async_ to the proxy
+    proxy_function._async = async_variant
+    return proxy_function

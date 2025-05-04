@@ -5,20 +5,42 @@ from typing import Optional
 from functools import wraps
 from gi.repository import Gio
 from dataclasses import dataclass
+from dataclasses import asdict
 
 class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
     INITIALIZE = "[INITIALIZE]"
 
+class ServerResponseStatusCode(Enum):
+    OK = 0
+    COMMAND_EXECUTION_FAILED = 1
+    COMMAND_DECODE_FAILED = 2
+    COMMAND_UNSUPPORTED_FUNC = 3
+    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 10
+    AUTHORIZATION_WRONG_UID = 11
+    AUTHORIZATION_WRONG_PID = 12
+    AUTHORIZATION_WRONG_TOKEN = 13
+    INITIALIZATION_ALREADY_DONE = 20
+    INITIALIZATION_NOT_DONE = 21
+
+@dataclass
+class ServerResponse:
+    code: ServerResponseStatusCode
+    response: str | None = None
+
 class RootHelperServer:
     _instance = None
+    _is_running = False
+    _server_socket = None
+    _pid_lock = None
 
     def __init__(self):
         self.uid = self._get_caller_uid()
         print("Please provide session token:")
-        self.session_token = sys.stdin.readline().strip()
+        self.session_token = sys.stdin.readline().strip() # TODO: This causes freeze if pkexec took longer than 1m
         print("Please provide runtime dir:")
         os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
+        self._threads = []
         self.runtime_dir = _get_runtime_dir(self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR")
         self.socket_path = _get_socket_path(self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR")
         self.socket_dir = os.path.dirname(self.socket_path)
@@ -53,6 +75,11 @@ class RootHelperServer:
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
 
+        for thread in self._threads:
+            if thread.is_alive():
+                thread.join()
+        self._threads.clear()
+
         print("[root_helper] Server stopped.")
 
     def _prepare_server_socket_directory(self, socket_dir: str, uid: int):
@@ -72,91 +99,106 @@ class RootHelperServer:
         return server
 
     def _listen_socket(self, server: socket.socket, socket_path: str, session_token: str, allowed_uid: int):
-        """Listen for incoming client commands and execute them."""
-        print(f"[root_helper] Listening socket {socket_path}")
-        server.listen(1)
+        """Listen for incoming client connections and spawn threads to handle them."""
+        print(f"[root_helper] Listening on socket {socket_path}")
+        server.listen()
 
         try:
             while self._is_running:
-                conn, _ = server.accept()
-
-                # Get peer credentials
                 try:
-                    ucred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-                    pid, uid, gid = struct.unpack("3i", ucred)
+                    conn, _ = server.accept()
+                    thread = threading.Thread(
+                        target=self._handle_connection,
+                        args=(conn, session_token, allowed_uid)
+                    )
+                    thread.start()
+                    self._threads.append(thread)
                 except Exception as e:
-                    conn.sendall(b"ERROR: Unable to get client credentials\n")
-                    conn.close()
-                    continue
-                if uid != allowed_uid:
-                    conn.sendall(b"ERROR: Unauthorized client UID\n")
-                    conn.close()
-                    continue
-                if self._pid_lock is not None and self._pid_lock != pid:
-                    conn.sendall(b"ERROR: Unauthorized client PID\n")
-                    conn.close()
-                    continue
+                    print(f"[root_helper] Error accepting connection: {e}")
+        finally:
+            self.stop()
 
-                data = conn.recv(4096).decode().strip()
-
-                if not data.startswith(session_token + " "):
-                    conn.sendall(b"ERROR: Invalid token\n")
-                    conn.close()
-                    continue
-
-                command = data[len(session_token) + 1:]
-                try:
-                    cmd_enum = ServerCommand(command)
-                except ValueError:
-                    cmd_enum = None
-                match cmd_enum:
-                    case ServerCommand.EXIT:
-                        conn.sendall(b"Exiting.\n")
-                        conn.close()
-                        break
-                    case ServerCommand.INITIALIZE:
-                        # Used to ping the server to see when it is ready.
-                        # Also locks future calls to this server for pid of this connection.
-                        if self._pid_lock is None:
-                            self._pid_lock = pid
-                            conn.sendall(json.dumps({"status": "ok"}).encode())  # Fixed parentheses and encoding
-                            conn.close()
-                            continue
-                        else:
-                            # Use a server response from the enum for consistency
-                            conn.sendall("[ERROR: Already initialized]\n")  # Standardized response
-                            conn.close()
-                            break
-
-                if self._pid_lock is None:
-                    conn.sendall(b"ERROR: Connection initialization not finished.\n")
-                    conn.close()
-                    continue
-
-                try:
-                    call = json.loads(command)
-                    function_name = call.get("function")
-                    args = call.get("args", [])
-                    kwargs = call.get("kwargs", {})
-                except json.JSONDecodeError:
-                    conn.sendall(b"ERROR: Invalid JSON\n")
-                    conn.close()
-                    continue
-                if function_name not in ROOT_FUNCTION_REGISTRY:
-                    conn.sendall(b"ERROR: Function not allowed\n")
-                    conn.close()
-                    continue
-                try:
-                    result = ROOT_FUNCTION_REGISTRY[function_name](*args, **kwargs)
-                    response = json.dumps({"status": "ok", "result": result})
-                except Exception as e:
-                    response = json.dumps({"status": "error", "message": str(e)})
-                conn.sendall(response.encode())
+    def _handle_connection(self, conn: socket.socket, session_token: str, allowed_uid: int):
+        """Handle a single client connection in a separate thread."""
+        def respond(code: ServerResponseStatusCode, response: str | None = None):
+            payload = {
+                "code": code.value,
+                "response": response
+            }
+            try:
+                conn.sendall(json.dumps(payload).encode())
+            except Exception as e:
+                print(f"[root_helper] Failed to send response: {e}")
+            finally:
                 conn.close()
 
-        finally:
-            # Ensure server is stopped and resources are cleaned up
-            self.stop()  # Gracefully stop the server and remove the socket file
+        try:
+            # Get peer credentials
+            try:
+                ucred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+                pid, uid, gid = struct.unpack("3i", ucred)
+            except Exception:
+                respond(ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
+                return
+
+            if uid != allowed_uid:
+                respond(ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
+                return
+            if self._pid_lock is not None and self._pid_lock != pid:
+                respond(ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
+                return
+
+            data = conn.recv(4096).decode().strip()
+            if not data.startswith(session_token + " "):
+                respond(ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
+                return
+
+            command = data[len(session_token) + 1:]
+            try:
+                cmd_enum = ServerCommand(command)
+            except ValueError:
+                cmd_enum = None
+
+            match cmd_enum:
+                case ServerCommand.EXIT:
+                    respond(ServerResponseStatusCode.OK, "Exiting")
+                    self.stop()
+                    return
+                case ServerCommand.INITIALIZE:
+                    if self._pid_lock is None:
+                        self._pid_lock = pid
+                        respond(ServerResponseStatusCode.OK, "Initialization succeeded")
+                        return
+                    else:
+                        respond(ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
+                        return
+
+            if self._pid_lock is None:
+                respond(ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+                return
+
+            try:
+                call = json.loads(command)
+                function_name = call.get("function")
+                args = call.get("args", [])
+                kwargs = call.get("kwargs", {})
+            except json.JSONDecodeError:
+                respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                return
+
+            if function_name not in ROOT_FUNCTION_REGISTRY:
+                respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
+                return
+
+            try:
+                result = ROOT_FUNCTION_REGISTRY[function_name](*args, **kwargs)
+                respond(ServerResponseStatusCode.OK, response=f"{result}")
+            except Exception as e:
+                respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+
+        except Exception as e:
+            print(f"[root_helper] Unexpected error in connection handler: {e}")
+            conn.close()
 
     def _validate_session_token(self, session_token: str):
         """Validate that the session token is a valid UUIDv4."""
@@ -221,24 +263,5 @@ def __init_server__():
 ROOT_FUNCTION_REGISTRY = {}
 
 def root_function(func):
-    """Registers a function and replaces it with a proxy that calls the root server."""
-    # Example:
-    #@root_function
-    #def add(a, b):
-    #    return a + b
-    #
-    # Then in client you can call it directly:
-    # add(1, 2) - it will be actually running on root server
-    # or even with async variant and handler:
-    # add._async(handler, 1, 2)
-    # IMPORTANT: Functions decorated with root_function must be defined in global space and can't accept reference types, including self, cls etc.
+    """Registers a function to be allowed to call from client."""
     ROOT_FUNCTION_REGISTRY[func.__name__] = func
-    @wraps(func)
-    def proxy_function(*args, **kwargs):
-        return RootHelperClient.shared().call_root_function(func.__name__, *args, **kwargs)
-    # Attach async variant
-    def async_variant(handler, *args, **kwargs):
-        return RootHelperClient.shared().call_root_function_async(func.__name__, handler, *args, **kwargs)
-    # Add .async_ to the proxy
-    proxy_function._async = async_variant
-    return proxy_function

@@ -5,6 +5,7 @@ from .app_section import AppSection
 from .environment import RuntimeEnv
 from .settings import Settings, SettingsEvents
 from .root_helper_client import RootHelperClient
+from .root_helper_client import root_function
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/welcome_section.ui')
 class WelcomeSection(Gtk.Box):
@@ -21,7 +22,8 @@ class WelcomeSection(Gtk.Box):
     def on_environments_row_activated(self, _):
         #app_event_bus.emit(AppEvents.PUSH_VIEW, EnvironmentsSection(), title="Environments")
         #app_event_bus.emit(AppEvents.PUSH_SECTION, AppSection.ENVIRONMENTS)
-        app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
+        #app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
+        test_root._async(lambda x: print(x))
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
@@ -40,3 +42,10 @@ class WelcomeSection(Gtk.Box):
         initial_setup_done = Settings.current.get_toolsets()
         self.setup_environments_section.set_visible(not initial_setup_done)
         self.suggested_actions_section.set_visible(initial_setup_done)
+
+@root_function
+def test_root() -> str:
+    import time
+    time.sleep(5)
+    return "WORKS"
+
