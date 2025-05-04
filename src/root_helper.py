@@ -5,6 +5,10 @@ import sys
 import uuid
 import time
 import pwd
+import tempfile
+import time
+import struct
+from gi.repository import Gio
 from typing import Optional
 
 # ----------------------------------------
@@ -25,7 +29,7 @@ def run_server():
 
     _prepare_server_socket_directory(socket_dir=socket_dir, uid=uid)
     server = _setup_server_socket(socket_path=socket_path, uid=uid)
-    _listen_socket(server=server, socket_path=socket_path, session_token=session_token)
+    _listen_socket(server=server, socket_path=socket_path, session_token=session_token, allowed_uid=uid)
 
 def _prepare_server_socket_directory(socket_dir: str, uid: int):
     """Ensure the socket directory exists and has proper permissions."""
@@ -43,14 +47,28 @@ def _setup_server_socket(socket_path: str, uid: int):
     os.chmod(socket_path, 0o600)
     return server
 
-def _listen_socket(server: socket, socket_path: str, session_token: str):
+def _listen_socket(server: socket.socket, socket_path: str, session_token: str, allowed_uid: int):
     """Listen for incoming client commands and execute them."""
-    print(f"[root_helper] Listening socket {socket_path}")
+    print(f"[root_helper] Listening socket {socket_path}, allowed UID={allowed_uid}")
     server.listen(1)
-
     try:
         while True:
             conn, _ = server.accept()
+
+            # Get peer credentials
+            try:
+                ucred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+                pid, uid, gid = struct.unpack("3i", ucred)
+            except Exception as e:
+                print(f"Failed to get client credentials: {e}")
+                conn.send(b"ERROR: Unable to get client credentials\n")
+                conn.close()
+                continue
+            if uid != allowed_uid:
+                conn.send(b"ERROR: Unauthorized client UID\n")
+                conn.close()
+                continue
+
             data = conn.recv(4096).decode().strip()
 
             if not data.startswith(session_token + " "):
@@ -59,11 +77,15 @@ def _listen_socket(server: socket, socket_path: str, session_token: str):
                 continue
 
             command = data[len(session_token) + 1:]
-            if command == "exit":
-                conn.send(b"Exiting.\n")
-                conn.close()
-                break
-
+            match command:
+                case "[EXIT]":
+                    conn.send(b"Exiting.\n")
+                    conn.close()
+                    break
+                case "[PING]":
+                    conn.send(b"[OK]\n")
+                    conn.close()
+                    continue
             try:
                 output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
                 conn.send(output)
@@ -109,42 +131,87 @@ class RootHelperClient:
             print("Root helper is already running.")
             return
 
-        env = os.environ.copy()
-        env['ROOT_HELPER_TOKEN'] = self.token
-        env['RUNTIME_DIR'] = _get_runtime_dir(os.getuid())
-        helper_host_path = os.path.realpath(__file__)
+        helper_host_path = _extract_root_helper_to_tmp()
+        runtime_dir = _get_runtime_dir(os.getuid())
+        socket_path = _get_socket_path(os.getuid())
 
-        # Start the process to launch the server
+        if os.path.exists(socket_path):
+            os.remove(socket_path)
+
         self._process = subprocess.Popen([
-            "flatpak-spawn", "--host", "pkexec", "python3", helper_host_path
-        ], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = self._process.communicate()
-        if self._process.returncode != 0:
+            "flatpak-spawn", "--host", "pkexec", "env",
+            f"ROOT_HELPER_TOKEN={self.token}",
+            f"RUNTIME_DIR={runtime_dir}",
+            "python3", helper_host_path
+        ])
+
+        # Wait for the server to send the "OK" message
+        if not self._wait_for_server_ready():
+            stderr = self._process.stderr.read() if self._process.stderr else None
             raise RuntimeError(f"Error starting root helper: {stderr.decode() if stderr else 'No error message'}")
-        print("Root helper process started.")
+        print("Root helper process started and is ready.")
+
+    def _wait_for_server_ready(self, timeout: int = 60) -> bool:
+        """Wait for the server to send an 'OK' message indicating it's ready."""
+        import errno
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                response = self.send_command("[PING]", allow_auto_start=False)
+                if response.strip() == "[OK]":
+                    return True
+            except (FileNotFoundError, ConnectionRefusedError, socket.error) as e:
+                # If the socket isn't ready yet, retry after short sleep
+                if isinstance(e, socket.error) and getattr(e, "errno", None) not in (errno.ECONNREFUSED, errno.ENOENT):
+                    raise
+            except Exception as e:
+                print(f"Unexpected error while waiting for server: {e}")
+                break
+            time.sleep(1)  # Retry delay
+
+        print("Server did not respond with '[OK]' in time.")
+        self._process.kill()
+        return False
 
     def stop_root_helper(self):
         """Stop the root helper process."""
+        if not self.is_server_running:
+            print(f"Server is already stopped")
+            return # Already stopped
         try:
-            self.send_command("exit")
+            self.send_command("[EXIT]")
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
         finally:
             self._process = None
             print("Root helper process stopped.")
 
-    def send_command(self, command):
+    def send_command(self, command, allow_auto_start=True) -> str:
         """Send a command to the root helper server."""
         if not self.is_server_running:
-            print("Root helper is not running, attempting to start it.")
-            self.start_root_helper()
+            if allow_auto_start:
+                print("Root helper is not running, attempting to start it.")
+                self.start_root_helper()
+            else:
+                raise RuntimeError("Root helper is not running.")
+
         if not self.is_server_running:
             raise RuntimeError("Failed to start the root helper server.")
-        # Logic for communicating with the root helper process
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-            s.connect(self.socket_path)
-            s.sendall(f"{self.token} {command}".encode())
-            response = s.recv(4096)
+
+        if not os.path.exists(self.socket_path):
+            print("Waiting for server socket")
+            return "[WAITING]"
+
+        print(f"SEND {command} with token: {self.token}")
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.connect(self.socket_path)
+                s.sendall(f"{self.token} {command}".encode())
+                response = s.recv(4096)
+            return response.decode()
+        except FileNotFoundError as e:
+            raise ConnectionRefusedError("Socket not available yet") from e
 
 # ----------------------------------------
 # Shared functions
@@ -169,14 +236,13 @@ def _validate_runtime_dir_and_uid(runtime_dir: str, uid: int):
         raise RuntimeError(f"Runtime directory not specified.")
     if not os.path.isdir(runtime_dir):
         raise RuntimeError(f"Runtime directory does not exist: {runtime_dir}")
-    return uid, runtime_dir
 
 def _validate_started_as_root():
     """Ensure the script is run as root."""
     if os.geteuid() != 0:
         raise RuntimeError("This script must be run as root.")
 
-def _get_caller_uid():
+def _get_caller_uid() -> int:
     """Get the UID of the user calling the script, handling pkexec."""
     pkexec_uid = os.environ.get("PKEXEC_UID")
     if pkexec_uid:
@@ -190,6 +256,18 @@ def _get_socket_path(uid: int) -> str:
     """Get the path to the socket file for communication."""
     runtime_dir = _get_runtime_dir(uid)
     return os.path.join(runtime_dir, "catalystlab-root-helper", "socket")
+
+def _extract_root_helper_to_tmp() -> str:
+    resource_path = "/com/damiandudycz/CatalystLab/root_helper.py"
+    output_path = os.path.join(tempfile.gettempdir(), "catalystlab-root-helper.py")
+    if os.path.exists(output_path):
+        os.remove(output_path)
+    resource = Gio.Resource.load("/app/share/catalystlab/catalystlab.gresource")
+    data = resource.lookup_data(resource_path, Gio.ResourceLookupFlags.NONE)
+    with open(output_path, "wb") as f:
+        f.write(data.get_data())
+    os.chmod(output_path, 0o700)
+    return output_path
 
 # ----------------------------------------
 # Entry point
