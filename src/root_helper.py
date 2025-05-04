@@ -20,13 +20,17 @@ class RootHelperServer:
     _instance = None  # Class-level variable to store the single instance
     _is_running = False  # Flag to indicate whether the server is running
     _server_socket = None  # Save the server socket reference
+    _pid_lock = None # Locks future calls only from initial process id
 
     def __init__(self):
-        uid = self._get_caller_uid()
-        self.session_token = os.environ.get("ROOT_HELPER_TOKEN")
-        self.runtime_dir = _get_runtime_dir(uid)
-        self.socket_path = _get_socket_path(uid)
-        self.socket_dir = os.path.dirname(socket_path)
+        self.uid = self._get_caller_uid()
+        print("Please provide session token:")
+        self.session_token = sys.stdin.readline().strip()
+        print("Please provide runtime dir:")
+        os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
+        self.runtime_dir = _get_runtime_dir(self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR")
+        self.socket_path = _get_socket_path(self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR")
+        self.socket_dir = os.path.dirname(self.socket_path)
         self._validate_started_as_root()
         self._validate_session_token(self.session_token)
         self._validate_runtime_dir_and_uid(self.runtime_dir, self.uid)
@@ -78,7 +82,7 @@ class RootHelperServer:
 
     def _listen_socket(self, server: socket.socket, socket_path: str, session_token: str, allowed_uid: int):
         """Listen for incoming client commands and execute them."""
-        print(f"[root_helper] Listening socket {socket_path}, allowed UID={allowed_uid}")
+        print(f"[root_helper] Listening socket {socket_path}")
         server.listen(1)
 
         try:
@@ -91,36 +95,48 @@ class RootHelperServer:
                     pid, uid, gid = struct.unpack("3i", ucred)
                 except Exception as e:
                     print(f"Failed to get client credentials: {e}")
-                    conn.send(b"ERROR: Unable to get client credentials\n")
+                    conn.sendall(b"ERROR: Unable to get client credentials\n")
                     conn.close()
                     continue
                 if uid != allowed_uid:
-                    conn.send(b"ERROR: Unauthorized client UID\n")
+                    conn.sendall(b"ERROR: Unauthorized client UID\n")
+                    conn.close()
+                    continue
+                if self._pid_lock is not None and self._pid_lock != pid:
+                    conn.sendall(b"ERROR: Unauthorized client PID\n")
                     conn.close()
                     continue
 
                 data = conn.recv(4096).decode().strip()
 
                 if not data.startswith(session_token + " "):
-                    conn.send(b"ERROR: Invalid token\n")
+                    conn.sendall(b"ERROR: Invalid token\n")
                     conn.close()
                     continue
 
                 command = data[len(session_token) + 1:]
                 match command:
                     case "[EXIT]":
-                        conn.send(b"Exiting.\n")
+                        conn.sendall(b"Exiting.\n")
                         conn.close()
                         break
-                    case "[PING]":
-                        conn.send(b"[OK]\n")
+                    case "[INITIALIZE]":
+                        # Used to ping the server to see when it is ready.
+                        # Also locks future calls to this server for pid of this connection.
+                        self._pid_lock = pid
+                        conn.sendall(b"[OK]\n")
                         conn.close()
                         continue
+
+                if self._pid_lock is None:
+                    conn.sendall(b"ERROR: Connection initialization not finished.\n")
+                    conn.close()
+                    continue
                 try:
                     output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT)
-                    conn.send(output)
+                    conn.sendall(output)
                 except subprocess.CalledProcessError as e:
-                    conn.send(e.output)
+                    conn.sendall(e.output)
 
                 conn.close()
         finally:
@@ -170,16 +186,6 @@ class RootHelperClient:
         self.token = str(uuid.uuid4())
         self.socket_path = _get_socket_path(os.getuid())
         self._process = None
-        print(self.get_host_pid())
-
-    def get_host_pid(self):
-        with open("/proc/self/status") as f:
-            for line in f:
-                if line.startswith("NSpid:"):
-                    parts = line.strip().split()
-                    if len(parts) >= 2:
-                        return int(parts[1])  # Host PID
-        return None
 
     @classmethod
     def shared(cls):
@@ -209,12 +215,19 @@ class RootHelperClient:
         if os.path.exists(socket_path):
             os.remove(socket_path)
 
-        self._process = subprocess.Popen([
-            "flatpak-spawn", "--host", "pkexec", "env",
-            f"ROOT_HELPER_TOKEN={self.token}",
-            f"XDG_RUNTIME_DIR={xdg_runtime_dir}",
-            "python3", helper_host_path
-        ])
+        # Start pkexec and pass token via stdin
+        self._process = subprocess.Popen(
+            ["flatpak-spawn", "--host", "pkexec", "python3", helper_host_path],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        # Send the token and XGD_RUNTIME_DIR to server through stdin
+        self._process.stdin.write(self.token.encode() + b'\n')
+        self._process.stdin.flush()
+        self._process.stdin.write(xdg_runtime_dir.encode() + b'\n')
+        self._process.stdin.flush()
 
         # Wait for the server to send the "OK" message
         if not self._wait_for_server_ready():
@@ -229,7 +242,7 @@ class RootHelperClient:
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                response = self.send_command("[PING]", allow_auto_start=False)
+                response = self.send_command("[INITIALIZE]", allow_auto_start=False)
                 if response.strip() == "[OK]":
                     return True
             except (FileNotFoundError, ConnectionRefusedError, socket.error) as e:
@@ -307,13 +320,13 @@ class RootHelperClient:
 # Shared functions
 # ----------------------------------------
 
-def _get_runtime_dir(uid: int) -> str:
-    return os.path.join(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}", "catalystlab-root-helper")
+def _get_runtime_dir(uid: int, runtime_env_name: str = "XDG_RUNTIME_DIR") -> str:
+    return os.path.join(os.environ.get(runtime_env_name) or f"/run/user/{uid}", "catalystlab-root-helper")
 
-def _get_socket_path(uid: int) -> str:
+def _get_socket_path(uid: int, runtime_env_name: str = "XDG_RUNTIME_DIR") -> str:
     """Get the path to the socket file for communication."""
-    runtime_dir = _get_runtime_dir(uid)
-    return os.path.join(runtime_dir, "socket")
+    runtime_dir = _get_runtime_dir(uid, runtime_env_name=runtime_env_name)
+    return os.path.join(runtime_dir, "root-service-socket")
 
 # ----------------------------------------
 # Server runtime

@@ -90,8 +90,8 @@ class EnvironmentsSection(Gtk.Box):
         # Testing only
         run_isolated_system_command(
             runtime_env=RuntimeEnv.current(),
-            toolset_root="/home/damiandudycz/Downloads/gentoo",
-            command_to_run=["/bin/bash"],
+            toolset_root="/",
+            command_to_run=["catalyst -s stable"],
             hot_fixes=HotFix.catalyst_fixes,
             additional_bindings=[
                 BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)

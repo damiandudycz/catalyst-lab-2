@@ -11,6 +11,7 @@ from typing import Optional
 from collections import namedtuple
 from .environment import RuntimeEnv
 from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
+from .root_helper import RootHelperClient
 
 @dataclass
 class BindMount:
@@ -169,10 +170,13 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
         ]
 
         exec_call = cmd_prefix + cmd_authorize + cmd_bwrap + bind_options + command_to_run
+        exec_call = cmd_bwrap + bind_options + command_to_run
+
+        RootHelperClient.shared().send_command(' '.join(str(x) for x in exec_call))
 
         # Run process.
-        print(' '.join(str(x) for x in exec_call))
-        subprocess.run(exec_call)
+#        print(' '.join(str(x) for x in exec_call))
+#        subprocess.run(exec_call)
 
     finally:
         # Clean workdir.

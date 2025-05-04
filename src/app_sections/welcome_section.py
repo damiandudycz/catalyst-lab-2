@@ -26,7 +26,7 @@ class WelcomeSection(Gtk.Box):
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
         print(RootHelperClient.shared().send_command("echo hello back $UID"))
-        #self.content_navigation_view.push_section(AppSection.ENVIRONMENTS)
+        self.content_navigation_view.push_section(AppSection.ENVIRONMENTS)
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
