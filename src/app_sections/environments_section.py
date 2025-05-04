@@ -6,7 +6,8 @@ from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset_env_calls import run_isolated_system_command, BindMount
 from .hotfix_patching import HotFix
-from .root_helper import RootHelperClient
+from .root_helper_client import RootHelperClient
+from .root_helper_server import ServerCommand
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):

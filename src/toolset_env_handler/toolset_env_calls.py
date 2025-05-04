@@ -11,7 +11,8 @@ from typing import Optional
 from collections import namedtuple
 from .environment import RuntimeEnv
 from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
-from .root_helper import RootHelperClient
+from .root_helper_client import RootHelperClient
+from .root_helper_server import ServerCommand
 
 @dataclass
 class BindMount:
@@ -175,7 +176,7 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
         def line_handler(line):
             print(f"LINE: {line}")
 
-        thread = RootHelperClient.shared().send_command_async("ping google.com", handler=line_handler)
+        thread = RootHelperClient.shared().send_command(ServerCommand.INITIALIZE)
         print(thread)
 
         # Run process.
