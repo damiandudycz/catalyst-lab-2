@@ -57,6 +57,13 @@ class ServerResponse:
             "response": self.response
         })
 
+    @classmethod
+    def from_json(cls, json_str: str) -> 'ServerResponse':
+        data = json.loads(json_str)
+        code = ServerResponseStatusCode(data["code"])
+        response = data.get("response", None)
+        return cls(code=code, response=response)
+
 class RootHelperServer:
     _instance = None
     _is_running = False

@@ -23,9 +23,13 @@ class WelcomeSection(Gtk.Box):
         #app_event_bus.emit(AppEvents.PUSH_VIEW, EnvironmentsSection(), title="Environments")
         #app_event_bus.emit(AppEvents.PUSH_SECTION, AppSection.ENVIRONMENTS)
         #app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
+        print(test_root())
+        print(test_root._raw())
         test_root._async(lambda x: print(x))
-        test_root._async(lambda x: print(x))
-        test_root()
+        test_root._async(lambda x: print(x), lambda x: print(f"COMPLETE: {x}"))
+        test_root._async_raw(lambda x: print(x), lambda x: print(f"COMPLETE: {x}"))
+        #test_root._async(lambda x: print(x))
+        #print(test_root())
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
@@ -48,7 +52,6 @@ class WelcomeSection(Gtk.Box):
 @root_function
 def test_root() -> str:
     import time
-    time.sleep(5)
-    sdsadkjlk
+    time.sleep(2)
     return "WORKS"
 
