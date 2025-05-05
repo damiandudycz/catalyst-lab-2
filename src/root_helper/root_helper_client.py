@@ -4,8 +4,8 @@ from enum import Enum
 from typing import Optional
 from functools import wraps
 from gi.repository import Gio
-from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerFunction, ServerResponse, ServerResponseStatusCode, _get_socket_path, _get_runtime_dir
 from .environment import RuntimeEnv
+from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerFunction, ServerResponse, ServerResponseStatusCode, ServerMessageType, _get_socket_path, _get_runtime_dir
 
 class RootHelperClient:
     _instance = None
@@ -44,36 +44,65 @@ class RootHelperClient:
             message, request_type = request.value, "command"
         else:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
-        def handle_chunk(chunk: bytes, buffer: list[bytes]):
-            buffer.append(chunk)
-            if not handler:
-                return
-            try:
-                joined = b"".join(buffer).decode()
-                server_response = ServerResponse.from_json(joined)
-                handler(server_response.response)
-                buffer.clear()
-            except Exception:
-                pass  # Ignore incomplete or invalid chunks
         def worker() -> ServerResponse:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.connect(self.socket_path)
                 s.sendall(f"{self.token} {request_type} {message}".encode())
-                response_chunks, handler_buffer = [], []
+
+                current_message_type: ServerMessageType | None = None
+                current_chars_left: int | None = None
+                current_buffer = ""
+                response_string: str = None
+
+                def handle_message(message_type: ServerMessageType, content: str):
+                    nonlocal response_string
+                    match message_type:
+                        case ServerMessageType.RETURN:
+                            response_string = content
+                        case ServerMessageType.STDOUT:
+                            if handler:
+                                handler(content)
+                        case ServerMessageType.STDERR:
+                            if handler:
+                                handler(content)
+
+                # Processing data returned over socket and combining them into messages.
+                # Format: <ServerMessageType.raw>:<Length>:<Message>. eq: 0:11:Hello World
+                def process_fragment(fragment: str):
+                    nonlocal current_message_type, current_chars_left, current_buffer
+                    if current_message_type is None:
+                        current_message_type, current_chars_left, start_buffer = fragment.split(":", 2)
+                        current_message_type = ServerMessageType(int(current_message_type))
+                        current_chars_left = int(current_chars_left)
+                        process_fragment(start_buffer)
+                    else:
+                        append_fragment = fragment[:current_chars_left]
+                        remaining_fragment = fragment[current_chars_left:]
+                        current_buffer += append_fragment
+                        current_chars_left -= len(append_fragment)
+                        if current_chars_left == 0:
+                            handle_message(current_message_type, current_buffer)
+                            current_buffer = ""
+                            current_message_type = None
+                            if remaining_fragment:
+                                process_fragment(remaining_fragment)
+
                 while (chunk := s.recv(4096)):
-                    response_chunks.append(chunk)
-                    handle_chunk(chunk, handler_buffer)
-                full_response = b"".join(response_chunks).decode()
-                server_response = ServerResponse.from_json(full_response)
+                    fragment = chunk.decode()
+                    process_fragment(fragment)
+
+                server_response = ServerResponse.from_json(response_string)
                 if completion_handler:
                     result = server_response if raw else server_response.response
                     completion_handler(result)
                 return server_response
+
         if asynchronous:
             thread = threading.Thread(target=worker, daemon=True)
             thread.start()
             return thread
-        return worker()
+        else:
+            return worker()
 
     def call_root_function(
         self,
@@ -146,7 +175,6 @@ class RootHelperClient:
         if not self._wait_for_server_ready():
             _, stderr = self._process.communicate(timeout=5) if self.is_server_process_running else (None, None)
             raise RuntimeError(f"Error starting root helper: {stderr.decode() if stderr else 'No error message'}")
-        print("Root helper process started and is ready.")
 
     def _wait_for_server_ready(self, timeout: int = 60) -> bool:
         """Wait for the server to send an 'OK' message indicating it's ready."""

@@ -6,7 +6,7 @@ from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset_env_calls import run_isolated_system_command, BindMount
 from .hotfix_patching import HotFix
-from .root_helper_client import RootHelperClient
+from .root_helper_client import RootHelperClient, root_function
 from .root_helper_server import ServerCommand
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/environments_section.ui')
@@ -83,9 +83,10 @@ class EnvironmentsSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_add_toolset_activated(self, button):
-        toolset_env_builder = ToolsetEnvBuilder()
-        toolset_env_builder.build_toolset()
-        Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
+        #toolset_env_builder = ToolsetEnvBuilder()
+        #toolset_env_builder.build_toolset()
+        #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
+        print(f"Returned: {test()}")
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
@@ -98,3 +99,9 @@ class EnvironmentsSection(Gtk.Box):
             ]
         )
 
+@root_function
+def test() -> str:
+    print("A")
+    print("B")
+    print("C")
+    return "<<DONE>>"

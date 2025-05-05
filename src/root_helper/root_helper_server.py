@@ -4,8 +4,7 @@ from enum import Enum
 from typing import Optional
 from functools import wraps
 from gi.repository import Gio
-from dataclasses import dataclass
-from dataclasses import asdict
+from dataclasses import dataclass, asdict
 
 # Use instead of print to see results in client.
 def log(string: str):
@@ -41,6 +40,11 @@ class ServerFunction:
             return cls(data["function"], *data.get("args", []), **data.get("kwargs", {}))
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise ValueError(f"Invalid ServerFunction JSON: {e}")
+
+class ServerMessageType(Enum):
+    RETURN = 0
+    STDOUT = 1
+    STDERR = 2
 
 class ServerResponseStatusCode(Enum):
     OK = 0
@@ -110,12 +114,12 @@ class RootHelperServer:
     def stop(self):
         """Stop the server, closing the socket and removing any resources."""
         log("Stopping server...")
-        self._is_running = False  # Set the flag to indicate the server should stop
+        self._is_running = False
 
         if self._server_socket:
             log("Closing socket...")
-            self._server_socket.close()  # Close the server socket
-            self._server_socket = None  # Clear the reference to the socket
+            self._server_socket.close()
+            self._server_socket = None
 
         # Clean up the socket file
         if os.path.exists(self.socket_path):
@@ -177,8 +181,17 @@ class RootHelperServer:
             # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value is any.
             log(f"Responding with code: {code}, response: {response}")
             server_response = ServerResponse(code=code, response=response)
-            conn.sendall(server_response.to_json().encode())
+            server_response_json = server_response.to_json()
+            conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
             conn.close()
+        def stdout(message: str):
+            # Send part of stdout to receive by handler
+            log(f"Sending stdout: {message}")
+            conn.sendall(f"{ServerMessageType.STDOUT.value}:{len(message)}:".encode() + message.encode())
+        def stderr(message: str):
+            # Send part of stderr to receive by handler
+            log(f"Sending stderr: {message}")
+            conn.sendall(f"{ServerMessageType.STDERR.value}:{len(message)}:".encode() + message.encode())
 
         try:
             # Get peer credentials
@@ -232,11 +245,13 @@ class RootHelperServer:
                             log(f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
                             if func_struct.function_name not in ROOT_FUNCTION_REGISTRY:
                                 respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
-                            try:
-                                result = ROOT_FUNCTION_REGISTRY[func_struct.function_name](*func_struct.args, **func_struct.kwargs)
-                                respond(ServerResponseStatusCode.OK, response=f"{result}")
-                            except Exception as e:
-                                respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                            else:
+                                try:
+                                    # TODO: Get live stdout, stderr from this call, and pass it through stdout(message: str):, stderr(message: str):
+                                    result = ROOT_FUNCTION_REGISTRY[func_struct.function_name](*func_struct.args, **func_struct.kwargs)
+                                    respond(ServerResponseStatusCode.OK, response=f"{result}")
+                                except Exception as e:
+                                    respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
                         except ValueError:
                             respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                 case _:

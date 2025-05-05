@@ -155,8 +155,8 @@ def run_isolated_system_command(toolset_root: str, command_to_run: List[str], ho
                     ])
                 continue
 
-        result = start_toolset_command._async(handler=lambda x: print(x), fake_root=fake_root, bind_options=bind_options, command_to_run=command_to_run)
-        print(result)
+        result = start_toolset_command(fake_root=fake_root, bind_options=bind_options, command_to_run=command_to_run)
+        print(f":: {result}")
 
     finally:
         # Clean workdir.
