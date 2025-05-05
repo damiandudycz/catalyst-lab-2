@@ -7,7 +7,7 @@ from gi.repository import Gio
 from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerResponse, ServerResponseStatusCode, _get_socket_path, _get_runtime_dir
 
 class RootHelperClient:
-    _instance = None  # Class-level variable to store the single instance
+    _instance = None
 
     def __init__(self):
         self.token = str(uuid.uuid4())
@@ -16,20 +16,64 @@ class RootHelperClient:
 
     @classmethod
     def shared(cls):
-        """Return the shared instance of the RootHelperClient (singleton pattern)."""
         if cls._instance is None:
-            cls._instance = cls()  # Create a new instance if one doesn't exist
+            cls._instance = cls()
         return cls._instance
 
     @property
     def is_server_process_running(self):
-        """Check if the server process is running."""
-        # Check if the process is running
-        if self._process is None:
-            return False
-        return self._process.poll() is None
+        return False if self._process is None else self._process.poll() is None
+
+    def send_command(self, command: ServerCommand, allow_auto_start=True) -> str:
+        """Send a command to the root helper server."""
+        if not self._ensure_server_ready(allow_auto_start):
+            return "[SERVER NOT READY]"
+
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(self.socket_path)
+        s.sendall(f"{self.token} {command.value}".encode())
+
+        response_chunks = []
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            response_chunks.append(chunk)
+        return b"".join(response_chunks).decode()
+
+    def send_command_async(self, command: ServerCommand, handler: callable, allow_auto_start=True) -> threading.Thread:
+        """Send a command to the root helper server in async mode."""
+        if not self._ensure_server_ready(allow_auto_start):
+            return "[SERVER NOT READY]" # TODO: Change to excepting and handle in _wait_for_server_ready correctly
+
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(self.socket_path)
+        s.sendall(f"{self.token} {command.value}".encode())
+
+        def reader_thread(sock, callback):
+            try:
+                buffer = b""
+                while True:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        if buffer:
+                            callback(buffer.decode())
+                        break
+                    buffer += chunk
+                    while b'\n' in buffer:
+                        line, buffer = buffer.split(b'\n', 1)
+                        callback(line.decode())
+            finally:
+                sock.close()
+
+        thread = threading.Thread(target=reader_thread, args=(s, handler), daemon=True)
+        thread.start()
+        return thread
 
     def call_root_function(self, func_name: str, *args, **kwargs) -> str:
+        """ Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server. """
+        """ This is just a helper function, decorator @root_function handles this communication and you can just """
+        """ call these functions directly on client side - they will be passed to server using this function. """
         if not self._ensure_server_ready():
             raise RuntimeError("[SERVER NOT READY]")
 
@@ -39,26 +83,23 @@ class RootHelperClient:
             "kwargs": kwargs,
         }
 
-        try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.connect(self.socket_path)
-            s.sendall(f"{self.token} {json.dumps(payload)}".encode())
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(self.socket_path)
+        s.sendall(f"{self.token} {json.dumps(payload)}".encode())
 
-            response_chunks = []
-            while True:
-                chunk = s.recv(4096)
-                if not chunk:
-                    break
-                response_chunks.append(chunk)
+        response_chunks = []
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            response_chunks.append(chunk)
 
-            result = json.loads(b"".join(response_chunks).decode())
-            if result.get("code") == ServerResponseStatusCode.OK.value:
-                return result.get("response")
-            else:
-                message = result.get("response")
-                raise RuntimeError(f"Root function error: {message}")
-        except FileNotFoundError as e:
-            raise ConnectionRefusedError("Socket not available yet") from e
+        result = json.loads(b"".join(response_chunks).decode())
+        if result.get("code") == ServerResponseStatusCode.OK.value:
+            return result.get("response")
+        else:
+            message = result.get("response")
+            raise RuntimeError(f"Root function error: {message}")
 
     def call_root_function_async(self, func_name: str, handler: callable, *args, **kwargs) -> threading.Thread:
         """
@@ -73,12 +114,9 @@ class RootHelperClient:
             "kwargs": kwargs,
         }
 
-        try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.connect(self.socket_path)
-            s.sendall(f"{self.token} {json.dumps(payload)}".encode())
-        except FileNotFoundError as e:
-            raise ConnectionRefusedError("Socket not available yet") from e
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(self.socket_path)
+        s.sendall(f"{self.token} {json.dumps(payload)}".encode())
 
         def reader_thread(sock, callback):
             try:
@@ -135,23 +173,23 @@ class RootHelperClient:
 
         # Wait for the server to send the "OK" message
         if not self._wait_for_server_ready():
-            stderr = self._process.stderr.read() if self._process.stderr else None
+            _, stderr = self._process.communicate(timeout=5) if self.is_server_process_running else (None, None)
             raise RuntimeError(f"Error starting root helper: {stderr.decode() if stderr else 'No error message'}")
         print("Root helper process started and is ready.")
 
     def _wait_for_server_ready(self, timeout: int = 60) -> bool:
         """Wait for the server to send an 'OK' message indicating it's ready."""
         import errno
-
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
                 response = self.send_command(ServerCommand.INITIALIZE, allow_auto_start=False)
+                print(f">>> {response}")
                 try:
                     data = json.loads(response)
-                    return data.get("code") == 0
+                    return data.get("code") == ServerResponseStatusCode.OK.value
                 except json.JSONDecodeError:
-                    time.sleep(1)  # Retry delay
+                    time.sleep(1)
                     continue
             except (FileNotFoundError, ConnectionRefusedError, socket.error) as e:
                 # If the socket isn't ready yet, retry after short sleep
@@ -160,7 +198,7 @@ class RootHelperClient:
             except Exception as e:
                 print(f"Unexpected error while waiting for server: {e}")
                 break
-            time.sleep(1)  # Retry delay
+            time.sleep(1)
 
         print(f"Server did not respond to {ServerCommand.INITIALIZE.value} in time.")
         self._process.terminate()
@@ -169,13 +207,14 @@ class RootHelperClient:
         except subprocess.TimeoutExpired:
             self._process.kill()
             self._process.wait()
+        self._process = None
         return False
 
     def stop_root_helper(self):
         """Stop the root helper process."""
         if not self.is_server_process_running:
             print(f"Server is already stopped")
-            return # Already stopped
+            return
         try:
             self.send_command(ServerCommand.EXIT)
         except Exception as e:
@@ -183,60 +222,6 @@ class RootHelperClient:
         finally:
             self._process = None
             print("Root helper process stopped.")
-
-    def send_command(self, command: ServerCommand, allow_auto_start=True) -> str:
-        """Send a command to the root helper server."""
-        if not self._ensure_server_ready(allow_auto_start):
-            print("[SERVER NOT READY]")
-            return "[SERVER NOT READY]"
-
-        print(f"> {command.value}")
-        try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.connect(self.socket_path)
-            s.sendall(f"{self.token} {command.value}".encode())
-            response_chunks = []
-            while True:
-                chunk = s.recv(4096)
-                if not chunk:
-                    break
-                response_chunks.append(chunk)
-            return b"".join(response_chunks).decode()
-        except FileNotFoundError as e:
-            raise ConnectionRefusedError("Socket not available yet") from e
-
-    def send_command_async(self, command: ServerCommand, handler: callable, allow_auto_start=True) -> threading.Thread:
-        """Send a command to the root helper server in async mode."""
-        if not self._ensure_server_ready(allow_auto_start):
-            print("[SERVER NOT READY]")
-            return "[SERVER NOT READY]" # TODO: Change to excepting and handle in _wait_for_server_ready correctly
-
-        try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.connect(self.socket_path)
-            s.sendall(f"{self.token} {command.value}".encode())
-        except FileNotFoundError as e:
-            raise ConnectionRefusedError("Socket not available yet") from e
-
-        def reader_thread(sock, callback):
-            try:
-                buffer = b""
-                while True:
-                    chunk = sock.recv(4096)
-                    if not chunk:
-                        if buffer:
-                            callback(buffer.decode())
-                        break
-                    buffer += chunk
-                    while b'\n' in buffer:
-                        line, buffer = buffer.split(b'\n', 1)
-                        callback(line.decode())
-            finally:
-                sock.close()
-
-        thread = threading.Thread(target=reader_thread, args=(s, handler), daemon=True)
-        thread.start()
-        return thread
 
     def _ensure_server_ready(self, allow_auto_start=True):
         """Ensure the root helper server is running and the socket is available."""

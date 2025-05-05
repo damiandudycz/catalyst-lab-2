@@ -13,9 +13,10 @@ class ServerCommand(str, Enum):
 
 class ServerResponseStatusCode(Enum):
     OK = 0
-    COMMAND_EXECUTION_FAILED = 1
-    COMMAND_DECODE_FAILED = 2
-    COMMAND_UNSUPPORTED_FUNC = 3
+    SERVER_NOT_READY = 1 # Server process not ready yet
+    COMMAND_EXECUTION_FAILED = 2
+    COMMAND_DECODE_FAILED = 3
+    COMMAND_UNSUPPORTED_FUNC = 4
     AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 10
     AUTHORIZATION_WRONG_UID = 11
     AUTHORIZATION_WRONG_PID = 12
@@ -28,6 +29,12 @@ class ServerResponse:
     code: ServerResponseStatusCode
     response: str | None = None
 
+    def to_json(self) -> str:
+        return json.dumps({
+            "code": self.code.value,
+            "response": self.response
+        })
+
 class RootHelperServer:
     _instance = None
     _is_running = False
@@ -37,7 +44,7 @@ class RootHelperServer:
     def __init__(self):
         self.uid = self._get_caller_uid()
         print("Please provide session token:")
-        self.session_token = sys.stdin.readline().strip() # TODO: This causes freeze if pkexec took longer than 1m
+        self.session_token = sys.stdin.readline().strip()
         print("Please provide runtime dir:")
         os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
         self._threads = []
@@ -50,7 +57,6 @@ class RootHelperServer:
 
     @classmethod
     def shared(cls):
-        """Return the shared instance of the RootHelperServer (singleton pattern)."""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -120,17 +126,11 @@ class RootHelperServer:
 
     def _handle_connection(self, conn: socket.socket, session_token: str, allowed_uid: int):
         """Handle a single client connection in a separate thread."""
+
         def respond(code: ServerResponseStatusCode, response: str | None = None):
-            payload = {
-                "code": code.value,
-                "response": response
-            }
-            try:
-                conn.sendall(json.dumps(payload).encode())
-            except Exception as e:
-                print(f"[root_helper] Failed to send response: {e}")
-            finally:
-                conn.close()
+            server_response = ServerResponse(code=code, response=response)
+            conn.sendall(server_response.to_json().encode())
+            conn.close()
 
         try:
             # Get peer credentials
