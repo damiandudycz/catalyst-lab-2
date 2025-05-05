@@ -91,10 +91,8 @@ class EnvironmentsSection(Gtk.Box):
     def on_validate_system_toolset_pressed(self, button):
         # Testing only
         run_isolated_system_command(
-            runtime_env=RuntimeEnv.current(),
             toolset_root="/",
-            command_to_run=["catalyst -s stable"],
-            hot_fixes=HotFix.catalyst_fixes,
+            command_to_run=["emerge", "--sync"],
             additional_bindings=[
                 BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
             ]

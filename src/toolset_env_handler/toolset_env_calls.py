@@ -11,8 +11,7 @@ from typing import Optional
 from collections import namedtuple
 from .environment import RuntimeEnv
 from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
-from .root_helper_client import RootHelperClient
-from .root_helper_server import ServerCommand
+from .root_helper_client import root_function
 
 @dataclass
 class BindMount:
@@ -22,8 +21,10 @@ class BindMount:
     store_changes: bool = False     # True if changes should be stored outside isolated env
     resolve_host_path: bool = True  # Whether to resolve path through runtime_env
 
-def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, command_to_run: List[str], hot_fixes: Optional[List[HotFix]] = None, additional_bindings: Optional[List[BindMount]] = None):
+def run_isolated_system_command(toolset_root: str, command_to_run: List[str], hot_fixes: Optional[List[HotFix]] = None, additional_bindings: Optional[List[BindMount]] = None):
     """Runs the given command in an isolated Linux environment with host tools mounted as read-only."""
+
+    runtime_env = RuntimeEnv.current()
 
     _system_bindings = [ # System.
         BindMount(mount_path="/usr",   toolset_path="/usr"),
@@ -154,38 +155,54 @@ def run_isolated_system_command(runtime_env: RuntimeEnv, toolset_root: str, comm
                     ])
                 continue
 
-        # Add special prefix when running from flatpak.
-        cmd_prefix = ["flatpak-spawn", "--host"] if runtime_env == RuntimeEnv.FLATPAK else []
-        cmd_authorize = ["pkexec"]
-        cmd_bwrap = [
-            "bwrap",
-            "--die-with-parent",
-            "--cap-add", "CAP_DAC_OVERRIDE", "--cap-add", "CAP_SYS_ADMIN", "--cap-add", "CAP_FOWNER", "--cap-add", "CAP_SETGID",
-            "--unshare-uts", "--unshare-ipc", "--unshare-pid", "--unshare-cgroup",
-            #"--unshare-user", "--uid", "0", "--gid", "0", # Only add when running as user, not root (pkexec)
-            "--hostname", "catalyst-lab",
-            "--bind", fake_root, "/",
-            "--dev", "/dev",
-            "--proc", "/proc",
-            "--setenv", "HOME", "/"
-        ]
-
-        exec_call = cmd_prefix + cmd_authorize + cmd_bwrap + bind_options + command_to_run
-        exec_call = cmd_bwrap + bind_options + command_to_run
-
-        def line_handler(line):
-            print(f"LINE: {line}")
-
-        thread = RootHelperClient.shared().send_command(ServerCommand.INITIALIZE)
-        print(thread)
-
-        # Run process.
-#        print(' '.join(str(x) for x in exec_call))
-#        subprocess.run(exec_call)
+        result = start_toolset_command._async(handler=lambda x: print(x), fake_root=fake_root, bind_options=bind_options, command_to_run=command_to_run)
+        print(result)
 
     finally:
         # Clean workdir.
-        shutil.rmtree(work_dir, ignore_errors=True)
+        #shutil.rmtree(work_dir, ignore_errors=True)
+        pass
+
+@root_function
+def start_toolset_command(fake_root: str, bind_options, command_to_run):
+    cmd_bwrap = [
+        "bwrap",
+        "--die-with-parent",
+        "--cap-add", "CAP_DAC_OVERRIDE", "--cap-add", "CAP_SYS_ADMIN", "--cap-add", "CAP_FOWNER", "--cap-add", "CAP_SETGID",
+        "--unshare-uts", "--unshare-ipc", "--unshare-pid", "--unshare-cgroup",
+        #"--unshare-user", "--uid", "0", "--gid", "0", # Only add when running as user, not root (pkexec)
+        "--hostname", "catalyst-lab",
+        "--bind", fake_root, "/",
+        "--dev", "/dev",
+        "--proc", "/proc",
+        "--setenv", "HOME", "/"
+    ]
+    exec_call = cmd_bwrap + bind_options + command_to_run
+
+    sys.stdout.write("Hello, terminal!\n")
+    sys.stdout.flush()  # Ensure it's written immediately
+
+    try:
+        # Capture the stdout and stderr
+        result = subprocess.run(
+            exec_call,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True
+        )
+
+        # Return both stdout and stderr as strings
+        output = result.stdout.decode()  # stdout captured
+        error = result.stderr.decode()   # stderr captured
+
+        # You can return either or both, for example:
+        if result.returncode == 0:
+            return output  # Return standard output
+        else:
+            return error   # Return error output if there was a failure
+
+    except subprocess.CalledProcessError as e:
+        return f"Error occurred: {e.stderr.decode()}"  # In case of a subprocess error
 
 #run_isolated_system_command(
 #    runtime_env=RuntimeEnv.current(),

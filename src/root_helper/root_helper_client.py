@@ -175,7 +175,7 @@ class RootHelperClient:
             self._process = None
             print("Root helper process stopped.")
 
-    def _ensure_server_ready(self, allow_auto_start=True):
+    def _ensure_server_ready(self, allow_auto_start=True) -> bool:
         """Ensure the root helper server is running and the socket is available."""
         if not self.is_server_process_running:
             if allow_auto_start:
