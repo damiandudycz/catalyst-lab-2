@@ -173,6 +173,8 @@ class RootHelperServer:
         """Handle a single client connection in a separate thread."""
 
         def respond(code: ServerResponseStatusCode, response: str | None = None):
+            # Final response, returning the result of function called.
+            # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value is any.
             log(f"Responding with code: {code}, response: {response}")
             server_response = ServerResponse(code=code, response=response)
             conn.sendall(server_response.to_json().encode())
@@ -208,46 +210,37 @@ class RootHelperServer:
                     try:
                         cmd_enum = ServerCommand(payload)
                         log(f"Command: {cmd_enum}")
+                        match cmd_enum:
+                            case ServerCommand.EXIT:
+                                respond(ServerResponseStatusCode.OK, "Exiting")
+                                self.stop()
+                            case ServerCommand.INITIALIZE:
+                                if self._pid_lock is None:
+                                    self._pid_lock = pid
+                                    respond(ServerResponseStatusCode.OK, "Initialization succeeded")
+                                else:
+                                    respond(ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
                     except ValueError:
                         respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
-                        return
-                    match cmd_enum:
-                        case ServerCommand.EXIT:
-                            respond(ServerResponseStatusCode.OK, "Exiting")
-                            self.stop()
-                            return
-                        case ServerCommand.INITIALIZE:
-                            if self._pid_lock is None:
-                                self._pid_lock = pid
-                                respond(ServerResponseStatusCode.OK, "Initialization succeeded")
-                                return
-                            else:
-                                respond(ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
-                                return
                 case "function":
                     log("Processing function request")
                     if self._pid_lock is None:
                         respond(ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
-                        return
-                    try:
-                        func_struct = ServerFunction.from_json(payload)
-                        log(f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
-                    except ValueError:
-                        respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
-                        return
-                    if func_struct.function_name not in ROOT_FUNCTION_REGISTRY:
-                        respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
-                        return
-                    try:
-                        result = ROOT_FUNCTION_REGISTRY[func_struct.function_name](*func_struct.args, **func_struct.kwargs)
-                        respond(ServerResponseStatusCode.OK, response=f"{result}")
-                    except Exception as e:
-                        respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
-                    finally:
-                        return
+                    else:
+                        try:
+                            func_struct = ServerFunction.from_json(payload)
+                            log(f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
+                            if func_struct.function_name not in ROOT_FUNCTION_REGISTRY:
+                                respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
+                            try:
+                                result = ROOT_FUNCTION_REGISTRY[func_struct.function_name](*func_struct.args, **func_struct.kwargs)
+                                respond(ServerResponseStatusCode.OK, response=f"{result}")
+                            except Exception as e:
+                                respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                        except ValueError:
+                            respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                 case _:
                     respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
-                    return
 
         except Exception as e:
             log_error(f"Unexpected error in connection handler: {e}")

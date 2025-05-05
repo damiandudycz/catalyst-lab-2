@@ -33,7 +33,7 @@ class RootHelperClient:
         asynchronous: bool = False,
         raw: bool = False,
         completion_handler: callable = None
-    ) -> threading.Thread | ServerResponse:
+    ) -> ServerResponse | threading.Thread:
         """Send a command to the root helper server."""
         if not self._ensure_server_ready(allow_auto_start):
             raise ServerCallError.SERVER_NOT_READY
@@ -84,7 +84,7 @@ class RootHelperClient:
         raw: bool = False,
         completion_handler: callable = None,
         **kwargs
-    ) -> str | threading.Thread | ServerResponse:
+    ) -> str | ServerResponse | threading.Thread:
         """ Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server. """
         function = ServerFunction(func_name, *args, **kwargs)
         server_response = self.send_command(
@@ -132,6 +132,7 @@ class RootHelperClient:
         )
 
         # Start threads to stream stdout and stderr
+        # TODO: Terminate threads when server stops
         threading.Thread(target=stream_output, args=(self._process.stdout, '[SERVER] >> '), daemon=True).start()
         threading.Thread(target=stream_output, args=(self._process.stderr, '[SERVER] !> '), daemon=True).start()
 
