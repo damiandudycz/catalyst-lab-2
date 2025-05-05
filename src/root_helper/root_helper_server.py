@@ -25,6 +25,15 @@ class ServerFunction:
             "kwargs": self.kwargs
         })
 
+    @classmethod
+    def from_json(cls, json_str: str):
+        """Create a ServerFunction instance from a JSON string."""
+        try:
+            data = json.loads(json_str)
+            return cls(data["function"], *data.get("args", []), **data.get("kwargs", {}))
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            raise ValueError(f"Invalid ServerFunction JSON: {e}")
+
 class ServerResponseStatusCode(Enum):
     OK = 0
     COMMAND_EXECUTION_FAILED = 1
@@ -166,48 +175,49 @@ class RootHelperServer:
                 respond(ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
 
-            command = data[len(session_token) + 1:]
-            try:
-                cmd_enum = ServerCommand(command)
-            except ValueError:
-                cmd_enum = None
+            full_payload = data[len(session_token) + 1:]
+            request_type, payload = full_payload.split(" ", 1)
 
-            match cmd_enum:
-                case ServerCommand.EXIT:
-                    respond(ServerResponseStatusCode.OK, "Exiting")
-                    self.stop()
-                    return
-                case ServerCommand.INITIALIZE:
+            match request_type:
+                case "command":
+                    try:
+                        cmd_enum = ServerCommand(payload)
+                    except ValueError:
+                        respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                        return
+                    match cmd_enum:
+                        case ServerCommand.EXIT:
+                            respond(ServerResponseStatusCode.OK, "Exiting")
+                            self.stop()
+                            return
+                        case ServerCommand.INITIALIZE:
+                            if self._pid_lock is None:
+                                self._pid_lock = pid
+                                respond(ServerResponseStatusCode.OK, "Initialization succeeded")
+                                return
+                            else:
+                                respond(ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
+                                return
+                case "function":
                     if self._pid_lock is None:
-                        self._pid_lock = pid
-                        respond(ServerResponseStatusCode.OK, "Initialization succeeded")
+                        respond(ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
                         return
-                    else:
-                        respond(ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
+                    try:
+                        func_struct = ServerFunction.from_json(payload)
+                    except ValueError:
+                        respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                         return
-
-            if self._pid_lock is None:
-                respond(ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
-                return
-
-            try:
-                call = json.loads(command)
-                function_name = call.get("function")
-                args = call.get("args", [])
-                kwargs = call.get("kwargs", {})
-            except json.JSONDecodeError:
-                respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
-                return
-
-            if function_name not in ROOT_FUNCTION_REGISTRY:
-                respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
-                return
-
-            try:
-                result = ROOT_FUNCTION_REGISTRY[function_name](*args, **kwargs)
-                respond(ServerResponseStatusCode.OK, response=f"{result}")
-            except Exception as e:
-                respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                    if func_struct.function_name not in ROOT_FUNCTION_REGISTRY:
+                        respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
+                        return
+                    try:
+                        result = ROOT_FUNCTION_REGISTRY[func_struct.function_name](*func_struct.args, **func_struct.kwargs)
+                        respond(ServerResponseStatusCode.OK, response=f"{result}")
+                    except Exception as e:
+                        respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                case _:
+                    respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                    return
 
         except Exception as e:
             print(f"[root_helper] Unexpected error in connection handler: {e}")

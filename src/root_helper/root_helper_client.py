@@ -25,16 +25,18 @@ class RootHelperClient:
     def is_server_process_running(self) -> bool:
         return False if self._process is None else self._process.poll() is None
 
-    def send_command(self, command: ServerCommand | ServerFunction, allow_auto_start=True, handler: callable = None, asynchronous: bool = False) -> str | threading.Thread:
+    def send_command(self, request: ServerCommand | ServerFunction, allow_auto_start=True, handler: callable = None, asynchronous: bool = False) -> str | threading.Thread:
         """Send a command to the root helper server."""
         if not self._ensure_server_ready(allow_auto_start):
             raise ServerCallError.SERVER_NOT_READY
 
         # Ensure that command is either ServerCommand or ServerFunction
-        if isinstance(command, ServerFunction):
-            message = command.to_json()
-        elif isinstance(command, ServerCommand):
-            message = command.value
+        if isinstance(request, ServerFunction):
+            message = request.to_json()
+            request_type = "function"
+        elif isinstance(request, ServerCommand):
+            message = request.value
+            request_type = "command"
         else:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
         # Function to handle the socket communication
@@ -42,7 +44,7 @@ class RootHelperClient:
             # TODO: Proper cleaning and closing socket if thread was stopped.
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                 s.connect(self.socket_path)
-                s.sendall(f"{self.token} {message}".encode())
+                s.sendall(f"{self.token} {request_type} {message}".encode())
                 response_chunks = []
                 handler_chunks = []
                 while True:
