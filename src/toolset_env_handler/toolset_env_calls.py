@@ -179,8 +179,8 @@ def start_toolset_command(fake_root: str, bind_options, command_to_run):
     ]
     exec_call = cmd_bwrap + bind_options + command_to_run
 
-    sys.stdout.write("Hello, terminal!\n")
-    sys.stdout.flush()  # Ensure it's written immediately
+#    sys.stdout.write("Hello, terminal!\n")
+#    sys.stdout.flush()  # Ensure it's written immediately
 
     try:
         # Capture the stdout and stderr

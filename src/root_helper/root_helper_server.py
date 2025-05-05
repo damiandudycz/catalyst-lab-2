@@ -7,6 +7,14 @@ from gi.repository import Gio
 from dataclasses import dataclass
 from dataclasses import asdict
 
+# Use instead of print to see results in client.
+def log(string: str):
+    sys.stdout.write(f"{string}\n")
+    sys.stdout.flush()  # Ensure it's written immediately
+def log_error(string: str):
+    sys.stderr.write(f"{string}\n")
+    sys.stderr.flush()  # Ensure it's written immediately
+
 class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
     INITIALIZE = "[INITIALIZE]"
@@ -71,10 +79,11 @@ class RootHelperServer:
     _pid_lock = None
 
     def __init__(self):
+        log("Welcome")
         self.uid = self._get_caller_uid()
-        print("Please provide session token:")
+        log("Please provide session token:")
         self.session_token = sys.stdin.readline().strip()
-        print("Please provide runtime dir:")
+        log("Please provide runtime dir:")
         os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
         self._threads = []
         self.runtime_dir = _get_runtime_dir(self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR")
@@ -92,6 +101,7 @@ class RootHelperServer:
 
     def start(self):
         """Run the root helper server."""
+        log("Starting server...")
         self._prepare_server_socket_directory(self.socket_dir, self.uid)
         self._server_socket = self._setup_server_socket(self.socket_path, self.uid)
         self._is_running = True
@@ -99,32 +109,37 @@ class RootHelperServer:
 
     def stop(self):
         """Stop the server, closing the socket and removing any resources."""
+        log("Stopping server...")
         self._is_running = False  # Set the flag to indicate the server should stop
-        print("[root_helper] Stopping server...")
 
         if self._server_socket:
+            log("Closing socket...")
             self._server_socket.close()  # Close the server socket
             self._server_socket = None  # Clear the reference to the socket
 
         # Clean up the socket file
         if os.path.exists(self.socket_path):
+            log("Removing socket file...")
             os.remove(self.socket_path)
 
         for thread in self._threads:
             if thread.is_alive():
+                log("Waiting for function thread to complete...")
                 thread.join()
+        log("Clearing list of function threads...")
         self._threads.clear()
-
-        print("[root_helper] Server stopped.")
+        log("Server stopped.")
 
     def _prepare_server_socket_directory(self, socket_dir: str, uid: int):
         """Ensure the socket directory exists and has proper permissions."""
+        log("Preparing socket directory...")
         os.makedirs(socket_dir, exist_ok=True)
         os.chown(socket_dir, uid, uid)
         os.chmod(socket_dir, 0o700)
 
     def _setup_server_socket(self, socket_path: str, uid: int):
         """Set up the server socket for communication."""
+        log("Setting up socket...")
         if os.path.exists(socket_path):
             os.remove(socket_path)
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -135,21 +150,22 @@ class RootHelperServer:
 
     def _listen_socket(self, server: socket.socket, socket_path: str, session_token: str, allowed_uid: int):
         """Listen for incoming client connections and spawn threads to handle them."""
-        print(f"[root_helper] Listening on socket {socket_path}")
+        log(f"Listening on socket {socket_path}...")
         server.listen()
 
         try:
             while self._is_running:
                 try:
                     conn, _ = server.accept()
+                    log("Accepting connection...")
                     thread = threading.Thread(
                         target=self._handle_connection,
                         args=(conn, session_token, allowed_uid)
                     )
-                    thread.start()
                     self._threads.append(thread)
+                    thread.start()
                 except Exception as e:
-                    print(f"[root_helper] Error accepting connection: {e}")
+                    log_error(f"Error accepting connection: {e}")
         finally:
             self.stop()
 
@@ -157,6 +173,7 @@ class RootHelperServer:
         """Handle a single client connection in a separate thread."""
 
         def respond(code: ServerResponseStatusCode, response: str | None = None):
+            log(f"Responding with code: {code}, response: {response}")
             server_response = ServerResponse(code=code, response=response)
             conn.sendall(server_response.to_json().encode())
             conn.close()
@@ -187,8 +204,10 @@ class RootHelperServer:
 
             match request_type:
                 case "command":
+                    log("Processing command request")
                     try:
                         cmd_enum = ServerCommand(payload)
+                        log(f"Command: {cmd_enum}")
                     except ValueError:
                         respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                         return
@@ -206,11 +225,13 @@ class RootHelperServer:
                                 respond(ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
                                 return
                 case "function":
+                    log("Processing function request")
                     if self._pid_lock is None:
                         respond(ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
                         return
                     try:
                         func_struct = ServerFunction.from_json(payload)
+                        log(f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
                     except ValueError:
                         respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                         return
@@ -222,12 +243,14 @@ class RootHelperServer:
                         respond(ServerResponseStatusCode.OK, response=f"{result}")
                     except Exception as e:
                         respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                    finally:
+                        return
                 case _:
                     respond(ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                     return
 
         except Exception as e:
-            print(f"[root_helper] Unexpected error in connection handler: {e}")
+            log_error(f"Unexpected error in connection handler: {e}")
             conn.close()
 
     def _validate_session_token(self, session_token: str):

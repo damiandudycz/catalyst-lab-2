@@ -118,6 +118,11 @@ class RootHelperClient:
         cmd_authorize = ["pkexec"]
         exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
 
+        def stream_output(pipe, prefix=""):
+            for line in iter(pipe.readline, b''):
+                print(prefix + line.decode(), end='')
+            pipe.close()
+
         # Start pkexec and pass token via stdin
         self._process = subprocess.Popen(
             exec_call,
@@ -126,7 +131,11 @@ class RootHelperClient:
             stderr=subprocess.PIPE
         )
 
-        # Send the token and XGD_RUNTIME_DIR to server through stdin
+        # Start threads to stream stdout and stderr
+        threading.Thread(target=stream_output, args=(self._process.stdout, '[SERVER] >> '), daemon=True).start()
+        threading.Thread(target=stream_output, args=(self._process.stderr, '[SERVER] !> '), daemon=True).start()
+
+        # Send token and runtime dir
         self._process.stdin.write(self.token.encode() + b'\n')
         self._process.stdin.flush()
         self._process.stdin.write(xdg_runtime_dir.encode() + b'\n')
