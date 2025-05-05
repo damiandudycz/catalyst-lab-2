@@ -6,6 +6,46 @@ from functools import wraps
 from gi.repository import Gio
 from dataclasses import dataclass, asdict
 
+import multiprocessing
+from contextlib import redirect_stdout, redirect_stderr
+
+def _run_and_capture_target(func, args, kwargs, write_fd):
+    with os.fdopen(write_fd, 'w', buffering=1) as f, redirect_stdout(f), redirect_stderr(f):
+        try:
+            result = func(*args, **kwargs)
+            if result is not None:
+                print(f"[RETURN_VALUE] {result}")
+        except Exception as e:
+            print(f"[EXCEPTION] {str(e)}", file=sys.stderr)
+
+def run_function_with_streaming_output(func, args, kwargs, stdout_callback, stderr_callback):
+    read_fd, write_fd = os.pipe()
+
+    proc = multiprocessing.Process(
+        target=_run_and_capture_target,
+        args=(func, args, kwargs, write_fd)
+    )
+    proc.start()
+    os.close(write_fd)
+
+    def stream_reader():
+        with os.fdopen(read_fd, 'r') as pipe:
+            for line in pipe:
+                if "[EXCEPTION]" in line:
+                    stderr_callback(line.replace("[EXCEPTION] ", "").strip())
+                elif "[RETURN_VALUE]" in line:
+                    nonlocal result_holder
+                    result_holder = line.replace("[RETURN_VALUE] ", "").strip()
+                else:
+                    stdout_callback(line.strip())
+
+    result_holder = None
+    reader_thread = threading.Thread(target=stream_reader)
+    reader_thread.start()
+    proc.join()
+    reader_thread.join()
+    return result_holder
+
 # Use instead of print to see results in client.
 def log(string: str):
     sys.stdout.write(f"{string}\n")
@@ -64,10 +104,11 @@ class ServerResponse:
     response: str | None = None
 
     def to_json(self) -> str:
-        return json.dumps({
+        dictionary = {
             "code": self.code.value,
             "response": self.response
-        })
+        }
+        return json.dumps(dictionary)
 
     @classmethod
     def from_json(cls, json_str: str) -> 'ServerResponse':
@@ -181,6 +222,7 @@ class RootHelperServer:
             # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value is any.
             log(f"Responding with code: {code}, response: {response}")
             server_response = ServerResponse(code=code, response=response)
+            log(server_response)
             server_response_json = server_response.to_json()
             conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
             conn.close()
@@ -247,9 +289,17 @@ class RootHelperServer:
                                 respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
                             else:
                                 try:
-                                    # TODO: Get live stdout, stderr from this call, and pass it through stdout(message: str):, stderr(message: str):
-                                    result = ROOT_FUNCTION_REGISTRY[func_struct.function_name](*func_struct.args, **func_struct.kwargs)
-                                    respond(ServerResponseStatusCode.OK, response=f"{result}")
+                                    # TODO: Get live stdout, stderr from this call, and pass it through stdout(message: str):, stdZ(message: str):
+
+                                    result = run_function_with_streaming_output(
+                                        ROOT_FUNCTION_REGISTRY[func_struct.function_name],
+                                        func_struct.args,
+                                        func_struct.kwargs,
+                                        stdout,
+                                        stderr
+                                    )
+                                    respond(ServerResponseStatusCode.OK, response=result)
+
                                 except Exception as e:
                                     respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
                         except ValueError:
