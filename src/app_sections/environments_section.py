@@ -89,7 +89,7 @@ class EnvironmentsSection(Gtk.Box):
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
         test._async_raw(
                 lambda x: print(f".. {x}"),
-                lambda x: print(f">> {x.response is None}")
+                lambda x: print(f">> {type(x.response).__name__}")
             )
 
     @Gtk.Template.Callback()
@@ -109,4 +109,3 @@ def test():
     print("B")
     time.sleep(5)
     print("C")
-    return 11

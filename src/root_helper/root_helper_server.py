@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal, threading, json, inspect
 from enum import Enum
-from typing import Optional
 from functools import wraps
 from gi.repository import Gio
 from dataclasses import dataclass, asdict
-
+from typing import Any
 import multiprocessing
 from contextlib import redirect_stdout, redirect_stderr
 
@@ -14,7 +13,8 @@ def _run_and_capture_target(func, args, kwargs, write_fd):
         try:
             result = func(*args, **kwargs)
             if result is not None:
-                print(f"[RETURN_VALUE] {result}")
+                result_type = type(result).__name__
+                print(f"[RETURN_VALUE] {result_type}:{result}")
         except Exception as e:
             print(f"[EXCEPTION] {str(e)}", file=sys.stderr)
 
@@ -35,7 +35,12 @@ def run_function_with_streaming_output(func, args, kwargs, stdout_callback, stde
                     stderr_callback(line.replace("[EXCEPTION] ", "").strip())
                 elif "[RETURN_VALUE]" in line:
                     nonlocal result_holder
-                    result_holder = line.replace("[RETURN_VALUE] ", "").strip()
+                    line = line.replace("[RETURN_VALUE] ", "").strip()
+                    result_type, result_value = line.split(":", 1)
+                    try:
+                        result_holder = eval(f"{result_type}({result_value})")
+                    except Exception as e:
+                        stderr_callback(f"Error converting result: {e}")
                 else:
                     stdout_callback(line.strip())
 
@@ -101,20 +106,35 @@ class ServerResponseStatusCode(Enum):
 @dataclass
 class ServerResponse:
     code: ServerResponseStatusCode
-    response: str | None = None
+    response: Any | None = None
 
     def to_json(self) -> str:
-        dictionary = {
+        """Convert the ServerResponse instance to a JSON string, including dynamic type info."""
+        response_data = {
             "code": self.code.value,
-            "response": self.response
+            "response": None if self.response is None else {
+                "type": type(self.response).__name__,
+                "value": self.response
+            }
         }
-        return json.dumps(dictionary)
+        return json.dumps(response_data)
 
     @classmethod
     def from_json(cls, json_str: str) -> 'ServerResponse':
+        """Create a ServerResponse instance from a JSON string, restoring the type of the response."""
         data = json.loads(json_str)
         code = ServerResponseStatusCode(data["code"])
-        response = data.get("response", None)
+        response_data = data.get("response")
+        response = None
+        if response_data:
+            response_type = response_data["type"]
+            value = response_data["value"]
+            try:
+                # Use eval to dynamically convert the value based on the response_type
+                response = eval(f"{response_type}({value})")
+            except Exception as e:
+                response = value
+                log_error(f"Error converting {value} to {response_type}: {e}")
         return cls(code=code, response=response)
 
 class RootHelperServer:
@@ -222,16 +242,15 @@ class RootHelperServer:
             # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value is any.
             log(f"Responding with code: {code}, response: {response}")
             server_response = ServerResponse(code=code, response=response)
-            log(server_response)
             server_response_json = server_response.to_json()
             conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
             conn.close()
         def stdout(message: str):
-            # Send part of stdout to receive by handler
+            # Send part of stdout to the server.
             log(f"Sending stdout: {message}")
             conn.sendall(f"{ServerMessageType.STDOUT.value}:{len(message)}:".encode() + message.encode())
         def stderr(message: str):
-            # Send part of stderr to receive by handler
+            # Send part of stderr to the server.
             log(f"Sending stderr: {message}")
             conn.sendall(f"{ServerMessageType.STDERR.value}:{len(message)}:".encode() + message.encode())
 
@@ -289,8 +308,6 @@ class RootHelperServer:
                                 respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
                             else:
                                 try:
-                                    # TODO: Get live stdout, stderr from this call, and pass it through stdout(message: str):, stdZ(message: str):
-
                                     result = run_function_with_streaming_output(
                                         ROOT_FUNCTION_REGISTRY[func_struct.function_name],
                                         func_struct.args,
@@ -299,7 +316,6 @@ class RootHelperServer:
                                         stderr
                                     )
                                     respond(ServerResponseStatusCode.OK, response=result)
-
                                 except Exception as e:
                                     respond(ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
                         except ValueError:
