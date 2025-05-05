@@ -4,7 +4,8 @@ from enum import Enum
 from typing import Optional
 from functools import wraps
 from gi.repository import Gio
-from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerResponse, ServerResponseStatusCode, _get_socket_path, _get_runtime_dir
+from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerFunction, ServerResponse, ServerResponseStatusCode, _get_socket_path, _get_runtime_dir
+from .environment import RuntimeEnv
 
 class RootHelperClient:
     _instance = None
@@ -21,123 +22,70 @@ class RootHelperClient:
         return cls._instance
 
     @property
-    def is_server_process_running(self):
+    def is_server_process_running(self) -> bool:
         return False if self._process is None else self._process.poll() is None
 
-    def send_command(self, command: ServerCommand, allow_auto_start=True) -> str:
+    def send_command(self, command: ServerCommand | ServerFunction, allow_auto_start=True, handler: callable = None, asynchronous: bool = False) -> str | threading.Thread:
         """Send a command to the root helper server."""
         if not self._ensure_server_ready(allow_auto_start):
-            return "[SERVER NOT READY]"
+            raise ServerCallError.SERVER_NOT_READY
 
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(self.socket_path)
-        s.sendall(f"{self.token} {command.value}".encode())
-
-        response_chunks = []
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            response_chunks.append(chunk)
-        return b"".join(response_chunks).decode()
-
-    def send_command_async(self, command: ServerCommand, handler: callable, allow_auto_start=True) -> threading.Thread:
-        """Send a command to the root helper server in async mode."""
-        if not self._ensure_server_ready(allow_auto_start):
-            return "[SERVER NOT READY]" # TODO: Change to excepting and handle in _wait_for_server_ready correctly
-
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(self.socket_path)
-        s.sendall(f"{self.token} {command.value}".encode())
-
-        def reader_thread(sock, callback):
-            try:
-                buffer = b""
+        # Ensure that command is either ServerCommand or ServerFunction
+        if isinstance(command, ServerFunction):
+            message = command.to_json()
+        elif isinstance(command, ServerCommand):
+            message = command.value
+        else:
+            raise TypeError("command must be either a ServerCommand or ServerFunction instance")
+        # Function to handle the socket communication
+        def worker():
+            # TODO: Proper cleaning and closing socket if thread was stopped.
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.connect(self.socket_path)
+                s.sendall(f"{self.token} {message}".encode())
+                response_chunks = []
+                handler_chunks = []
                 while True:
-                    chunk = sock.recv(4096)
+                    chunk = s.recv(4096)
                     if not chunk:
-                        if buffer:
-                            callback(buffer.decode())
                         break
-                    buffer += chunk
-                    while b'\n' in buffer:
-                        line, buffer = buffer.split(b'\n', 1)
-                        callback(line.decode())
-            finally:
-                sock.close()
+                    response_chunks.append(chunk)
+                    # If handler is provided, pass each chunk to the handler
+                    if handler:
+                        handler_chunks.append(chunk)
+                        # Try to decode handler_chunks if they already created a full json
+                        handler_line = b"".join(handler_chunks).decode()
+                        try:
+                            json_response = json.loads(handler_line)
+                            handler_chunks = []
+                            handler(json_response.get("response"))
+                            # Ignore error codes in callback handler
+                        except Exception:
+                            pass
+                # Combine chunks and decode
+                return b"".join(response_chunks).decode()
+        if asynchronous:
+            thread = threading.Thread(target=worker, daemon=True)
+            thread.start()
+            return thread
+        else:
+            return worker()
 
-        thread = threading.Thread(target=reader_thread, args=(s, handler), daemon=True)
-        thread.start()
-        return thread
-
-    def call_root_function(self, func_name: str, *args, **kwargs) -> str:
+    def call_root_function(self, func_name: str, *args, handler: callable = None, asynchronous: bool = False, **kwargs) -> str | threading.Thread:
         """ Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server. """
         """ This is just a helper function, decorator @root_function handles this communication and you can just """
         """ call these functions directly on client side - they will be passed to server using this function. """
-        if not self._ensure_server_ready():
-            raise RuntimeError("[SERVER NOT READY]")
-
-        payload = {
-            "function": func_name,
-            "args": args,
-            "kwargs": kwargs,
-        }
-
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(self.socket_path)
-        s.sendall(f"{self.token} {json.dumps(payload)}".encode())
-
-        response_chunks = []
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            response_chunks.append(chunk)
-
-        result = json.loads(b"".join(response_chunks).decode())
-        if result.get("code") == ServerResponseStatusCode.OK.value:
-            return result.get("response")
+        function = ServerFunction(func_name, *args, **kwargs)
+        command_response = self.send_command(function, handler=handler, asynchronous=asynchronous)
+        if asynchronous:
+            return command_response  # Return the thread object for async execution
+        # Process response for sync execution
+        json_response = json.loads(command_response)
+        if json_response.get("code") == ServerResponseStatusCode.OK.value:
+            return json_response.get("response")
         else:
-            message = result.get("response")
+            message = json_response.get("response")
             raise RuntimeError(f"Root function error: {message}")
-
-    def call_root_function_async(self, func_name: str, handler: callable, *args, **kwargs) -> threading.Thread:
-        """
-        Asynchronously call a root function and pass the decoded response (JSON) to the handler.
-        """
-        if not self._ensure_server_ready():
-            raise RuntimeError("[SERVER NOT READY]")
-
-        payload = {
-            "function": func_name,
-            "args": args,
-            "kwargs": kwargs,
-        }
-
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(self.socket_path)
-        s.sendall(f"{self.token} {json.dumps(payload)}".encode())
-
-        def reader_thread(sock, callback):
-            try:
-                buffer = b""
-                while True:
-                    chunk = sock.recv(4096)
-                    if not chunk:
-                        break
-                    buffer += chunk
-                if buffer:
-                    try:
-                        result = json.loads(buffer.decode())
-                    except json.JSONDecodeError:
-                        result = {"status": "error", "message": "Invalid JSON response"}
-                    callback(result)
-            finally:
-                sock.close()
-
-        thread = threading.Thread(target=reader_thread, args=(s, handler), daemon=True)
-        thread.start()
-        return thread
 
     def start_root_helper(self):
         """Start the root helper process."""
@@ -152,7 +100,6 @@ class RootHelperClient:
         if os.path.exists(socket_path):
             os.remove(socket_path)
 
-        from .environment import RuntimeEnv
         cmd_prefix = ["flatpak-spawn", "--host"] if RuntimeEnv.current() == RuntimeEnv.FLATPAK else []
         cmd_authorize = ["pkexec"]
         exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
@@ -179,27 +126,19 @@ class RootHelperClient:
 
     def _wait_for_server_ready(self, timeout: int = 60) -> bool:
         """Wait for the server to send an 'OK' message indicating it's ready."""
-        import errno
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
                 response = self.send_command(ServerCommand.INITIALIZE, allow_auto_start=False)
-                print(f">>> {response}")
-                try:
-                    data = json.loads(response)
-                    return data.get("code") == ServerResponseStatusCode.OK.value
-                except json.JSONDecodeError:
+                data = json.loads(response)
+                return data.get("code") == ServerResponseStatusCode.OK.value
+            except ServerCallError as e:
+                if e == ServerCallError.SERVER_NOT_READY:
                     time.sleep(1)
                     continue
-            except (FileNotFoundError, ConnectionRefusedError, socket.error) as e:
-                # If the socket isn't ready yet, retry after short sleep
-                if isinstance(e, socket.error) and getattr(e, "errno", None) not in (errno.ECONNREFUSED, errno.ENOENT):
-                    raise
             except Exception as e:
                 print(f"Unexpected error while waiting for server: {e}")
                 break
-            time.sleep(1)
-
         print(f"Server did not respond to {ServerCommand.INITIALIZE.value} in time.")
         self._process.terminate()
         try:
@@ -229,10 +168,10 @@ class RootHelperClient:
             if allow_auto_start:
                 print("[Root helper is not running, attempting to start it.]")
                 self.start_root_helper()
+                if not self.is_server_process_running:
+                    raise RuntimeError("Failed to start the root helper server.")
             else:
                 raise RuntimeError("Root helper is not running.")
-        if not self.is_server_process_running:
-            raise RuntimeError("Failed to start the root helper server.")
         if not os.path.exists(self.socket_path):
             print("[Waiting for server socket]")
             return False
@@ -297,9 +236,9 @@ class RootHelperClient:
 def root_function(func):
     """Registers a function and replaces it with a proxy that calls the root server."""
     # Example:
-    #@root_function
-    #def add(a, b):
-    #    return a + b
+    # @root_function
+    # def add(a, b):
+    #     return a + b
     #
     # Then in client you can call it directly:
     # add(1, 2) - it will be actually running on root server
@@ -312,7 +251,55 @@ def root_function(func):
         return RootHelperClient.shared().call_root_function(func.__name__, *args, **kwargs)
     # Attach async variant
     def async_variant(handler, *args, **kwargs):
-        return RootHelperClient.shared().call_root_function_async(func.__name__, handler, *args, **kwargs)
-    # Add .async_ to the proxy
+        # Now calling call_root_function with asynchronous=True
+        return RootHelperClient.shared().call_root_function(func.__name__, *args, handler=handler, asynchronous=True, **kwargs)
+    # Add ._async to the proxy
     proxy_function._async = async_variant
     return proxy_function
+
+class ServerCallError(Exception):
+    """Custom exception with predefined error codes and messages."""
+    def __init__(self, error_code: int, message: str):
+        # You can pass either a predefined error code or a custom message
+        self.error_code = error_code
+        self.message = message
+        super().__init__(f"Error code {error_code}: {message}")
+    def __str__(self):
+        return f"Server error (code={self.error_code}): {self.message}"
+# Define error codes and their corresponding messages as class variables
+ServerCallError.SERVER_NOT_READY = ServerCallError(1, "The server is not ready.")
+
+class ThreadWorker:
+    def __init__(self, target_function):
+        """Initialize the thread worker with the target function to run in a separate thread."""
+        self.target_function = target_function
+        self.stop_thread = False  # Flag to stop the thread
+        self.thread = threading.Thread(target=self._worker, daemon=True)
+
+    def _worker(self):
+        """Worker thread that executes the provided target function."""
+        try:
+            self.result = self.target_function()
+        except Exception as e:
+            self.error = e
+            self.result = None
+
+    def start(self):
+        """Start the thread."""
+        self.thread.start()
+
+    def stop(self):
+        """Set the stop flag to True to signal the thread to stop."""
+        self.stop_thread = True
+
+    def join(self):
+        """Join the thread, blocking until it finishes."""
+        self.thread.join()
+
+    def get_result(self):
+        """Return the result of the worker function if finished."""
+        return getattr(self, 'result', None)
+
+    def get_error(self):
+        """Return any error that occurred in the worker thread."""
+        return getattr(self, 'error', None)

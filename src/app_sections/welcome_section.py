@@ -23,7 +23,9 @@ class WelcomeSection(Gtk.Box):
         #app_event_bus.emit(AppEvents.PUSH_VIEW, EnvironmentsSection(), title="Environments")
         #app_event_bus.emit(AppEvents.PUSH_SECTION, AppSection.ENVIRONMENTS)
         #app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ENVIRONMENTS)
-        test_root._async(lambda x: print(x))
+        print(test_root())
+        print(test_root())
+        print(test_root())
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):

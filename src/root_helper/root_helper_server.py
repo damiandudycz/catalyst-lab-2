@@ -11,12 +11,25 @@ class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
     INITIALIZE = "[INITIALIZE]"
 
+class ServerFunction:
+    def __init__(self, function_name: str, *args, **kwargs):
+        self.function_name = function_name
+        self.args = args
+        self.kwargs = kwargs
+
+    def to_json(self):
+        """Convert the ServerFunction instance to a JSON string."""
+        return json.dumps({
+            "function": self.function_name,
+            "args": self.args,
+            "kwargs": self.kwargs
+        })
+
 class ServerResponseStatusCode(Enum):
     OK = 0
-    SERVER_NOT_READY = 1 # Server process not ready yet
-    COMMAND_EXECUTION_FAILED = 2
-    COMMAND_DECODE_FAILED = 3
-    COMMAND_UNSUPPORTED_FUNC = 4
+    COMMAND_EXECUTION_FAILED = 1
+    COMMAND_DECODE_FAILED = 2
+    COMMAND_UNSUPPORTED_FUNC = 3
     AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 10
     AUTHORIZATION_WRONG_UID = 11
     AUTHORIZATION_WRONG_PID = 12
