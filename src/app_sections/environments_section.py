@@ -87,10 +87,8 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
-        test._async_raw(
-                lambda x: print(f".. {x}"),
-                lambda x: print(f">> {type(x.response).__name__}")
-            )
+        thread = test._async(lambda x: print(f"... {x}"))
+        print(thread)
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
@@ -106,6 +104,9 @@ class EnvironmentsSection(Gtk.Box):
 @root_function
 def test():
     print("A")
+    time.sleep(2)
     print("B")
-    time.sleep(5)
+    time.sleep(2)
     print("C")
+
+    raise RuntimeError("Z")

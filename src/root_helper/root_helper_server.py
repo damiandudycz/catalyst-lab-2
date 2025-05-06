@@ -8,22 +8,21 @@ from typing import Any
 import multiprocessing
 from contextlib import redirect_stdout, redirect_stderr
 
-def _run_and_capture_target(func, args, kwargs, write_fd):
+def _run_and_capture_target(func, args, kwargs, write_fd, result_queue):
     with os.fdopen(write_fd, 'w', buffering=1) as f, redirect_stdout(f), redirect_stderr(f):
         try:
             result = func(*args, **kwargs)
-            if result is not None:
-                result_type = type(result).__name__
-                print(f"[RETURN_VALUE] {result_type}:{result}")
+            result_queue.put(result)
         except Exception as e:
-            print(f"[EXCEPTION] {str(e)}", file=sys.stderr)
+            result_queue.put(e)
 
-def run_function_with_streaming_output(func, args, kwargs, stdout_callback, stderr_callback):
+def run_function_with_streaming_output(func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
     read_fd, write_fd = os.pipe()
+    result_queue = multiprocessing.Queue()
 
     proc = multiprocessing.Process(
         target=_run_and_capture_target,
-        args=(func, args, kwargs, write_fd)
+        args=(func, args, kwargs, write_fd, result_queue)
     )
     proc.start()
     os.close(write_fd)
@@ -31,25 +30,23 @@ def run_function_with_streaming_output(func, args, kwargs, stdout_callback, stde
     def stream_reader():
         with os.fdopen(read_fd, 'r') as pipe:
             for line in pipe:
-                if "[EXCEPTION]" in line:
-                    stderr_callback(line.replace("[EXCEPTION] ", "").strip())
-                elif "[RETURN_VALUE]" in line:
-                    nonlocal result_holder
-                    line = line.replace("[RETURN_VALUE] ", "").strip()
-                    result_type, result_value = line.split(":", 1)
-                    try:
-                        result_holder = eval(f"{result_type}({result_value})")
-                    except Exception as e:
-                        stderr_callback(f"Error converting result: {e}")
-                else:
-                    stdout_callback(line.strip())
+                line = line.strip()
+                if line:
+                    stdout_callback(line)
 
-    result_holder = None
     reader_thread = threading.Thread(target=stream_reader)
     reader_thread.start()
+
     proc.join()
     reader_thread.join()
-    return result_holder
+
+    if not result_queue.empty():
+        result = result_queue.get()
+        if isinstance(result, Exception):
+            raise result
+        return result
+    else:
+        return None
 
 # Use instead of print to see results in client.
 def log(string: str):
@@ -112,10 +109,7 @@ class ServerResponse:
         """Convert the ServerResponse instance to a JSON string, including dynamic type info."""
         response_data = {
             "code": self.code.value,
-            "response": None if self.response is None else {
-                "type": type(self.response).__name__,
-                "value": self.response
-            }
+            "response": self.response
         }
         return json.dumps(response_data)
 
@@ -124,17 +118,7 @@ class ServerResponse:
         """Create a ServerResponse instance from a JSON string, restoring the type of the response."""
         data = json.loads(json_str)
         code = ServerResponseStatusCode(data["code"])
-        response_data = data.get("response")
-        response = None
-        if response_data:
-            response_type = response_data["type"]
-            value = response_data["value"]
-            try:
-                # Use eval to dynamically convert the value based on the response_type
-                response = eval(f"{response_type}({value})")
-            except Exception as e:
-                response = value
-                log_error(f"Error converting {value} to {response_type}: {e}")
+        response = data.get("response")
         return cls(code=code, response=response)
 
 class RootHelperServer:
