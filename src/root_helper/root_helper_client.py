@@ -16,6 +16,7 @@ class RootHelperClient:
         self.socket_path = _get_socket_path(os.getuid())
         self._process = None
         self.running_actions = []
+        self._is_server_process_running = False
 
     def set_request_status(self, request: ServerCommand | ServerFunction, in_progress: bool):
         if in_progress:
@@ -33,7 +34,11 @@ class RootHelperClient:
 
     @property
     def is_server_process_running(self) -> bool:
-        return False if self._process is None else self._process.poll() is None
+        return self._is_server_process_running
+    @is_server_process_running.setter
+    def is_server_process_running(self, value: bool) -> None:
+        self._is_server_process_running = value
+        app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, value)
 
     def send_command(
         self,
@@ -46,6 +51,8 @@ class RootHelperClient:
     ) -> ServerResponse | threading.Thread:
         """Send a command to the root helper server."""
         if not self._ensure_server_ready(allow_auto_start):
+            if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
+                self.stop_root_helper()
             raise ServerCallError.SERVER_NOT_READY
         # Prepare message and type
         if isinstance(request, ServerFunction):
@@ -148,6 +155,7 @@ class RootHelperClient:
         if self.is_server_process_running:
             print("Root helper is already running.")
             return
+        self.is_server_process_running = True
 
         helper_host_path = self._extract_root_helper_to_run_user(os.getuid())
         socket_path = _get_socket_path(os.getuid())
@@ -166,6 +174,7 @@ class RootHelperClient:
             pipe.close()
 
         # Start pkexec and pass token via stdin
+        # Note: This is flatpak-spawn process, not server process itself.
         self._process = subprocess.Popen(
             exec_call,
             stdin=subprocess.PIPE,
@@ -186,16 +195,17 @@ class RootHelperClient:
 
         # Wait for the server to send the "OK" message
         if not self._wait_for_server_ready():
-            _, stderr = self._process.communicate(timeout=5) if self.is_server_process_running else (None, None)
+            process_running = self._process and self._process.poll is None
+            _, stderr = self._process.communicate(timeout=5) if process_running else (None, None)
+            self.is_server_process_running = False
             raise RuntimeError(f"Error starting root helper: {stderr.decode() if stderr else 'No error message'}")
-        app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, True)
 
     def _wait_for_server_ready(self, timeout: int = 60) -> bool:
         """Wait for the server to send an 'OK' message indicating it's ready."""
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                response = self.send_command(ServerCommand.INITIALIZE, allow_auto_start=False)
+                response = self.send_command(ServerCommand.HANDSHAKE, allow_auto_start=False)
                 return response.code == ServerResponseStatusCode.OK
             except ServerCallError as e:
                 if e == ServerCallError.SERVER_NOT_READY:
@@ -205,12 +215,13 @@ class RootHelperClient:
                 print(f"Unexpected error while waiting for server: {e}")
                 break
         print(f"Server initialization failed.")
-        self._process.terminate()
-        try:
-            self._process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self._process.kill()
-            self._process.wait()
+        if self._process and self._process.poll is None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait()
         self._process = None
         return False
 
@@ -224,9 +235,16 @@ class RootHelperClient:
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
         finally:
+            if self._process and self._process.poll is None:
+                self._process.terminate()
+                try:
+                    self._process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._process.kill()
+                    self._process.wait()
             self._process = None
+            self.is_server_process_running = False
             print("Root helper process disconnected.")
-            app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, False)
 
     def _ensure_server_ready(self, allow_auto_start=True) -> bool:
         """Ensure the root helper server is running and the socket is available."""

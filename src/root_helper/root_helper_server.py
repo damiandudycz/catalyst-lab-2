@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import os, socket, subprocess, sys, uuid, pwd, time, struct, signal, threading, json
+import os, socket, subprocess, sys, uuid, pwd, time, struct, signal, threading, json, multiprocessing
 from enum import Enum
 from functools import wraps
 from dataclasses import dataclass, asdict
 from typing import Any
-import multiprocessing
 from contextlib import redirect_stdout, redirect_stderr
 
 class RootHelperServer:
@@ -162,7 +161,9 @@ class RootHelperServer:
                             case ServerCommand.EXIT:
                                 respond(ServerResponseStatusCode.OK, "Exiting")
                                 self.stop()
-                            case ServerCommand.INITIALIZE:
+                            case ServerCommand.PING:
+                                respond(ServerResponseStatusCode.OK)
+                            case ServerCommand.HANDSHAKE:
                                 if self._pid_lock is None:
                                     self._pid_lock = pid
                                     respond(ServerResponseStatusCode.OK, "Initialization succeeded")
@@ -269,7 +270,8 @@ ROOT_FUNCTION_REGISTRY = {}
 
 class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
-    INITIALIZE = "[INITIALIZE]"
+    HANDSHAKE = "[HANDSKAHE]"
+    PING = "[PING]"
 
     @property
     def function_name(self):
@@ -321,15 +323,15 @@ class ServerResponse:
 
 class ServerResponseStatusCode(Enum):
     OK = 0
-    COMMAND_EXECUTION_FAILED = 1
-    COMMAND_DECODE_FAILED = 2
-    COMMAND_UNSUPPORTED_FUNC = 3
-    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 10
-    AUTHORIZATION_WRONG_UID = 11
-    AUTHORIZATION_WRONG_PID = 12
-    AUTHORIZATION_WRONG_TOKEN = 13
-    INITIALIZATION_ALREADY_DONE = 20
-    INITIALIZATION_NOT_DONE = 21
+    COMMAND_EXECUTION_FAILED = 10
+    COMMAND_DECODE_FAILED = 11
+    COMMAND_UNSUPPORTED_FUNC = 12
+    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 20
+    AUTHORIZATION_WRONG_UID = 21
+    AUTHORIZATION_WRONG_PID = 22
+    AUTHORIZATION_WRONG_TOKEN = 23
+    INITIALIZATION_ALREADY_DONE = 30
+    INITIALIZATION_NOT_DONE = 31
 
 class ServerMessageType(Enum):
     RETURN = 0
