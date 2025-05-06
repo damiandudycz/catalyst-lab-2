@@ -58,10 +58,12 @@ class RootHelperServer:
             log("Removing socket file...")
             os.remove(self.socket_path)
 
+        current_thread = threading.current_thread()
         for thread in self._threads:
             if thread.is_alive():
                 log("Waiting for function thread to complete...")
-                thread.join()
+                if thread is not current_thread:
+                    thread.join()
         log("Clearing list of function threads...")
         self._threads.clear()
         log("Server stopped.")
@@ -115,6 +117,7 @@ class RootHelperServer:
             server_response = ServerResponse(code=code, response=response)
             server_response_json = server_response.to_json()
             conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
+            conn.shutdown(socket.SHUT_WR)
             conn.close()
         def stdout(message: str):
             # Send part of stdout to the server.

@@ -175,7 +175,7 @@ class RootHelperClient:
 
         # Start threads to stream stdout and stderr
         # TODO: Terminate threads when server stops
-        #threading.Thread(target=stream_output, args=(self._process.stdout, '[SERVER] >> '), daemon=True).start()
+        threading.Thread(target=stream_output, args=(self._process.stdout, '[SERVER] >> '), daemon=True).start()
         threading.Thread(target=stream_output, args=(self._process.stderr, '[SERVER] !> '), daemon=True).start()
 
         # Send token and runtime dir
