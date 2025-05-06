@@ -7,8 +7,6 @@ from .app_section import AppSection
 from .app_section_details import AppSectionDetails
 from .app_events import AppEvents, app_event_bus
 from .navigation_view_extensions import *
-from .root_helper_client import RootHelperClient, root_function
-from .root_helper_server import ServerCommand, ServerFunction
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window.ui')
 class CatalystlabWindow(Adw.ApplicationWindow):
@@ -34,8 +32,6 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         # Connect sidebar_toggle_breakpoint actions
         self.sidebar_toggle_breakpoint.connect("apply", self._on_sidebar_toggle_breakpoint_apply)
         self.sidebar_toggle_breakpoint.connect("unapply", self._on_sidebar_toggle_breakpoint_unapply)
-
-        app_event_bus.subscribe(AppEvents.ROOT_REQUEST_STATUS, self.root_requests_status_changed)
 
     # Toggle sidebar visibility with button.
     @Gtk.Template.Callback()
@@ -64,6 +60,3 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         self.split_view.set_show_sidebar(self.allow_side_menu)
         self.content_view.sidebar_toggle_button_visible = self.allow_side_menu and CatalystlabWindow.allow_side_menu_toggle
 
-    def root_requests_status_changed(self, client: RootHelperClient, request: ServerCommand | ServerFunction, status: bool):
-        """Handle changes to root access request status."""
-        print(f"[REQUEST STATUS: {request} - {status}")

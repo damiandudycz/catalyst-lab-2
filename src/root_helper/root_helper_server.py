@@ -271,6 +271,10 @@ class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
     INITIALIZE = "[INITIALIZE]"
 
+    @property
+    def function_name(self):
+        return self.value
+
 class ServerFunction:
     def __init__(self, function_name: str, *args, **kwargs):
         self.function_name = function_name
