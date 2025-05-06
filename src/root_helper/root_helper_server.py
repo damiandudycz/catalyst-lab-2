@@ -1,141 +1,12 @@
 #!/usr/bin/env python3
-import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal, threading, json, inspect
+from __future__ import annotations
+import os, socket, subprocess, sys, uuid, pwd, time, struct, signal, threading, json
 from enum import Enum
 from functools import wraps
-from gi.repository import Gio
 from dataclasses import dataclass, asdict
 from typing import Any
 import multiprocessing
 from contextlib import redirect_stdout, redirect_stderr
-
-class StreamWrapper:
-    def __init__(self, stream, prefix):
-        self.stream = stream
-        self.prefix = prefix
-
-    def write(self, message):
-        self.stream.write(f"[{self.prefix}] {message}")
-
-    def flush(self):
-        self.stream.flush()
-
-def _run_and_capture_target(func, args, kwargs, write_fd, result_queue):
-    with os.fdopen(write_fd, 'w', buffering=1) as f:
-        stdout_wrapper = StreamWrapper(f, "STDOUT")
-        stderr_wrapper = StreamWrapper(f, "STDERR")
-        with redirect_stdout(stdout_wrapper), redirect_stderr(stderr_wrapper):
-            try:
-                result = func(*args, **kwargs)
-                result_queue.put(result)
-            except Exception as e:
-                result_queue.put(e)
-
-def run_function_with_streaming_output(func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
-    read_fd, write_fd = os.pipe()
-    result_queue = multiprocessing.Queue()
-
-    proc = multiprocessing.Process(
-        target=_run_and_capture_target,
-        args=(func, args, kwargs, write_fd, result_queue)
-    )
-    proc.start()
-    os.close(write_fd)
-
-    def stream_reader():
-        with os.fdopen(read_fd, 'r') as pipe:
-            for line in pipe:
-                line = line.strip()
-                if line.startswith("[STDOUT] "):
-                    stdout_callback(line[len("[STDOUT] "):])
-                elif line.startswith("[STDERR] "):
-                    stderr_callback(line[len("[STDERR] "):])
-
-    reader_thread = threading.Thread(target=stream_reader)
-    reader_thread.start()
-
-    proc.join()
-    reader_thread.join()
-
-    if not result_queue.empty():
-        result = result_queue.get()
-        if isinstance(result, Exception):
-            raise result
-        return result
-    else:
-        return None
-
-# Use instead of print to see results in client.
-def log(string: str):
-    sys.stdout.write(f"{string}\n")
-    sys.stdout.flush()  # Ensure it's written immediately
-def log_error(string: str):
-    sys.stderr.write(f"{string}\n")
-    sys.stderr.flush()  # Ensure it's written immediately
-
-class ServerCommand(str, Enum):
-    EXIT = "[EXIT]"
-    INITIALIZE = "[INITIALIZE]"
-
-class ServerFunction:
-    def __init__(self, function_name: str, *args, **kwargs):
-        self.function_name = function_name
-        self.args = args
-        self.kwargs = kwargs
-
-    def to_json(self):
-        """Convert the ServerFunction instance to a JSON string."""
-        return json.dumps({
-            "function": self.function_name,
-            "args": self.args,
-            "kwargs": self.kwargs
-        })
-
-    @classmethod
-    def from_json(cls, json_str: str):
-        """Create a ServerFunction instance from a JSON string."""
-        try:
-            data = json.loads(json_str)
-            return cls(data["function"], *data.get("args", []), **data.get("kwargs", {}))
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            raise ValueError(f"Invalid ServerFunction JSON: {e}")
-
-class ServerMessageType(Enum):
-    RETURN = 0
-    STDOUT = 1
-    STDERR = 2
-
-class ServerResponseStatusCode(Enum):
-    OK = 0
-    COMMAND_EXECUTION_FAILED = 1
-    COMMAND_DECODE_FAILED = 2
-    COMMAND_UNSUPPORTED_FUNC = 3
-    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 10
-    AUTHORIZATION_WRONG_UID = 11
-    AUTHORIZATION_WRONG_PID = 12
-    AUTHORIZATION_WRONG_TOKEN = 13
-    INITIALIZATION_ALREADY_DONE = 20
-    INITIALIZATION_NOT_DONE = 21
-
-@dataclass
-class ServerResponse:
-    code: ServerResponseStatusCode
-    response: Any | None = None
-
-    def to_json(self) -> str:
-        """Convert the ServerResponse instance to a JSON string, including dynamic type info."""
-        response_data = {
-            "code": self.code.value,
-            "response": self.response
-        }
-        return json.dumps(response_data)
-
-    @classmethod
-    def from_json(cls, json_str: str) -> 'ServerResponse':
-        """Create a ServerResponse instance from a JSON string, restoring the type of the response."""
-        data = json.loads(json_str)
-        code = ServerResponseStatusCode(data["code"])
-        response = data.get("response")
-        return cls(code=code, response=response)
 
 class RootHelperServer:
     _instance = None
@@ -308,7 +179,7 @@ class RootHelperServer:
                                 respond(ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{ROOT_FUNCTION_REGISTRY}")
                             else:
                                 try:
-                                    result = run_function_with_streaming_output(
+                                    result = _run_function_with_streaming_output(
                                         ROOT_FUNCTION_REGISTRY[func_struct.function_name],
                                         func_struct.args,
                                         func_struct.kwargs,
@@ -386,9 +257,157 @@ def __init_server__():
     signal.signal(signal.SIGQUIT, _signal_handler)  # Quit cleanly
     RootHelperServer.shared().start()
 
+# ----------------------------------------
+# Helpers
+# ----------------------------------------
+
 # Function registry used by injected root functions
 ROOT_FUNCTION_REGISTRY = {}
+
+class ServerCommand(str, Enum):
+    EXIT = "[EXIT]"
+    INITIALIZE = "[INITIALIZE]"
+
+class ServerFunction:
+    def __init__(self, function_name: str, *args, **kwargs):
+        self.function_name = function_name
+        self.args = args
+        self.kwargs = kwargs
+
+    def to_json(self):
+        """Convert the ServerFunction instance to a JSON string."""
+        return json.dumps({
+            "function": self.function_name,
+            "args": self.args,
+            "kwargs": self.kwargs
+        })
+
+    @classmethod
+    def from_json(cls, json_str: str):
+        """Create a ServerFunction instance from a JSON string."""
+        try:
+            data = json.loads(json_str)
+            return cls(data["function"], *data.get("args", []), **data.get("kwargs", {}))
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            raise ValueError(f"Invalid ServerFunction JSON: {e}")
+
+@dataclass
+class ServerResponse:
+    code: ServerResponseStatusCode
+    response: Any | None = None
+
+    def to_json(self) -> str:
+        """Convert the ServerResponse instance to a JSON string, including dynamic type info."""
+        response_data = {
+            "code": self.code.value,
+            "response": self.response
+        }
+        return json.dumps(response_data)
+
+    @classmethod
+    def from_json(cls, json_str: str) -> 'ServerResponse':
+        """Create a ServerResponse instance from a JSON string, restoring the type of the response."""
+        data = json.loads(json_str)
+        code = ServerResponseStatusCode(data["code"])
+        response = data.get("response")
+        return cls(code=code, response=response)
+
+class ServerResponseStatusCode(Enum):
+    OK = 0
+    COMMAND_EXECUTION_FAILED = 1
+    COMMAND_DECODE_FAILED = 2
+    COMMAND_UNSUPPORTED_FUNC = 3
+    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 10
+    AUTHORIZATION_WRONG_UID = 11
+    AUTHORIZATION_WRONG_PID = 12
+    AUTHORIZATION_WRONG_TOKEN = 13
+    INITIALIZATION_ALREADY_DONE = 20
+    INITIALIZATION_NOT_DONE = 21
+
+class ServerMessageType(Enum):
+    RETURN = 0
+    STDOUT = 1
+    STDERR = 2
+
+class StreamType(str, Enum):
+    STDOUT = "stdout"
+    STDERR = "stderr"
+
+class StreamWrapper:
+    def __init__(self, stream, stream_type: StreamType):
+        self.stream = stream
+        self.stream_type = stream_type
+    def write(self, message):
+        if not message.strip():
+            return  # Skip empty messages
+        payload = json.dumps({
+            "stream": self.stream_type.value,
+            "message": message.rstrip("\n")
+        })
+        self.stream.write(payload + "\n")
+        self.stream.flush()
+    def flush(self):
+        self.stream.flush()
+
+# Use instead of print to see results in client.
+def log(string: str):
+    sys.stdout.write(f"{string}\n")
+    sys.stdout.flush()  # Ensure it's written immediately
+def log_error(string: str):
+    sys.stderr.write(f"{string}\n")
+    sys.stderr.flush()  # Ensure it's written immediately
 
 def root_function(func):
     """Registers a function to be allowed to call from client."""
     ROOT_FUNCTION_REGISTRY[func.__name__] = func
+
+def _run_and_capture_target(func, args, kwargs, write_fd, result_queue):
+    with os.fdopen(write_fd, 'w', buffering=1) as f:
+        stdout_wrapper = StreamWrapper(f, StreamType.STDOUT)
+        stderr_wrapper = StreamWrapper(f, StreamType.STDERR)
+        with redirect_stdout(stdout_wrapper), redirect_stderr(stderr_wrapper):
+            try:
+                result = func(*args, **kwargs)
+                result_queue.put(result)
+            except Exception as e:
+                result_queue.put(e)
+
+def _run_function_with_streaming_output(func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
+    read_fd, write_fd = os.pipe()
+    result_queue = multiprocessing.Queue()
+
+    proc = multiprocessing.Process(
+        target=_run_and_capture_target,
+        args=(func, args, kwargs, write_fd, result_queue)
+    )
+    proc.start()
+    os.close(write_fd)
+
+    def stream_reader():
+        with os.fdopen(read_fd, 'r') as pipe:
+            for line in pipe:
+                try:
+                    data = json.loads(line)
+                    stream = data["stream"]
+                    if stream == StreamType.STDOUT.value:
+                        stdout_callback(data["message"])
+                    elif stream == StreamType.STDERR.value:
+                        stderr_callback(data["message"])
+                except json.JSONDecodeError as e:
+                    stderr_callback(f"[parser error] {e}: {line}")
+
+    reader_thread = threading.Thread(target=stream_reader)
+    reader_thread.start()
+
+    proc.join()
+    reader_thread.join()
+
+    # Safe to use .empty() here because proc and reader_thread have been joined,
+    # ensuring no further writes to the result_queue will occur.
+    if not result_queue.empty():
+        result = result_queue.get()
+        if isinstance(result, Exception):
+            raise result
+        return result
+    else:
+        return None

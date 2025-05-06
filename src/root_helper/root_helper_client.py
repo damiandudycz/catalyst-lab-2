@@ -190,7 +190,7 @@ class RootHelperClient:
             except Exception as e:
                 print(f"Unexpected error while waiting for server: {e}")
                 break
-        print(f"Server did not respond to {ServerCommand.INITIALIZE.value} in time.")
+        print(f"Server initialization failed.")
         self._process.terminate()
         try:
             self._process.wait(timeout=5)
@@ -224,7 +224,6 @@ class RootHelperClient:
             else:
                 raise RuntimeError("Root helper is not running.")
         if not os.path.exists(self.socket_path):
-            print("[Waiting for server socket]")
             return False
         return True
 
