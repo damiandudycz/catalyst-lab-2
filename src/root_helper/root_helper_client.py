@@ -59,7 +59,6 @@ class RootHelperClient:
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                     s.connect(self.socket_path)
                     s.sendall(f"{self.token} {request_type} {message}".encode())
-
                     current_message_type: ServerMessageType | None = None
                     current_chars_left: int | None = None
                     current_buffer = ""
@@ -176,7 +175,7 @@ class RootHelperClient:
 
         # Start threads to stream stdout and stderr
         # TODO: Terminate threads when server stops
-        threading.Thread(target=stream_output, args=(self._process.stdout, '[SERVER] >> '), daemon=True).start()
+        #threading.Thread(target=stream_output, args=(self._process.stdout, '[SERVER] >> '), daemon=True).start()
         threading.Thread(target=stream_output, args=(self._process.stderr, '[SERVER] !> '), daemon=True).start()
 
         # Send token and runtime dir
