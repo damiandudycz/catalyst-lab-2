@@ -5,7 +5,6 @@ from .root_helper_client import RootHelperClient, root_function
 from .root_helper_server import ServerCommand, ServerFunction
 
 class RootAccessButton(Gtk.Overlay):
-    """Overlay widget containing a button for toggling root access with a spinner."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -28,7 +27,11 @@ class RootAccessButton(Gtk.Overlay):
         self.set_child(self.root_access_button)
         self.add_overlay(self.root_access_spinner)
 
-        # Event handling
+        # Create popover to display when the button is clicked
+        self.popover = Gtk.Popover.new()
+        self.popover.set_parent(self)
+
+        # Event handling for the button click
         self.root_access_button.connect("clicked", self.toggle_root_access)
 
         # Subscribe to events
@@ -39,9 +42,10 @@ class RootAccessButton(Gtk.Overlay):
         self.root_access_changed(RootHelperClient.shared().is_server_process_running)
 
     def toggle_root_access(self, sender):
-        """Toggle root access state."""
+        """Toggle root access state and show the popover."""
         if RootHelperClient.shared().is_server_process_running:
-            RootHelperClient.shared().stop_root_helper()
+            self.show_root_tasks_popover()
+            #RootHelperClient.shared().stop_root_helper()
         else:
             RootHelperClient.shared().start_root_helper()
 
@@ -59,3 +63,45 @@ class RootAccessButton(Gtk.Overlay):
     def root_requests_status_changed(self, client: RootHelperClient, request: GObject.Object, status: bool):
         """Handle changes to root access request status."""
         self.root_access_spinner.set_visible(client.running_actions)
+
+    def show_root_tasks_popover(self):
+        """Show a popover with a list of root tasks and a 'Disable root access' button."""
+        # Create a vertical list box to display the running actions
+        self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.list_box.set_focusable(False)  # Prevent focus on the ListBox itself
+        self.list_box.set_vexpand(True)
+
+        # Add rows for each running action
+        for action in RootHelperClient.shared().running_actions:
+            action_row = RootActionInfoRow(request=action)
+            action_row.set_title(action.function_name)
+            action_row.set_icon_name("user-desktop-symbolic")
+            action_row.set_focusable(False)  # Prevent focus on individual rows
+            self.list_box.append(action_row)
+
+        # Create the 'Disable root access' ActionRow as a Gtk.Button
+        disable_row = Gtk.Button()
+        disable_row.set_focusable(False)  # Disable focus on the button
+        disable_row.set_label("Disable root access")
+        disable_row.get_style_context().add_class("destructive-action")
+        disable_row.connect("clicked", self.disable_root_access)
+        self.list_box.append(disable_row)
+
+        # Make sure the popover itself doesn't gain focus
+        self.popover.set_focusable(False)
+
+        # Update the popover content
+        self.popover.set_child(self.list_box)
+
+        # Show the popover
+        self.popover.show()
+
+    def disable_root_access(self, sender):
+        """Disable root access when the button is clicked."""
+        RootHelperClient.shared().stop_root_helper()
+        self.popover.hide()
+
+class RootActionInfoRow(Adw.ActionRow):
+    def __init__(self, request: ServerCommand | ServerFunction):
+        super().__init__()
+        self.request = request
