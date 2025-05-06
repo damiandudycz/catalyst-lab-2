@@ -5,6 +5,10 @@ from .app_section_details import AppSectionDetails
 from .main_window_side_menu import CatalystlabWindowSideMenu
 from functools import partial
 from gi.repository import GObject
+from .root_helper_client import RootHelperClient, root_function
+from .root_helper_server import ServerCommand, ServerFunction
+from .app_events import AppEvents, app_event_bus
+from .root_access_button import RootAccessButton
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_content.ui')
 class CatalystlabWindowContent(Gtk.Box):
@@ -20,7 +24,7 @@ class CatalystlabWindowContent(Gtk.Box):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.sidebar_toggle_button = None  # 🔸 Initialize as None
+        self.sidebar_toggle_button = None
         self.sidebar_toggle_button_visible = False
 
     def open_app_section(self, section: AppSection):
@@ -38,6 +42,10 @@ class CatalystlabWindowContent(Gtk.Box):
 
         page = Adw.NavigationPage.new(toolbar_view, section_details.title)
         navigation_view.push(page)
+
+        # Add the root access button to the header
+        root_access_button = RootAccessButton()
+        header.pack_end(root_access_button)
 
         self.sidebar_toggle_button = Gtk.Button.new()
         self.sidebar_toggle_button.set_icon_name("sidebar-show-symbolic")

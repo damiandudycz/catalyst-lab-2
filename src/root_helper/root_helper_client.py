@@ -6,6 +6,7 @@ from functools import wraps
 from gi.repository import Gio
 from .environment import RuntimeEnv
 from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerFunction, ServerResponse, ServerResponseStatusCode, ServerMessageType, _get_socket_path, _get_runtime_dir
+from .app_events import AppEvents, app_event_bus
 
 class RootHelperClient:
     _instance = None
@@ -14,6 +15,15 @@ class RootHelperClient:
         self.token = str(uuid.uuid4())
         self.socket_path = _get_socket_path(os.getuid())
         self._process = None
+        self.running_actions = []
+
+    def set_request_status(self, request: ServerCommand | ServerFunction, in_progress: bool):
+        if in_progress:
+            self.running_actions.append(request)
+            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, True)
+        else:
+            self.running_actions.remove(request)
+            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, False)
 
     @classmethod
     def shared(cls):
@@ -45,58 +55,62 @@ class RootHelperClient:
         else:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
         def worker() -> ServerResponse:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-                s.connect(self.socket_path)
-                s.sendall(f"{self.token} {request_type} {message}".encode())
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                    s.connect(self.socket_path)
+                    s.sendall(f"{self.token} {request_type} {message}".encode())
 
-                current_message_type: ServerMessageType | None = None
-                current_chars_left: int | None = None
-                current_buffer = ""
-                response_string: str = None
+                    current_message_type: ServerMessageType | None = None
+                    current_chars_left: int | None = None
+                    current_buffer = ""
+                    response_string: str = None
 
-                def handle_message(message_type: ServerMessageType, content: str):
-                    nonlocal response_string
-                    match message_type:
-                        case ServerMessageType.RETURN:
-                            response_string = content
-                        case ServerMessageType.STDOUT:
-                            if handler:
-                                handler(content)
-                        case ServerMessageType.STDERR:
-                            if handler:
-                                handler(content)
+                    def handle_message(message_type: ServerMessageType, content: str):
+                        nonlocal response_string
+                        match message_type:
+                            case ServerMessageType.RETURN:
+                                response_string = content
+                            case ServerMessageType.STDOUT:
+                                if handler:
+                                    handler(content)
+                            case ServerMessageType.STDERR:
+                                if handler:
+                                    handler(content)
 
-                # Processing data returned over socket and combining them into messages.
-                # Format: <ServerMessageType.raw>:<Length>:<Message>. eq: 0:11:Hello World
-                def process_fragment(fragment: str):
-                    nonlocal current_message_type, current_chars_left, current_buffer
-                    if current_message_type is None:
-                        current_message_type, current_chars_left, start_buffer = fragment.split(":", 2)
-                        current_message_type = ServerMessageType(int(current_message_type))
-                        current_chars_left = int(current_chars_left)
-                        process_fragment(start_buffer)
-                    else:
-                        append_fragment = fragment[:current_chars_left]
-                        remaining_fragment = fragment[current_chars_left:]
-                        current_buffer += append_fragment
-                        current_chars_left -= len(append_fragment)
-                        if current_chars_left == 0:
-                            handle_message(current_message_type, current_buffer)
-                            current_buffer = ""
-                            current_message_type = None
-                            if remaining_fragment:
-                                process_fragment(remaining_fragment)
+                    # Processing data returned over socket and combining them into messages.
+                    # Format: <ServerMessageType.raw>:<Length>:<Message>. eq: 0:11:Hello World
+                    def process_fragment(fragment: str):
+                        nonlocal current_message_type, current_chars_left, current_buffer
+                        if current_message_type is None:
+                            current_message_type, current_chars_left, start_buffer = fragment.split(":", 2)
+                            current_message_type = ServerMessageType(int(current_message_type))
+                            current_chars_left = int(current_chars_left)
+                            process_fragment(start_buffer)
+                        else:
+                            append_fragment = fragment[:current_chars_left]
+                            remaining_fragment = fragment[current_chars_left:]
+                            current_buffer += append_fragment
+                            current_chars_left -= len(append_fragment)
+                            if current_chars_left == 0:
+                                handle_message(current_message_type, current_buffer)
+                                current_buffer = ""
+                                current_message_type = None
+                                if remaining_fragment:
+                                    process_fragment(remaining_fragment)
 
-                while (chunk := s.recv(4096)):
-                    fragment = chunk.decode()
-                    process_fragment(fragment)
+                    while (chunk := s.recv(4096)):
+                        fragment = chunk.decode()
+                        process_fragment(fragment)
 
-                server_response = ServerResponse.from_json(response_string)
-                if completion_handler:
-                    result = server_response if raw else server_response.response
-                    completion_handler(result)
-                return server_response
+                    server_response = ServerResponse.from_json(response_string)
+                    if completion_handler:
+                        result = server_response if raw else server_response.response
+                        completion_handler(result)
+                    return server_response
+            finally:
+                self.set_request_status(request, False)
 
+        self.set_request_status(request, True)
         if asynchronous:
             thread = threading.Thread(target=worker, daemon=True)
             thread.start()
@@ -175,6 +189,7 @@ class RootHelperClient:
         if not self._wait_for_server_ready():
             _, stderr = self._process.communicate(timeout=5) if self.is_server_process_running else (None, None)
             raise RuntimeError(f"Error starting root helper: {stderr.decode() if stderr else 'No error message'}")
+        app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, True)
 
     def _wait_for_server_ready(self, timeout: int = 60) -> bool:
         """Wait for the server to send an 'OK' message indicating it's ready."""
@@ -211,7 +226,8 @@ class RootHelperClient:
             print(f"Failed to stop root helper: {e}")
         finally:
             self._process = None
-            print("Root helper process stopped.")
+            print("Root helper process disconnected.")
+            app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, False)
 
     def _ensure_server_ready(self, allow_auto_start=True) -> bool:
         """Ensure the root helper server is running and the socket is available."""

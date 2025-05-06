@@ -8,5 +8,7 @@ class AppEvents(Enum):
     OPEN_APP_SECTION = auto() # Args: (section: AppSection)
     PUSH_VIEW = auto() # Push on Main Navigation View (Full window mode). Args: (view: Gtk.Widget), kwargs: (title=<title>).
     PUSH_SECTION = auto() # Like PUSH_VIEW but for pushing by AppSection enum. # Args: (section: AppSection)
+    CHANGE_ROOT_ACCESS = auto() # root_helper_client unlocked / locked root access
+    ROOT_REQUEST_STATUS = auto() # calls when state of root_function is changed (in progress / finished)
 
 app_event_bus: EventBus[AppEvents] = EventBus[AppEvents]()

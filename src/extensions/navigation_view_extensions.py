@@ -2,6 +2,7 @@ from gi.repository import Gtk
 from gi.repository import Adw
 from .app_section import AppSection
 from .app_section_details import AppSectionDetails
+from .root_access_button import RootAccessButton
 
 def _push_section(self, section: AppSection):
     section_details = AppSectionDetails(section)
@@ -16,6 +17,9 @@ def _push_view(self, view: Gtk.Widget, title: str):
     toolbar_view = Adw.ToolbarView()
     toolbar_view.set_content(view)
     toolbar_view.add_top_bar(header)
+    # Add the root access button to the header
+    root_access_button = RootAccessButton()
+    header.pack_end(root_access_button)
     # Create a navigation page with title and child
     page = Adw.NavigationPage.new(toolbar_view, title)
     self.push(page)
