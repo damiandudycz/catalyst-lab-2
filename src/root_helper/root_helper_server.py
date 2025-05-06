@@ -8,13 +8,27 @@ from typing import Any
 import multiprocessing
 from contextlib import redirect_stdout, redirect_stderr
 
+class StreamWrapper:
+    def __init__(self, stream, prefix):
+        self.stream = stream
+        self.prefix = prefix
+
+    def write(self, message):
+        self.stream.write(f"[{self.prefix}] {message}")
+
+    def flush(self):
+        self.stream.flush()
+
 def _run_and_capture_target(func, args, kwargs, write_fd, result_queue):
-    with os.fdopen(write_fd, 'w', buffering=1) as f, redirect_stdout(f), redirect_stderr(f):
-        try:
-            result = func(*args, **kwargs)
-            result_queue.put(result)
-        except Exception as e:
-            result_queue.put(e)
+    with os.fdopen(write_fd, 'w', buffering=1) as f:
+        stdout_wrapper = StreamWrapper(f, "STDOUT")
+        stderr_wrapper = StreamWrapper(f, "STDERR")
+        with redirect_stdout(stdout_wrapper), redirect_stderr(stderr_wrapper):
+            try:
+                result = func(*args, **kwargs)
+                result_queue.put(result)
+            except Exception as e:
+                result_queue.put(e)
 
 def run_function_with_streaming_output(func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
     read_fd, write_fd = os.pipe()
@@ -31,8 +45,10 @@ def run_function_with_streaming_output(func, args, kwargs, stdout_callback, stde
         with os.fdopen(read_fd, 'r') as pipe:
             for line in pipe:
                 line = line.strip()
-                if line:
-                    stdout_callback(line)
+                if line.startswith("[STDOUT] "):
+                    stdout_callback(line[len("[STDOUT] "):])
+                elif line.startswith("[STDERR] "):
+                    stderr_callback(line[len("[STDERR] "):])
 
     reader_thread = threading.Thread(target=stream_reader)
     reader_thread.start()
