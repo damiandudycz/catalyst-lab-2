@@ -62,6 +62,7 @@ class RootAccessButton(Gtk.Overlay):
 
     def root_requests_status_changed(self, client: RootHelperClient, request: GObject.Object, status: bool):
         """Handle changes to root access request status."""
+        print(f">> {request}: {status}")
         self.root_access_spinner.set_visible(client.running_actions)
 
     def show_root_tasks_popover(self):

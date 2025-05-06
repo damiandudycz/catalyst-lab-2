@@ -103,10 +103,5 @@ class EnvironmentsSection(Gtk.Box):
 
 @root_function
 def test():
-    print("A")
-    time.sleep(2)
-    print("B")
-    time.sleep(2)
-    print("C")
-
-    raise RuntimeError("Z")
+    time.sleep(5)
+    return 11.5
