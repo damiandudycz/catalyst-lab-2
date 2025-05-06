@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal, threading, json, inspect, re
 from enum import Enum
-from typing import Optional
+from typing import Optional, Any
 from functools import wraps
 from gi.repository import Gio
 from .environment import RuntimeEnv
-from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerFunction, ServerResponse, ServerResponseStatusCode, ServerMessageType, _get_socket_path, _get_runtime_dir
+from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerFunction
+from .root_helper_server import ServerResponse, ServerResponseStatusCode, ServerMessageType
+from .root_helper_server import _get_socket_path, _get_runtime_dir
 from .app_events import AppEvents, app_event_bus
 
 class RootHelperClient:
@@ -37,6 +39,8 @@ class RootHelperClient:
         return self._is_server_process_running
     @is_server_process_running.setter
     def is_server_process_running(self, value: bool) -> None:
+        if self._is_server_process_running == value:
+            return
         self._is_server_process_running = value
         app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, value)
 
@@ -133,7 +137,7 @@ class RootHelperClient:
         raw: bool = False,
         completion_handler: callable = None,
         **kwargs
-    ) -> str | ServerResponse | threading.Thread:
+    ) -> Any | ServerResponse | threading.Thread:
         """ Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server. """
         function = ServerFunction(func_name, *args, **kwargs)
         server_response = self.send_command(
@@ -211,6 +215,8 @@ class RootHelperClient:
                 if e == ServerCallError.SERVER_NOT_READY:
                     time.sleep(1)
                     continue
+                else:
+                    break
             except Exception as e:
                 print(f"Unexpected error while waiting for server: {e}")
                 break
