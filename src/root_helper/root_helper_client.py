@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal, threading, json, inspect, re
 from enum import Enum
 from typing import Optional, Any
 from functools import wraps
 from gi.repository import Gio
 from .environment import RuntimeEnv
-from .root_helper_server import ROOT_FUNCTION_REGISTRY, ServerCommand, ServerFunction
+from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode, ServerMessageType
-from .root_helper_server import _get_socket_path, _get_runtime_dir
+from .root_helper_server import RootHelperServer
 from .app_events import AppEvents, app_event_bus
 
 class RootHelperClient:
-    _instance = None
+
+    ROOT_FUNCTION_REGISTRY = {}               # Registry used to collect registered root functions.
+    _instance: RootHelperClient | None = None # Singleton shared instance.
 
     def __init__(self):
         self.token = str(uuid.uuid4())
-        self.socket_path = _get_socket_path(os.getuid())
+        self.socket_path = RootHelperServer.get_socket_path(os.getuid())
         self._process = None
         self.running_actions = []
         self._is_server_process_running = False
@@ -39,8 +42,6 @@ class RootHelperClient:
         return self._is_server_process_running
     @is_server_process_running.setter
     def is_server_process_running(self, value: bool) -> None:
-        if self._is_server_process_running == value:
-            return
         self._is_server_process_running = value
         app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, value)
 
@@ -162,7 +163,7 @@ class RootHelperClient:
         self.is_server_process_running = True
 
         helper_host_path = self._extract_root_helper_to_run_user(os.getuid())
-        socket_path = _get_socket_path(os.getuid())
+        socket_path = RootHelperServer.get_socket_path(os.getuid())
         xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
 
         if os.path.exists(socket_path):
@@ -209,8 +210,12 @@ class RootHelperClient:
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
+                print(f"Tick {self._process} {self._process.poll}")
+                #if self._process and self._process.poll is None:
                 response = self.send_command(ServerCommand.HANDSHAKE, allow_auto_start=False)
                 return response.code == ServerResponseStatusCode.OK
+                #else:
+                #    raise ServerCallError.SERVER_PROCESS_NOT_AVAILABLE
             except ServerCallError as e:
                 if e == ServerCallError.SERVER_NOT_READY:
                     time.sleep(1)
@@ -271,7 +276,7 @@ class RootHelperClient:
         import os
 
         # Runtime directory where the generated root-helper script will be placed
-        runtime_dir = _get_runtime_dir(uid)
+        runtime_dir = RootHelperServer.get_runtime_dir(uid)
         output_path = os.path.join(runtime_dir, "root-helper-server.py")
 
         # Ensure the directory exists
@@ -309,12 +314,12 @@ class RootHelperClient:
     def collect_root_function_sources(self) -> str:
         """Returns all registered root function sources as a single Python string,
         with @root_function decorators removed."""
-        if not ROOT_FUNCTION_REGISTRY:
+        if not RootHelperClient.ROOT_FUNCTION_REGISTRY:
             return ""
 
         sources = []
 
-        for func in ROOT_FUNCTION_REGISTRY.values():
+        for func in RootHelperClient.ROOT_FUNCTION_REGISTRY.values():
             try:
                 source = inspect.getsource(func)
                 sources.append(source.strip())
@@ -324,7 +329,7 @@ class RootHelperClient:
 
 def root_function(func):
     """Registers a function and replaces it with a proxy that calls the root server."""
-    ROOT_FUNCTION_REGISTRY[func.__name__] = func
+    RootHelperClient.ROOT_FUNCTION_REGISTRY[func.__name__] = func
     @wraps(func)
     def proxy_function(*args, **kwargs):
         return RootHelperClient.shared().call_root_function(
@@ -376,4 +381,5 @@ class ServerCallError(Exception):
         return f"Server error (code={self.error_code}): {self.message}"
 # Define error codes and their corresponding messages as class variables
 ServerCallError.SERVER_NOT_READY = ServerCallError(1, "The server is not ready.")
+ServerCallError.SERVER_PROCESS_NOT_AVAILABLE = ServerCallError(2, "The server starting process is not available.")
 
