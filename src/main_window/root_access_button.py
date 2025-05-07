@@ -66,7 +66,6 @@ class RootAccessButton(Gtk.Overlay):
         """Toggle root access state and show the popover."""
         if RootHelperClient.shared().is_server_process_running:
             self.show_root_tasks_popover()
-            #RootHelperClient.shared().stop_root_helper()
         else:
             RootHelperClient.shared().start_root_helper()
 

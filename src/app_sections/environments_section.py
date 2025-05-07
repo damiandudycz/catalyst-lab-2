@@ -87,7 +87,7 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
-        thread = test._async(lambda x: print(f"... {x}"))
+        thread = test._async_raw(lambda x: print(f"... {x}"), lambda x: print(f"...> {x}"))
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):

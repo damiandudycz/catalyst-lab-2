@@ -20,7 +20,6 @@ class RootHelperClient:
     # Lifecycle:
 
     def __init__(self):
-        self.token = str(uuid.uuid4())
         self.socket_path = RootHelperServer.get_socket_path(os.getuid())
         self.main_process = None
         self.running_actions = []
@@ -43,14 +42,15 @@ class RootHelperClient:
     # --------------------------------------------------------------------------------
     # Server lifecycle management:
 
-    def start_root_helper(self):
+    def start_root_helper(self) -> bool: # Returns true even if server was already running
         """Start the root helper process."""
         if self.is_server_process_running:
             print("Root helper is already running.")
-            return
+            return True
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
         self.is_server_process_running = True
+        self.token = str(uuid.uuid4())
 
         helper_host_path = self.extract_root_helper_to_run_user(os.getuid())
         xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
@@ -80,8 +80,8 @@ class RootHelperClient:
             for line in iter(pipe.readline, b''):
                 print(prefix + line.decode(), end='')
             pipe.close()
-        threading.Thread(target=stream_output, args=(self.main_process.stdout, '[Server start main process]: '), daemon=True).start()
-        threading.Thread(target=stream_output, args=(self.main_process.stderr, '[Server start main process]! '), daemon=True).start()
+        threading.Thread(target=stream_output, args=(self.main_process.stdout, '[SERVER]: '), daemon=True).start()
+        threading.Thread(target=stream_output, args=(self.main_process.stderr, '[SERVER]! '), daemon=True).start()
 
         # Send token and runtime dir
         self.main_process.stdin.write(self.token.encode() + b'\n')
@@ -90,7 +90,9 @@ class RootHelperClient:
         self.main_process.stdin.flush()
 
         # Wait for the server initialization to return result.
-        if not self.initialize_server_connectivity():
+        if self.initialize_server_connectivity():
+            return True
+        else:
             print("[Server start main process]! Server failed to initialize. Cleaning up...")
             if self.main_process and self.main_process.poll() is None:
                 print("[Server start main process]: Terminating main process...")
@@ -103,7 +105,7 @@ class RootHelperClient:
                     self.main_process.wait()
             self.is_server_process_running = False
             self.main_process = None
-            raise RuntimeError("Server start main process]! Server failed to initialize.")
+            return False
 
     def stop_root_helper(self):
         """Stop the root helper process."""
@@ -115,11 +117,11 @@ class RootHelperClient:
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
         finally:
+            self.is_server_process_running = False
             if self.main_process and self.main_process.poll() is None:
                 self.main_process.kill()
                 self.main_process.wait()
             self.main_process = None
-            self.is_server_process_running = False
             print("[Server start main process]: Closed.")
 
     def extract_root_helper_to_run_user(self, uid: int) -> str:
@@ -213,8 +215,7 @@ class RootHelperClient:
             return os.path.exists(self.socket_path)
         elif allow_auto_start:
             print("[Root helper is not running, attempting to start it.]")
-            self.start_root_helper()
-            return self.is_server_process_running and os.path.exists(self.socket_path)
+            return self.start_root_helper()
         else:
             return False
 

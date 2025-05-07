@@ -73,7 +73,6 @@ class RootHelperServer:
         current_thread = threading.current_thread()
         for thread in self.threads:
             if thread.is_alive():
-                log("Waiting for function thread to complete...")
                 if thread is not current_thread:
                     thread.join()
         self.threads.clear()
@@ -170,7 +169,7 @@ class RootHelperServer:
             log(f"Command: {cmd_enum}")
             match cmd_enum:
                 case ServerCommand.EXIT:
-                    self.respond(conn, conn_thread, ServerResponseStatusCode.OK, "Exiting")
+                    self.respond(conn, conn_thread, ServerResponseStatusCode.OK, "Exiting...")
                     self.stop()
                 case ServerCommand.PING:
                     self.respond(conn, conn_thread, ServerResponseStatusCode.OK)
