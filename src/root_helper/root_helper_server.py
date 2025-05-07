@@ -19,7 +19,7 @@ class RootHelperServer:
         self.is_running = False
         self.server_socket: socket.socket | None = None
         self.pid_lock: int | None = None
-        self.threads: threading.Thread = []
+        self.threads: List[threading.Thread] = []
         self.uid: int = self._get_caller_uid()
         log("Welcome")
         log("Please provide session token:")
@@ -295,7 +295,7 @@ def __init_server__():
 
 class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
-    HANDSHAKE = "[HANDSKAHE]"
+    HANDSHAKE = "[HANDSHAKE]"
     PING = "[PING]"
 
     @property
