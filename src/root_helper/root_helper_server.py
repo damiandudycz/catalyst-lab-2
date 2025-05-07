@@ -19,7 +19,7 @@ class RootHelperServer:
         self.is_running = False
         self.server_socket: socket.socket | None = None
         self.pid_lock: int | None = None
-        self.threads: List[threading.Thread] = []
+        self.jobs: List[Job] = []
         self.uid: int = self._get_caller_uid()
         log("Welcome")
         log("Please provide session token:")
@@ -70,12 +70,9 @@ class RootHelperServer:
             log("Removing socket file...")
             os.remove(self.socket_path)
 
-        current_thread = threading.current_thread()
-        for thread in self.threads:
-            if thread.is_alive():
-                if thread is not current_thread:
-                    thread.join()
-        self.threads.clear()
+        for job in self.jobs:
+           job.terminate()
+        self.jobs.clear()
         log("Server stopped.")
 
     # --------------------------------------------------------------------------------
@@ -111,18 +108,19 @@ class RootHelperServer:
                 try:
                     conn, _ = server.accept()
                     log("Accepting connection...")
-                    thread = threading.Thread(
+                    job = Job(server=self, conn=conn)
+                    job.thread = threading.Thread(
                         target=self.handle_connection,
-                        args=(conn, session_token, allowed_uid)
+                        args=(job, conn, session_token, allowed_uid)
                     )
-                    self.threads.append(thread)
-                    thread.start()
+                    self.jobs.append(job)
+                    job.thread.start()
                 except Exception as e:
                     log_error(f"Error accepting connection: {e}")
         finally:
             self.stop()
 
-    def handle_connection(self, conn: socket.socket, session_token: str, allowed_uid: int):
+    def handle_connection(self, job: Job, conn: socket.socket, session_token: str, allowed_uid: int):
         """Handle a single client connection in a separate thread."""
         conn_thread = threading.current_thread()
         try:
@@ -131,20 +129,20 @@ class RootHelperServer:
                 ucred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
                 pid, uid, gid = struct.unpack("3i", ucred)
             except Exception:
-                self.respond(conn, conn_thread, ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
+                self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
                 return
 
             if uid != allowed_uid:
-                self.respond(conn, conn_thread, ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
+                self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
                 return
             if self.pid_lock is not None and self.pid_lock != pid:
-                self.respond(conn, conn_thread, ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
+                self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
                 return
 
             # Receive request data:
             data = conn.recv(4096).decode().strip()
             if not data.startswith(session_token + " "):
-                self.respond(conn, conn_thread, ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
+                self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
             full_payload = data[len(session_token) + 1:]
             request_type, payload = full_payload.split(" ", 1)
@@ -152,80 +150,90 @@ class RootHelperServer:
             # Process request:
             match request_type:
                 case "command":
-                    self.handle_command_request(conn, conn_thread, pid, payload)
+                    self.handle_command_request(job, conn, conn_thread, pid, payload)
                 case "function":
-                    self.handle_function_request(conn, conn_thread, pid, payload)
+                    self.handle_function_request(job, conn, conn_thread, pid, payload)
                 case _:
-                    self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                    self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
         except Exception as e:
             log_error(f"Unexpected error in connection handler: {e}")
             conn.close()
 
-    def handle_command_request(self, conn: socket.conn, conn_thread: threading.Thread, pid: int, payload: str):
+    def handle_command_request(self, job: Job, conn: socket.conn, conn_thread: threading.Thread, pid: int, payload: str):
         log("Processing command request")
         try:
             cmd_enum = ServerCommand(payload)
             log(f"Command: {cmd_enum}")
             match cmd_enum:
                 case ServerCommand.EXIT:
-                    self.respond(conn, conn_thread, ServerResponseStatusCode.OK, "Exiting...")
+                    self.respond(conn, job, ServerResponseStatusCode.OK, "Exiting...")
                     self.stop()
                 case ServerCommand.PING:
-                    self.respond(conn, conn_thread, ServerResponseStatusCode.OK)
+                    self.respond(conn, job, ServerResponseStatusCode.OK)
                 case ServerCommand.HANDSHAKE:
                     if self.pid_lock is None:
                         self.pid_lock = pid
-                        self.respond(conn, conn_thread, ServerResponseStatusCode.OK, "Initialization succeeded")
+                        self.respond(conn, job, ServerResponseStatusCode.OK, "Initialization succeeded")
                     else:
-                        self.respond(conn, conn_thread, ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
-        except ValueError:
+                        self.respond(conn, job, ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
+        except ValueError as e:
             self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def handle_function_request(self, conn: socket.conn, conn_thread: threading.Thread, pid: int, payload: str):
+    def handle_function_request(self, job: Job, conn: socket.conn, conn_thread: threading.Thread, pid: int, payload: str):
         log("Processing function request")
         if self.pid_lock is None:
-            self.respond(conn, conn_thread, ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+            self.respond(conn, job, ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
         else:
             try:
                 func_struct = ServerFunction.from_json(payload)
                 log(f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
                 if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
-                    self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.func_name}")
+                    self.respond(conn, job, ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.func_name}")
                 else:
                     try:
                         result = _run_function_with_streaming_output(
                             conn,
+                            job,
                             RootHelperServer.ROOT_FUNCTION_REGISTRY[func_struct.function_name],
                             func_struct.args,
                             func_struct.kwargs,
                             self.respond_stdout,
                             self.respond_stderr
                         )
-                        self.respond(conn, conn_thread, ServerResponseStatusCode.OK, response=result)
+                        self.respond(conn, job, ServerResponseStatusCode.OK, response=result)
                     except Exception as e:
-                        self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                        self.respond(conn, job, ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
             except ValueError:
-                self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def respond(self, conn: socket.conn, conn_thread: threading.Thread, code: ServerResponseStatusCode, response: str | None = None):
+    def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode, response: str | None = None):
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value is any.
+        if conn.fileno() == -1:
+            log_error(f"Connection already closed: {conn} / {job} [{response}]")
+            return
         log(f"Responding with code: {code}, response: {response}")
         server_response = ServerResponse(code=code, response=response)
         server_response_json = server_response.to_json()
         conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
         conn.shutdown(socket.SHUT_WR)
         conn.close()
-        self.threads.remove(conn_thread)
+        self.jobs.remove(job)
 
     def respond_stdout(self, conn: socket.conn, message: str):
         # Send part of stdout to the server.
+        if conn.fileno() == -1:
+            log_error(f"Connection already closed: {conn} [{message}]")
+            return
         log(f"Sending stdout: {message}")
         conn.sendall(f"{ServerMessageType.STDOUT.value}:{len(message)}:".encode() + message.encode())
 
     def respond_stderr(self, conn: socket.conn, message: str):
         # Send part of stderr to the server.
+        if conn.fileno() == -1:
+            log_error(f"Connection already closed: {conn} [{message}]")
+            return
         log(f"Sending stderr: {message}")
         conn.sendall(f"{ServerMessageType.STDERR.value}:{len(message)}:".encode() + message.encode())
 
@@ -349,6 +357,7 @@ class ServerResponse:
 
 class ServerResponseStatusCode(Enum):
     OK = 0
+    JOB_WILL_BE_TERMINATED = 1
     COMMAND_EXECUTION_FAILED = 10
     COMMAND_DECODE_FAILED = 11
     COMMAND_UNSUPPORTED_FUNC = 12
@@ -389,6 +398,35 @@ def root_function(func):
 # Function processing with output handlers support.
 # --------------------------------------------------------------------------------
 
+class Job:
+    """Groups thread with additional process that is spawned by this thread."""
+    """This is used for redirecting output from this process to StreamWrapper."""
+    """process is None at start and it is set later in handle_function_request if needed."""
+    """thread is none at init, but it is set right after creating."""
+    """This is because we need to pass the Job itself to the thread handler, so that it is able to set process later."""
+
+    def __init__(self, server: RootHelperServer, conn: socket.socket):
+        self.server = server
+        self.conn = conn
+        self.thread: threading.Thread | None = None
+        self.process: multiprocessing.Process | None = None
+
+    def terminate(self):
+        current_thread = threading.current_thread()
+        if self.process is None or self.thread is current_thread or not self.process.is_alive():
+            return
+        # Respond to job with JOB_WILL_BE_TERMINATED code.
+        self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WILL_BE_TERMINATED)
+        # Terminate / kill process:
+        self.process.terminate()
+        # TODO: Move joins to separate thread (maybe?) and add new def wait, that waits for both process and thread. Use it in server
+        self.process.join(timeout=5) # If there are multiple threads, one after another will block this???? And they have time to respond with fail code after being killed. Need to invalidate responding first.
+        if self.process.is_alive():
+            log_error("Process did not terminate. Killing forcefully.")
+            self.process.kill()
+            self.process.join()
+        self.thread.join()
+
 class StreamType(str, Enum):
     STDOUT = "stdout"
     STDERR = "stderr"
@@ -409,7 +447,7 @@ class StreamWrapper:
     def flush(self):
         self.stream.flush()
 
-def _run_function_with_streaming_output(conn, func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
+def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
     """Takes a function and runs it as separate process while sending its output to stdout_callback and stderr_callback."""
     """Spawned process runs in sync, so this function only after given function is ready."""
     """Returns what given function returns or throws if given function throws."""
@@ -421,6 +459,7 @@ def _run_function_with_streaming_output(conn, func, args, kwargs, stdout_callbac
         target=_run_and_capture_target,
         args=(func, args, kwargs, write_fd, result_queue)
     )
+    job.process = proc
     proc.start()
     os.close(write_fd)
 
