@@ -48,9 +48,25 @@ class RootAccessButton(Gtk.Overlay):
         disable_row.connect("clicked", self.disable_root_access)
         self.task_list_box.append(disable_row)
 
+        # Divider
+        self.root_tasks_separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        self.root_tasks_separator.set_visible(RootHelperClient.shared().running_actions)
+        self.root_tasks_separator.set_margin_top(12)
+        #self.task_list_box.append(self.root_tasks_separator)
+
+        # "Root tasks:" label (initially hidden)
+        self.root_tasks_label = Gtk.Label(label="Root tasks:")
+        self.root_tasks_label.get_style_context().add_class("caption-heading")
+        self.root_tasks_label.set_halign(Gtk.Align.START)
+        self.root_tasks_label.set_margin_top(12)
+        self.root_tasks_label.set_margin_bottom(6)
+        self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
+        self.root_tasks_label.get_style_context().add_class("dim-label")
+        self.task_list_box.append(self.root_tasks_label)
+
         # Add initial requests to list
         for request in RootHelperClient.shared().running_actions:
-            add_request_to_list(request)
+            self.add_request_to_list(request)
 
         # Event handling for the button click
         self.root_access_button.connect("clicked", self.toggle_root_access)
@@ -87,6 +103,8 @@ class RootAccessButton(Gtk.Overlay):
             self.add_request_to_list(request)
         else:
             self.remove_request_from_list(request)
+        self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
+        self.root_tasks_separator.set_visible(RootHelperClient.shared().running_actions)
 
     def show_root_tasks_popover(self):
         """Show a popover with a list of root tasks and a 'Disable root access' button."""
@@ -99,9 +117,6 @@ class RootAccessButton(Gtk.Overlay):
 
     def add_request_to_list(self, request: ServerCommand | ServerFunction):
         action_row = RootActionInfoRow(request=request)
-        action_row.set_title(request.function_name)
-        action_row.set_icon_name("user-desktop-symbolic")
-        action_row.set_focusable(False)
         self.task_list_box.append(action_row)
         self.displayed_requests_views.append(action_row)
 
@@ -112,7 +127,40 @@ class RootAccessButton(Gtk.Overlay):
                 self.displayed_requests_views.remove(row)
                 break
 
-class RootActionInfoRow(Adw.ActionRow):
+class RootActionInfoRow(Gtk.Box):
     def __init__(self, request: ServerCommand | ServerFunction):
-        super().__init__()
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.request = request
+        self.set_hexpand(True)
+
+        # Divider (separator at the top)
+        separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        self.append(separator)
+
+        # Inner horizontal row layout
+        row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row_box.set_hexpand(True)
+        row_box.set_valign(Gtk.Align.CENTER)
+
+        # Create label on the left
+        label = Gtk.Label(label=request.function_name)
+        label.get_style_context().add_class("caption-heading")
+        label.set_xalign(0)
+        label.set_hexpand(True)
+        row_box.append(label)
+
+        # Icon button on the right
+        icon = Gtk.Image.new_from_icon_name("window-close-symbolic")
+        button = Gtk.Button()
+        button.set_child(icon)
+        button.set_valign(Gtk.Align.CENTER)
+        button.set_focusable(False)
+        button.get_style_context().add_class("circular")
+        button.get_style_context().add_class("flat")
+        button.set_margin_top(4)
+        button.set_margin_bottom(4)
+        row_box.append(button)
+
+        # Add the horizontal row to the vertical box
+        self.append(row_box)
+

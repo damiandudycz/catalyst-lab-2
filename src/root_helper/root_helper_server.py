@@ -70,8 +70,15 @@ class RootHelperServer:
             log("Removing socket file...")
             os.remove(self.socket_path)
 
-        for job in self.jobs:
-           job.terminate()
+        jobs_to_wait = []
+        for job in self.jobs[:]:
+            job_to_wait = job.terminate()
+            if job_to_wait:
+                jobs_to_wait.append(job_to_wait)
+        Job.join_all(jobs_to_wait, 5 + 1)
+        # Force termination of remining if any left.
+        for job in self.jobs[:]:
+            job.terminate(force=true)
         self.jobs.clear()
         log("Server stopped.")
 
@@ -141,7 +148,7 @@ class RootHelperServer:
 
             # Receive request data:
             data = conn.recv(4096).decode().strip()
-            if not data.startswith(session_token + " "):
+            if not data.startswith(session_token):
                 self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
             full_payload = data[len(session_token) + 1:]
@@ -287,15 +294,7 @@ class RootHelperServer:
 # Server runtime lifecycle.
 # --------------------------------------------------------------------------------
 
-def _signal_handler(sig, frame):
-    RootHelperServer.shared().stop()
-    sys.exit(0)
-
 def __init_server__():
-    # Set up signal handling using a shared instance for all signals
-    signal.signal(signal.SIGINT, _signal_handler)  # Ctrl+C
-    signal.signal(signal.SIGTERM, _signal_handler)  # Termination
-    signal.signal(signal.SIGQUIT, _signal_handler)  # Quit cleanly
     RootHelperServer.shared().start()
 
 # --------------------------------------------------------------------------------
@@ -411,21 +410,39 @@ class Job:
         self.thread: threading.Thread | None = None
         self.process: multiprocessing.Process | None = None
 
-    def terminate(self):
+    def terminate(self, force: bool = False) -> Job | None:
+        """Schedules Job process to terminate and gives it 5 seconds to finish."""
+        """Termination itself happens on separate thread so that multiple can be stopped at once."""
+        """If force flag is set, termination happens instantly on current thread, blocking it."""
+        """Returns Job if process needed to be terminated or None if it was not running."""
         current_thread = threading.current_thread()
         if self.process is None or self.thread is current_thread or not self.process.is_alive():
-            return
+            return None
         # Respond to job with JOB_WILL_BE_TERMINATED code.
         self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WILL_BE_TERMINATED)
-        # Terminate / kill process:
+        if force:
+            self.prcess.kill()
+            self.process.join()
+        else:
+            cleanup_thread = threading.Thread(target=self.terminate_and_cleanup)
+            cleanup_thread.start()
+        return self
+
+    def terminate_and_cleanup(self):
         self.process.terminate()
-        # TODO: Move joins to separate thread (maybe?) and add new def wait, that waits for both process and thread. Use it in server
-        self.process.join(timeout=5) # If there are multiple threads, one after another will block this???? And they have time to respond with fail code after being killed. Need to invalidate responding first.
+        self.process.join(timeout=5) # Allow time for graceful termination for 5s
         if self.process.is_alive():
             log_error("Process did not terminate. Killing forcefully.")
             self.process.kill()
             self.process.join()
         self.thread.join()
+
+    def join_all(jobs: List[Job], timeout: float):
+        """Waits for all given threads to finish for given time, blocking current thread."""
+        start = cur_time = time.time()
+        while cur_time <= (start + timeout) and not all(not t.thread and t.thread.is_alive() for t in jobs):
+            time.sleep(0.5)
+            cur_time = time.time()
 
 class StreamType(str, Enum):
     STDOUT = "stdout"

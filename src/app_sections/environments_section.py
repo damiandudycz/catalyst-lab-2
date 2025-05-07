@@ -103,6 +103,6 @@ class EnvironmentsSection(Gtk.Box):
 @root_function
 def test():
     print("aaa")
-    time.sleep(10)
+    time.sleep(50)
     print("abbb")
     return 11.5
