@@ -119,6 +119,7 @@ class RootHelperClient:
         finally:
             self.is_server_process_running = False
             if self.main_process and self.main_process.poll() is None:
+                # Note: This only kills main process if it was left - pkexec or flatpak-spawn. Server needs to quit by itself after [EXIT] command.
                 self.main_process.kill()
                 self.main_process.wait()
             self.main_process = None
