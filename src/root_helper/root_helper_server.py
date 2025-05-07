@@ -42,7 +42,11 @@ class RootHelperServer:
 
     def start(self):
         """Run the root helper server."""
+        if self.is_running:
+            log_error("Server is already running")
+            return
         log("Starting server...")
+        self.pid_lock = None
         self.prepare_server_socket_directory(self.socket_dir, self.uid)
         self.server_socket = self.setup_server_socket(self.socket_path, self.uid)
         self.is_running = True
@@ -50,6 +54,9 @@ class RootHelperServer:
 
     def stop(self):
         """Stop the server, closing the socket and removing any resources."""
+        if not self.is_running:
+            log_error("Server is not running")
+            return
         log("Stopping server...")
         self.is_running = False
 
@@ -118,26 +125,27 @@ class RootHelperServer:
 
     def handle_connection(self, conn: socket.socket, session_token: str, allowed_uid: int):
         """Handle a single client connection in a separate thread."""
+        conn_thread = threading.current_thread()
         try:
             # Validate peer credentials:
             try:
                 ucred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
                 pid, uid, gid = struct.unpack("3i", ucred)
             except Exception:
-                self.respond(conn, ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
+                self.respond(conn, conn_thread, ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
                 return
 
             if uid != allowed_uid:
-                self.respond(conn, ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
+                self.respond(conn, conn_thread, ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
                 return
             if self.pid_lock is not None and self.pid_lock != pid:
-                self.respond(conn, ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
+                self.respond(conn, conn_thread, ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
                 return
 
             # Receive request data:
             data = conn.recv(4096).decode().strip()
             if not data.startswith(session_token + " "):
-                self.respond(conn, ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
+                self.respond(conn, conn_thread, ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
             full_payload = data[len(session_token) + 1:]
             request_type, payload = full_payload.split(" ", 1)
@@ -145,46 +153,46 @@ class RootHelperServer:
             # Process request:
             match request_type:
                 case "command":
-                    self.handle_command_request(conn, pid, payload)
+                    self.handle_command_request(conn, conn_thread, pid, payload)
                 case "function":
-                    self.handle_function_request(conn, pid, payload)
+                    self.handle_function_request(conn, conn_thread, pid, payload)
                 case _:
-                    self.respond(conn, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                    self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
         except Exception as e:
             log_error(f"Unexpected error in connection handler: {e}")
             conn.close()
 
-    def handle_command_request(self, conn: socket.conn, pid: int, payload: str):
+    def handle_command_request(self, conn: socket.conn, conn_thread: threading.Thread, pid: int, payload: str):
         log("Processing command request")
         try:
             cmd_enum = ServerCommand(payload)
             log(f"Command: {cmd_enum}")
             match cmd_enum:
                 case ServerCommand.EXIT:
-                    self.respond(conn, ServerResponseStatusCode.OK, "Exiting")
+                    self.respond(conn, conn_thread, ServerResponseStatusCode.OK, "Exiting")
                     self.stop()
                 case ServerCommand.PING:
-                    self.respond(conn, ServerResponseStatusCode.OK)
+                    self.respond(conn, conn_thread, ServerResponseStatusCode.OK)
                 case ServerCommand.HANDSHAKE:
                     if self.pid_lock is None:
                         self.pid_lock = pid
-                        self.respond(conn, ServerResponseStatusCode.OK, "Initialization succeeded")
+                        self.respond(conn, conn_thread, ServerResponseStatusCode.OK, "Initialization succeeded")
                     else:
-                        self.respond(conn, ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
+                        self.respond(conn, conn_thread, ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
         except ValueError:
-            self.respond(conn, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+            self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def handle_function_request(self, conn: socket.conn, pid: int, payload: str):
+    def handle_function_request(self, conn: socket.conn, conn_thread: threading.Thread, pid: int, payload: str):
         log("Processing function request")
         if self.pid_lock is None:
-            self.respond(conn, ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+            self.respond(conn, conn_thread, ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
         else:
             try:
                 func_struct = ServerFunction.from_json(payload)
                 log(f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
                 if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
-                    self.respond(conn, ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.func_name}")
+                    self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.func_name}")
                 else:
                     try:
                         result = _run_function_with_streaming_output(
@@ -194,13 +202,13 @@ class RootHelperServer:
                             self.respond_stdout,
                             self.respond_stderr
                         )
-                        self.respond(conn, ServerResponseStatusCode.OK, response=result)
+                        self.respond(conn, conn_thread, ServerResponseStatusCode.OK, response=result)
                     except Exception as e:
-                        self.respond(conn, ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                        self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
             except ValueError:
-                self.respond(conn, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def respond(self, conn: socket.conn, code: ServerResponseStatusCode, response: str | None = None):
+    def respond(self, conn: socket.conn, conn_thread: threading.Thread, code: ServerResponseStatusCode, response: str | None = None):
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value is any.
         log(f"Responding with code: {code}, response: {response}")
@@ -209,6 +217,7 @@ class RootHelperServer:
         conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
         conn.shutdown(socket.SHUT_WR)
         conn.close()
+        self.threads.remove(conn_thread)
 
     def respond_stdout(self, conn: socket.conn, message: str):
         # Send part of stdout to the server.

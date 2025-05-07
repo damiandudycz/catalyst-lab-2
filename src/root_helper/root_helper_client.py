@@ -48,22 +48,15 @@ class RootHelperClient:
         if self.is_server_process_running:
             print("Root helper is already running.")
             return
+        if os.path.exists(self.socket_path):
+            os.remove(self.socket_path)
         self.is_server_process_running = True
 
         helper_host_path = self.extract_root_helper_to_run_user(os.getuid())
         xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-
-        if os.path.exists(self.socket_path):
-            os.remove(self.socket_path)
-
         cmd_prefix = ["flatpak-spawn", "--host"] if RuntimeEnv.current() == RuntimeEnv.FLATPAK else []
         cmd_authorize = ["pkexec"]
         exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
-
-        def stream_output(pipe, prefix=""):
-            for line in iter(pipe.readline, b''):
-                print(prefix + line.decode(), end='')
-            pipe.close()
 
         # Start pkexec and pass token via stdin
         # Note: This is flatpak-spawn process, not server process itself.
@@ -74,10 +67,21 @@ class RootHelperClient:
             stderr=subprocess.PIPE
         )
 
-        # Start threads to stream stdout and stderr
-        # TODO: Terminate threads when server stops
-        threading.Thread(target=stream_output, args=(self.main_process.stdout, '[SERVER] >> '), daemon=True).start()
-        threading.Thread(target=stream_output, args=(self.main_process.stderr, '[SERVER] !> '), daemon=True).start()
+        # Waits until main_process finishes, to see if it was closed with error code.
+        def monitor_error_codes():
+            if self.main_process.wait() != 0 and self.is_server_process_running:
+                print("[Server start main process]! Authorization failed or was cancelled.")
+                self.is_server_process_running = False
+        threading.Thread(target=monitor_error_codes, daemon=True).start()
+
+        # Start threads to stream stdout and stderr (only for debugging purpose).
+        def stream_output(pipe, prefix: str = ""):
+            # Streams output from thread to selected pipe.
+            for line in iter(pipe.readline, b''):
+                print(prefix + line.decode(), end='')
+            pipe.close()
+        threading.Thread(target=stream_output, args=(self.main_process.stdout, '[Server start main process]: '), daemon=True).start()
+        threading.Thread(target=stream_output, args=(self.main_process.stderr, '[Server start main process]! '), daemon=True).start()
 
         # Send token and runtime dir
         self.main_process.stdin.write(self.token.encode() + b'\n')
@@ -85,12 +89,21 @@ class RootHelperClient:
         self.main_process.stdin.write(xdg_runtime_dir.encode() + b'\n')
         self.main_process.stdin.flush()
 
-        # Wait for the server to send the "OK" message
-        if not self.wait_for_server_ready():
-            process_running = self.main_process and self.main_process.poll is None
-            _, stderr = self.main_process.communicate(timeout=5) if process_running else (None, None)
+        # Wait for the server initialization to return result.
+        if not self.initialize_server_connectivity():
+            print("[Server start main process]! Server failed to initialize. Cleaning up...")
+            if self.main_process and self.main_process.poll() is None:
+                print("[Server start main process]: Terminating main process...")
+                self.main_process.terminate()
+                try:
+                    self.main_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    print("[Server start main process]: Killing unresponsive main process...")
+                    self.main_process.kill()
+                    self.main_process.wait()
             self.is_server_process_running = False
-            raise RuntimeError(f"Error starting root helper: {stderr.decode() if stderr else 'No error message'}")
+            self.main_process = None
+            raise RuntimeError("Server start main process]! Server failed to initialize.")
 
     def stop_root_helper(self):
         """Stop the root helper process."""
@@ -102,16 +115,12 @@ class RootHelperClient:
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
         finally:
-            if self.main_process and self.main_process.poll is None:
-                self.main_process.terminate()
-                try:
-                    self.main_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.main_process.kill()
-                    self.main_process.wait()
+            if self.main_process and self.main_process.poll() is None:
+                self.main_process.kill()
+                self.main_process.wait()
             self.main_process = None
             self.is_server_process_running = False
-            print("Root helper process disconnected.")
+            print("[Server start main process]: Closed.")
 
     def extract_root_helper_to_run_user(self, uid: int) -> str:
         """Extracts root helper server script and appends root-callable functions."""
@@ -167,17 +176,16 @@ class RootHelperClient:
                 print(f"Warning: could not get source for function {func.__name__}")
         return "\n\n# ---- Injected root functions ----\n\n" + "\n\n".join(sources)
 
-    def wait_for_server_ready(self, timeout: int = 60) -> bool:
+    def initialize_server_connectivity(self, timeout: int = 10) -> bool:
         """Wait for the server to send an 'OK' message indicating it's ready."""
         start_time = time.time()
         while time.time() - start_time < timeout:
+            # If server was never started or killed before initialization finished.
+            if not self.is_server_process_running:
+                break
             try:
-                print(f"Tick {self.main_process} {self.main_process.poll}")
-                #if self.main_process and self.main_process.poll is None:
                 response = self.send_request(ServerCommand.HANDSHAKE, allow_auto_start=False)
                 return response.code == ServerResponseStatusCode.OK
-                #else:
-                #    raise ServerCallError.SERVER_PROCESS_NOT_AVAILABLE
             except ServerCallError as e:
                 if e == ServerCallError.SERVER_NOT_READY:
                     time.sleep(1)
@@ -188,29 +196,27 @@ class RootHelperClient:
                 print(f"Unexpected error while waiting for server: {e}")
                 break
         print(f"Server initialization failed.")
-        if self.main_process and self.main_process.poll is None:
+        if self.main_process and self.main_process.poll() is None:
             self.main_process.terminate()
             try:
                 self.main_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.main_process.kill()
                 self.main_process.wait()
-        self.main_process = None
         return False
 
     def ensure_server_ready(self, allow_auto_start=True) -> bool:
         """Ensure the root helper server is running and the socket is available."""
-        if not self.is_server_process_running:
-            if allow_auto_start:
-                print("[Root helper is not running, attempting to start it.]")
-                self.start_root_helper()
-                if not self.is_server_process_running:
-                    raise RuntimeError("Failed to start the root helper server.")
-            else:
-                raise RuntimeError("Root helper is not running.")
-        if not os.path.exists(self.socket_path):
+        """If allowed automatically start the server (This should be used only by handshake request)."""
+        print("Ensure server ready")
+        if self.is_server_process_running:
+            return os.path.exists(self.socket_path)
+        elif allow_auto_start:
+            print("[Root helper is not running, attempting to start it.]")
+            self.start_root_helper()
+            return self.is_server_process_running and os.path.exists(self.socket_path)
+        else:
             return False
-        return True
 
     # --------------------------------------------------------------------------------
     # Handling requests to server / root functions:
