@@ -209,10 +209,12 @@ class RootHelperServer:
         conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
         conn.shutdown(socket.SHUT_WR)
         conn.close()
+
     def respond_stdout(self, conn: socket.conn, message: str):
         # Send part of stdout to the server.
         log(f"Sending stdout: {message}")
         conn.sendall(f"{ServerMessageType.STDOUT.value}:{len(message)}:".encode() + message.encode())
+
     def respond_stderr(self, conn: socket.conn, message: str):
         # Send part of stderr to the server.
         log(f"Sending stderr: {message}")

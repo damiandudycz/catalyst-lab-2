@@ -16,20 +16,14 @@ class RootHelperClient:
     ROOT_FUNCTION_REGISTRY = {}               # Registry used to collect registered root functions.
     _instance: RootHelperClient | None = None # Singleton shared instance.
 
+    # --------------------------------------------------------------------------------
+    # Lifecycle:
+
     def __init__(self):
         self.token = str(uuid.uuid4())
         self.socket_path = RootHelperServer.get_socket_path(os.getuid())
-        self._process = None
+        self.main_process = None
         self.running_actions = []
-        self._is_server_process_running = False
-
-    def set_request_status(self, request: ServerCommand | ServerFunction, in_progress: bool):
-        if in_progress:
-            self.running_actions.append(request)
-            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, True)
-        else:
-            self.running_actions.remove(request)
-            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, False)
 
     @classmethod
     def shared(cls):
@@ -37,15 +31,191 @@ class RootHelperClient:
             cls._instance = cls()
         return cls._instance
 
-    @property
-    def is_server_process_running(self) -> bool:
-        return self._is_server_process_running
-    @is_server_process_running.setter
-    def is_server_process_running(self, value: bool) -> None:
-        self._is_server_process_running = value
-        app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, value)
+    is_server_process_running = property(
+        # Note: Use with self.
+        fget=lambda self: getattr(self, "_is_server_process_running", False),
+        fset=lambda self, value: (
+            setattr(self, "_is_server_process_running", value),
+            app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, value)
+        )[0]
+    )
 
-    def send_command(
+    # --------------------------------------------------------------------------------
+    # Server lifecycle management:
+
+    def start_root_helper(self):
+        """Start the root helper process."""
+        if self.is_server_process_running:
+            print("Root helper is already running.")
+            return
+        self.is_server_process_running = True
+
+        helper_host_path = self.extract_root_helper_to_run_user(os.getuid())
+        xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+
+        if os.path.exists(self.socket_path):
+            os.remove(self.socket_path)
+
+        cmd_prefix = ["flatpak-spawn", "--host"] if RuntimeEnv.current() == RuntimeEnv.FLATPAK else []
+        cmd_authorize = ["pkexec"]
+        exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
+
+        def stream_output(pipe, prefix=""):
+            for line in iter(pipe.readline, b''):
+                print(prefix + line.decode(), end='')
+            pipe.close()
+
+        # Start pkexec and pass token via stdin
+        # Note: This is flatpak-spawn process, not server process itself.
+        self.main_process = subprocess.Popen(
+            exec_call,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        # Start threads to stream stdout and stderr
+        # TODO: Terminate threads when server stops
+        threading.Thread(target=stream_output, args=(self.main_process.stdout, '[SERVER] >> '), daemon=True).start()
+        threading.Thread(target=stream_output, args=(self.main_process.stderr, '[SERVER] !> '), daemon=True).start()
+
+        # Send token and runtime dir
+        self.main_process.stdin.write(self.token.encode() + b'\n')
+        self.main_process.stdin.flush()
+        self.main_process.stdin.write(xdg_runtime_dir.encode() + b'\n')
+        self.main_process.stdin.flush()
+
+        # Wait for the server to send the "OK" message
+        if not self.wait_for_server_ready():
+            process_running = self.main_process and self.main_process.poll is None
+            _, stderr = self.main_process.communicate(timeout=5) if process_running else (None, None)
+            self.is_server_process_running = False
+            raise RuntimeError(f"Error starting root helper: {stderr.decode() if stderr else 'No error message'}")
+
+    def stop_root_helper(self):
+        """Stop the root helper process."""
+        if not self.is_server_process_running:
+            print(f"Server is already stopped")
+            return
+        try:
+            self.send_request(ServerCommand.EXIT)
+        except Exception as e:
+            print(f"Failed to stop root helper: {e}")
+        finally:
+            if self.main_process and self.main_process.poll is None:
+                self.main_process.terminate()
+                try:
+                    self.main_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.main_process.kill()
+                    self.main_process.wait()
+            self.main_process = None
+            self.is_server_process_running = False
+            print("Root helper process disconnected.")
+
+    def extract_root_helper_to_run_user(self, uid: int) -> str:
+        """Extracts root helper server script and appends root-callable functions."""
+        import os
+
+        # Runtime directory where the generated root-helper script will be placed
+        runtime_dir = RootHelperServer.get_runtime_dir(uid)
+        output_path = os.path.join(runtime_dir, "root-helper-server.py")
+
+        # Ensure the directory exists
+        os.makedirs(runtime_dir, exist_ok=True)
+
+        # If the file already exists, remove it
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+        # Load the embedded server code from resources
+        resource_path = "/com/damiandudycz/CatalystLab/root_helper/root_helper_server.py"
+        resource = Gio.Resource.load("/app/share/catalystlab/catalystlab.gresource")
+        data = resource.lookup_data(resource_path, Gio.ResourceLookupFlags.NONE)
+        server_code = data.get_data().decode()
+
+        # Collect the root functions (dynamically registered)
+        injected_functions = self.collect_root_function_sources()
+
+        # Combine the server code with the dynamically injected functions
+        full_code = server_code + "\n\n" + injected_functions
+
+        # Add the `if __name__ == "__main__":` block to run the server
+        # This needs to be added bellow dynamic functions.
+        full_code += """\n\nif __name__ == "__main__":\n    __init_server__()"""
+
+        # Write the full code to the output file
+        with open(output_path, "w") as f:
+            f.write(full_code)
+
+        # Make the script executable
+        os.chmod(output_path, 0o700)
+
+        return output_path
+
+    def collect_root_function_sources(self) -> str:
+        """Returns all registered root function sources as a single Python string,
+        with @root_function decorators removed."""
+        if not RootHelperClient.ROOT_FUNCTION_REGISTRY:
+            return ""
+        sources = []
+        for func in RootHelperClient.ROOT_FUNCTION_REGISTRY.values():
+            try:
+                source = inspect.getsource(func)
+                sources.append(source.strip())
+            except OSError:
+                print(f"Warning: could not get source for function {func.__name__}")
+        return "\n\n# ---- Injected root functions ----\n\n" + "\n\n".join(sources)
+
+    def wait_for_server_ready(self, timeout: int = 60) -> bool:
+        """Wait for the server to send an 'OK' message indicating it's ready."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                print(f"Tick {self.main_process} {self.main_process.poll}")
+                #if self.main_process and self.main_process.poll is None:
+                response = self.send_request(ServerCommand.HANDSHAKE, allow_auto_start=False)
+                return response.code == ServerResponseStatusCode.OK
+                #else:
+                #    raise ServerCallError.SERVER_PROCESS_NOT_AVAILABLE
+            except ServerCallError as e:
+                if e == ServerCallError.SERVER_NOT_READY:
+                    time.sleep(1)
+                    continue
+                else:
+                    break
+            except Exception as e:
+                print(f"Unexpected error while waiting for server: {e}")
+                break
+        print(f"Server initialization failed.")
+        if self.main_process and self.main_process.poll is None:
+            self.main_process.terminate()
+            try:
+                self.main_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.main_process.kill()
+                self.main_process.wait()
+        self.main_process = None
+        return False
+
+    def ensure_server_ready(self, allow_auto_start=True) -> bool:
+        """Ensure the root helper server is running and the socket is available."""
+        if not self.is_server_process_running:
+            if allow_auto_start:
+                print("[Root helper is not running, attempting to start it.]")
+                self.start_root_helper()
+                if not self.is_server_process_running:
+                    raise RuntimeError("Failed to start the root helper server.")
+            else:
+                raise RuntimeError("Root helper is not running.")
+        if not os.path.exists(self.socket_path):
+            return False
+        return True
+
+    # --------------------------------------------------------------------------------
+    # Handling requests to server / root functions:
+
+    def send_request(
         self,
         request: ServerCommand | ServerFunction,
         allow_auto_start: bool = True,
@@ -55,7 +225,7 @@ class RootHelperClient:
         completion_handler: callable = None
     ) -> ServerResponse | threading.Thread:
         """Send a command to the root helper server."""
-        if not self._ensure_server_ready(allow_auto_start):
+        if not self.ensure_server_ready(allow_auto_start):
             if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
                 self.stop_root_helper()
             raise ServerCallError.SERVER_NOT_READY
@@ -139,9 +309,9 @@ class RootHelperClient:
         completion_handler: callable = None,
         **kwargs
     ) -> Any | ServerResponse | threading.Thread:
-        """ Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server. """
+        """Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server."""
         function = ServerFunction(func_name, *args, **kwargs)
-        server_response = self.send_command(
+        server_response = self.send_request(
             function,
             handler=handler,
             asynchronous=asynchronous,
@@ -155,177 +325,17 @@ class RootHelperClient:
         else:
             raise RuntimeError(f"Root function error: {server_response.response}")
 
-    def start_root_helper(self):
-        """Start the root helper process."""
-        if self.is_server_process_running:
-            print("Root helper is already running.")
-            return
-        self.is_server_process_running = True
+    def set_request_status(self, request: ServerCommand | ServerFunction, in_progress: bool):
+        if in_progress:
+            self.running_actions.append(request)
+            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, True)
+        else:
+            self.running_actions.remove(request)
+            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, False)
 
-        helper_host_path = self._extract_root_helper_to_run_user(os.getuid())
-        socket_path = RootHelperServer.get_socket_path(os.getuid())
-        xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-
-        if os.path.exists(socket_path):
-            os.remove(socket_path)
-
-        cmd_prefix = ["flatpak-spawn", "--host"] if RuntimeEnv.current() == RuntimeEnv.FLATPAK else []
-        cmd_authorize = ["pkexec"]
-        exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
-
-        def stream_output(pipe, prefix=""):
-            for line in iter(pipe.readline, b''):
-                print(prefix + line.decode(), end='')
-            pipe.close()
-
-        # Start pkexec and pass token via stdin
-        # Note: This is flatpak-spawn process, not server process itself.
-        self._process = subprocess.Popen(
-            exec_call,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        # Start threads to stream stdout and stderr
-        # TODO: Terminate threads when server stops
-        threading.Thread(target=stream_output, args=(self._process.stdout, '[SERVER] >> '), daemon=True).start()
-        threading.Thread(target=stream_output, args=(self._process.stderr, '[SERVER] !> '), daemon=True).start()
-
-        # Send token and runtime dir
-        self._process.stdin.write(self.token.encode() + b'\n')
-        self._process.stdin.flush()
-        self._process.stdin.write(xdg_runtime_dir.encode() + b'\n')
-        self._process.stdin.flush()
-
-        # Wait for the server to send the "OK" message
-        if not self._wait_for_server_ready():
-            process_running = self._process and self._process.poll is None
-            _, stderr = self._process.communicate(timeout=5) if process_running else (None, None)
-            self.is_server_process_running = False
-            raise RuntimeError(f"Error starting root helper: {stderr.decode() if stderr else 'No error message'}")
-
-    def _wait_for_server_ready(self, timeout: int = 60) -> bool:
-        """Wait for the server to send an 'OK' message indicating it's ready."""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                print(f"Tick {self._process} {self._process.poll}")
-                #if self._process and self._process.poll is None:
-                response = self.send_command(ServerCommand.HANDSHAKE, allow_auto_start=False)
-                return response.code == ServerResponseStatusCode.OK
-                #else:
-                #    raise ServerCallError.SERVER_PROCESS_NOT_AVAILABLE
-            except ServerCallError as e:
-                if e == ServerCallError.SERVER_NOT_READY:
-                    time.sleep(1)
-                    continue
-                else:
-                    break
-            except Exception as e:
-                print(f"Unexpected error while waiting for server: {e}")
-                break
-        print(f"Server initialization failed.")
-        if self._process and self._process.poll is None:
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-                self._process.wait()
-        self._process = None
-        return False
-
-    def stop_root_helper(self):
-        """Stop the root helper process."""
-        if not self.is_server_process_running:
-            print(f"Server is already stopped")
-            return
-        try:
-            self.send_command(ServerCommand.EXIT)
-        except Exception as e:
-            print(f"Failed to stop root helper: {e}")
-        finally:
-            if self._process and self._process.poll is None:
-                self._process.terminate()
-                try:
-                    self._process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self._process.kill()
-                    self._process.wait()
-            self._process = None
-            self.is_server_process_running = False
-            print("Root helper process disconnected.")
-
-    def _ensure_server_ready(self, allow_auto_start=True) -> bool:
-        """Ensure the root helper server is running and the socket is available."""
-        if not self.is_server_process_running:
-            if allow_auto_start:
-                print("[Root helper is not running, attempting to start it.]")
-                self.start_root_helper()
-                if not self.is_server_process_running:
-                    raise RuntimeError("Failed to start the root helper server.")
-            else:
-                raise RuntimeError("Root helper is not running.")
-        if not os.path.exists(self.socket_path):
-            return False
-        return True
-
-    def _extract_root_helper_to_run_user(self, uid: int) -> str:
-        """Extracts root helper server script and appends root-callable functions."""
-        import os
-
-        # Runtime directory where the generated root-helper script will be placed
-        runtime_dir = RootHelperServer.get_runtime_dir(uid)
-        output_path = os.path.join(runtime_dir, "root-helper-server.py")
-
-        # Ensure the directory exists
-        os.makedirs(runtime_dir, exist_ok=True)
-
-        # If the file already exists, remove it
-        if os.path.exists(output_path):
-            os.remove(output_path)
-
-        # Load the embedded server code from resources
-        resource_path = "/com/damiandudycz/CatalystLab/root_helper/root_helper_server.py"
-        resource = Gio.Resource.load("/app/share/catalystlab/catalystlab.gresource")
-        data = resource.lookup_data(resource_path, Gio.ResourceLookupFlags.NONE)
-        server_code = data.get_data().decode()
-
-        # Collect the root functions (dynamically registered)
-        injected_functions = self.collect_root_function_sources()
-
-        # Combine the server code with the dynamically injected functions
-        full_code = server_code + "\n\n" + injected_functions
-
-        # Add the `if __name__ == "__main__":` block to run the server
-        # This needs to be added bellow dynamic functions.
-        full_code += """\n\nif __name__ == "__main__":\n    __init_server__()"""
-
-        # Write the full code to the output file
-        with open(output_path, "w") as f:
-            f.write(full_code)
-
-        # Make the script executable
-        os.chmod(output_path, 0o700)
-
-        return output_path
-
-    def collect_root_function_sources(self) -> str:
-        """Returns all registered root function sources as a single Python string,
-        with @root_function decorators removed."""
-        if not RootHelperClient.ROOT_FUNCTION_REGISTRY:
-            return ""
-
-        sources = []
-
-        for func in RootHelperClient.ROOT_FUNCTION_REGISTRY.values():
-            try:
-                source = inspect.getsource(func)
-                sources.append(source.strip())
-            except OSError:
-                print(f"Warning: could not get source for function {func.__name__}")
-        return "\n\n# ---- Injected root functions ----\n\n" + "\n\n".join(sources)
+# --------------------------------------------------------------------------------
+# @root_function decorator.
+# --------------------------------------------------------------------------------
 
 def root_function(func):
     """Registers a function and replaces it with a proxy that calls the root server."""
@@ -369,6 +379,10 @@ def root_function(func):
     proxy_function._raw = _raw
     proxy_function._async_raw = _async_raw
     return proxy_function
+
+# --------------------------------------------------------------------------------
+# Helper functions and types.
+# --------------------------------------------------------------------------------
 
 class ServerCallError(Exception):
     """Custom exception with predefined error codes and messages."""
