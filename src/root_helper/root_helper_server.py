@@ -195,6 +195,7 @@ class RootHelperServer:
                 else:
                     try:
                         result = _run_function_with_streaming_output(
+                            conn,
                             RootHelperServer.ROOT_FUNCTION_REGISTRY[func_struct.function_name],
                             func_struct.args,
                             func_struct.kwargs,
@@ -408,7 +409,7 @@ class StreamWrapper:
     def flush(self):
         self.stream.flush()
 
-def _run_function_with_streaming_output(func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
+def _run_function_with_streaming_output(conn, func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
     """Takes a function and runs it as separate process while sending its output to stdout_callback and stderr_callback."""
     """Spawned process runs in sync, so this function only after given function is ready."""
     """Returns what given function returns or throws if given function throws."""
@@ -430,9 +431,9 @@ def _run_function_with_streaming_output(func, args, kwargs, stdout_callback, std
                     data = json.loads(line)
                     stream = data["stream"]
                     if stream == StreamType.STDOUT.value:
-                        stdout_callback(data["message"])
+                        stdout_callback(conn, data["message"])
                     elif stream == StreamType.STDERR.value:
-                        stderr_callback(data["message"])
+                        stderr_callback(conn, data["message"])
                 except json.JSONDecodeError as e:
                     stderr_callback(f"[parser error] {e}: {line}")
 
