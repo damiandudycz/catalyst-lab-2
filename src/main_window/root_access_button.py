@@ -43,27 +43,38 @@ class RootAccessButton(Gtk.Overlay):
 
         # Popover close button
         self.stop_button = Gtk.Button()
+        self.stop_button.get_style_context().add_class("destructive-action")
         self.stop_button.set_focusable(False)
         self.stop_button.set_label("Disable root access")
-        self.stop_button.get_style_context().add_class("destructive-action")
         self.stop_button.connect("clicked", self.disable_root_access)
         self.task_list_box.append(self.stop_button)
 
         # Popover start button
         self.start_button = Gtk.Button()
+        self.start_button.get_style_context().add_class("suggested-action")
         self.start_button.set_focusable(False)
         self.start_button.set_label("Enable root access")
-        self.start_button.get_style_context().add_class("suggested-action")
         self.start_button.connect("clicked", self.enable_root_access)
         self.start_button.set_sensitive(not RootHelperClient.shared().running_actions)
         self.task_list_box.append(self.start_button)
 
+        # Stop warning label
+        #self.stop_warning_label = Gtk.Label(label="Disabling root access while actions are in progress will terminate these action.")
+        #self.stop_warning_label.get_style_context().add_class("caption-heading")
+        #self.stop_warning_label.get_style_context().add_class("dim-label")
+        #self.stop_warning_label.set_halign(Gtk.Align.CENTER)
+        #self.stop_warning_label.set_margin_top(12)
+        #self.stop_warning_label.set_margin_bottom(6)
+        #self.stop_warning_label.set_wrap(True)
+        #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and RootHelperClient.shared().is_server_process_running)
+        #self.task_list_box.append(self.stop_warning_label)
+
         # CheckButton for "Keep root access unlocked"
         self.keep_unlocked_checkbox = Gtk.CheckButton(label="Keep unlocked")
+        self.keep_unlocked_checkbox.get_style_context().add_class("caption-heading")
         self.keep_unlocked_checkbox.set_active(Settings.current.keep_root_unlocked)
         self.keep_unlocked_checkbox.set_focusable(False)
         self.keep_unlocked_checkbox.connect("toggled", self.on_keep_unlocked_toggled)
-        self.keep_unlocked_checkbox.get_style_context().add_class("caption-heading")
         self.keep_unlocked_checkbox.set_margin_top(6)
         self.task_list_box.append(self.keep_unlocked_checkbox)
 
@@ -76,11 +87,11 @@ class RootAccessButton(Gtk.Overlay):
         # "Root tasks:" label (initially hidden)
         self.root_tasks_label = Gtk.Label(label="Root tasks:")
         self.root_tasks_label.get_style_context().add_class("caption-heading")
+        self.root_tasks_label.get_style_context().add_class("dim-label")
         self.root_tasks_label.set_halign(Gtk.Align.START)
         self.root_tasks_label.set_margin_top(12)
         self.root_tasks_label.set_margin_bottom(6)
         self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
-        self.root_tasks_label.get_style_context().add_class("dim-label")
         self.task_list_box.append(self.root_tasks_label)
 
         # Add initial requests to list
@@ -117,6 +128,7 @@ class RootAccessButton(Gtk.Overlay):
             self.root_access_button.set_child(icon)
         self.start_button.set_visible(not enabled)
         self.stop_button.set_visible(enabled)
+        #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and enabled)
 
     def root_requests_status_changed(self, client: RootHelperClient, request: GObject.Object, status: bool):
         """Handle changes to root access request status."""
@@ -127,6 +139,7 @@ class RootAccessButton(Gtk.Overlay):
             self.remove_request_from_list(request)
         self.start_button.set_sensitive(not RootHelperClient.shared().running_actions)
         self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
+        #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and RootHelperClient.shared().is_server_process_running)
         #self.root_tasks_separator.set_visible(RootHelperClient.shared().running_actions)
 
     def disable_root_access(self, sender):

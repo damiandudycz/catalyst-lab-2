@@ -189,10 +189,10 @@ class RootHelperClient:
                 print(f"Warning: could not get source for function {func.__name__}")
         return "\n\n# ---- Injected root functions ----\n\n" + "\n\n".join(sources)
 
-    def initialize_server_connectivity(self, token: str, timeout: int = 10) -> bool:
+    def initialize_server_connectivity(self, token: str, timeout: int | None = None) -> bool:
         """Wait for the server to send an 'OK' message indicating it's ready."""
         start_time = time.time()
-        while time.time() - start_time < timeout:
+        while timeout is None or time.time() - start_time < timeout:
             # If server was never started or killed before initialization finished.
             if not self.is_server_process_running:
                 break

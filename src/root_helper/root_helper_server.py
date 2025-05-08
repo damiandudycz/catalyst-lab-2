@@ -397,7 +397,7 @@ class ServerResponse:
 
 class ServerResponseStatusCode(Enum):
     OK = 0
-    JOB_WILL_BE_TERMINATED = 1
+    JOB_WAS_TERMINATED = 1
     COMMAND_EXECUTION_FAILED = 10
     COMMAND_DECODE_FAILED = 11
     COMMAND_UNSUPPORTED_FUNC = 12
@@ -475,14 +475,15 @@ class Job:
         current_thread = threading.current_thread()
         if self.process is None or self.thread is current_thread or not self.process.is_alive():
             return None
-        # Respond to job with JOB_WILL_BE_TERMINATED code.
+        # Respond to job with JOB_WAS_TERMINATED code.
         try:
-            self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WILL_BE_TERMINATED)
+            self.server.respond_err(self.conn, self, "Job will be terminated...")
         except:
             pass
         if force:
             self.prcess.kill()
             self.process.join()
+            self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WAS_TERMINATED)
         else:
             cleanup_thread = threading.Thread(target=self.terminate_and_cleanup)
             cleanup_thread.start()
@@ -499,8 +500,10 @@ class Job:
             self.process.kill()
             self.process.join()
             self.thread.join()
+            self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WAS_TERMINATED)
         else:
             log("Process did terminate.")
+            self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WAS_TERMINATED)
 
     def join_all(jobs: List[Job], timeout: float):
         """Waits for all job threads to finish or until the timeout expires."""
