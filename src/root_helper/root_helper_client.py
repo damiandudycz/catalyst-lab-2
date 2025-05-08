@@ -70,7 +70,7 @@ class RootHelperClient:
         # Waits until main_process finishes, to see if it was closed with error code.
         def monitor_error_codes():
             if self.main_process.wait() != 0 and self.is_server_process_running:
-                print("[Server start main process]! Authorization failed or was cancelled.")
+                print("[Server process]! Authorization failed or was cancelled.")
                 self.is_server_process_running = False
         threading.Thread(target=monitor_error_codes, daemon=True).start()
 
@@ -93,14 +93,14 @@ class RootHelperClient:
         if self.initialize_server_connectivity():
             return True
         else:
-            print("[Server start main process]! Server failed to initialize. Cleaning up...")
+            print("[Server process]! Server failed to initialize. Cleaning up...")
             if self.main_process and self.main_process.poll() is None:
-                print("[Server start main process]: Terminating main process...")
+                print("[Server process]: Terminating main process...")
                 self.main_process.terminate()
                 try:
                     self.main_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    print("[Server start main process]: Killing unresponsive main process...")
+                    print("[Server process]: Killing unresponsive main process...")
                     self.main_process.kill()
                     self.main_process.wait()
             self.is_server_process_running = False
@@ -123,7 +123,7 @@ class RootHelperClient:
                 self.main_process.kill()
                 self.main_process.wait()
             self.main_process = None
-            print("[Server start main process]: Closed.")
+            print("[Server process]: Closed.")
 
     def extract_root_helper_to_run_user(self, uid: int) -> str:
         """Extracts root helper server script and appends root-callable functions."""
