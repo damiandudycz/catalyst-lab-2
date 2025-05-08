@@ -33,7 +33,6 @@ class RootHelperServer:
         self._validate_started_as_root()
         self._validate_session_token(self.session_token)
         self._validate_runtime_dir_and_uid(self.runtime_dir, self.uid)
-        self.log_file: str | None = /tmp/catalyst-lab-server.log
 
     @classmethod
     def shared(cls):
@@ -384,20 +383,22 @@ class ServerMessageType(Enum):
 # Server logging.
 # --------------------------------------------------------------------------------
 
+log_file: str | None = "/tmp/catalyst-lab-server.log"
+
 # Use instead of print to see results in client.
 def log(string: str):
     message = f"{string}\n"
     sys.stdout.write(message)
     sys.stdout.flush()
-    if self.log_file:
-        with open(self.log_file, "a") as f:
+    if log_file:
+        with open(log_file, "a") as f:
             f.write(message)
 def log_error(string: str):
     message = f"{string}\n"
     sys.stderr.write(message)
     sys.stderr.flush()
-    if self.log_file:
-        with open(self.log_file, "a") as f:
+    if log_file:
+        with open(log_file, "a") as f:
             f.write(message)
 
 # --------------------------------------------------------------------------------
