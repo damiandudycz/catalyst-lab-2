@@ -87,7 +87,7 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
-        thread = test._async_raw(lambda x: print(f"... {x}"), lambda x: print(f"...> {x}"))
+        thread = stubborn_worker._async_raw(lambda x: print(f"... {x}"), lambda x: print(f"[result] --> {x} <-- [result]"))
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
@@ -106,3 +106,17 @@ def test():
     time.sleep(50)
     print("abbb")
     return 11.5
+
+@root_function
+def stubborn_worker():
+    def handle_sigterm(signum, frame):
+        print(f"Process {os.getpid()} received SIGTERM but will ignore it.")
+        # You can either ignore or do something here, but the process will not exit
+
+    # Override SIGTERM handler
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
+    print(f"Process {os.getpid()} started")
+    while True:
+        time.sleep(1)
+

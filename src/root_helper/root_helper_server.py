@@ -218,7 +218,7 @@ class RootHelperServer:
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value is any.
         if conn.fileno() == -1:
-            log_error(f"Connection already closed: {conn} / {job} [{response}]")
+            #log_error(f"Connection already closed: {conn} / {job} [{response}]")
             return
         log(f"Responding with code: {code}, response: {response}")
         server_response = ServerResponse(code=code, response=response)
@@ -231,7 +231,7 @@ class RootHelperServer:
     def respond_stdout(self, conn: socket.conn, message: str):
         # Send part of stdout to the server.
         if conn.fileno() == -1:
-            log_error(f"Connection already closed: {conn} [{message}]")
+            #log_error(f"Connection already closed: {conn} [{message}]")
             return
         log(f"Sending stdout: {message}")
         conn.sendall(f"{ServerMessageType.STDOUT.value}:{len(message)}:".encode() + message.encode())
@@ -239,7 +239,7 @@ class RootHelperServer:
     def respond_stderr(self, conn: socket.conn, message: str):
         # Send part of stderr to the server.
         if conn.fileno() == -1:
-            log_error(f"Connection already closed: {conn} [{message}]")
+            #log_error(f"Connection already closed: {conn} [{message}]")
             return
         log(f"Sending stderr: {message}")
         conn.sendall(f"{ServerMessageType.STDERR.value}:{len(message)}:".encode() + message.encode())
@@ -429,20 +429,24 @@ class Job:
         return self
 
     def terminate_and_cleanup(self):
+        if self.process is None or not self.process.is_alive():
+            log("Process already stopped")
+            return
         self.process.terminate()
-        self.process.join(timeout=5) # Allow time for graceful termination for 5s
+        self.thread.join(timeout=5) # Allow time for graceful termination for 5s
         if self.process.is_alive():
             log_error("Process did not terminate. Killing forcefully.")
             self.process.kill()
             self.process.join()
-        self.thread.join()
+            self.thread.join()
+        else:
+            log("Process did terminate.")
 
     def join_all(jobs: List[Job], timeout: float):
-        """Waits for all given threads to finish for given time, blocking current thread."""
-        start = cur_time = time.time()
-        while cur_time <= (start + timeout) and not all(not t.thread and t.thread.is_alive() for t in jobs):
-            time.sleep(0.5)
-            cur_time = time.time()
+        """Waits for all job threads to finish or until the timeout expires."""
+        start_time = time.time()
+        while (time.time() - start_time < timeout and not all(job.thread is not None and not job.thread.is_alive() for job in jobs)):
+            time.sleep(0.1)
 
 class StreamType(str, Enum):
     STDOUT = "stdout"
