@@ -68,12 +68,7 @@ class RootHelperClient:
 
         # Start pkexec and pass token via stdin
         # Note: This is flatpak-spawn process, not server process itself.
-        self.main_process = subprocess.Popen(
-            exec_call,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
+        self.main_process = subprocess.Popen(exec_call, stdin=subprocess.PIPE)
 
         # Waits until main_process finishes, to see if it was closed with error code.
         def monitor_error_codes():
@@ -81,15 +76,6 @@ class RootHelperClient:
                 print("[Server process]! Authorization failed or was cancelled.")
                 self.is_server_process_running = False
         threading.Thread(target=monitor_error_codes, daemon=True).start()
-
-        # Start threads to stream stdout and stderr (only for debugging purpose).
-        def stream_output(pipe, prefix: str = ""):
-            # Streams output from thread to selected pipe.
-            for line in iter(pipe.readline, b''):
-                print(prefix + line.decode(), end='')
-            pipe.close()
-        threading.Thread(target=stream_output, args=(self.main_process.stdout, '[SERVER]: '), daemon=True).start()
-        threading.Thread(target=stream_output, args=(self.main_process.stderr, '[SERVER]! '), daemon=True).start()
 
         # Send token and runtime dir
         self.main_process.stdin.write(token.encode() + b'\n')

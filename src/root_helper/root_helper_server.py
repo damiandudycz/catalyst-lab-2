@@ -33,6 +33,12 @@ class RootHelperServer:
         self._validate_started_as_root()
         self._validate_session_token(self.session_token)
         self._validate_runtime_dir_and_uid(self.runtime_dir, self.uid)
+        # Block stdin/stdout/stderr pipes
+        devnull_read = open(os.devnull, 'r')
+        devnull_write = open(os.devnull, 'w')
+        sys.stdin = devnull_read
+        sys.stdout = devnull_write
+        sys.stderr = devnull_write
 
     @classmethod
     def shared(cls):
@@ -53,37 +59,54 @@ class RootHelperServer:
         self.listen_socket(self.server_socket, self.socket_path, self.session_token, self.uid)
 
     def stop(self):
-        """Stop the server, closing the socket and removing any resources."""
-        if not self.is_running:
-            log_error("Server is not running")
-            return
-        log("Stopping server...")
-        self.is_running = False
-
-        if self.server_socket:
-            log("Closing socket...")
-            self.server_socket.close()
-            self.server_socket = None
-
-        # Clean up the socket file
-        if os.path.exists(self.socket_path):
-            log("Removing socket file...")
-            os.remove(self.socket_path)
-
-        jobs_to_wait = []
-        for job in self.jobs[:]:
-            job_to_wait = job.terminate()
-            if job_to_wait:
-                jobs_to_wait.append(job_to_wait)
-        # TODO: This never finishes if application is closed. Probably thread gets killed or something.
-        Job.join_all(jobs_to_wait, 5 + 1)
-        log("Waiting done")
-        # Force termination of remining if any left.
-        for job in self.jobs[:]:
-            job.terminate(force=true)
-        self.jobs.clear()
-        log("Server stopped.")
-        os._exit(0) # sys.exit() could be used, but if this runs from thread it exits the thread instead.
+        try:
+            """Stop the server, closing the socket and removing any resources."""
+            try:
+                if not self.is_running:
+                    log_error("Server is not running")
+                    return
+                log("Stopping server...")
+                self.is_running = False
+            except Exception as e:
+                log_error(f"Error while updating server state: {e}")
+            try:
+                if self.server_socket:
+                    log("Closing socket...")
+                    self.server_socket.close()
+                    self.server_socket = None
+            except Exception as e:
+                log_error(f"Error while closing socket: {e}")
+            try:
+                if os.path.exists(self.socket_path):
+                    log("Removing socket file...")
+                    os.remove(self.socket_path)
+            except Exception as e:
+                log_error(f"Error while removing socket file: {e}")
+            try:
+                jobs_to_wait = []
+                for job in self.jobs[:]:
+                    try:
+                        job_to_wait = job.terminate()
+                        if job_to_wait:
+                            jobs_to_wait.append(job_to_wait)
+                    except Exception as je:
+                        log_error(f"Error terminating job {job}: {je}")
+                Job.join_all(jobs_to_wait, timeout=6)
+                log("Waiting done")
+            except Exception as e:
+                log_error(f"Error while waiting for jobs: {e}")
+            try:
+                for job in self.jobs[:]:
+                    try:
+                        job.terminate(force=True)
+                    except Exception as je:
+                        log_error(f"Error force terminating job {job}: {je}")
+                self.jobs.clear()
+            except Exception as e:
+                log_error(f"Error while force clearing jobs: {e}")
+            log("Server stopped.")
+        finally:
+            os._exit(0)  # Ensure complete shutdown, even if from a thread.
 
     # --------------------------------------------------------------------------------
     # Socket management:
@@ -387,19 +410,25 @@ log_file: str | None = "/tmp/catalyst-lab-server.log"
 
 # Use instead of print to see results in client.
 def log(string: str):
-    message = f"{string}\n"
-    sys.stdout.write(message)
-    sys.stdout.flush()
-    if log_file:
-        with open(log_file, "a") as f:
-            f.write(message)
+    try:
+        message = f"{string}\n"
+        sys.stdout.write(message)
+        sys.stdout.flush()
+        if log_file:
+            with open(log_file, "a") as f:
+                f.write(message)
+    except:
+        pass
 def log_error(string: str):
-    message = f"{string}\n"
-    sys.stderr.write(message)
-    sys.stderr.flush()
-    if log_file:
-        with open(log_file, "a") as f:
-            f.write(message)
+    try:
+        message = f"{string}\n"
+        sys.stderr.write(message)
+        sys.stderr.flush()
+        if log_file:
+            with open(log_file, "a") as f:
+                f.write(message)
+    except:
+        pass
 
 # --------------------------------------------------------------------------------
 # @root_function decorator.
@@ -436,7 +465,10 @@ class Job:
         if self.process is None or self.thread is current_thread or not self.process.is_alive():
             return None
         # Respond to job with JOB_WILL_BE_TERMINATED code.
-        self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WILL_BE_TERMINATED)
+        try:
+            self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WILL_BE_TERMINATED)
+        except:
+            pass
         if force:
             self.prcess.kill()
             self.process.join()
