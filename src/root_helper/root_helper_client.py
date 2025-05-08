@@ -10,6 +10,7 @@ from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode, ServerMessageType
 from .root_helper_server import RootHelperServer
 from .app_events import AppEvents, app_event_bus
+from .settings import *
 
 class RootHelperClient:
 
@@ -23,6 +24,9 @@ class RootHelperClient:
         self.socket_path = RootHelperServer.get_socket_path(os.getuid())
         self.main_process = None
         self.running_actions = []
+        self.token = None
+        self.keep_unlocked = Settings.current.keep_root_unlocked
+        Settings.current.event_bus.subscribe(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, self.keep_root_unlocked_changed)
 
     @classmethod
     def shared(cls):
@@ -39,6 +43,9 @@ class RootHelperClient:
         )[0]
     )
 
+    def server_handshake_established(self) -> bool:
+        return self.token is not None
+
     # --------------------------------------------------------------------------------
     # Server lifecycle management:
 
@@ -50,7 +57,8 @@ class RootHelperClient:
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
         self.is_server_process_running = True
-        self.token = str(uuid.uuid4())
+        token = str(uuid.uuid4())
+        self.token = None
 
         helper_host_path = self.extract_root_helper_to_run_user(os.getuid())
         xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
@@ -84,13 +92,14 @@ class RootHelperClient:
         threading.Thread(target=stream_output, args=(self.main_process.stderr, '[SERVER]! '), daemon=True).start()
 
         # Send token and runtime dir
-        self.main_process.stdin.write(self.token.encode() + b'\n')
+        self.main_process.stdin.write(token.encode() + b'\n')
         self.main_process.stdin.flush()
         self.main_process.stdin.write(xdg_runtime_dir.encode() + b'\n')
         self.main_process.stdin.flush()
 
         # Wait for the server initialization to return result.
-        if self.initialize_server_connectivity():
+        if self.initialize_server_connectivity(token=token):
+            self.token = token
             return True
         else:
             print("[Server process]! Server failed to initialize. Cleaning up...")
@@ -113,7 +122,9 @@ class RootHelperClient:
             print(f"Server is already stopped")
             return
         try:
-            self.send_request(ServerCommand.EXIT)
+            token = self.token
+            self.token = None
+            self.send_request(ServerCommand.EXIT, token=token)
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
         finally:
@@ -179,7 +190,7 @@ class RootHelperClient:
                 print(f"Warning: could not get source for function {func.__name__}")
         return "\n\n# ---- Injected root functions ----\n\n" + "\n\n".join(sources)
 
-    def initialize_server_connectivity(self, timeout: int = 10) -> bool:
+    def initialize_server_connectivity(self, token: str, timeout: int = 10) -> bool:
         """Wait for the server to send an 'OK' message indicating it's ready."""
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -187,7 +198,7 @@ class RootHelperClient:
             if not self.is_server_process_running:
                 break
             try:
-                response = self.send_request(ServerCommand.HANDSHAKE, allow_auto_start=False)
+                response = self.send_request(ServerCommand.HANDSHAKE, allow_auto_start=False, token=token)
                 return response.code == ServerResponseStatusCode.OK
             except ServerCallError as e:
                 if e == ServerCallError.SERVER_NOT_READY:
@@ -230,7 +241,8 @@ class RootHelperClient:
         handler: callable = None,
         asynchronous: bool = False,
         raw: bool = False,
-        completion_handler: callable = None
+        completion_handler: callable = None,
+        token: str | None = None
     ) -> ServerResponse | threading.Thread:
         """Send a command to the root helper server."""
         if not self.ensure_server_ready(allow_auto_start):
@@ -246,9 +258,10 @@ class RootHelperClient:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
         def worker() -> ServerResponse:
             try:
+                used_token = token if token is not None else self.token
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                     s.connect(self.socket_path)
-                    s.sendall(f"{self.token} {request_type} {message}".encode())
+                    s.sendall(f"{used_token} {request_type} {message}".encode())
                     current_message_type: ServerMessageType | None = None
                     current_chars_left: int | None = None
                     current_buffer = ""
@@ -340,6 +353,11 @@ class RootHelperClient:
         else:
             self.running_actions.remove(request)
             app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, False)
+        if not self.running_actions and not self.keep_unlocked and self.server_handshake_established() and self.is_server_process_running:
+            self.stop_root_helper()
+
+    def keep_root_unlocked_changed(self, value: bool):
+        self.keep_unlocked = value
 
 # --------------------------------------------------------------------------------
 # @root_function decorator.

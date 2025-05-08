@@ -1,16 +1,16 @@
 from __future__ import annotations
-from typing import List
+from typing import List, Callable, final
 import json
 import os
-from .environment import RuntimeEnv, ToolsetEnvHelper
-from typing import final
-from typing import Callable
 from enum import Enum, auto
+from uuid import UUID
+from .environment import RuntimeEnv, ToolsetEnvHelper
 from .event_bus import EventBus
 
 @final
 class SettingsEvents(Enum):
     TOOLSETS_CHANGED = auto()
+    KEEP_ROOT_UNLOCKED_CHANGED = auto()
 
 @final
 class Settings:
@@ -20,8 +20,9 @@ class Settings:
 
     _current_instance: Settings | None = None  # Internal cache
 
-    def __init__(self, toolsets: List[ToolsetEnvHelper]):
+    def __init__(self, toolsets: List[ToolsetEnvHelper], keep_root_unlocked: bool = False):
         self._toolsets = toolsets
+        self._keep_root_unlocked = keep_root_unlocked
         self.event_bus: EventBus[SettingsEvents] = EventBus[SettingsEvents]()
 
     # Lifecycle and access:
@@ -33,19 +34,19 @@ class Settings:
             RuntimeEnv.FLATPAK: lambda: os.path.expanduser(f"~/.var/app/{os.environ.get('FLATPAK_ID')}/config"),
             RuntimeEnv.HOST: lambda: os.environ["XDG_CONFIG_HOME"]
         }
-        # Get the appropriate config base directory based on current runtime environment
         config_base = config_paths.get(RuntimeEnv.current())()
         return os.path.join(config_base, "settings.json")
 
     @classmethod
     def default(cls) -> Settings:
         """Create a default (empty) Settings instance."""
-        return cls(toolsets=[])
+        return cls(toolsets=[], keep_root_unlocked=False)
 
     def serialize(self) -> dict:
         """Convert the settings to a serializable dictionary."""
         return {
-            "toolsets": [toolset.serialize() for toolset in self._toolsets]
+            "toolsets": [toolset.serialize() for toolset in self._toolsets],
+            "keep_root_unlocked": self.keep_root_unlocked
         }
 
     @classmethod
@@ -53,7 +54,8 @@ class Settings:
         """Initialize settings from a dictionary."""
         toolsets_data = data.get("toolsets", [])
         toolsets = [ToolsetEnvHelper.init_from(ts) for ts in toolsets_data]
-        return cls(toolsets)
+        keep_root_unlocked = data.get("keep_root_unlocked", True)
+        return cls(toolsets, keep_root_unlocked=keep_root_unlocked)
 
     def save(self, path: str = None) -> None:
         """Save current settings to a file (default location if not provided)."""
@@ -82,7 +84,7 @@ class Settings:
             cls._current_instance = cls.load()
         return cls._current_instance
 
-    # Toolsets managemtent:
+    # Toolsets management:
 
     def get_toolsets(self) -> List[ToolsetEnvHelper]:
         return self._toolsets
@@ -110,4 +112,16 @@ class Settings:
         if toolset in self._toolsets:
             self._toolsets.remove(toolset)
             self.event_bus.emit(SettingsEvents.TOOLSETS_CHANGED)
+            self.save()
+
+    # Optional: Accessors for keep_root_unlocked
+
+    @property
+    def keep_root_unlocked(self) -> bool:
+        return self._keep_root_unlocked
+    @keep_root_unlocked.setter
+    def keep_root_unlocked(self, value: bool):
+        if self._keep_root_unlocked != value:
+            self._keep_root_unlocked = value
+            self.event_bus.emit(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, value)
             self.save()
