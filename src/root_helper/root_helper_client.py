@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal, threading, json, inspect, re
+import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal
+import threading, json, inspect, re
 from enum import Enum
 from typing import Optional, Any
 from functools import wraps
 from gi.repository import Gio
 from .environment import RuntimeEnv
 from .root_helper_server import ServerCommand, ServerFunction
-from .root_helper_server import ServerResponse, ServerResponseStatusCode, ServerMessageType
-from .root_helper_server import RootHelperServer
+from .root_helper_server import ServerResponse, ServerResponseStatusCode
+from .root_helper_server import RootHelperServer, ServerMessageType
 from .app_events import AppEvents, app_event_bus
 from .settings import *
 
 class RootHelperClient:
 
-    ROOT_FUNCTION_REGISTRY = {}               # Registry used to collect registered root functions.
+    ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperClient | None = None # Singleton shared instance.
 
-    # --------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Lifecycle:
 
     def __init__(self):
@@ -26,7 +27,10 @@ class RootHelperClient:
         self.running_actions = []
         self.token = None
         self.keep_unlocked = Settings.current.keep_root_unlocked
-        Settings.current.event_bus.subscribe(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, self.keep_root_unlocked_changed)
+        Settings.current.event_bus.subscribe(
+            SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED,
+            self.keep_root_unlocked_changed
+        )
 
     @classmethod
     def shared(cls):
@@ -46,14 +50,17 @@ class RootHelperClient:
     def server_handshake_established(self) -> bool:
         return self.token is not None
 
-    # --------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Server lifecycle management:
 
-    def start_root_helper(self) -> bool: # Returns true even if server was already running
+    def start_root_helper(self) -> bool:
         """Start the root helper process."""
         if self.is_server_process_running:
             print("Root helper is already running.")
             return True
+        if self.running_actions:
+            print("Error: Some actions are not finished yet.")
+            return False
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
         self.is_server_process_running = True
@@ -62,7 +69,10 @@ class RootHelperClient:
 
         helper_host_path = self.extract_root_helper_to_run_user(os.getuid())
         xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-        cmd_prefix = ["flatpak-spawn", "--host"] if RuntimeEnv.current() == RuntimeEnv.FLATPAK else []
+        if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
+            cmd_prefix = ["flatpak-spawn", "--host"]
+        else:
+            cmd_prefix = []
         cmd_authorize = ["pkexec"]
         exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
 
@@ -70,10 +80,10 @@ class RootHelperClient:
         # Note: This is flatpak-spawn process, not server process itself.
         self.main_process = subprocess.Popen(exec_call, stdin=subprocess.PIPE)
 
-        # Waits until main_process finishes, to see if it was closed with error code.
+        # Waits until main_process finishes, to see if it was closed with error.
         def monitor_error_codes():
             if self.main_process.wait() != 0 and self.is_server_process_running:
-                print("[Server process]! Authorization failed or was cancelled.")
+                print("[Server process]! Authorization failed or cancelled.")
                 self.is_server_process_running = False
         threading.Thread(target=monitor_error_codes, daemon=True).start()
 
@@ -88,14 +98,14 @@ class RootHelperClient:
             self.token = token
             return True
         else:
-            print("[Server process]! Server failed to initialize. Cleaning up...")
+            print("[Server process]! Server failed to initialize. Cleaning...")
             if self.main_process and self.main_process.poll() is None:
                 print("[Server process]: Terminating main process...")
                 self.main_process.terminate()
                 try:
                     self.main_process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    print("[Server process]: Killing unresponsive main process...")
+                    print("[Server process]: Kill unresponsive main process...")
                     self.main_process.kill()
                     self.main_process.wait()
             self.is_server_process_running = False
@@ -110,23 +120,26 @@ class RootHelperClient:
         try:
             token = self.token
             self.token = None
-            self.send_request(ServerCommand.EXIT, token=token)
+            self.send_request(ServerCommand.EXIT, asynchronous=True, token=token)
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
         finally:
             self.is_server_process_running = False
             if self.main_process and self.main_process.poll() is None:
-                # Note: This only kills main process if it was left - pkexec or flatpak-spawn. Server needs to quit by itself after [EXIT] command.
+                # Note: This only kills main process if it was left.
+                # pkexec or flatpak-spawn.
+                # Server needs to quit by itself after [EXIT] command.
+                # That's why it's safe to kill this even before EXIT completes.
                 self.main_process.kill()
                 self.main_process.wait()
             self.main_process = None
             print("[Server process]: Closed.")
 
     def extract_root_helper_to_run_user(self, uid: int) -> str:
-        """Extracts root helper server script and appends root-callable functions."""
+        """Extracts root helper server code and appends root functions."""
         import os
 
-        # Runtime directory where the generated root-helper script will be placed
+        # Runtime directory where the generated server code will be placed.
         runtime_dir = RootHelperServer.get_runtime_dir(uid)
         output_path = os.path.join(runtime_dir, "root-helper-server.py")
 
@@ -163,8 +176,8 @@ class RootHelperClient:
         return output_path
 
     def collect_root_function_sources(self) -> str:
-        """Returns all registered root function sources as a single Python string,
-        with @root_function decorators removed."""
+        """Returns all registered root function sources as a single"""
+        """Python string, with @root_function decorators removed."""
         if not RootHelperClient.ROOT_FUNCTION_REGISTRY:
             return ""
         sources = []
@@ -206,18 +219,23 @@ class RootHelperClient:
         return False
 
     def ensure_server_ready(self, allow_auto_start=True) -> bool:
-        """Ensure the root helper server is running and the socket is available."""
-        """If allowed automatically start the server (This should be used only by handshake request)."""
+        """Ensure the root helper server is running and the socket is"""
+        """available. If allowed automatically start the server (This should"""
+        """be used only by handshake request)."""
         print("Ensure server ready")
         if self.is_server_process_running:
             return os.path.exists(self.socket_path)
         elif allow_auto_start:
             print("[Root helper is not running, attempting to start it.]")
-            return self.start_root_helper()
+            if self.running_actions:
+                print("[Error: Some actions are not finished yet]")
+                return False
+            else:
+                return self.start_root_helper()
         else:
             return False
 
-    # --------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Handling requests to server / root functions:
 
     def send_request(
@@ -345,9 +363,9 @@ class RootHelperClient:
     def keep_root_unlocked_changed(self, value: bool):
         self.keep_unlocked = value
 
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # @root_function decorator.
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 def root_function(func):
     """Registers a function and replaces it with a proxy that calls the root server."""
@@ -392,9 +410,9 @@ def root_function(func):
     proxy_function._async_raw = _async_raw
     return proxy_function
 
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Helper functions and types.
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 class ServerCallError(Exception):
     """Custom exception with predefined error codes and messages."""

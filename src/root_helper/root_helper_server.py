@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import os, socket, subprocess, sys, uuid, pwd, time, struct, signal, threading, json, multiprocessing
+import os, socket, subprocess, sys, uuid, pwd, time, struct, signal, threading
+import json, multiprocessing
 from enum import Enum
 from functools import wraps
 from dataclasses import dataclass, asdict
@@ -9,10 +10,10 @@ from contextlib import redirect_stdout, redirect_stderr
 
 class RootHelperServer:
 
-    ROOT_FUNCTION_REGISTRY = {}               # Registry used to collect registered root functions.
+    ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperServer | None = None # Singleton shared instance.
 
-    # --------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Lifecycle:
 
     def __init__(self):
@@ -26,8 +27,12 @@ class RootHelperServer:
         self.session_token = sys.stdin.readline().strip()
         log("Please provide runtime dir:")
         os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
-        self.runtime_dir: str = RootHelperServer.get_runtime_dir(self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR")
-        self.socket_path: str = RootHelperServer.get_socket_path(self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR")
+        self.runtime_dir: str = RootHelperServer.get_runtime_dir(
+            self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
+        )
+        self.socket_path: str = RootHelperServer.get_socket_path(
+            self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
+        )
         self.socket_dir:  str = os.path.dirname(self.socket_path)
         # Validate state:
         self._validate_started_as_root()
@@ -58,30 +63,17 @@ class RootHelperServer:
         self.is_running = True
         self.listen_socket(self.server_socket, self.socket_path, self.session_token, self.uid)
 
-    def stop(self):
+    def stop(self, after_jobs_cleaned: callable | None = None):
         try:
             """Stop the server, closing the socket and removing any resources."""
             try:
                 if not self.is_running:
                     log_error("Server is not running")
                     return
-                log("Stopping server...")
-                self.is_running = False
+                else:
+                    log("Stopping server...")
             except Exception as e:
                 log_error(f"Error while updating server state: {e}")
-            try:
-                if self.server_socket:
-                    log("Closing socket...")
-                    self.server_socket.close()
-                    self.server_socket = None
-            except Exception as e:
-                log_error(f"Error while closing socket: {e}")
-            try:
-                if os.path.exists(self.socket_path):
-                    log("Removing socket file...")
-                    os.remove(self.socket_path)
-            except Exception as e:
-                log_error(f"Error while removing socket file: {e}")
             try:
                 jobs_to_wait = []
                 for job in self.jobs[:]:
@@ -104,11 +96,30 @@ class RootHelperServer:
                 self.jobs.clear()
             except Exception as e:
                 log_error(f"Error while force clearing jobs: {e}")
+            if after_jobs_cleaned:
+                try:
+                    after_jobs_cleaned()
+                except Exception as je:
+                    log_error(f"Error calling after_jobs_cleaned {after_jobs_cleaned}: {je}")
+            try:
+                if self.server_socket:
+                    log("Closing socket...")
+                    self.server_socket.close()
+                    self.server_socket = None
+            except Exception as e:
+                log_error(f"Error while closing socket: {e}")
+            try:
+                if os.path.exists(self.socket_path):
+                    log("Removing socket file...")
+                    os.remove(self.socket_path)
+            except Exception as e:
+                log_error(f"Error while removing socket file: {e}")
             log("Server stopped.")
         finally:
+            self.is_running = False
             os._exit(0)  # Ensure complete shutdown, even if from a thread.
 
-    # --------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Socket management:
 
     def prepare_server_socket_directory(self, socket_dir: str, uid: int):
@@ -129,7 +140,7 @@ class RootHelperServer:
         os.chmod(socket_path, 0o600)
         return server
 
-    # --------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Handling connections:
 
     def listen_socket(self, server: socket.socket, socket_path: str, session_token: str, allowed_uid: int):
@@ -204,10 +215,10 @@ class RootHelperServer:
                 case ServerCommand.EXIT:
                     # TODO: Reversing order helps, but probably only because it stalls application client. Need to check further.
                     # Also this order was set this way for a reason, but not sure why anymore (probably to send signal back sooner without wait).
-                    self.respond(conn, job, ServerResponseStatusCode.OK, "Exiting...")
-                    self.stop()
+                    self.respond_stdout(conn, "Exiting...")
+                    self.stop(after_jobs_cleaned = lambda: self.respond(conn, job, ServerResponseStatusCode.OK, "Exited"))
                 case ServerCommand.PING:
-                    self.respond(conn, job, ServerResponseStatusCode.OK)
+                    self.respond(conn, job, ServerResponseStatusCode.OK, "PONG")
                 case ServerCommand.HANDSHAKE:
                     if self.pid_lock is None:
                         self.pid_lock = pid
@@ -274,7 +285,7 @@ class RootHelperServer:
         log(f"Sending stderr: {message}")
         conn.sendall(f"{ServerMessageType.STDERR.value}:{len(message)}:".encode() + message.encode())
 
-    # --------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Helper function.
 
     def _validate_session_token(self, session_token: str):
@@ -309,7 +320,7 @@ class RootHelperServer:
             return int(pkexec_uid)
         raise RuntimeError("Could not determine UID. This script must be run using pkexec.")
 
-    # --------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Shared helper functions.
 
     def get_runtime_dir(uid: int, runtime_env_name: str = "XDG_RUNTIME_DIR") -> str:
@@ -320,16 +331,16 @@ class RootHelperServer:
         runtime_dir = RootHelperServer.get_runtime_dir(uid, runtime_env_name=runtime_env_name)
         return os.path.join(runtime_dir, "root-service-socket")
 
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Server runtime lifecycle.
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 def __init_server__():
     RootHelperServer.shared().start()
 
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Helper functions and types.
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
@@ -402,9 +413,9 @@ class ServerMessageType(Enum):
     STDOUT = 1
     STDERR = 2
 
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Server logging.
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 log_file: str | None = "/tmp/catalyst-lab-server.log"
 
@@ -430,18 +441,18 @@ def log_error(string: str):
     except:
         pass
 
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # @root_function decorator.
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 def root_function(func):
     """Registers a function to be allowed to call from client."""
     """Server version of this decorator just collects these functions into ROOT_FUNCTION_REGISTRY."""
     RootHelperServer.ROOT_FUNCTION_REGISTRY[func.__name__] = func
 
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Function processing with output handlers support.
-# --------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 class Job:
     """Groups thread with additional process that is spawned by this thread."""
