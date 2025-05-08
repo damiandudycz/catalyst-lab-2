@@ -33,6 +33,7 @@ class RootHelperServer:
         self._validate_started_as_root()
         self._validate_session_token(self.session_token)
         self._validate_runtime_dir_and_uid(self.runtime_dir, self.uid)
+        self.log_file: str | None = /tmp/catalyst-lab-server.log
 
     @classmethod
     def shared(cls):
@@ -75,12 +76,15 @@ class RootHelperServer:
             job_to_wait = job.terminate()
             if job_to_wait:
                 jobs_to_wait.append(job_to_wait)
+        # TODO: This never finishes if application is closed. Probably thread gets killed or something.
         Job.join_all(jobs_to_wait, 5 + 1)
+        log("Waiting done")
         # Force termination of remining if any left.
         for job in self.jobs[:]:
             job.terminate(force=true)
         self.jobs.clear()
         log("Server stopped.")
+        os._exit(0) # sys.exit() could be used, but if this runs from thread it exits the thread instead.
 
     # --------------------------------------------------------------------------------
     # Socket management:
@@ -110,26 +114,28 @@ class RootHelperServer:
         """Listen for incoming client connections and spawn threads to handle them."""
         log(f"Listening on socket {socket_path}...")
         server.listen()
-        try:
-            while self.is_running:
-                try:
-                    conn, _ = server.accept()
-                    log("Accepting connection...")
-                    job = Job(server=self, conn=conn)
-                    job.thread = threading.Thread(
-                        target=self.handle_connection,
-                        args=(job, conn, session_token, allowed_uid)
-                    )
-                    self.jobs.append(job)
-                    job.thread.start()
-                except Exception as e:
-                    log_error(f"Error accepting connection: {e}")
-        finally:
-            self.stop()
+        while self.is_running:
+            try:
+                conn, _ = server.accept()
+                log("Accepting connection...")
+                job = Job(server=self, conn=conn)
+                job.thread = threading.Thread(
+                    target=self.handle_connection,
+                    args=(job, conn, session_token, allowed_uid)
+                )
+                self.jobs.append(job)
+                job.thread.start()
+            except Exception as e:
+                log_error(f"Error accepting connection: {e}")
+                # Optional - stop server if there are errors in single connection:
+                self.stop()
+                return
+                # ^
+
+        self.stop()
 
     def handle_connection(self, job: Job, conn: socket.socket, session_token: str, allowed_uid: int):
         """Handle a single client connection in a separate thread."""
-        conn_thread = threading.current_thread()
         try:
             # Validate peer credentials:
             try:
@@ -157,9 +163,9 @@ class RootHelperServer:
             # Process request:
             match request_type:
                 case "command":
-                    self.handle_command_request(job, conn, conn_thread, pid, payload)
+                    self.handle_command_request(job, conn, pid, payload)
                 case "function":
-                    self.handle_function_request(job, conn, conn_thread, pid, payload)
+                    self.handle_function_request(job, conn, pid, payload)
                 case _:
                     self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
@@ -167,13 +173,15 @@ class RootHelperServer:
             log_error(f"Unexpected error in connection handler: {e}")
             conn.close()
 
-    def handle_command_request(self, job: Job, conn: socket.conn, conn_thread: threading.Thread, pid: int, payload: str):
+    def handle_command_request(self, job: Job, conn: socket.conn, pid: int, payload: str):
         log("Processing command request")
         try:
             cmd_enum = ServerCommand(payload)
             log(f"Command: {cmd_enum}")
             match cmd_enum:
                 case ServerCommand.EXIT:
+                    # TODO: Reversing order helps, but probably only because it stalls application client. Need to check further.
+                    # Also this order was set this way for a reason, but not sure why anymore (probably to send signal back sooner without wait).
                     self.respond(conn, job, ServerResponseStatusCode.OK, "Exiting...")
                     self.stop()
                 case ServerCommand.PING:
@@ -183,11 +191,11 @@ class RootHelperServer:
                         self.pid_lock = pid
                         self.respond(conn, job, ServerResponseStatusCode.OK, "Initialization succeeded")
                     else:
-                        self.respond(conn, job, ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE)
+                        self.respond(conn, job, ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, "Initialization already finished")
         except ValueError as e:
-            self.respond(conn, conn_thread, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+            self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def handle_function_request(self, job: Job, conn: socket.conn, conn_thread: threading.Thread, pid: int, payload: str):
+    def handle_function_request(self, job: Job, conn: socket.conn, pid: int, payload: str):
         log("Processing function request")
         if self.pid_lock is None:
             self.respond(conn, job, ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
@@ -378,11 +386,19 @@ class ServerMessageType(Enum):
 
 # Use instead of print to see results in client.
 def log(string: str):
-    sys.stdout.write(f"{string}\n")
-    sys.stdout.flush()  # Ensure it's written immediately
+    message = f"{string}\n"
+    sys.stdout.write(message)
+    sys.stdout.flush()
+    if self.log_file:
+        with open(self.log_file, "a") as f:
+            f.write(message)
 def log_error(string: str):
-    sys.stderr.write(f"{string}\n")
-    sys.stderr.flush()  # Ensure it's written immediately
+    message = f"{string}\n"
+    sys.stderr.write(message)
+    sys.stderr.flush()
+    if self.log_file:
+        with open(self.log_file, "a") as f:
+            f.write(message)
 
 # --------------------------------------------------------------------------------
 # @root_function decorator.

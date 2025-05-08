@@ -126,7 +126,7 @@ class RootAccessButton(Gtk.Overlay):
         else:
             self.remove_request_from_list(request)
         self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
-        self.root_tasks_separator.set_visible(RootHelperClient.shared().running_actions)
+        #self.root_tasks_separator.set_visible(RootHelperClient.shared().running_actions)
 
     def disable_root_access(self, sender):
         """Disable root access when the button is clicked."""

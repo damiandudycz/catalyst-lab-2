@@ -6,6 +6,7 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Gio, Adw
 from .main_window import CatalystlabWindow
+from .root_helper_client import RootHelperClient
 
 class CatalystlabApplication(Adw.Application):
     """The main application singleton class."""
@@ -27,6 +28,11 @@ class CatalystlabApplication(Adw.Application):
         if not win:
             win = CatalystlabWindow(application=self)
         win.present()
+
+    def do_shutdown(self):
+        """Called when the application is shutting down."""
+        RootHelperClient.shared().stop_root_helper()
+        Gio.Application.do_shutdown(self)
 
     def on_about_action(self, widget, _):
         """Callback for the app.about action."""
