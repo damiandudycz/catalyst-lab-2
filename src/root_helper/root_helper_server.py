@@ -7,6 +7,8 @@ from functools import wraps
 from dataclasses import dataclass, asdict
 from typing import Any
 from contextlib import redirect_stdout, redirect_stderr
+from typing import List
+from datetime import datetime
 
 class StreamPipe(Enum):
     RETURN = 0
@@ -62,35 +64,34 @@ class RootHelperServer:
         print("[Server]: " + "Please provide session token:")
         self.session_token = sys.stdin.readline().strip()
         print("[Server]: " + "Please provide runtime dir:")
-        os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
+        os.environ["CL_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
         self.runtime_dir: str = RootHelperServer.get_runtime_dir(
-            self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
+            self.uid, runtime_env_name="CL_SERVER_RUNTIME_DIR"
         )
         self.socket_path: str = RootHelperServer.get_socket_path(
-            self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
+            self.uid, runtime_env_name="CL_SERVER_RUNTIME_DIR"
         )
 
     def validate_session(self):
-        """Validates basic session information - run as root, token correct, runtime dir, uuid."""
+        """Validates basic session information - run as root, token correct,"""
+        """runtime dir, uuid."""
         # Validate that script was started as root:
         if os.geteuid() != 0:
             raise RuntimeError("This script must be run as root.")
         # Validate that the session token is a valid UUIDv4:
-        if not self.session_token:
-            raise RuntimeError("Missing ROOT_HELPER_TOKEN env value.")
         try:
             token_obj = uuid.UUID(self.session_token, version=4)
             if str(token_obj) != self.session_token:
                 raise RuntimeError("Token string doesn't match parsed UUID")
         except (ValueError, AttributeError):
-            raise RuntimeError("Invalid ROOT_HELPER_TOKEN: must be a valid UUIDv4.")
+            raise RuntimeError("Invalid session token: must be a valid UUIDv4.")
         # Ensure the runtime directory exists and the UID is valid:
         if self.uid is None:
             raise RuntimeError("Cannot determine calling user UID.")
         if self.runtime_dir is None:
             raise RuntimeError(f"Runtime directory not specified.")
         if not os.path.isdir(self.runtime_dir):
-            raise RuntimeError(f"Runtime directory does not exist: {self.runtime_dir}")
+            raise RuntimeError(f"Runtime directory missing: {self.runtime_dir}")
 
     def start(self):
         """Run the root helper server."""
@@ -101,7 +102,12 @@ class RootHelperServer:
         self.pid_lock = None
         self.server_socket = self.setup_socket(self.socket_path, self.uid)
         self.is_running = True
-        self.listen_socket(self.server_socket, self.socket_path, self.session_token, self.uid)
+        self.listen_socket(
+            server=self.server_socket,
+            socket_path=self.socket_path,
+            session_token=self.session_token,
+            allowed_uid=self.uid
+        )
 
     def stop(self, called_by_job: Job | None = None, after_jobs_cleaned: callable | None = None):
         """Stop the server, closing the socket and removing any resources."""
@@ -143,7 +149,7 @@ class RootHelperServer:
         # Close app
         print("[Server]: Server stopped.")
         self.is_running = False
-        os._exit(0)  # Ensure complete shutdown, even if from a thread.
+        os._exit(0)
 
     # --------------------------------------------------------------------------
     # Socket management:
@@ -183,11 +189,9 @@ class RootHelperServer:
                 job.thread.start()
             except Exception as e:
                 print("[Server]: ERROR: " + f"Error accepting connection: {e}")
-                # Optional - stop server if there are errors in single connection:
+                # Stop server after errors in single connection:
                 self.stop()
                 return
-                # ^
-
         self.stop()
 
     def handle_connection(self, job: Job, conn: socket.socket, session_token: str, allowed_uid: int):
@@ -214,6 +218,9 @@ class RootHelperServer:
                 self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
             full_payload = data[len(session_token) + 1:]
+            if " " not in full_payload:
+                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                return
             request_type, payload = full_payload.split(" ", 1)
 
             # Process request:
@@ -229,7 +236,7 @@ class RootHelperServer:
             print("[Server]: ERROR: " + f"Unexpected error in connection handler: {e}")
             conn.close()
 
-    def handle_command_request(self, job: Job, conn: socket.conn, pid: int, payload: str):
+    def handle_command_request(self, job: Job, conn: socket.socket, pid: int, payload: str):
         print("[Server]: " + "Processing command request")
         try:
             cmd_enum = ServerCommand(payload)
@@ -249,7 +256,7 @@ class RootHelperServer:
         except ValueError as e:
             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def handle_function_request(self, job: Job, conn: socket.conn, pid: int, payload: str):
+    def handle_function_request(self, job: Job, conn: socket.socket, pid: int, payload: str):
         print("[Server]: " + "Processing function request")
         if self.pid_lock is None:
             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
@@ -258,7 +265,7 @@ class RootHelperServer:
                 func_struct = ServerFunction.from_json(payload)
                 print("[Server]: " + f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
                 if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
-                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.func_name}")
+                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.function_name}")
                 else:
                     try:
                         result = _run_function_with_streaming_output(
@@ -416,7 +423,7 @@ class Job:
         except Exception as e:
             pass
         if force:
-            self.prcess.kill()
+            self.process.kill()
             self.process.join()
             self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
         else:
@@ -440,6 +447,7 @@ class Job:
             print("[Server]: " + "Process did terminate.")
             self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
 
+    @staticmethod
     def join_all(jobs: List[Job], timeout: float):
         """Waits for all job threads to finish or until the timeout expires."""
         start_time = time.time()
