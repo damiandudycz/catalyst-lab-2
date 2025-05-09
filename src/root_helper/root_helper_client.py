@@ -121,7 +121,7 @@ class RootHelperClient:
             token = self.token
             self.token = None
             # TODO: If this finished and there are still running processes, remove them from list, and print a warning that they failed to be killed.
-            self.send_request(ServerCommand.EXIT, asynchronous=True, token=token)
+            self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, token=token)
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
         finally:
@@ -201,7 +201,7 @@ class RootHelperClient:
                 response = self.send_request(ServerCommand.HANDSHAKE, allow_auto_start=False, token=token)
                 return response.code == ServerResponseStatusCode.OK
             except ServerCallError as e:
-                if e == ServerCallError.SERVER_NOT_READY:
+                if e == ServerCallError.SERVER_NOT_RESPONDING:
                     time.sleep(1)
                     continue
                 else:
@@ -223,16 +223,11 @@ class RootHelperClient:
         """Ensure the root helper server is running and the socket is"""
         """available. If allowed automatically start the server (This should"""
         """be used only by handshake request)."""
-        print("Ensure server ready")
         if self.is_server_process_running:
             return os.path.exists(self.socket_path)
         elif allow_auto_start:
             print("[Root helper is not running, attempting to start it.]")
-            if self.running_actions:
-                print("[Error: Some actions are not finished yet]")
-                return False
-            else:
-                return self.start_root_helper()
+            return self.start_root_helper()
         else:
             return False
 
@@ -250,10 +245,10 @@ class RootHelperClient:
         token: str | None = None
     ) -> ServerResponse | threading.Thread:
         """Send a command to the root helper server."""
-        if not self.ensure_server_ready(allow_auto_start):
+        if request != ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start):
             if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
                 self.stop_root_helper()
-            raise ServerCallError.SERVER_NOT_READY
+            raise ServerCallError.SERVER_NOT_RESPONDING
         # Prepare message and type
         if isinstance(request, ServerFunction):
             message, request_type = request.to_json(), "function"
@@ -314,6 +309,8 @@ class RootHelperClient:
                         result = server_response if raw else server_response.response
                         completion_handler(result)
                     return server_response
+            except Exception as e:
+                return ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
             finally:
                 self.set_request_status(request, False)
 
@@ -370,6 +367,7 @@ class RootHelperClient:
 
 def root_function(func):
     """Registers a function and replaces it with a proxy that calls the root server."""
+    """All these calls can throw in case server call fails to start."""
     RootHelperClient.ROOT_FUNCTION_REGISTRY[func.__name__] = func
     @wraps(func)
     def proxy_function(*args, **kwargs):
@@ -425,6 +423,6 @@ class ServerCallError(Exception):
     def __str__(self):
         return f"Server error (code={self.error_code}): {self.message}"
 # Define error codes and their corresponding messages as class variables
-ServerCallError.SERVER_NOT_READY = ServerCallError(1, "The server is not ready.")
+ServerCallError.SERVER_NOT_RESPONDING = ServerCallError(1, "The server is not responding.")
 ServerCallError.SERVER_PROCESS_NOT_AVAILABLE = ServerCallError(2, "The server starting process is not available.")
 

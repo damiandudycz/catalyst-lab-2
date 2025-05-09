@@ -12,6 +12,7 @@ class RootHelperServer:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperServer | None = None # Singleton shared instance.
+    hide_logs = False
 
     # --------------------------------------------------------------------------
     # Lifecycle:
@@ -43,8 +44,9 @@ class RootHelperServer:
         devnull_read = open(os.devnull, 'r')
         devnull_write = open(os.devnull, 'w')
         sys.stdin = devnull_read
-        sys.stdout = devnull_write
-        sys.stderr = devnull_write
+        if RootHelperServer.hide_logs:
+            sys.stdout = devnull_write
+            sys.stderr = devnull_write
 
     @classmethod
     def shared(cls):
@@ -65,62 +67,61 @@ class RootHelperServer:
         self.listen_socket(self.server_socket, self.socket_path, self.session_token, self.uid)
 
     def stop(self, called_by_job: Job | None = None, after_jobs_cleaned: callable | None = None):
+        """Stop the server, closing the socket and removing any resources."""
         try:
-            """Stop the server, closing the socket and removing any resources."""
-            try:
-                if not self.is_running:
-                    log_error("Server is not running")
-                    return
-                else:
-                    log("Stopping server...")
-            except Exception as e:
-                log_error(f"Error while updating server state: {e}")
-            try:
-                jobs_to_wait = []
-                # Loop all jobs, except the one that called this function if any (usually [EXIT])
-                for job in [j for j in self.jobs if j is not called_by_job]:
-                    try:
-                        job_to_wait = job.terminate()
-                        if job_to_wait:
-                            jobs_to_wait.append(job_to_wait)
-                    except Exception as je:
-                        log_error(f"Error terminating job {job}: {je}")
-                Job.join_all(jobs_to_wait, timeout=6)
-                log("Waiting done")
-            except Exception as e:
-                log_error(f"Error while waiting for jobs: {e}")
-            try:
-                for job in self.jobs[:]:
-                    try:
-                        job.terminate(force=True)
-                    except Exception as je:
-                        log_error(f"Error force terminating job {job}: {je}")
-                # Clear self.job, only leaving current [EXIT] job.
-                self.jobs = [called_by_job] if called_by_job in self.jobs else []
-            except Exception as e:
-                log_error(f"Error while force clearing jobs: {e}")
-            if after_jobs_cleaned:
+            if not self.is_running:
+                log_error("Server is not running")
+                return
+            else:
+                log("Stopping server...")
+        except Exception as e:
+            log_error(f"Error while updating server state: {e}")
+        try:
+            jobs_to_wait = []
+            # Loop all jobs, except the one that called this function if any (usually [EXIT])
+            for job in [j for j in self.jobs if j is not called_by_job]:
                 try:
-                    after_jobs_cleaned()
+                    job_to_wait = job.terminate()
+                    if job_to_wait:
+                        jobs_to_wait.append(job_to_wait)
                 except Exception as je:
-                    log_error(f"Error calling after_jobs_cleaned {after_jobs_cleaned}: {je}")
+                    log_error(f"Error terminating job {job}: {je}")
+            Job.join_all(jobs_to_wait, timeout=6)
+            log("Waiting done")
+        except Exception as e:
+            log_error(f"Error while waiting for jobs: {e}")
+        try:
+            for job in self.jobs[:]:
+                try:
+                    job.terminate(force=True)
+                except Exception as je:
+                    log_error(f"Error force terminating job {job}: {je}")
+            # Clear self.job, only leaving current [EXIT] job.
+            self.jobs = [called_by_job] if called_by_job in self.jobs else []
+        except Exception as e:
+            log_error(f"Error while force clearing jobs: {e}")
+        if after_jobs_cleaned:
             try:
-                if self.server_socket:
-                    log("Closing socket...")
-                    self.server_socket.close()
-                    self.server_socket = None
-            except Exception as e:
-                log_error(f"Error while closing socket: {e}")
-            try:
-                if os.path.exists(self.socket_path):
-                    log("Removing socket file...")
-                    os.remove(self.socket_path)
-            except Exception as e:
-                log_error(f"Error while removing socket file: {e}")
-            log("Server stopped.")
-        finally:
-            self.is_running = False
-            os._exit(0)  # Ensure complete shutdown, even if from a thread.
+                after_jobs_cleaned()
+            except Exception as je:
+                log_error(f"Error calling after_jobs_cleaned {after_jobs_cleaned}: {je}")
+        try:
+            if self.server_socket:
+                log("Closing socket...")
+                self.server_socket.close()
+                self.server_socket = None
+        except Exception as e:
+            log_error(f"Error while closing socket: {e}")
+        try:
+            if os.path.exists(self.socket_path):
+                log("Removing socket file...")
+                os.remove(self.socket_path)
+        except Exception as e:
+            log_error(f"Error while removing socket file: {e}")
+        log("Server stopped.")
+
+        self.is_running = False
+        os._exit(0)  # Ensure complete shutdown, even if from a thread.
 
     # --------------------------------------------------------------------------
     # Socket management:
@@ -420,29 +421,13 @@ class ServerMessageType(Enum):
 # Server logging.
 # ------------------------------------------------------------------------------
 
-log_file: str | None = "/tmp/catalyst-lab-server.log"
-
 # Use instead of print to see results in client.
 def log(string: str):
-    try:
-        message = f"{string}\n"
-        sys.stdout.write(message)
-        sys.stdout.flush()
-        if log_file:
-            with open(log_file, "a") as f:
-                f.write(message)
-    except:
-        pass
+    sys.stdout.write("[Server]: " + string + "\n")
+    sys.stdout.flush()
 def log_error(string: str):
-    try:
-        message = f"{string}\n"
-        sys.stderr.write(message)
-        sys.stderr.flush()
-        if log_file:
-            with open(log_file, "a") as f:
-                f.write(message)
-    except:
-        pass
+    sys.stdout.write("[Server]! " + string + "\n")
+    sys.stderr.flush()
 
 # ------------------------------------------------------------------------------
 # @root_function decorator.

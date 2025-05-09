@@ -87,7 +87,7 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
-        thread = stubborn_worker._async_raw(lambda x: print(f"... {x}"), lambda x: print(f"[result] --> {x} <-- [result]"))
+        test._async_raw(lambda x: print(f"> A  {x}"), lambda x: print(f"[result A] --> {x} <-- [result]"), 1)
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
@@ -101,12 +101,9 @@ class EnvironmentsSection(Gtk.Box):
         )
 
 @root_function
-def test():
-    print("aaa")
-    time.sleep(10)
-    print("abbb")
-    raise RuntimeError("Wonder what code this have")
-    return 11.5
+def test(x: int):
+    time.sleep(5)
+    return x
 
 @root_function
 def stubborn_worker():
