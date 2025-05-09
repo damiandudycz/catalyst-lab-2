@@ -9,7 +9,7 @@ from gi.repository import Gio
 from .environment import RuntimeEnv
 from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
-from .root_helper_server import RootHelperServer, ServerMessageType
+from .root_helper_server import RootHelperServer, ServerMessageType, WatchDog
 from .app_events import AppEvents, app_event_bus
 from .settings import *
 
@@ -27,6 +27,7 @@ class RootHelperClient:
         self.running_actions = []
         self.token = None
         self.keep_unlocked = Settings.current.keep_root_unlocked
+        self.server_watchdog = WatchDog(lambda: self.ping_server())
         Settings.current.event_bus.subscribe(
             SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED,
             self.keep_root_unlocked_changed
@@ -43,7 +44,8 @@ class RootHelperClient:
         fget=lambda self: getattr(self, "_is_server_process_running", False),
         fset=lambda self, value: (
             setattr(self, "_is_server_process_running", value),
-            app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, value)
+            app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, value),
+            (not value and self.server_watchdog.stop() or None)
         )[0]
     )
 
@@ -136,6 +138,12 @@ class RootHelperClient:
             self.main_process = None
             print("[Server process]: Closed.")
 
+    def ping_server(self):
+        try:
+            self.send_request(ServerCommand.PING, allow_auto_start=False)
+        finally:
+            pass # Server disconnection is handled in send_request.
+
     def extract_root_helper_to_run_user(self, uid: int) -> str:
         """Extracts root helper server code and appends root functions."""
         import os
@@ -199,6 +207,7 @@ class RootHelperClient:
                 break
             try:
                 response = self.send_request(ServerCommand.HANDSHAKE, allow_auto_start=False, token=token)
+                self.server_watchdog.start()
                 return response.code == ServerResponseStatusCode.OK
             except ServerCallError as e:
                 if e == ServerCallError.SERVER_NOT_RESPONDING:
@@ -247,7 +256,8 @@ class RootHelperClient:
         """Send a command to the root helper server."""
         if request != ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start):
             if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
-                self.stop_root_helper()
+                print("[Server process] Server communication broke.")
+                self.stop_root_helper() # This should never happen.
             raise ServerCallError.SERVER_NOT_RESPONDING
         # Prepare message and type
         if isinstance(request, ServerFunction):

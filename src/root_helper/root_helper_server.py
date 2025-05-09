@@ -577,3 +577,45 @@ def _run_and_capture_target(func, args, kwargs, write_fd, result_queue):
             except Exception as e:
                 result_queue.put(e)
 
+class WatchDog:
+    def __init__(self, func: callable, ns: float = 5.0):
+        if not callable(func):
+            raise ValueError("func must be callable")
+        if not isinstance(ns, float) or ns <= 0:
+            raise ValueError("ns must be a positive number")
+
+        self.func = func
+        self.ns = ns
+        self._stop_event = threading.Event()
+        self._thread = None
+        self._started = False
+        self._lock = threading.Lock()
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            self._stop_event.wait(self.ns)
+            try:
+                if not self._stop_event.is_set():
+                    self.func()
+            except Exception as e:
+                print(f"Exception in WatchDog function: {e}")
+
+    def start(self):
+        with self._lock:
+            if self._started:
+                return
+            self._started = True
+            self._stop_event.clear()
+            self._thread = threading.Thread(target=self._run, daemon=True)
+            self._thread.start()
+
+    def stop(self):
+        with self._lock:
+            if not self._started:
+                return
+            self._stop_event.set()
+            if self._thread != threading.current_thread():
+                self._thread.join()
+            self._started = False
+            self._thread = None
+

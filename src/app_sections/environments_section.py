@@ -102,7 +102,7 @@ class EnvironmentsSection(Gtk.Box):
 
 @root_function
 def test(x: int):
-    time.sleep(5)
+    time.sleep(10)
     return x
 
 @root_function
