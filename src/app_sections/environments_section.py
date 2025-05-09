@@ -105,6 +105,7 @@ def test():
     print("aaa")
     time.sleep(10)
     print("abbb")
+    raise RuntimeError("Wonder what code this have")
     return 11.5
 
 @root_function

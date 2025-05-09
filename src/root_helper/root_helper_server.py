@@ -22,6 +22,7 @@ class RootHelperServer:
         self.pid_lock: int | None = None
         self.jobs: List[Job] = []
         self.uid: int = self._get_caller_uid()
+        self.last_ping: datetime | None = None
         log("Welcome")
         log("Please provide session token:")
         self.session_token = sys.stdin.readline().strip()
@@ -63,7 +64,7 @@ class RootHelperServer:
         self.is_running = True
         self.listen_socket(self.server_socket, self.socket_path, self.session_token, self.uid)
 
-    def stop(self, after_jobs_cleaned: callable | None = None):
+    def stop(self, called_by_job: Job | None = None, after_jobs_cleaned: callable | None = None):
         try:
             """Stop the server, closing the socket and removing any resources."""
             try:
@@ -76,7 +77,8 @@ class RootHelperServer:
                 log_error(f"Error while updating server state: {e}")
             try:
                 jobs_to_wait = []
-                for job in self.jobs[:]:
+                # Loop all jobs, except the one that called this function if any (usually [EXIT])
+                for job in [j for j in self.jobs if j is not called_by_job]:
                     try:
                         job_to_wait = job.terminate()
                         if job_to_wait:
@@ -93,7 +95,8 @@ class RootHelperServer:
                         job.terminate(force=True)
                     except Exception as je:
                         log_error(f"Error force terminating job {job}: {je}")
-                self.jobs.clear()
+                # Clear self.job, only leaving current [EXIT] job.
+                self.jobs = [called_by_job] if called_by_job in self.jobs else []
             except Exception as e:
                 log_error(f"Error while force clearing jobs: {e}")
             if after_jobs_cleaned:
@@ -213,10 +216,8 @@ class RootHelperServer:
             log(f"Command: {cmd_enum}")
             match cmd_enum:
                 case ServerCommand.EXIT:
-                    # TODO: Reversing order helps, but probably only because it stalls application client. Need to check further.
-                    # Also this order was set this way for a reason, but not sure why anymore (probably to send signal back sooner without wait).
                     self.respond_stdout(conn, "Exiting...")
-                    self.stop(after_jobs_cleaned = lambda: self.respond(conn, job, ServerResponseStatusCode.OK, "Exited"))
+                    self.stop(called_by_job=job, after_jobs_cleaned = lambda: self.respond(conn, job, ServerResponseStatusCode.OK, "Exited"))
                 case ServerCommand.PING:
                     self.respond(conn, job, ServerResponseStatusCode.OK, "PONG")
                 case ServerCommand.HANDSHAKE:
@@ -249,17 +250,19 @@ class RootHelperServer:
                             self.respond_stdout,
                             self.respond_stderr
                         )
-                        self.respond(conn, job, ServerResponseStatusCode.OK, response=result)
+                        if not job.was_terminated:
+                            self.respond(conn, job, ServerResponseStatusCode.OK, response=result)
                     except Exception as e:
-                        self.respond(conn, job, ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                        if not job.was_terminated:
+                            self.respond(conn, job, ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
             except ValueError:
                 self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
     def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode, response: str | None = None):
         # Final response, returning the result of function called.
-        # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value is any.
+        # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
         if conn.fileno() == -1:
-            #log_error(f"Connection already closed: {conn} / {job} [{response}]")
+            log_error(f"Connection already closed: {conn} / {job} [{response}]")
             return
         log(f"Responding with code: {code}, response: {response}")
         server_response = ServerResponse(code=code, response=response)
@@ -272,7 +275,7 @@ class RootHelperServer:
     def respond_stdout(self, conn: socket.conn, message: str):
         # Send part of stdout to the server.
         if conn.fileno() == -1:
-            #log_error(f"Connection already closed: {conn} [{message}]")
+            log_error(f"Connection already closed: {conn} [{message}]")
             return
         log(f"Sending stdout: {message}")
         conn.sendall(f"{ServerMessageType.STDOUT.value}:{len(message)}:".encode() + message.encode())
@@ -280,7 +283,7 @@ class RootHelperServer:
     def respond_stderr(self, conn: socket.conn, message: str):
         # Send part of stderr to the server.
         if conn.fileno() == -1:
-            #log_error(f"Connection already closed: {conn} [{message}]")
+            log_error(f"Connection already closed: {conn} [{message}]")
             return
         log(f"Sending stderr: {message}")
         conn.sendall(f"{ServerMessageType.STDERR.value}:{len(message)}:".encode() + message.encode())
@@ -466,6 +469,7 @@ class Job:
         self.conn = conn
         self.thread: threading.Thread | None = None
         self.process: multiprocessing.Process | None = None
+        self.was_terminated = False
 
     def terminate(self, force: bool = False) -> Job | None:
         """Schedules Job process to terminate and gives it 5 seconds to finish."""
@@ -475,10 +479,10 @@ class Job:
         current_thread = threading.current_thread()
         if self.process is None or self.thread is current_thread or not self.process.is_alive():
             return None
-        # Respond to job with JOB_WAS_TERMINATED code.
+        self.was_terminated = True
         try:
-            self.server.respond_err(self.conn, self, "Job will be terminated...")
-        except:
+            self.server.respond_stderr(self.conn, "Job will be terminated...")
+        except Exception as e:
             pass
         if force:
             self.prcess.kill()

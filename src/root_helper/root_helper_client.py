@@ -120,6 +120,7 @@ class RootHelperClient:
         try:
             token = self.token
             self.token = None
+            # TODO: If this finished and there are still running processes, remove them from list, and print a warning that they failed to be killed.
             self.send_request(ServerCommand.EXIT, asynchronous=True, token=token)
         except Exception as e:
             print(f"Failed to stop root helper: {e}")
