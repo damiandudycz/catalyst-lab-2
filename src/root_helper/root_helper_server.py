@@ -35,7 +35,6 @@ class RootHelperServer:
         self.socket_path: str = RootHelperServer.get_socket_path(
             self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
         )
-        self.socket_dir:  str = os.path.dirname(self.socket_path)
         # Validate state:
         self._validate_started_as_root()
         self._validate_session_token(self.session_token)
@@ -61,8 +60,7 @@ class RootHelperServer:
             return
         log("Starting server...")
         self.pid_lock = None
-        self.prepare_server_socket_directory(self.socket_dir, self.uid)
-        self.server_socket = self.setup_server_socket(self.socket_path, self.uid)
+        self.server_socket = self.setup_socket(self.socket_path, self.uid)
         self.is_running = True
         self.listen_socket(self.server_socket, self.socket_path, self.session_token, self.uid)
 
@@ -126,16 +124,13 @@ class RootHelperServer:
     # --------------------------------------------------------------------------
     # Socket management:
 
-    def prepare_server_socket_directory(self, socket_dir: str, uid: int):
-        """Ensure the socket directory exists and has proper permissions."""
-        log("Preparing socket directory...")
+    def setup_socket(self, socket_path: str, uid: int):
+        """Set up the server socket for communication."""
+        log("Setting up socket...")
+        socket_dir: str = os.path.dirname(socket_path)
         os.makedirs(socket_dir, exist_ok=True)
         os.chown(socket_dir, uid, uid)
         os.chmod(socket_dir, 0o700)
-
-    def setup_server_socket(self, socket_path: str, uid: int):
-        """Set up the server socket for communication."""
-        log("Setting up socket...")
         if os.path.exists(socket_path):
             os.remove(socket_path)
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
