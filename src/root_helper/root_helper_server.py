@@ -24,10 +24,10 @@ class RootHelperServer:
         self.jobs: List[Job] = []
         self.uid: int = self._get_caller_uid()
         self.last_ping: datetime | None = None
-        log("Welcome")
-        log("Please provide session token:")
+        print("[Server]: " + "Welcome")
+        print("[Server]: " + "Please provide session token:")
         self.session_token = sys.stdin.readline().strip()
-        log("Please provide runtime dir:")
+        print("[Server]: " + "Please provide runtime dir:")
         os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
         self.runtime_dir: str = RootHelperServer.get_runtime_dir(
             self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
@@ -56,9 +56,9 @@ class RootHelperServer:
     def start(self):
         """Run the root helper server."""
         if self.is_running:
-            log_error("Server is already running")
+            print("[Server]: ERROR: " + "Server is already running")
             return
-        log("Starting server...")
+        print("[Server]: " + "Starting server...")
         self.pid_lock = None
         self.server_socket = self.setup_socket(self.socket_path, self.uid)
         self.is_running = True
@@ -68,12 +68,12 @@ class RootHelperServer:
         """Stop the server, closing the socket and removing any resources."""
         try:
             if not self.is_running:
-                log_error("Server is not running")
+                print("[Server]: ERROR: " + "Server is not running")
                 return
             else:
-                log("Stopping server...")
+                print("[Server]: " + "Stopping server...")
         except Exception as e:
-            log_error(f"Error while updating server state: {e}")
+            print("[Server]: ERROR: "+f"Error while updating server state: {e}")
         try:
             jobs_to_wait = []
             # Loop all jobs, except the one that called this function if any (usually [EXIT])
@@ -83,40 +83,40 @@ class RootHelperServer:
                     if job_to_wait:
                         jobs_to_wait.append(job_to_wait)
                 except Exception as je:
-                    log_error(f"Error terminating job {job}: {je}")
+                    print("[Server]: ERROR: "+f"Error terminating job {job}: {je}")
             Job.join_all(jobs_to_wait, timeout=6)
-            log("Waiting done")
+            print("[Server]: " + "Waiting done")
         except Exception as e:
-            log_error(f"Error while waiting for jobs: {e}")
+            print("[Server]: ERROR: "+f"Error while waiting for jobs: {e}")
         try:
             for job in self.jobs[:]:
                 try:
                     job.terminate(force=True)
                 except Exception as je:
-                    log_error(f"Error force terminating job {job}: {je}")
+                    print("[Server]: ERROR: "+f"Error force terminating job {job}: {je}")
             # Clear self.job, only leaving current [EXIT] job.
             self.jobs = [called_by_job] if called_by_job in self.jobs else []
         except Exception as e:
-            log_error(f"Error while force clearing jobs: {e}")
+            print("[Server]: ERROR: "+f"Error while force clearing jobs: {e}")
         if after_jobs_cleaned:
             try:
                 after_jobs_cleaned()
             except Exception as je:
-                log_error(f"Error calling after_jobs_cleaned {after_jobs_cleaned}: {je}")
+                print("[Server]: ERROR: "+f"Error calling after_jobs_cleaned {after_jobs_cleaned}: {je}")
         try:
             if self.server_socket:
-                log("Closing socket...")
+                print("[Server]: " + "Closing socket...")
                 self.server_socket.close()
                 self.server_socket = None
         except Exception as e:
-            log_error(f"Error while closing socket: {e}")
+            print("[Server]: ERROR: "+f"Error while closing socket: {e}")
         try:
             if os.path.exists(self.socket_path):
-                log("Removing socket file...")
+                print("[Server]: " + "Removing socket file...")
                 os.remove(self.socket_path)
         except Exception as e:
-            log_error(f"Error while removing socket file: {e}")
-        log("Server stopped.")
+            print("[Server]: ERROR: "+f"Error while removing socket file: {e}")
+        print("[Server]: " + "Server stopped.")
 
         self.is_running = False
         os._exit(0)  # Ensure complete shutdown, even if from a thread.
@@ -126,7 +126,7 @@ class RootHelperServer:
 
     def setup_socket(self, socket_path: str, uid: int):
         """Set up the server socket for communication."""
-        log("Setting up socket...")
+        print("[Server]: " + "Setting up socket...")
         socket_dir: str = os.path.dirname(socket_path)
         os.makedirs(socket_dir, exist_ok=True)
         os.chown(socket_dir, uid, uid)
@@ -144,12 +144,12 @@ class RootHelperServer:
 
     def listen_socket(self, server: socket.socket, socket_path: str, session_token: str, allowed_uid: int):
         """Listen for incoming client connections and spawn threads to handle them."""
-        log(f"Listening on socket {socket_path}...")
+        print("[Server]: "+f"Listening on socket {socket_path}...")
         server.listen()
         while self.is_running:
             try:
                 conn, _ = server.accept()
-                log("Accepting connection...")
+                print("[Server]: " + "Accepting connection...")
                 job = Job(server=self, conn=conn)
                 job.thread = threading.Thread(
                     target=self.handle_connection,
@@ -158,7 +158,7 @@ class RootHelperServer:
                 self.jobs.append(job)
                 job.thread.start()
             except Exception as e:
-                log_error(f"Error accepting connection: {e}")
+                print("[Server]: ERROR: "+f"Error accepting connection: {e}")
                 # Optional - stop server if there are errors in single connection:
                 self.stop()
                 return
@@ -202,14 +202,14 @@ class RootHelperServer:
                     self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
         except Exception as e:
-            log_error(f"Unexpected error in connection handler: {e}")
+            print("[Server]: ERROR: "+f"Unexpected error in connection handler: {e}")
             conn.close()
 
     def handle_command_request(self, job: Job, conn: socket.conn, pid: int, payload: str):
-        log("Processing command request")
+        print("[Server]: " + "Processing command request")
         try:
             cmd_enum = ServerCommand(payload)
-            log(f"Command: {cmd_enum}")
+            print("[Server]: "+f"Command: {cmd_enum}")
             match cmd_enum:
                 case ServerCommand.EXIT:
                     self.respond_stdout(conn, "Exiting...")
@@ -226,13 +226,13 @@ class RootHelperServer:
             self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
     def handle_function_request(self, job: Job, conn: socket.conn, pid: int, payload: str):
-        log("Processing function request")
+        print("[Server]: " + "Processing function request")
         if self.pid_lock is None:
             self.respond(conn, job, ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
         else:
             try:
                 func_struct = ServerFunction.from_json(payload)
-                log(f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
+                print("[Server]: "+f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
                 if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
                     self.respond(conn, job, ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.func_name}")
                 else:
@@ -258,9 +258,9 @@ class RootHelperServer:
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
         if conn.fileno() == -1:
-            log_error(f"Connection already closed: {conn} / {job} [{response}]")
+            print("[Server]: ERROR: "+f"Connection already closed: {conn} / {job} [{response}]")
             return
-        log(f"Responding with code: {code}, response: {response}")
+        print("[Server]: "+f"Responding with code: {code}, response: {response}")
         server_response = ServerResponse(code=code, response=response)
         server_response_json = server_response.to_json()
         conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
@@ -271,17 +271,17 @@ class RootHelperServer:
     def respond_stdout(self, conn: socket.conn, message: str):
         # Send part of stdout to the server.
         if conn.fileno() == -1:
-            log_error(f"Connection already closed: {conn} [{message}]")
+            print("[Server]: ERROR: "+f"Connection already closed: {conn} [{message}]")
             return
-        log(f"Sending stdout: {message}")
+        print("[Server]: "+f"Sending stdout: {message}")
         conn.sendall(f"{ServerMessageType.STDOUT.value}:{len(message)}:".encode() + message.encode())
 
     def respond_stderr(self, conn: socket.conn, message: str):
         # Send part of stderr to the server.
         if conn.fileno() == -1:
-            log_error(f"Connection already closed: {conn} [{message}]")
+            print("[Server]: ERROR: "+f"Connection already closed: {conn} [{message}]")
             return
-        log(f"Sending stderr: {message}")
+        print("[Server]: "+f"Sending stderr: {message}")
         conn.sendall(f"{ServerMessageType.STDERR.value}:{len(message)}:".encode() + message.encode())
 
     # --------------------------------------------------------------------------
@@ -413,18 +413,6 @@ class ServerMessageType(Enum):
     STDERR = 2
 
 # ------------------------------------------------------------------------------
-# Server logging.
-# ------------------------------------------------------------------------------
-
-# Use instead of print to see results in client.
-def log(string: str):
-    sys.stdout.write("[Server]: " + string + "\n")
-    sys.stdout.flush()
-def log_error(string: str):
-    sys.stdout.write("[Server]! " + string + "\n")
-    sys.stderr.flush()
-
-# ------------------------------------------------------------------------------
 # @root_function decorator.
 # ------------------------------------------------------------------------------
 
@@ -475,18 +463,18 @@ class Job:
 
     def terminate_and_cleanup(self):
         if self.process is None or not self.process.is_alive():
-            log("Process already stopped")
+            print("[Server]: " + "Process already stopped")
             return
         self.process.terminate()
         self.thread.join(timeout=5) # Allow time for graceful termination for 5s
         if self.process.is_alive():
-            log_error("Process did not terminate. Killing forcefully.")
+            print("[Server]: ERROR: " + "Process did not terminate. Killing forcefully.")
             self.process.kill()
             self.process.join()
             self.thread.join()
             self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WAS_TERMINATED)
         else:
-            log("Process did terminate.")
+            print("[Server]: " + "Process did terminate.")
             self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WAS_TERMINATED)
 
     def join_all(jobs: List[Job], timeout: float):
