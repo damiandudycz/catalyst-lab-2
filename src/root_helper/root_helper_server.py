@@ -8,6 +8,24 @@ from dataclasses import dataclass, asdict
 from typing import Any
 from contextlib import redirect_stdout, redirect_stderr
 
+class StreamPipe(Enum):
+    RETURN = 0
+    STDOUT = 1
+    STDERR = 2
+
+class ServerResponseStatusCode(Enum):
+    OK = 0
+    JOB_WAS_TERMINATED = 1
+    COMMAND_EXECUTION_FAILED = 10
+    COMMAND_DECODE_FAILED = 11
+    COMMAND_UNSUPPORTED_FUNC = 12
+    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 20
+    AUTHORIZATION_WRONG_UID = 21
+    AUTHORIZATION_WRONG_PID = 22
+    AUTHORIZATION_WRONG_TOKEN = 23
+    INITIALIZATION_ALREADY_DONE = 30
+    INITIALIZATION_NOT_DONE = 31
+
 class RootHelperServer:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
@@ -22,24 +40,9 @@ class RootHelperServer:
         self.server_socket: socket.socket | None = None
         self.pid_lock: int | None = None
         self.jobs: List[Job] = []
-        self.uid: int = self._get_caller_uid()
         self.last_ping: datetime | None = None
         print("[Server]: " + "Welcome")
-        print("[Server]: " + "Please provide session token:")
-        self.session_token = sys.stdin.readline().strip()
-        print("[Server]: " + "Please provide runtime dir:")
-        os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
-        self.runtime_dir: str = RootHelperServer.get_runtime_dir(
-            self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
-        )
-        self.socket_path: str = RootHelperServer.get_socket_path(
-            self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
-        )
-        # Validate state:
-        self._validate_started_as_root()
-        self._validate_session_token(self.session_token)
-        self._validate_runtime_dir_and_uid(self.runtime_dir, self.uid)
-        # Block stdin/stdout/stderr pipes
+        self.read_initial_session_data()
         devnull_read = open(os.devnull, 'r')
         devnull_write = open(os.devnull, 'w')
         sys.stdin = devnull_read
@@ -52,6 +55,42 @@ class RootHelperServer:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    def read_initial_session_data(self):
+        """Reads session uuid, token and runtime env from STDIN and os.env."""
+        self.uid: int = int(os.environ.get("PKEXEC_UID"))
+        print("[Server]: " + "Please provide session token:")
+        self.session_token = sys.stdin.readline().strip()
+        print("[Server]: " + "Please provide runtime dir:")
+        os.environ["CATALYSTLAB_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
+        self.runtime_dir: str = RootHelperServer.get_runtime_dir(
+            self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
+        )
+        self.socket_path: str = RootHelperServer.get_socket_path(
+            self.uid, runtime_env_name="CATALYSTLAB_SERVER_RUNTIME_DIR"
+        )
+
+    def validate_session(self):
+        """Validates basic session information - run as root, token correct, runtime dir, uuid."""
+        # Validate that script was started as root:
+        if os.geteuid() != 0:
+            raise RuntimeError("This script must be run as root.")
+        # Validate that the session token is a valid UUIDv4:
+        if not self.session_token:
+            raise RuntimeError("Missing ROOT_HELPER_TOKEN env value.")
+        try:
+            token_obj = uuid.UUID(self.session_token, version=4)
+            if str(token_obj) != self.session_token:
+                raise RuntimeError("Token string doesn't match parsed UUID")
+        except (ValueError, AttributeError):
+            raise RuntimeError("Invalid ROOT_HELPER_TOKEN: must be a valid UUIDv4.")
+        # Ensure the runtime directory exists and the UID is valid:
+        if self.uid is None:
+            raise RuntimeError("Cannot determine calling user UID.")
+        if self.runtime_dir is None:
+            raise RuntimeError(f"Runtime directory not specified.")
+        if not os.path.isdir(self.runtime_dir):
+            raise RuntimeError(f"Runtime directory does not exist: {self.runtime_dir}")
 
     def start(self):
         """Run the root helper server."""
@@ -78,7 +117,6 @@ class RootHelperServer:
             except Exception as e:
                 print(f"[Server]: ERROR: {str(e)}")
                 return None
-
         # Handle job termination
         jobs_to_wait = []
         for job in [j for j in self.jobs if j is not called_by_job]:
@@ -87,16 +125,13 @@ class RootHelperServer:
                 jobs_to_wait.append(job_to_wait)
         Job.join_all(jobs_to_wait, timeout=6)
         print("[Server]: Waiting done")
-
         # Force terminate remaining jobs and clear jobs list
         for job in self.jobs[:]:
             safe_execute(job.terminate, force=True)
         self.jobs = [called_by_job] if called_by_job in self.jobs else []
-
         # Call after_jobs_cleaned callback if provided
         if after_jobs_cleaned:
             safe_execute(after_jobs_cleaned)
-
         # Close server socket and remove socket file
         if self.server_socket:
             print("[Server]: Closing socket...")
@@ -105,7 +140,7 @@ class RootHelperServer:
         if os.path.exists(self.socket_path):
             print("[Server]: Removing socket file...")
             safe_execute(os.remove, self.socket_path)
-
+        # Close app
         print("[Server]: Server stopped.")
         self.is_running = False
         os._exit(0)  # Ensure complete shutdown, even if from a thread.
@@ -133,7 +168,7 @@ class RootHelperServer:
 
     def listen_socket(self, server: socket.socket, socket_path: str, session_token: str, allowed_uid: int):
         """Listen for incoming client connections and spawn threads to handle them."""
-        print("[Server]: "+f"Listening on socket {socket_path}...")
+        print("[Server]: " + f"Listening on socket {socket_path}...")
         server.listen()
         while self.is_running:
             try:
@@ -147,7 +182,7 @@ class RootHelperServer:
                 self.jobs.append(job)
                 job.thread.start()
             except Exception as e:
-                print("[Server]: ERROR: "+f"Error accepting connection: {e}")
+                print("[Server]: ERROR: " + f"Error accepting connection: {e}")
                 # Optional - stop server if there are errors in single connection:
                 self.stop()
                 return
@@ -163,20 +198,20 @@ class RootHelperServer:
                 ucred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
                 pid, uid, gid = struct.unpack("3i", ucred)
             except Exception:
-                self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
+                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
                 return
 
             if uid != allowed_uid:
-                self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
+                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
                 return
             if self.pid_lock is not None and self.pid_lock != pid:
-                self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
+                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
                 return
 
             # Receive request data:
             data = conn.recv(4096).decode().strip()
             if not data.startswith(session_token):
-                self.respond(conn, job, ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
+                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
             full_payload = data[len(session_token) + 1:]
             request_type, payload = full_payload.split(" ", 1)
@@ -188,42 +223,42 @@ class RootHelperServer:
                 case "function":
                     self.handle_function_request(job, conn, pid, payload)
                 case _:
-                    self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
         except Exception as e:
-            print("[Server]: ERROR: "+f"Unexpected error in connection handler: {e}")
+            print("[Server]: ERROR: " + f"Unexpected error in connection handler: {e}")
             conn.close()
 
     def handle_command_request(self, job: Job, conn: socket.conn, pid: int, payload: str):
         print("[Server]: " + "Processing command request")
         try:
             cmd_enum = ServerCommand(payload)
-            print("[Server]: "+f"Command: {cmd_enum}")
+            print("[Server]: " + f"Command: {cmd_enum}")
             match cmd_enum:
                 case ServerCommand.EXIT:
-                    self.respond_stdout(conn, "Exiting...")
-                    self.stop(called_by_job=job, after_jobs_cleaned = lambda: self.respond(conn, job, ServerResponseStatusCode.OK, "Exited"))
+                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDOUT, response="Exiting...")
+                    self.stop(called_by_job=job, after_jobs_cleaned = lambda: self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Exited"))
                 case ServerCommand.PING:
-                    self.respond(conn, job, ServerResponseStatusCode.OK, "PONG")
+                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="PONG")
                 case ServerCommand.HANDSHAKE:
                     if self.pid_lock is None:
                         self.pid_lock = pid
-                        self.respond(conn, job, ServerResponseStatusCode.OK, "Initialization succeeded")
+                        self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Initialization succeeded")
                     else:
-                        self.respond(conn, job, ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, "Initialization already finished")
+                        self.respond(conn=conn, job=job, code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
         except ValueError as e:
-            self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
     def handle_function_request(self, job: Job, conn: socket.conn, pid: int, payload: str):
         print("[Server]: " + "Processing function request")
         if self.pid_lock is None:
-            self.respond(conn, job, ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
         else:
             try:
                 func_struct = ServerFunction.from_json(payload)
-                print("[Server]: "+f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
+                print("[Server]: " + f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
                 if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
-                    self.respond(conn, job, ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.func_name}")
+                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.func_name}")
                 else:
                     try:
                         result = _run_function_with_streaming_output(
@@ -232,81 +267,38 @@ class RootHelperServer:
                             RootHelperServer.ROOT_FUNCTION_REGISTRY[func_struct.function_name],
                             func_struct.args,
                             func_struct.kwargs,
-                            self.respond_stdout,
-                            self.respond_stderr
+                            self.respond
                         )
                         if not job.was_terminated:
-                            self.respond(conn, job, ServerResponseStatusCode.OK, response=result)
+                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response=result)
                     except Exception as e:
                         if not job.was_terminated:
-                            self.respond(conn, job, ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
             except ValueError:
-                self.respond(conn, job, ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode, response: str | None = None):
+    def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe = StreamPipe.RETURN, response: str | None = None):
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
+        if code != ServerResponseStatusCode.OK and pipe != StreamPipe.RETURN:
+            raise RuntimeError("Return code != OK can be used only with RETURN pipe.")
         if conn.fileno() == -1:
-            print("[Server]: ERROR: "+f"Connection already closed: {conn} / {job} [{response}]")
+            print("[Server]: ERROR: " + f"Connection already closed: {conn} / {job} [{response}]")
             return
-        print("[Server]: "+f"Responding with code: {code}, response: {response}")
-        server_response = ServerResponse(code=code, response=response)
-        server_response_json = server_response.to_json()
-        conn.sendall(f"{ServerMessageType.RETURN.value}:{len(server_response_json)}:".encode() + server_response_json.encode())
-        conn.shutdown(socket.SHUT_WR)
-        conn.close()
-        self.jobs.remove(job)
-
-    def respond_stdout(self, conn: socket.conn, message: str):
-        # Send part of stdout to the server.
-        if conn.fileno() == -1:
-            print("[Server]: ERROR: "+f"Connection already closed: {conn} [{message}]")
-            return
-        print("[Server]: "+f"Sending stdout: {message}")
-        conn.sendall(f"{ServerMessageType.STDOUT.value}:{len(message)}:".encode() + message.encode())
-
-    def respond_stderr(self, conn: socket.conn, message: str):
-        # Send part of stderr to the server.
-        if conn.fileno() == -1:
-            print("[Server]: ERROR: "+f"Connection already closed: {conn} [{message}]")
-            return
-        print("[Server]: "+f"Sending stderr: {message}")
-        conn.sendall(f"{ServerMessageType.STDERR.value}:{len(message)}:".encode() + message.encode())
-
-    # --------------------------------------------------------------------------
-    # Helper function.
-
-    def _validate_session_token(self, session_token: str):
-        """Validate that the session token is a valid UUIDv4."""
-        if not session_token:
-            raise RuntimeError("Missing ROOT_HELPER_TOKEN env value.")
-        try:
-            token_obj = uuid.UUID(session_token, version=4)
-            if str(token_obj) != session_token:
-                raise RuntimeError("Token string doesn't match parsed UUID")
-        except (ValueError, AttributeError):
-            raise RuntimeError("Invalid ROOT_HELPER_TOKEN: must be a valid UUIDv4.")
-
-    def _validate_runtime_dir_and_uid(self, runtime_dir: str, uid: int):
-        """Ensure the runtime directory exists and the UID is valid."""
-        if uid is None:
-            raise RuntimeError("Cannot determine calling user UID.")
-        if runtime_dir is None:
-            raise RuntimeError(f"Runtime directory not specified.")
-        if not os.path.isdir(runtime_dir):
-            raise RuntimeError(f"Runtime directory does not exist: {runtime_dir}")
-
-    def _validate_started_as_root(self):
-        """Ensure the script is run as root."""
-        if os.geteuid() != 0:
-            raise RuntimeError("This script must be run as root.")
-
-    def _get_caller_uid(self) -> int:
-        """Get the UID of the user calling the script, handling pkexec."""
-        pkexec_uid = os.environ.get("PKEXEC_UID")
-        if pkexec_uid:
-            return int(pkexec_uid)
-        raise RuntimeError("Could not determine UID. This script must be run using pkexec.")
+        print("[Server]: " + f"Responding with code: {code}, response: {response}, on pipe: {pipe}")
+        match pipe:
+            case StreamPipe.RETURN:
+                server_response = ServerResponse(code=code, response=response)
+                response_formatted = server_response.to_json()
+                close = True
+            case StreamPipe.STDOUT | StreamPipe.STDERR:
+                response_formatted = response
+                close = False
+        conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
+        if close:
+            conn.shutdown(socket.SHUT_WR)
+            conn.close()
+            self.jobs.remove(job)
 
     # --------------------------------------------------------------------------
     # Shared helper functions.
@@ -383,24 +375,6 @@ class ServerResponse:
         response = data.get("response")
         return cls(code=code, response=response)
 
-class ServerResponseStatusCode(Enum):
-    OK = 0
-    JOB_WAS_TERMINATED = 1
-    COMMAND_EXECUTION_FAILED = 10
-    COMMAND_DECODE_FAILED = 11
-    COMMAND_UNSUPPORTED_FUNC = 12
-    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 20
-    AUTHORIZATION_WRONG_UID = 21
-    AUTHORIZATION_WRONG_PID = 22
-    AUTHORIZATION_WRONG_TOKEN = 23
-    INITIALIZATION_ALREADY_DONE = 30
-    INITIALIZATION_NOT_DONE = 31
-
-class ServerMessageType(Enum):
-    RETURN = 0
-    STDOUT = 1
-    STDERR = 2
-
 # ------------------------------------------------------------------------------
 # @root_function decorator.
 # ------------------------------------------------------------------------------
@@ -438,13 +412,13 @@ class Job:
             return None
         self.was_terminated = True
         try:
-            self.server.respond_stderr(self.conn, "Job will be terminated...")
+            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDERR, response="Job will be terminated...")
         except Exception as e:
             pass
         if force:
             self.prcess.kill()
             self.process.join()
-            self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WAS_TERMINATED)
+            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
         else:
             cleanup_thread = threading.Thread(target=self.terminate_and_cleanup)
             cleanup_thread.start()
@@ -461,10 +435,10 @@ class Job:
             self.process.kill()
             self.process.join()
             self.thread.join()
-            self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WAS_TERMINATED)
+            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
         else:
             print("[Server]: " + "Process did terminate.")
-            self.server.respond(self.conn, self, ServerResponseStatusCode.JOB_WAS_TERMINATED)
+            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
 
     def join_all(jobs: List[Job], timeout: float):
         """Waits for all job threads to finish or until the timeout expires."""
@@ -472,19 +446,15 @@ class Job:
         while (time.time() - start_time < timeout and not all(job.thread is not None and not job.thread.is_alive() for job in jobs)):
             time.sleep(0.1)
 
-class StreamType(str, Enum):
-    STDOUT = "stdout"
-    STDERR = "stderr"
-
 class StreamWrapper:
-    def __init__(self, stream, stream_type: StreamType):
+    def __init__(self, stream, pipe: StreamPipe):
         self.stream = stream
-        self.stream_type = stream_type
+        self.pipe = pipe
     def write(self, message):
         if not message.strip():
             return  # Skip empty messages
         payload = json.dumps({
-            "stream": self.stream_type.value,
+            "pipe": self.pipe.value,
             "message": message.rstrip("\n")
         })
         self.stream.write(payload + "\n")
@@ -492,7 +462,7 @@ class StreamWrapper:
     def flush(self):
         self.stream.flush()
 
-def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, stdout_callback, stderr_callback) -> Any | None:
+def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, respond_callback) -> Any | None:
     """Takes a function and runs it as separate process while sending its output to stdout_callback and stderr_callback."""
     """Spawned process runs in sync, so this function only after given function is ready."""
     """Returns what given function returns or throws if given function throws."""
@@ -508,20 +478,19 @@ def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, stdo
     proc.start()
     os.close(write_fd)
 
-    def stream_reader():
+    def stream_reader(job: Job):
         with os.fdopen(read_fd, 'r') as pipe:
             for line in pipe:
                 try:
                     data = json.loads(line)
-                    stream = data["stream"]
-                    if stream == StreamType.STDOUT.value:
-                        stdout_callback(conn, data["message"])
-                    elif stream == StreamType.STDERR.value:
-                        stderr_callback(conn, data["message"])
+                    respond_callback(conn=conn, job=job, code=ServerResponseStatusCode.OK, pipe=data["pipe"], response=data["message"])
                 except json.JSONDecodeError as e:
                     stderr_callback(f"[parser error] {e}: {line}")
 
-    reader_thread = threading.Thread(target=stream_reader)
+    reader_thread = threading.Thread(
+        target=stream_reader,
+        args=(job,)
+    )
     reader_thread.start()
 
     proc.join()
@@ -540,8 +509,8 @@ def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, stdo
 def _run_and_capture_target(func, args, kwargs, write_fd, result_queue):
     """Runs function and redirects current stdout and stderr from it to StreamWrapper objects."""
     with os.fdopen(write_fd, 'w', buffering=1) as f:
-        stdout_wrapper = StreamWrapper(f, StreamType.STDOUT)
-        stderr_wrapper = StreamWrapper(f, StreamType.STDERR)
+        stdout_wrapper = StreamWrapper(f, StreamPipe.STDOUT)
+        stderr_wrapper = StreamWrapper(f, StreamPipe.STDERR)
         with redirect_stdout(stdout_wrapper), redirect_stderr(stderr_wrapper):
             try:
                 result = func(*args, **kwargs)
@@ -555,7 +524,6 @@ class WatchDog:
             raise ValueError("func must be callable")
         if not isinstance(ns, float) or ns <= 0:
             raise ValueError("ns must be a positive number")
-
         self.func = func
         self.ns = ns
         self._stop_event = threading.Event()

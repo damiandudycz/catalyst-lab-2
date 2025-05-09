@@ -9,7 +9,7 @@ from gi.repository import Gio
 from .environment import RuntimeEnv
 from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
-from .root_helper_server import RootHelperServer, ServerMessageType, WatchDog
+from .root_helper_server import RootHelperServer, StreamPipe, WatchDog
 from .app_events import AppEvents, app_event_bus
 from .settings import *
 
@@ -272,30 +272,30 @@ class RootHelperClient:
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                     s.connect(self.socket_path)
                     s.sendall(f"{used_token} {request_type} {message}".encode())
-                    current_message_type: ServerMessageType | None = None
+                    current_message_type: StreamPipe | None = None
                     current_chars_left: int | None = None
                     current_buffer = ""
                     response_string: str = None
 
-                    def handle_message(message_type: ServerMessageType, content: str):
+                    def handle_message(message_type: StreamPipe, content: str):
                         nonlocal response_string
                         match message_type:
-                            case ServerMessageType.RETURN:
+                            case StreamPipe.RETURN:
                                 response_string = content
-                            case ServerMessageType.STDOUT:
+                            case StreamPipe.STDOUT:
                                 if handler:
                                     handler(content)
-                            case ServerMessageType.STDERR:
+                            case StreamPipe.STDERR:
                                 if handler:
                                     handler(content)
 
                     # Processing data returned over socket and combining them into messages.
-                    # Format: <ServerMessageType.raw>:<Length>:<Message>. eq: 0:11:Hello World
+                    # Format: <StreamPipe.raw>:<Length>:<Message>. eq: 0:11:Hello World
                     def process_fragment(fragment: str):
                         nonlocal current_message_type, current_chars_left, current_buffer
                         if current_message_type is None:
                             current_message_type, current_chars_left, start_buffer = fragment.split(":", 2)
-                            current_message_type = ServerMessageType(int(current_message_type))
+                            current_message_type = StreamPipe(int(current_message_type))
                             current_chars_left = int(current_chars_left)
                             process_fragment(start_buffer)
                         else:
@@ -435,4 +435,3 @@ class ServerCallError(Exception):
 # Define error codes and their corresponding messages as class variables
 ServerCallError.SERVER_NOT_RESPONDING = ServerCallError(1, "The server is not responding.")
 ServerCallError.SERVER_PROCESS_NOT_AVAILABLE = ServerCallError(2, "The server starting process is not available.")
-
