@@ -66,58 +66,47 @@ class RootHelperServer:
 
     def stop(self, called_by_job: Job | None = None, after_jobs_cleaned: callable | None = None):
         """Stop the server, closing the socket and removing any resources."""
-        try:
-            if not self.is_running:
-                print("[Server]: ERROR: " + "Server is not running")
-                return
-            else:
-                print("[Server]: " + "Stopping server...")
-        except Exception as e:
-            print("[Server]: ERROR: "+f"Error while updating server state: {e}")
-        try:
-            jobs_to_wait = []
-            # Loop all jobs, except the one that called this function if any (usually [EXIT])
-            for job in [j for j in self.jobs if j is not called_by_job]:
-                try:
-                    job_to_wait = job.terminate()
-                    if job_to_wait:
-                        jobs_to_wait.append(job_to_wait)
-                except Exception as je:
-                    print("[Server]: ERROR: "+f"Error terminating job {job}: {je}")
-            Job.join_all(jobs_to_wait, timeout=6)
-            print("[Server]: " + "Waiting done")
-        except Exception as e:
-            print("[Server]: ERROR: "+f"Error while waiting for jobs: {e}")
-        try:
-            for job in self.jobs[:]:
-                try:
-                    job.terminate(force=True)
-                except Exception as je:
-                    print("[Server]: ERROR: "+f"Error force terminating job {job}: {je}")
-            # Clear self.job, only leaving current [EXIT] job.
-            self.jobs = [called_by_job] if called_by_job in self.jobs else []
-        except Exception as e:
-            print("[Server]: ERROR: "+f"Error while force clearing jobs: {e}")
-        if after_jobs_cleaned:
-            try:
-                after_jobs_cleaned()
-            except Exception as je:
-                print("[Server]: ERROR: "+f"Error calling after_jobs_cleaned {after_jobs_cleaned}: {je}")
-        try:
-            if self.server_socket:
-                print("[Server]: " + "Closing socket...")
-                self.server_socket.close()
-                self.server_socket = None
-        except Exception as e:
-            print("[Server]: ERROR: "+f"Error while closing socket: {e}")
-        try:
-            if os.path.exists(self.socket_path):
-                print("[Server]: " + "Removing socket file...")
-                os.remove(self.socket_path)
-        except Exception as e:
-            print("[Server]: ERROR: "+f"Error while removing socket file: {e}")
-        print("[Server]: " + "Server stopped.")
+        if not self.is_running:
+            print("[Server]: ERROR: Server is not running")
+            return
+        print("[Server]: Stopping server...")
 
+        def safe_execute(func, *args, **kwargs):
+            """Executes a function with error handling."""
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                print(f"[Server]: ERROR: {str(e)}")
+                return None
+
+        # Handle job termination
+        jobs_to_wait = []
+        for job in [j for j in self.jobs if j is not called_by_job]:
+            job_to_wait = safe_execute(job.terminate)
+            if job_to_wait:
+                jobs_to_wait.append(job_to_wait)
+        Job.join_all(jobs_to_wait, timeout=6)
+        print("[Server]: Waiting done")
+
+        # Force terminate remaining jobs and clear jobs list
+        for job in self.jobs[:]:
+            safe_execute(job.terminate, force=True)
+        self.jobs = [called_by_job] if called_by_job in self.jobs else []
+
+        # Call after_jobs_cleaned callback if provided
+        if after_jobs_cleaned:
+            safe_execute(after_jobs_cleaned)
+
+        # Close server socket and remove socket file
+        if self.server_socket:
+            print("[Server]: Closing socket...")
+            safe_execute(self.server_socket.close)
+            self.server_socket = None
+        if os.path.exists(self.socket_path):
+            print("[Server]: Removing socket file...")
+            safe_execute(os.remove, self.socket_path)
+
+        print("[Server]: Server stopped.")
         self.is_running = False
         os._exit(0)  # Ensure complete shutdown, even if from a thread.
 
