@@ -322,11 +322,15 @@ class RootHelperServer:
             case StreamPipe.STDOUT | StreamPipe.STDERR:
                 response_formatted = response
                 close = False
-        conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
-        if close:
-            conn.shutdown(socket.SHUT_WR)
-            conn.close()
-            self.jobs.remove(job)
+        try:
+            conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
+        except Exception as e:
+            print("[Server]: ERROR: " + f"{e}")
+        finally:
+            if close:
+                conn.shutdown(socket.SHUT_WR)
+                conn.close()
+                self.jobs.remove(job)
 
     # --------------------------------------------------------------------------
     # Shared helper functions.
