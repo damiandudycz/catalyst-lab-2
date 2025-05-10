@@ -34,6 +34,7 @@ class RootHelperServer:
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperServer | None = None # Singleton shared instance.
     hide_logs = False
+    use_client_watchdog = True
 
     # --------------------------------------------------------------------------
     # Lifecycle:
@@ -272,7 +273,8 @@ class RootHelperServer:
                 case ServerCommand.HANDSHAKE:
                     if self.pid_lock is None:
                         self.pid_lock = pid
-                        self.client_watchdog.start()
+                        if RootHelperServer.use_client_watchdog:
+                            self.client_watchdog.start()
                         self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Initialization succeeded")
                     else:
                         self.respond(conn=conn, job=job, code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")

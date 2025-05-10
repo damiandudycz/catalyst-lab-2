@@ -19,6 +19,7 @@ class RootHelperClient:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperClient | None = None # Singleton shared instance.
+    use_server_watchdog = False # Enable for release. Might disable for debugging.
 
     # --------------------------------------------------------------------------
     # Lifecycle:
@@ -215,7 +216,8 @@ class RootHelperClient:
                 break
             try:
                 response = self.send_request(ServerCommand.HANDSHAKE, allow_auto_start=False, token=token)
-                self.server_watchdog.start()
+                if RootHelperClient.use_server_watchdog:
+                    self.server_watchdog.start()
                 return response.code == ServerResponseStatusCode.OK
             except ServerCallError as e:
                 if e == ServerCallError.SERVER_NOT_RESPONDING:
@@ -276,7 +278,6 @@ class RootHelperClient:
             message, request_type = request.to_json(), "function"
         elif isinstance(request, ServerCommand):
             request_type = "command"
-            print(f">>> Combine {request.value} + {command_value}")
             message = request.value if command_value is None else request.value + " " + command_value
         else:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
