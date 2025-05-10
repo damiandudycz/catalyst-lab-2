@@ -103,6 +103,7 @@ class RootAccessButton(Gtk.Overlay):
         # Subscribe to events
         app_event_bus.subscribe(AppEvents.CHANGE_ROOT_ACCESS, self.root_access_changed)
         app_event_bus.subscribe(AppEvents.ROOT_REQUEST_STATUS, self.root_requests_status_changed)
+        app_event_bus.subscribe(AppEvents.ROOT_REQUEST_WILL_TERMINATE, self.root_request_will_terminate)
         Settings.current.event_bus.subscribe(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, self.keep_root_unlocked_changed)
 
         # Set initial state based on root access status
@@ -140,6 +141,13 @@ class RootAccessButton(Gtk.Overlay):
         self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
         #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and RootHelperClient.shared().is_server_process_running)
         #self.root_tasks_separator.set_visible(RootHelperClient.shared().running_actions)
+
+    def root_request_will_terminate(self, client: RootHelperClient, call: ServerCall):
+        # Mark task as terminating
+        view = next((view for view in self.displayed_requests_views if view.call == call), None)
+        if view:
+            view.mark_terminating()
+        pass
 
     def disable_root_access(self, sender):
         """Disable root access when the button is clicked."""
@@ -185,30 +193,40 @@ class RootActionInfoRow(Gtk.Box):
         row_box.set_valign(Gtk.Align.CENTER)
 
         # Create label on the left
-        label = Gtk.Label(label=call.request.function_name)
-        label.get_style_context().add_class("caption-heading")
-        label.set_xalign(0)
-        label.set_hexpand(True)
-        row_box.append(label)
+        self.label = Gtk.Label(label=call.request.function_name)
+        self.label.get_style_context().add_class("caption-heading")
+        self.label.set_xalign(0)
+        self.label.set_hexpand(True)
+        row_box.append(self.label)
 
         # Icon button on the right
         icon = Gtk.Image.new_from_icon_name("window-close-symbolic")
-        button = Gtk.Button()
-        button.set_child(icon)
-        button.set_valign(Gtk.Align.CENTER)
-        button.set_focusable(False)
-        button.get_style_context().add_class("circular")
-        button.get_style_context().add_class("flat")
-        button.set_margin_top(4)
-        button.set_margin_bottom(4)
-        button.call = call
-        button.connect("clicked", self.close_call)
-        row_box.append(button)
+        self.button = Gtk.Button()
+        self.button.set_child(icon)
+        self.button.set_valign(Gtk.Align.CENTER)
+        self.button.set_focusable(False)
+        self.button.get_style_context().add_class("circular")
+        self.button.get_style_context().add_class("flat")
+        self.button.set_margin_top(4)
+        self.button.set_margin_bottom(4)
+        self.button.call = call
+        self.button.connect("clicked", self.close_call)
+        row_box.append(self.button)
 
         # Add the horizontal row to the vertical box
         self.append(row_box)
 
+        self.mark_terminating(call.terminated)
+
     def close_call(self, button: Gtk.Button):
         call = button.call
         call.cancel()
+
+    def mark_terminating(self, terminating: bool = True):
+        if terminating:
+            self.label.get_style_context().add_class("dim-label")
+        else:
+            self.label.get_style_context().remove_class("dim-label")
+        if self.button:
+            self.button.set_sensitive(not terminating)
 

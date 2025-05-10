@@ -12,7 +12,7 @@ from .app_events import AppEvents, app_event_bus
 from .settings import *
 from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
-from .root_helper_server import RootHelperServer, StreamPipe, WatchDog
+from .root_helper_server import RootHelperServer, StreamPipe, StreamPipeEvent, WatchDog
 
 class RootHelperClient:
 
@@ -300,6 +300,20 @@ class RootHelperClient:
                             case StreamPipe.STDERR:
                                 if handler:
                                     GLib.idle_add(handler, content)
+                            case StreamPipe.EVENTS:
+                                # Handle EVENTS pipe:
+                                try:
+                                    event = StreamPipeEvent(int(content))
+                                    match event:
+                                        case StreamPipeEvent.CALL_WILL_TERMINATE:
+                                            call.terminated = True
+                                            app_event_bus.emit(AppEvents.ROOT_REQUEST_WILL_TERMINATE, self, call)
+                                        case _:
+                                           print(f"[Server process]: Warning: Received unsupported event: {event}")
+                                except Exception as e:
+                                       print(f"[Server process]: Warning: Failed to process event: {content}")
+                                if handler: # TODO: Decode if pass this to handler. Probably yes, and handler should decide which Pipes to process.
+                                    GLib.idle_add(handler, content)
 
                     # Processing data returned over socket and combining them into messages.
                     # Format: <StreamPipe.raw>:<Length>:<Message>. eq: 0:11:Hello World
@@ -398,6 +412,7 @@ class ServerCall:
     thread: threading.Thread | None
     client: RootHelperClient
     call_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    terminated: bool = False # Mark as terminated. Might still be terminating.
 
     def cancel(self):
         """Sends CANCEL_CALL <ID> to server. Can be used only with async calls that already started."""

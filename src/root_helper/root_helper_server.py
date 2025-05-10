@@ -2,31 +2,35 @@
 from __future__ import annotations
 import os, socket, subprocess, sys, uuid, pwd, time, struct, signal, threading
 import json, multiprocessing
-from enum import Enum
+from enum import Enum, auto
 from functools import wraps
 from dataclasses import dataclass, asdict
 from typing import Any, List
 from contextlib import redirect_stdout, redirect_stderr
 
 class StreamPipe(Enum):
-    RETURN = 0
-    STDOUT = 1
-    STDERR = 2
+    RETURN = auto()
+    STDOUT = auto()
+    STDERR = auto()
+    EVENTS = auto() # Sends special events to inform about call state etc.
 
 class ServerResponseStatusCode(Enum):
     OK = 0
-    JOB_WAS_TERMINATED = 1
-    JOB_ALREADY_SCHEDULED_FOR_TERMINATION= 2
-    JOB_NOT_FOUND = 3
-    COMMAND_EXECUTION_FAILED = 10
-    COMMAND_DECODE_FAILED = 11
-    COMMAND_UNSUPPORTED_FUNC = 12
-    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = 20
-    AUTHORIZATION_WRONG_UID = 21
-    AUTHORIZATION_WRONG_PID = 22
-    AUTHORIZATION_WRONG_TOKEN = 23
-    INITIALIZATION_ALREADY_DONE = 30
-    INITIALIZATION_NOT_DONE = 31
+    JOB_WAS_TERMINATED = auto()
+    JOB_ALREADY_SCHEDULED_FOR_TERMINATION = auto()
+    JOB_NOT_FOUND = auto()
+    COMMAND_EXECUTION_FAILED = auto()
+    COMMAND_DECODE_FAILED = auto()
+    COMMAND_UNSUPPORTED_FUNC = auto()
+    AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS = auto()
+    AUTHORIZATION_WRONG_UID = auto()
+    AUTHORIZATION_WRONG_PID = auto()
+    AUTHORIZATION_WRONG_TOKEN = auto()
+    INITIALIZATION_ALREADY_DONE = auto()
+    INITIALIZATION_NOT_DONE = auto()
+
+class StreamPipeEvent(Enum):
+    CALL_WILL_TERMINATE = auto()
 
 class RootHelperServer:
 
@@ -314,15 +318,15 @@ class RootHelperServer:
                             func_struct.kwargs,
                             self.respond
                         )
-                        if not job.was_terminated:
+                        if not job.terminated:
                             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response=result)
                     except Exception as e:
-                        if not job.was_terminated:
+                        if not job.terminated:
                             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
             except ValueError:
                 self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | None = None):
+    def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | StreamPipeEvent | None = None):
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
         with job.thread_lock:
@@ -342,6 +346,9 @@ class RootHelperServer:
                     close = True
                 case StreamPipe.STDOUT | StreamPipe.STDERR:
                     response_formatted = response
+                    close = False
+                case StreamPipe.EVENTS:
+                    response_formatted = str(response.value)
                     close = False
             try:
                 conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
@@ -490,7 +497,7 @@ class Job:
         self.conn = conn
         self.thread: threading.Thread | None = None
         self.process: multiprocessing.Process | None = None
-        self.was_terminated = False
+        self.terminated = False
         self.call_id: uuid | None = None # Set when handle_connection is called
         self.thread_lock = threading.Lock()
 
@@ -499,7 +506,7 @@ class Job:
         """Termination itself happens on separate thread so that multiple can be stopped at once."""
         """If force flag is set, termination happens instantly on current thread, blocking it."""
         """Returns Job if process needed to be terminated or None if it was not running."""
-        if self.was_terminated: # If already scheduled for termination or fully terminated.
+        if self.terminated: # If already scheduled for termination or fully terminated.
             completion(False)
             return None
         current_thread = threading.current_thread()
@@ -507,9 +514,9 @@ class Job:
             if completion:
                 completion(False)
             return None
-        self.was_terminated = True
+        self.terminated = True
         try:
-            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDERR, response="Job will be terminated...")
+            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.OK, pipe=StreamPipe.EVENTS, response=StreamPipeEvent.CALL_WILL_TERMINATE)
         except Exception as e:
             pass
         if force:
