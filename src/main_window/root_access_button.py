@@ -1,8 +1,7 @@
 from gi.repository import Gtk, Adw, GObject
 from functools import partial
 from .app_events import AppEvents, app_event_bus
-from .root_helper_client import RootHelperClient, root_function
-from .root_helper_server import ServerCommand, ServerFunction
+from .root_helper_client import RootHelperClient, root_function, ServerCall
 from .settings import *
 
 class RootAccessButton(Gtk.Overlay):
@@ -130,13 +129,13 @@ class RootAccessButton(Gtk.Overlay):
         self.stop_button.set_visible(enabled)
         #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and enabled)
 
-    def root_requests_status_changed(self, client: RootHelperClient, request: GObject.Object, status: bool):
+    def root_requests_status_changed(self, client: RootHelperClient, call: ServerCall, status: bool):
         """Handle changes to root access request status."""
         self.root_access_spinner.set_visible(client.running_actions)
         if status:
-            self.add_request_to_list(request)
+            self.add_request_to_list(call)
         else:
-            self.remove_request_from_list(request)
+            self.remove_request_from_list(call)
         self.start_button.set_sensitive(not RootHelperClient.shared().running_actions)
         self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
         #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and RootHelperClient.shared().is_server_process_running)
@@ -152,14 +151,14 @@ class RootAccessButton(Gtk.Overlay):
         RootHelperClient.shared().start_root_helper()
         self.popover.hide()
 
-    def add_request_to_list(self, request: ServerCommand | ServerFunction):
-        action_row = RootActionInfoRow(request=request)
+    def add_request_to_list(self, call: ServerCall):
+        action_row = RootActionInfoRow(call=call)
         self.task_list_box.append(action_row)
         self.displayed_requests_views.append(action_row)
 
-    def remove_request_from_list(self, request: ServerCommand | ServerFunction):
+    def remove_request_from_list(self, call: ServerCall):
         for row in self.displayed_requests_views:
-            if row.request == request:
+            if row.call == call:
                 self.task_list_box.remove(row)
                 self.displayed_requests_views.remove(row)
                 break
@@ -171,9 +170,9 @@ class RootAccessButton(Gtk.Overlay):
         print(f"-- {value}")
 
 class RootActionInfoRow(Gtk.Box):
-    def __init__(self, request: ServerCommand | ServerFunction):
+    def __init__(self, call: ServerCall):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.request = request
+        self.call = call
         self.set_hexpand(True)
 
         # Divider (separator at the top)
@@ -186,7 +185,7 @@ class RootActionInfoRow(Gtk.Box):
         row_box.set_valign(Gtk.Align.CENTER)
 
         # Create label on the left
-        label = Gtk.Label(label=request.function_name)
+        label = Gtk.Label(label=call.request.function_name)
         label.get_style_context().add_class("caption-heading")
         label.set_xalign(0)
         label.set_hexpand(True)
@@ -202,8 +201,14 @@ class RootActionInfoRow(Gtk.Box):
         button.get_style_context().add_class("flat")
         button.set_margin_top(4)
         button.set_margin_bottom(4)
+        button.call = call
+        button.connect("clicked", self.close_call)
         row_box.append(button)
 
         # Add the horizontal row to the vertical box
         self.append(row_box)
+
+    def close_call(self, button: Gtk.Button):
+        call = button.call
+        call.cancel()
 

@@ -237,6 +237,9 @@ class RootHelperServer:
 
             # Receive request data:
             data = conn.recv(4096).decode().strip()
+
+            print(f">> {data}")
+
             if not data.startswith(session_token):
                 self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return

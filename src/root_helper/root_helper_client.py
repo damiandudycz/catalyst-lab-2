@@ -27,7 +27,7 @@ class RootHelperClient:
     def __init__(self):
         self.socket_path = RootHelperServer.get_socket_path(os.getuid())
         self.main_process = None
-        self.running_actions = []
+        self.running_actions: List[ServerCall] = []
         self.token = None
         self.keep_unlocked = Settings.current.keep_root_unlocked
         self.server_watchdog = WatchDog(lambda: self.ping_server())
@@ -143,9 +143,9 @@ class RootHelperClient:
             print("[Server process]: Closed.")
 
     def clean_unfinished_jobs(self, exit_result: callable | None = None):
-        for request in self.running_actions[:]:
-            print(f"[Server process]: Warning: Request {request} was left orphined.")
-            self.set_request_status(request, False)
+        for call in self.running_actions[:]:
+            print(f"[Server process]: Warning: Call {call} was left orphined.")
+            self.set_request_status(call, False)
 
     def ping_server(self):
         try:
@@ -281,12 +281,12 @@ class RootHelperClient:
             message = request.value if command_value is None else request.value + " " + command_value
         else:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
-        def worker(call_id: uuid.uuid) -> ServerResponse:
+        def worker(call: ServerCall) -> ServerResponse:
             try:
                 used_token = token if token is not None else self.token
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                     s.connect(self.socket_path)
-                    s.sendall(f"{used_token} {call_id} {request_type} {message}".encode())
+                    s.sendall(f"{used_token} {call.call_id} {request_type} {message}".encode())
                     current_message_type: StreamPipe | None = None
                     current_chars_left: int | None = None
                     current_buffer = ""
@@ -338,18 +338,21 @@ class RootHelperClient:
                 return ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
             finally:
                 if request.show_in_running_tasks:
-                    self.set_request_status(request, False)
+                    self.set_request_status(call, False)
 
-        if request.show_in_running_tasks:
-            self.set_request_status(request, True)
         if asynchronous:
-            call_id = request.id
-            thread = threading.Thread(target=worker, args=(call_id,), daemon=True)
-            async_call = ServerCall(call_id=call_id, request=request, thread=thread, client=self)
+            async_call = ServerCall(call_id=request.id, request=request, thread=None, client=self)
+            thread = threading.Thread(target=worker, args=(async_call,), daemon=True)
+            async_call.thread = thread
+            if request.show_in_running_tasks:
+                self.set_request_status(async_call, True)
             thread.start()
             return async_call
         else:
-            return worker(call_id=request.id)
+            sync_call = ServerCall(call_id=request.id, request=request, thread=None, client=self)
+            if request.show_in_running_tasks:
+                self.set_request_status(sync_call, True)
+            return worker(call=sync_call)
 
     def call_root_function(
         self,
@@ -377,13 +380,13 @@ class RootHelperClient:
         else:
             raise RuntimeError(f"Root function error: {server_response.response}")
 
-    def set_request_status(self, request: ServerCommand | ServerFunction, in_progress: bool):
+    def set_request_status(self, call: ServerCall, in_progress: bool):
         if in_progress:
-            self.running_actions.append(request)
-            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, True)
+            self.running_actions.append(call)
+            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, call, True)
         else:
-            self.running_actions.remove(request)
-            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, request, False)
+            self.running_actions.remove(call)
+            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, call, False)
         if not self.running_actions and not self.keep_unlocked and self.server_handshake_established() and self.is_server_process_running:
             self.stop_root_helper()
 
@@ -392,16 +395,17 @@ class RootHelperClient:
 
 @dataclass
 class ServerCall:
-    """Captures details about ongoing server async call."""
+    """Captures details about ongoing server call."""
     """Can be used to join the thread later or send cancel request for single request."""
     call_id: uuid.uuid
     request: ServerCommand | ServerFunction
-    thread: threading.Thread
+    thread: threading.Thread | None
     client: RootHelperClient
 
     def cancel(self):
-        """Sends CANCEL_CALL <ID> to server"""
-        self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
+        """Sends CANCEL_CALL <ID> to server. Can be used only with async calls that already started."""
+        if self.thread:
+            self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
 
 # ------------------------------------------------------------------------------
 # @root_function decorator.

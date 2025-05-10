@@ -89,12 +89,8 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
-        if self.async_call is None:
-            self.async_call = stubborn_worker._async_raw(lambda x: print(f"> A  {x}"), lambda x: print(f"[result A] --> {x} <-- [result]"))
-            print(self.async_call)
-        else:
-            self.async_call.cancel()
-            self.async_call = None
+        self.async_call = stubborn_worker._async_raw(lambda x: print(f"> A  {x}"), lambda x: print(f"[result A] --> {x} <-- [result]"))
+        print(self.async_call)
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
