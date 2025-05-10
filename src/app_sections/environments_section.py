@@ -30,6 +30,8 @@ class EnvironmentsSection(Gtk.Box):
         # Subscribe to relevant events
         Settings.current.event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
 
+        self.async_call = None # TODO: Delete, this is for testing
+
     def toolsets_updated(self):
         self._load_system_toolset()
         self._load_external_toolsets()
@@ -87,7 +89,12 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
-        stubborn_worker._async_raw(lambda x: print(f"> A  {x}"), lambda x: print(f"[result A] --> {x} <-- [result]"))
+        if self.async_call is None:
+            self.async_call = stubborn_worker._async_raw(lambda x: print(f"> A  {x}"), lambda x: print(f"[result A] --> {x} <-- [result]"))
+            print(self.async_call)
+        else:
+            self.async_call.cancel()
+            self.async_call = None
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):

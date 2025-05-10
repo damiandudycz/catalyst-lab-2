@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Optional, Any
 from functools import wraps
 from gi.repository import Gio
+from dataclasses import dataclass, field
 from .environment import RuntimeEnv
 from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
@@ -253,13 +254,14 @@ class RootHelperClient:
     def send_request(
         self,
         request: ServerCommand | ServerFunction,
+        command_value: str | None = None, # TODO: Send and receive this additional value
         allow_auto_start: bool = True,
         handler: callable = None,
         asynchronous: bool = False,
         raw: bool = False,
         completion_handler: callable = None,
         token: str | None = None
-    ) -> ServerResponse | threading.Thread:
+    ) -> ServerResponse | ServerAsyncCall: # For async always returns ServerAsyncCall or throws.
         """Send a command to the root helper server."""
         if request != ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start):
             if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
@@ -273,15 +275,17 @@ class RootHelperClient:
         if isinstance(request, ServerFunction):
             message, request_type = request.to_json(), "function"
         elif isinstance(request, ServerCommand):
-            message, request_type = request.value, "command"
+            request_type = "command"
+            print(f">>> Combine {request.value} + {command_value}")
+            message = request.value if command_value is None else request.value + " " + command_value
         else:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
-        def worker() -> ServerResponse:
+        def worker(call_id: uuid.uuid) -> ServerResponse:
             try:
                 used_token = token if token is not None else self.token
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
                     s.connect(self.socket_path)
-                    s.sendall(f"{used_token} {request_type} {message}".encode())
+                    s.sendall(f"{used_token} {call_id} {request_type} {message}".encode())
                     current_message_type: StreamPipe | None = None
                     current_chars_left: int | None = None
                     current_buffer = ""
@@ -338,11 +342,13 @@ class RootHelperClient:
         if request.show_in_running_tasks:
             self.set_request_status(request, True)
         if asynchronous:
-            thread = threading.Thread(target=worker, daemon=True)
+            call_id = request.id
+            thread = threading.Thread(target=worker, args=(call_id,), daemon=True)
+            async_call = ServerAsyncCall(call_id=call_id, request=request, thread=thread, client=self)
             thread.start()
-            return thread
+            return async_call
         else:
-            return worker()
+            return worker(call_id=request.id)
 
     def call_root_function(
         self,
@@ -353,7 +359,7 @@ class RootHelperClient:
         raw: bool = False,
         completion_handler: callable = None,
         **kwargs
-    ) -> Any | ServerResponse | threading.Thread:
+    ) -> Any | ServerResponse | ServerAsyncCall:
         """Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server."""
         function = ServerFunction(func_name, *args, **kwargs)
         server_response = self.send_request(
@@ -363,7 +369,7 @@ class RootHelperClient:
             raw=raw,
             completion_handler=completion_handler
         )
-        if asynchronous or raw: # Returns thread or whole structure directly
+        if asynchronous or raw: # Returns ServerAsyncCall for async or whole structure directly for sync_raw
             return server_response
         if server_response.code == ServerResponseStatusCode.OK:
             return server_response.response
@@ -382,6 +388,19 @@ class RootHelperClient:
 
     def keep_root_unlocked_changed(self, value: bool):
         self.keep_unlocked = value
+
+@dataclass
+class ServerAsyncCall:
+    """Captures details about ongoing server async call."""
+    """Can be used to join the thread later or send cancel request for single request."""
+    call_id: uuid.uuid
+    request: ServerCommand | ServerFunction
+    thread: threading.Thread
+    client: RootHelperClient
+
+    def cancel(self):
+        """Sends CANCEL_CALL <ID> to server"""
+        self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
 
 # ------------------------------------------------------------------------------
 # @root_function decorator.

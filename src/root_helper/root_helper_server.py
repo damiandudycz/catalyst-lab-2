@@ -18,6 +18,7 @@ class StreamPipe(Enum):
 class ServerResponseStatusCode(Enum):
     OK = 0
     JOB_WAS_TERMINATED = 1
+    JOB_NOT_FOUND = 2
     COMMAND_EXECUTION_FAILED = 10
     COMMAND_DECODE_FAILED = 11
     COMMAND_UNSUPPORTED_FUNC = 12
@@ -238,7 +239,8 @@ class RootHelperServer:
             if " " not in full_payload:
                 self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                 return
-            request_type, payload = full_payload.split(" ", 1)
+            call_id_str, request_type, payload = full_payload.split(" ", 2)
+            job.call_id = uuid.UUID(call_id_str)
 
             # Process request:
             match request_type:
@@ -256,7 +258,10 @@ class RootHelperServer:
     def handle_command_request(self, job: Job, conn: socket.socket, pid: int, payload: str):
         print("[Server]: " + "Processing command request")
         try:
-            cmd_enum = ServerCommand(payload)
+            parts = payload.split(" ", 1)
+            cmd_type = parts[0]
+            cmd_value = parts[1] if len(parts) > 1 else None
+            cmd_enum = ServerCommand(cmd_type)
             print("[Server]: " + f"Command: {cmd_enum}")
             match cmd_enum:
                 case ServerCommand.EXIT:
@@ -271,6 +276,16 @@ class RootHelperServer:
                         self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Initialization succeeded")
                     else:
                         self.respond(conn=conn, job=job, code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
+                case ServerCommand.CANCEL_CALL:
+                    # Handle call cancellation
+                    call_id=uuid.UUID(cmd_value)
+                    job_to_cancel = next((j for j in self.jobs if j.call_id == call_id), None)
+                    if job:
+                        def completion():
+                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
+                        job_to_cancel.terminate(completion=completion)
+                    else:
+                        self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
         except ValueError as e:
             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
@@ -360,21 +375,30 @@ class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
     HANDSHAKE = "[HANDSHAKE]"
     PING = "[PING]"
+    CANCEL_CALL = "[CANCEL_CALL]"
 
     @property
-    def function_name(self):
+    def id(self) -> uuid:
+        # Commands always returns random ID, so be careful when using this.
+        # You can't cancel commands by ID.
+        return uuid.uuid4()
+
+    @property
+    def function_name(self) -> str:
         return self.value
 
     @property
-    def show_in_running_tasks(self):
+    def show_in_running_tasks(self) -> bool:
         match self:
             case ServerCommand.HANDSHAKE | ServerCommand.EXIT:
                 return True
-            case ServerCommand.PING:
+            case ServerCommand.PING | ServerCommand.CANCEL_CALL:
                 return False
+        raise RuntimeError("Unsupported ServerCommand case")
 
 class ServerFunction:
     def __init__(self, function_name: str, *args, **kwargs):
+        self.id = uuid.uuid4()
         self.function_name = function_name
         self.args = args
         self.kwargs = kwargs
@@ -382,6 +406,7 @@ class ServerFunction:
     def to_json(self):
         """Convert the ServerFunction instance to a JSON string."""
         return json.dumps({
+            "id": str(self.id),
             "function": self.function_name,
             "args": self.args,
             "kwargs": self.kwargs
@@ -392,7 +417,9 @@ class ServerFunction:
         """Create a ServerFunction instance from a JSON string."""
         try:
             data = json.loads(json_str)
-            return cls(data["function"], *data.get("args", []), **data.get("kwargs", {}))
+            object = cls(data["function"], *data.get("args", []), **data.get("kwargs", {}))
+            object.id = uuid.UUID(data["id"])
+            return object
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise ValueError(f"Invalid ServerFunction JSON: {e}")
 
@@ -447,14 +474,17 @@ class Job:
         self.thread: threading.Thread | None = None
         self.process: multiprocessing.Process | None = None
         self.was_terminated = False
+        self.call_id: uuid | None = None # Set when handle_connection is called
 
-    def terminate(self, force: bool = False) -> Job | None:
+    def terminate(self, force: bool = False, completion: callable | None = None) -> Job | None:
         """Schedules Job process to terminate and gives it 5 seconds to finish."""
         """Termination itself happens on separate thread so that multiple can be stopped at once."""
         """If force flag is set, termination happens instantly on current thread, blocking it."""
         """Returns Job if process needed to be terminated or None if it was not running."""
         current_thread = threading.current_thread()
         if self.process is None or self.thread is current_thread or not self.process.is_alive():
+            if completion:
+                completion()
             return None
         self.was_terminated = True
         try:
@@ -465,14 +495,18 @@ class Job:
             self.process.kill()
             self.process.join()
             self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
+            if completion:
+                completion()
         else:
-            cleanup_thread = threading.Thread(target=self.terminate_and_cleanup)
+            cleanup_thread = threading.Thread(target=self.terminate_and_cleanup, args=(completion,))
             cleanup_thread.start()
         return self
 
-    def terminate_and_cleanup(self):
+    def terminate_and_cleanup(self, completion: callable | None = None):
         if self.process is None or not self.process.is_alive():
             print("[Server]: " + "Process already stopped")
+            if completion:
+                completion()
             return
         self.process.terminate()
         self.thread.join(timeout=5) # Allow time for graceful termination for 5s
@@ -481,10 +515,11 @@ class Job:
             self.process.kill()
             self.process.join()
             self.thread.join()
-            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
         else:
             print("[Server]: " + "Process did terminate.")
-            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
+        self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
+        if completion:
+            completion()
 
     @staticmethod
     def join_all(jobs: List[Job], timeout: float):
