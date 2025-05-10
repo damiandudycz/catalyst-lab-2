@@ -43,8 +43,8 @@ class RootHelperServer:
         self.is_running = False
         self.server_socket: socket.socket | None = None
         self.pid_lock: int | None = None
-        self.jobs: List[Job] = []
         self._jobs_lock = threading.Lock()
+        self._jobs: List[Job] = []
         self.client_watchdog = WatchDog(lambda: self.check_client())
         print("[Server]: " + "Welcome")
         self.read_initial_session_data()
@@ -133,18 +133,16 @@ class RootHelperServer:
                 return None
         # Handle job termination
         jobs_to_wait = []
-        with self._jobs_lock:
-            for job in [j for j in self.jobs if j is not called_by_job]:
-                job_to_wait = safe_execute(job.terminate)
-                if job_to_wait:
-                    jobs_to_wait.append(job_to_wait)
-            Job.join_all(jobs_to_wait, timeout=5 + 1)
+        for job in [j for j in self.jobs if j is not called_by_job]:
+            job_to_wait = safe_execute(job.terminate)
+            if job_to_wait:
+                jobs_to_wait.append(job_to_wait)
+        Job.join_all(jobs_to_wait, timeout=5 + 1)
         print("[Server]: Waiting done")
         # Force terminate remaining jobs and clear jobs list
-        with self._jobs_lock:
-            for job in self.jobs[:]:
-                safe_execute(job.terminate, force=True)
-            self.jobs = [called_by_job] if called_by_job in self.jobs else []
+        for job in self.jobs[:]:
+            safe_execute(job.terminate, force=True)
+        self.clear_jobs(keep=called_by_job)
         # Call after_jobs_cleaned callback if provided
         if after_jobs_cleaned:
             safe_execute(after_jobs_cleaned)
@@ -207,8 +205,7 @@ class RootHelperServer:
                     target=self.handle_connection,
                     args=(job, conn, session_token, allowed_uid)
                 )
-                with self._jobs_lock:
-                    self.jobs.append(job)
+                self.add_job(job)
                 job.thread.start()
             except Exception as e:
                 print("[Server]: ERROR: " + f"Error accepting connection: {e}")
@@ -288,14 +285,13 @@ class RootHelperServer:
                 case ServerCommand.CANCEL_CALL:
                     # Handle call cancellation
                     call_id=uuid.UUID(cmd_value)
-                    with self._jobs_lock:
-                        job_to_cancel = next((j for j in self.jobs if j.call_id == call_id), None)
-                        if job:
-                            def completion():
-                                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
-                            job_to_cancel.terminate(completion=completion)
-                        else:
-                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
+                    job_to_cancel = self.get_job_by_call_id(call_id)
+                    if job:
+                        def completion():
+                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
+                        job_to_cancel.terminate(completion=completion)
+                    else:
+                        self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
         except ValueError as e:
             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
@@ -330,33 +326,54 @@ class RootHelperServer:
     def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | None = None):
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
-        if isinstance(pipe, int):
-            # If pipe was passed by ID, convert it back to pipe object
-            pipe = StreamPipe(pipe)
-        if code != ServerResponseStatusCode.OK and pipe != StreamPipe.RETURN:
-            raise RuntimeError("Return code != OK can be used only with RETURN pipe.")
-        if conn.fileno() == -1:
-            print("[Server]: ERROR: " + f"Connection already closed: {conn} / {job} [{response}]")
-            return
-        print("[Server]: " + f"Responding with code: {code}, response: {response}, on pipe: {pipe}")
-        match pipe:
-            case StreamPipe.RETURN:
-                server_response = ServerResponse(code=code, response=response)
-                response_formatted = server_response.to_json()
-                close = True
-            case StreamPipe.STDOUT | StreamPipe.STDERR:
-                response_formatted = response
-                close = False
-        try:
-            conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
-        except Exception as e:
-            print("[Server]: ERROR: " + f"{e}")
-        finally:
-            if close:
-                conn.shutdown(socket.SHUT_WR)
-                conn.close()
-                with self._jobs_lock:
-                    self.jobs.remove(job)
+        with job.thread_lock:
+            if isinstance(pipe, int):
+                # If pipe was passed by ID, convert it back to pipe object
+                pipe = StreamPipe(pipe)
+            if code != ServerResponseStatusCode.OK and pipe != StreamPipe.RETURN:
+                raise RuntimeError("Return code != OK can be used only with RETURN pipe.")
+            if conn.fileno() == -1:
+                print("[Server]: ERROR: " + f"Connection already closed: {conn} / {job} [{response}]")
+                return
+            print("[Server]: " + f"Responding with code: {code}, response: {response}, on pipe: {pipe}")
+            match pipe:
+                case StreamPipe.RETURN:
+                    server_response = ServerResponse(code=code, response=response)
+                    response_formatted = server_response.to_json()
+                    close = True
+                case StreamPipe.STDOUT | StreamPipe.STDERR:
+                    response_formatted = response
+                    close = False
+            try:
+                conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
+            except Exception as e:
+                print("[Server]: ERROR: " + f"{e}")
+            finally:
+                if close:
+                    conn.shutdown(socket.SHUT_WR)
+                    conn.close()
+                    self.remove_job(job)
+
+    # --------------------------------------------------------------------------
+    # Jobs management (With thread safety built in).
+
+    @property
+    def jobs(self):
+        with self._jobs_lock:
+            return self._jobs
+    def add_job(self, job: Job):
+        with self._jobs_lock:
+            self._jobs.append(job)
+    def remove_job(self, job: Job):
+        with self._jobs_lock:
+            if job in self._jobs:
+                self._jobs.remove(job)
+    def get_job_by_call_id(self, call_id: uuid.UUID) -> Job | None:
+        with self._jobs_lock:
+            return next((j for j in self._jobs if j.call_id == call_id), None)
+    def clear_jobs(self, keep: Job | None = None):
+        with self._jobs_lock:
+            self._jobs = [keep] if keep and keep in self._jobs else []
 
     # --------------------------------------------------------------------------
     # Shared helper functions.
@@ -486,6 +503,7 @@ class Job:
         self.process: multiprocessing.Process | None = None
         self.was_terminated = False
         self.call_id: uuid | None = None # Set when handle_connection is called
+        self.thread_lock = threading.Lock()
 
     def terminate(self, force: bool = False, completion: callable | None = None) -> Job | None:
         """Schedules Job process to terminate and gives it 5 seconds to finish."""
