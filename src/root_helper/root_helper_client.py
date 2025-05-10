@@ -414,6 +414,11 @@ class ServerCall:
     call_id: uuid.UUID = field(default_factory=uuid.uuid4)
     terminated: bool = False # Mark as terminated. Might still be terminating.
 
+    @property
+    def is_cancellable(self) -> bool:
+        """Only ServerFunctions are cancellable"""
+        return isinstance(self.request, ServerFunction)
+
     def cancel(self):
         """Sends CANCEL_CALL <ID> to server. Can be used only with async calls that already started."""
         if self.thread:

@@ -209,8 +209,9 @@ class RootActionInfoRow(Gtk.Box):
         self.button.get_style_context().add_class("flat")
         self.button.set_margin_top(4)
         self.button.set_margin_bottom(4)
-        self.button.call = call
         self.button.connect("clicked", self.close_call)
+        if not self.call.is_cancellable:
+            self.button.set_opacity(0.0)
         row_box.append(self.button)
 
         # Add the horizontal row to the vertical box
@@ -219,8 +220,7 @@ class RootActionInfoRow(Gtk.Box):
         self.mark_terminating(call.terminated)
 
     def close_call(self, button: Gtk.Button):
-        call = button.call
-        call.cancel()
+        self.call.cancel()
 
     def mark_terminating(self, terminating: bool = True):
         if terminating:
@@ -228,5 +228,5 @@ class RootActionInfoRow(Gtk.Box):
         else:
             self.label.get_style_context().remove_class("dim-label")
         if self.button:
-            self.button.set_sensitive(not terminating)
+            self.button.set_sensitive(not terminating and self.call.is_cancellable)
 
