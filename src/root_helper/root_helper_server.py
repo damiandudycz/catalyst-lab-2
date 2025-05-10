@@ -138,7 +138,7 @@ class RootHelperServer:
                 job_to_wait = safe_execute(job.terminate)
                 if job_to_wait:
                     jobs_to_wait.append(job_to_wait)
-            Job.join_all(jobs_to_wait, timeout=6)
+            Job.join_all(jobs_to_wait, timeout=5 + 1)
         print("[Server]: Waiting done")
         # Force terminate remaining jobs and clear jobs list
         with self._jobs_lock:

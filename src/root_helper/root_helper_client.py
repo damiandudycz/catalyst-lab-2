@@ -256,7 +256,7 @@ class RootHelperClient:
     def send_request(
         self,
         request: ServerCommand | ServerFunction,
-        command_value: str | None = None, # TODO: Send and receive this additional value
+        command_value: str | None = None,
         allow_auto_start: bool = True,
         handler: callable = None,
         asynchronous: bool = False,
