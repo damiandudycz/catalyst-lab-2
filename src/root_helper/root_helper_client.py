@@ -263,7 +263,7 @@ class RootHelperClient:
         raw: bool = False,
         completion_handler: callable = None,
         token: str | None = None
-    ) -> ServerResponse | ServerAsyncCall: # For async always returns ServerAsyncCall or throws.
+    ) -> ServerResponse | ServerCall: # For async always returns ServerCall or throws.
         """Send a command to the root helper server."""
         if request != ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start):
             if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
@@ -345,7 +345,7 @@ class RootHelperClient:
         if asynchronous:
             call_id = request.id
             thread = threading.Thread(target=worker, args=(call_id,), daemon=True)
-            async_call = ServerAsyncCall(call_id=call_id, request=request, thread=thread, client=self)
+            async_call = ServerCall(call_id=call_id, request=request, thread=thread, client=self)
             thread.start()
             return async_call
         else:
@@ -360,7 +360,7 @@ class RootHelperClient:
         raw: bool = False,
         completion_handler: callable = None,
         **kwargs
-    ) -> Any | ServerResponse | ServerAsyncCall:
+    ) -> Any | ServerResponse | ServerCall:
         """Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server."""
         function = ServerFunction(func_name, *args, **kwargs)
         server_response = self.send_request(
@@ -370,7 +370,7 @@ class RootHelperClient:
             raw=raw,
             completion_handler=completion_handler
         )
-        if asynchronous or raw: # Returns ServerAsyncCall for async or whole structure directly for sync_raw
+        if asynchronous or raw: # Returns ServerCall for async or whole structure directly for sync_raw
             return server_response
         if server_response.code == ServerResponseStatusCode.OK:
             return server_response.response
@@ -391,7 +391,7 @@ class RootHelperClient:
         self.keep_unlocked = value
 
 @dataclass
-class ServerAsyncCall:
+class ServerCall:
     """Captures details about ongoing server async call."""
     """Can be used to join the thread later or send cancel request for single request."""
     call_id: uuid.uuid
