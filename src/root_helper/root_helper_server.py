@@ -44,6 +44,7 @@ class RootHelperServer:
         self.server_socket: socket.socket | None = None
         self.pid_lock: int | None = None
         self.jobs: List[Job] = []
+        self._jobs_lock = threading.Lock()
         self.client_watchdog = WatchDog(lambda: self.check_client())
         print("[Server]: " + "Welcome")
         self.read_initial_session_data()
@@ -132,16 +133,18 @@ class RootHelperServer:
                 return None
         # Handle job termination
         jobs_to_wait = []
-        for job in [j for j in self.jobs if j is not called_by_job]:
-            job_to_wait = safe_execute(job.terminate)
-            if job_to_wait:
-                jobs_to_wait.append(job_to_wait)
-        Job.join_all(jobs_to_wait, timeout=6)
+        with self._jobs_lock:
+            for job in [j for j in self.jobs if j is not called_by_job]:
+                job_to_wait = safe_execute(job.terminate)
+                if job_to_wait:
+                    jobs_to_wait.append(job_to_wait)
+            Job.join_all(jobs_to_wait, timeout=6)
         print("[Server]: Waiting done")
         # Force terminate remaining jobs and clear jobs list
-        for job in self.jobs[:]:
-            safe_execute(job.terminate, force=True)
-        self.jobs = [called_by_job] if called_by_job in self.jobs else []
+        with self._jobs_lock:
+            for job in self.jobs[:]:
+                safe_execute(job.terminate, force=True)
+            self.jobs = [called_by_job] if called_by_job in self.jobs else []
         # Call after_jobs_cleaned callback if provided
         if after_jobs_cleaned:
             safe_execute(after_jobs_cleaned)
@@ -204,7 +207,8 @@ class RootHelperServer:
                     target=self.handle_connection,
                     args=(job, conn, session_token, allowed_uid)
                 )
-                self.jobs.append(job)
+                with self._jobs_lock:
+                    self.jobs.append(job)
                 job.thread.start()
             except Exception as e:
                 print("[Server]: ERROR: " + f"Error accepting connection: {e}")
@@ -281,13 +285,14 @@ class RootHelperServer:
                 case ServerCommand.CANCEL_CALL:
                     # Handle call cancellation
                     call_id=uuid.UUID(cmd_value)
-                    job_to_cancel = next((j for j in self.jobs if j.call_id == call_id), None)
-                    if job:
-                        def completion():
-                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
-                        job_to_cancel.terminate(completion=completion)
-                    else:
-                        self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
+                    with self._jobs_lock:
+                        job_to_cancel = next((j for j in self.jobs if j.call_id == call_id), None)
+                        if job:
+                            def completion():
+                                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
+                            job_to_cancel.terminate(completion=completion)
+                        else:
+                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
         except ValueError as e:
             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
@@ -347,7 +352,8 @@ class RootHelperServer:
             if close:
                 conn.shutdown(socket.SHUT_WR)
                 conn.close()
-                self.jobs.remove(job)
+                with self._jobs_lock:
+                    self.jobs.remove(job)
 
     # --------------------------------------------------------------------------
     # Shared helper functions.
