@@ -118,7 +118,7 @@ def stubborn_worker():
         # You can either ignore or do something here, but the process will not exit
 
     # Override SIGTERM handler
-    signal.signal(signal.SIGTERM, handle_sigterm)
+    #signal.signal(signal.SIGTERM, handle_sigterm)
 
     print(f"Process {os.getpid()} started")
     while True:

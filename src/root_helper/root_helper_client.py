@@ -30,6 +30,7 @@ class RootHelperClient:
         self.token = None
         self.keep_unlocked = Settings.current.keep_root_unlocked
         self.server_watchdog = WatchDog(lambda: self.ping_server())
+        self.set_request_status_lock = threading.Lock()
         Settings.current.event_bus.subscribe(
             SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED,
             self.keep_root_unlocked_changed
@@ -62,9 +63,10 @@ class RootHelperClient:
         if self.is_server_process_running:
             print("Root helper is already running.")
             return True
-        if self.running_actions:
-            print("Error: Some actions are not finished yet.")
-            return False
+        with self.set_request_status_lock:
+            if self.running_actions:
+                print("Error: Some actions are not finished yet.")
+                return False
         if os.path.exists(self.socket_path):
             os.remove(self.socket_path)
         self.is_server_process_running = True
@@ -125,9 +127,10 @@ class RootHelperClient:
             token = self.token
             self.token = None
             self.server_watchdog.stop()
+            # TODO: Race condition between marking EXIT as finished and completion_handler=self.clean_unfinished_jobs. Probably in handling send_request in separate thread.
             self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=self.clean_unfinished_jobs, token=token)
         except Exception as e:
-            print("[Server process] Failed to send EXIT command. Some process might be left working orphined.")
+            print("[Server process]: Warning: Failed to send EXIT command. Some process might be left working orphined.")
             self.clean_unfinished_jobs()
         finally:
             self.is_server_process_running = False
@@ -142,9 +145,10 @@ class RootHelperClient:
             print("[Server process]: Closed.")
 
     def clean_unfinished_jobs(self, exit_result: callable | None = None):
-        for call in self.running_actions[:]:
-            print(f"[Server process]: Warning: Call {call} was left orphined.")
-            self.set_request_status(call, False)
+        with self.set_request_status_lock:
+            for call in self.running_actions[:]:
+                print(f"[Server process]: Warning: Call {call} was left orphined.")
+                self.set_request_status(call, False)
 
     def ping_server(self):
         try:
@@ -392,14 +396,15 @@ class RootHelperClient:
             raise RuntimeError(f"Root function error: {server_response.response}")
 
     def set_request_status(self, call: ServerCall, in_progress: bool):
-        if in_progress:
-            self.running_actions.append(call)
-            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, call, True)
-        else:
-            self.running_actions.remove(call)
-            app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, call, False)
-        if not self.running_actions and not self.keep_unlocked and self.server_handshake_established() and self.is_server_process_running:
-            self.stop_root_helper()
+        with self.set_request_status_lock:
+            if in_progress:
+                self.running_actions.append(call)
+                app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, call, True)
+            else:
+                self.running_actions.remove(call)
+                app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, call, False)
+            if not self.running_actions and not self.keep_unlocked and self.server_handshake_established() and self.is_server_process_running:
+                self.stop_root_helper()
 
     def keep_root_unlocked_changed(self, value: bool):
         self.keep_unlocked = value
@@ -421,6 +426,9 @@ class ServerCall:
 
     def cancel(self):
         """Sends CANCEL_CALL <ID> to server. Can be used only with async calls that already started."""
+        if not self.is_cancellable:
+            print("[Server process]: Warning: Tried to cancel a call that is not cancellable")
+            return
         if self.thread:
             self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
 
