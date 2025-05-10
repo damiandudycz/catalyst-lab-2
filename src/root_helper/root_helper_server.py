@@ -284,9 +284,12 @@ class RootHelperServer:
             except ValueError:
                 self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe = StreamPipe.RETURN, response: str | None = None):
+    def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | None = None):
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
+        if isinstance(pipe, int):
+            # If pipe was passed by ID, convert it back to pipe object
+            pipe = StreamPipe(pipe)
         if code != ServerResponseStatusCode.OK and pipe != StreamPipe.RETURN:
             raise RuntimeError("Return code != OK can be used only with RETURN pipe.")
         if conn.fileno() == -1:
@@ -310,9 +313,11 @@ class RootHelperServer:
     # --------------------------------------------------------------------------
     # Shared helper functions.
 
+    @staticmethod
     def get_runtime_dir(uid: int, runtime_env_name: str = "XDG_RUNTIME_DIR") -> str:
         return os.path.join(os.environ.get(runtime_env_name) or f"/run/user/{uid}", "catalystlab-root-helper")
 
+    @staticmethod
     def get_socket_path(uid: int, runtime_env_name: str = "XDG_RUNTIME_DIR") -> str:
         """Get the path to the socket file for communication."""
         runtime_dir = RootHelperServer.get_runtime_dir(uid, runtime_env_name=runtime_env_name)

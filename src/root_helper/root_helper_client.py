@@ -12,6 +12,7 @@ from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_server import RootHelperServer, StreamPipe, WatchDog
 from .app_events import AppEvents, app_event_bus
 from .settings import *
+from gi.repository import GLib
 
 class RootHelperClient:
 
@@ -284,10 +285,10 @@ class RootHelperClient:
                                 response_string = content
                             case StreamPipe.STDOUT:
                                 if handler:
-                                    handler(content)
+                                    GLib.idle_add(handler, content)
                             case StreamPipe.STDERR:
                                 if handler:
-                                    handler(content)
+                                    GLib.idle_add(handler, content)
 
                     # Processing data returned over socket and combining them into messages.
                     # Format: <StreamPipe.raw>:<Length>:<Message>. eq: 0:11:Hello World
@@ -317,7 +318,7 @@ class RootHelperClient:
                     server_response = ServerResponse.from_json(response_string)
                     if completion_handler:
                         result = server_response if raw else server_response.response
-                        completion_handler(result)
+                        GLib.idle_add(completion_handler, result)
                     return server_response
             except Exception as e:
                 return ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)

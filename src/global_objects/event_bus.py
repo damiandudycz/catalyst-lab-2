@@ -1,8 +1,9 @@
 from enum import Enum, auto
-from typing import final
-from typing import TypeVar, Generic, Callable, Dict, List
+from typing import final, TypeVar, Generic, Callable, Dict, List
+from gi.repository import GLib
 
-EventBusType = TypeVar("EventBusType", bound=Enum)  # Enum type variable
+EventBusType = TypeVar("EventBusType", bound=Enum)
+
 @final
 class EventBus(Generic[EventBusType]):
     def __init__(self):
@@ -15,5 +16,6 @@ class EventBus(Generic[EventBusType]):
 
     def emit(self, event: EventBusType, *args, **kwargs):
         for callback in self._subscribers.get(event, []):
-            callback(*args, **kwargs)
+            # Schedule each callback to run on the main thread
+            GLib.idle_add(callback, *args, **kwargs)
 
