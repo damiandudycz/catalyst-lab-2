@@ -5,15 +5,14 @@ import threading, json, inspect, re
 from enum import Enum
 from typing import Optional, Any
 from functools import wraps
-from gi.repository import Gio
+from gi.repository import Gio, GLib
 from dataclasses import dataclass, field
 from .environment import RuntimeEnv
+from .app_events import AppEvents, app_event_bus
+from .settings import *
 from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_server import RootHelperServer, StreamPipe, WatchDog
-from .app_events import AppEvents, app_event_bus
-from .settings import *
-from gi.repository import GLib
 
 class RootHelperClient:
 
@@ -155,8 +154,6 @@ class RootHelperClient:
 
     def extract_root_helper_to_run_user(self, uid: int) -> str:
         """Extracts root helper server code and appends root functions."""
-        import os
-
         # Runtime directory where the generated server code will be placed.
         runtime_dir = RootHelperServer.get_runtime_dir(uid)
         output_path = os.path.join(runtime_dir, "root-helper-server.py")
@@ -341,7 +338,7 @@ class RootHelperClient:
                     self.set_request_status(call, False)
 
         if asynchronous:
-            async_call = ServerCall(call_id=request.id, request=request, thread=None, client=self)
+            async_call = ServerCall(request=request, thread=None, client=self)
             thread = threading.Thread(target=worker, args=(async_call,), daemon=True)
             async_call.thread = thread
             if request.show_in_running_tasks:
@@ -349,7 +346,7 @@ class RootHelperClient:
             thread.start()
             return async_call
         else:
-            sync_call = ServerCall(call_id=request.id, request=request, thread=None, client=self)
+            sync_call = ServerCall(request=request, thread=None, client=self)
             if request.show_in_running_tasks:
                 self.set_request_status(sync_call, True)
             return worker(call=sync_call)
@@ -397,10 +394,10 @@ class RootHelperClient:
 class ServerCall:
     """Captures details about ongoing server call."""
     """Can be used to join the thread later or send cancel request for single request."""
-    call_id: uuid.uuid
     request: ServerCommand | ServerFunction
     thread: threading.Thread | None
     client: RootHelperClient
+    call_id: uuid.UUID = field(default_factory=uuid.uuid4)
 
     def cancel(self):
         """Sends CANCEL_CALL <ID> to server. Can be used only with async calls that already started."""

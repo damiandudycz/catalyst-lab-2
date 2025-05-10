@@ -5,10 +5,8 @@ import json, multiprocessing
 from enum import Enum
 from functools import wraps
 from dataclasses import dataclass, asdict
-from typing import Any
+from typing import Any, List
 from contextlib import redirect_stdout, redirect_stderr
-from typing import List
-from datetime import datetime
 
 class StreamPipe(Enum):
     RETURN = 0
@@ -235,9 +233,6 @@ class RootHelperServer:
 
             # Receive request data:
             data = conn.recv(4096).decode().strip()
-
-            print(f">> {data}")
-
             if not data.startswith(session_token):
                 self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
@@ -410,12 +405,6 @@ class ServerCommand(str, Enum):
     CANCEL_CALL = "[CANCEL_CALL]"
 
     @property
-    def id(self) -> uuid:
-        # Commands always returns random ID, so be careful when using this.
-        # You can't cancel commands by ID.
-        return uuid.uuid4()
-
-    @property
     def function_name(self) -> str:
         return self.value
 
@@ -430,7 +419,6 @@ class ServerCommand(str, Enum):
 
 class ServerFunction:
     def __init__(self, function_name: str, *args, **kwargs):
-        self.id = uuid.uuid4()
         self.function_name = function_name
         self.args = args
         self.kwargs = kwargs
@@ -438,7 +426,6 @@ class ServerFunction:
     def to_json(self):
         """Convert the ServerFunction instance to a JSON string."""
         return json.dumps({
-            "id": str(self.id),
             "function": self.function_name,
             "args": self.args,
             "kwargs": self.kwargs
@@ -446,14 +433,12 @@ class ServerFunction:
 
     @classmethod
     def from_json(cls, json_str: str):
-        """Create a ServerFunction instance from a JSON string."""
-        try:
-            data = json.loads(json_str)
-            object = cls(data["function"], *data.get("args", []), **data.get("kwargs", {}))
-            object.id = uuid.UUID(data["id"])
-            return object
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            raise ValueError(f"Invalid ServerFunction JSON: {e}")
+        data = json.loads(json_str)
+        return cls(
+            data["function"],
+            *data.get("args", []),
+            **data.get("kwargs", {})
+        )
 
     @property
     def show_in_running_tasks(self):
