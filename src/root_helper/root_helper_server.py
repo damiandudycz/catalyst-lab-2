@@ -18,7 +18,8 @@ class StreamPipe(Enum):
 class ServerResponseStatusCode(Enum):
     OK = 0
     JOB_WAS_TERMINATED = 1
-    JOB_NOT_FOUND = 2
+    JOB_ALREADY_SCHEDULED_FOR_TERMINATION= 2
+    JOB_NOT_FOUND = 3
     COMMAND_EXECUTION_FAILED = 10
     COMMAND_DECODE_FAILED = 11
     COMMAND_UNSUPPORTED_FUNC = 12
@@ -286,9 +287,12 @@ class RootHelperServer:
                     # Handle call cancellation
                     call_id=uuid.UUID(cmd_value)
                     job_to_cancel = self.get_job_by_call_id(call_id)
-                    if job:
-                        def completion():
-                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
+                    if job_to_cancel:
+                        def completion(did_schedule_for_termination: bool):
+                            if did_schedule_for_termination:
+                                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
+                            else:
+                                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_ALREADY_SCHEDULED_FOR_TERMINATION, response="Job was already terminated or scheduled for termination")
                         job_to_cancel.terminate(completion=completion)
                     else:
                         self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
@@ -510,10 +514,13 @@ class Job:
         """Termination itself happens on separate thread so that multiple can be stopped at once."""
         """If force flag is set, termination happens instantly on current thread, blocking it."""
         """Returns Job if process needed to be terminated or None if it was not running."""
+        if self.was_terminated: # If already scheduled for termination or fully terminated.
+            completion(False)
+            return None
         current_thread = threading.current_thread()
         if self.process is None or self.thread is current_thread or not self.process.is_alive():
             if completion:
-                completion()
+                completion(False)
             return None
         self.was_terminated = True
         try:
@@ -525,7 +532,7 @@ class Job:
             self.process.join()
             self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
             if completion:
-                completion()
+                completion(True)
         else:
             cleanup_thread = threading.Thread(target=self.terminate_and_cleanup, args=(completion,))
             cleanup_thread.start()
@@ -535,7 +542,7 @@ class Job:
         if self.process is None or not self.process.is_alive():
             print("[Server]: " + "Process already stopped")
             if completion:
-                completion()
+                completion(False)
             return
         self.process.terminate()
         self.thread.join(timeout=5) # Allow time for graceful termination for 5s
@@ -548,7 +555,7 @@ class Job:
             print("[Server]: " + "Process did terminate.")
         self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
         if completion:
-            completion()
+            completion(True)
 
     @staticmethod
     def join_all(jobs: List[Job], timeout: float):
