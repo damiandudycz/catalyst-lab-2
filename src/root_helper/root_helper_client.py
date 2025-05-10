@@ -123,10 +123,11 @@ class RootHelperClient:
         try:
             token = self.token
             self.token = None
-            # TODO: If this finished and there are still running processes, remove them from list, and print a warning that they failed to be killed.
-            self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, token=token)
+            self.server_watchdog.stop()
+            self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=self.clean_unfinished_jobs, token=token)
         except Exception as e:
-            print(f"Failed to stop root helper: {e}")
+            print("[Server process] Failed to send EXIT command. Some process might be left working orphined.")
+            self.clean_unfinished_jobs()
         finally:
             self.is_server_process_running = False
             if self.main_process and self.main_process.poll() is None:
@@ -138,6 +139,11 @@ class RootHelperClient:
                 self.main_process.wait()
             self.main_process = None
             print("[Server process]: Closed.")
+
+    def clean_unfinished_jobs(self, exit_result: callable | None = None):
+        for request in self.running_actions[:]:
+            print(f"[Server process]: Warning: Request {request} was left orphined.")
+            self.set_request_status(request, False)
 
     def ping_server(self):
         try:
@@ -260,6 +266,9 @@ class RootHelperClient:
                 print("[Server process] Server communication broke.")
                 self.stop_root_helper() # This should never happen.
             raise ServerCallError.SERVER_NOT_RESPONDING
+        if request == ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start=False):
+            raise ServerCallError.SERVER_NOT_RESPONDING
+
         # Prepare message and type
         if isinstance(request, ServerFunction):
             message, request_type = request.to_json(), "function"
@@ -323,9 +332,11 @@ class RootHelperClient:
             except Exception as e:
                 return ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
             finally:
-                self.set_request_status(request, False)
+                if request.show_in_running_tasks:
+                    self.set_request_status(request, False)
 
-        self.set_request_status(request, True)
+        if request.show_in_running_tasks:
+            self.set_request_status(request, True)
         if asynchronous:
             thread = threading.Thread(target=worker, daemon=True)
             thread.start()

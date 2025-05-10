@@ -42,13 +42,13 @@ class RootHelperServer:
         self.server_socket: socket.socket | None = None
         self.pid_lock: int | None = None
         self.jobs: List[Job] = []
-        self.last_ping: datetime | None = None
+        self.client_watchdog = WatchDog(lambda: self.check_client())
         print("[Server]: " + "Welcome")
         self.read_initial_session_data()
         devnull_read = open(os.devnull, 'r')
-        devnull_write = open(os.devnull, 'w')
         sys.stdin = devnull_read
         if RootHelperServer.hide_logs:
+            devnull_write = open(os.devnull, 'w')
             sys.stdout = devnull_write
             sys.stderr = devnull_write
 
@@ -93,10 +93,13 @@ class RootHelperServer:
         if not os.path.isdir(self.runtime_dir):
             raise RuntimeError(f"Runtime directory missing: {self.runtime_dir}")
 
+    # --------------------------------------------------------------------------
+    # Session lifecycle:
+
     def start(self):
         """Run the root helper server."""
         if self.is_running:
-            print("[Server]: ERROR: " + "Server is already running")
+            print("[Server]: INFO: " + "Server is already running. Ignoring start().")
             return
         print("[Server]: " + "Starting server...")
         self.pid_lock = None
@@ -115,6 +118,8 @@ class RootHelperServer:
             print("[Server]: ERROR: Server is not running")
             return
         print("[Server]: Stopping server...")
+
+        self.client_watchdog.stop()
 
         def safe_execute(func, *args, **kwargs):
             """Executes a function with error handling."""
@@ -149,7 +154,19 @@ class RootHelperServer:
         # Close app
         print("[Server]: Server stopped.")
         self.is_running = False
+        self.pid_lock = None
         os._exit(0)
+
+    def check_client(self):
+        """Checks if client is still running, and if not, stops the server."""
+        if not self.pid_lock:
+            return
+        try:
+            os.kill(self.pid_lock, 0)
+        except ProcessLookupError:
+            self.stop()
+        except:
+            pass
 
     # --------------------------------------------------------------------------
     # Socket management:
@@ -250,6 +267,7 @@ class RootHelperServer:
                 case ServerCommand.HANDSHAKE:
                     if self.pid_lock is None:
                         self.pid_lock = pid
+                        self.client_watchdog.start()
                         self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Initialization succeeded")
                     else:
                         self.respond(conn=conn, job=job, code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
@@ -343,6 +361,14 @@ class ServerCommand(str, Enum):
     def function_name(self):
         return self.value
 
+    @property
+    def show_in_running_tasks(self):
+        match self:
+            case ServerCommand.HANDSHAKE | ServerCommand.EXIT:
+                return True
+            case ServerCommand.PING:
+                return False
+
 class ServerFunction:
     def __init__(self, function_name: str, *args, **kwargs):
         self.function_name = function_name
@@ -365,6 +391,10 @@ class ServerFunction:
             return cls(data["function"], *data.get("args", []), **data.get("kwargs", {}))
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             raise ValueError(f"Invalid ServerFunction JSON: {e}")
+
+    @property
+    def show_in_running_tasks(self):
+        return True
 
 @dataclass
 class ServerResponse:
@@ -443,7 +473,7 @@ class Job:
         self.process.terminate()
         self.thread.join(timeout=5) # Allow time for graceful termination for 5s
         if self.process.is_alive():
-            print("[Server]: ERROR: " + "Process did not terminate. Killing forcefully.")
+            print("[Server]: WARNING: " + "Process did not terminate. Killing forcefully.")
             self.process.kill()
             self.process.join()
             self.thread.join()
@@ -571,4 +601,3 @@ class WatchDog:
                 self._thread.join()
             self._started = False
             self._thread = None
-
