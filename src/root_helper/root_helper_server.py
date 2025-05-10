@@ -144,7 +144,7 @@ class RootHelperServer:
         print("[Server]: Waiting done")
         # Force terminate remaining jobs and clear jobs list
         for job in self.jobs[:]:
-            safe_execute(job.terminate, force=True)
+            safe_execute(job.terminate, instant=True)
         self.clear_jobs(keep=called_by_job)
         # Call after_jobs_cleaned callback if provided
         if after_jobs_cleaned:
@@ -318,10 +318,10 @@ class RootHelperServer:
                             func_struct.kwargs,
                             self.respond
                         )
-                        if not job.terminated:
+                        if not job.mark_terminated:
                             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response=result)
                     except Exception as e:
-                        if not job.terminated:
+                        if not job.mark_terminated:
                             self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
             except ValueError:
                 self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
@@ -497,37 +497,45 @@ class Job:
         self.conn = conn
         self.thread: threading.Thread | None = None
         self.process: multiprocessing.Process | None = None
-        self.terminated = False
+        self.mark_terminated = False
         self.call_id: uuid | None = None # Set when handle_connection is called
         self.thread_lock = threading.Lock()
 
-    def terminate(self, force: bool = False, completion: callable | None = None) -> Job | None:
+    def terminate(self, instant: bool = False, completion: callable | None = None) -> Job | None:
         """Schedules Job process to terminate and gives it 5 seconds to finish."""
         """Termination itself happens on separate thread so that multiple can be stopped at once."""
-        """If force flag is set, termination happens instantly on current thread, blocking it."""
+        """If instant flag is set, termination happens instantly on current thread, blocking it."""
         """Returns Job if process needed to be terminated or None if it was not running."""
-        if self.terminated: # If already scheduled for termination or fully terminated.
-            completion(False)
-            return None
+        if self.mark_terminated:
+            if self.cleanup_thread and self.cleanup_thread.is_alive():
+                if instant:
+                    self.cleanup_thread.join()
+                if completion:
+                    completion(True)  # Indicates it was already being terminated
+                return self
+            else:
+                if completion:
+                    completion(False)  # Indicates it was already terminated and no cleanup needed
+                return None
         current_thread = threading.current_thread()
         if self.process is None or self.thread is current_thread or not self.process.is_alive():
             if completion:
                 completion(False)
             return None
-        self.terminated = True
+        self.mark_terminated = True
         try:
             self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.OK, pipe=StreamPipe.EVENTS, response=StreamPipeEvent.CALL_WILL_TERMINATE)
         except Exception as e:
             pass
-        if force:
+        if instant:
             self.process.kill()
             self.process.join()
             self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
             if completion:
                 completion(True)
         else:
-            cleanup_thread = threading.Thread(target=self.terminate_and_cleanup, args=(completion,))
-            cleanup_thread.start()
+            self.cleanup_thread = threading.Thread(target=self.terminate_and_cleanup, args=(completion,))
+            self.cleanup_thread.start()
         return self
 
     def terminate_and_cleanup(self, completion: callable | None = None):
