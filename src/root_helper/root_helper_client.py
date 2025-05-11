@@ -14,6 +14,12 @@ from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_server import RootHelperServer, StreamPipe, StreamPipeEvent, WatchDog
 
+@final
+class RootHelperClientEvents(Enum):
+    CHANGE_ROOT_ACCESS = auto() # root_helper_client unlocked / locked root access
+    ROOT_REQUEST_STATUS = auto() # calls when state of root_function is changed (in progress / finished)
+    ROOT_REQUEST_WILL_TERMINATE = auto() # Root call was marked to be terminated.
+
 class RootHelperClient:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
@@ -24,6 +30,7 @@ class RootHelperClient:
     # Lifecycle:
 
     def __init__(self):
+        self.event_bus: EventBus[SettingsEvents] = EventBus[SettingsEvents]()
         self.socket_path = RootHelperServer.get_socket_path(os.getuid())
         self.main_process = None
         self.running_actions: List[ServerCall] = []
@@ -47,7 +54,7 @@ class RootHelperClient:
         fget=lambda self: getattr(self, "_is_server_process_running", False),
         fset=lambda self, value: (
             setattr(self, "_is_server_process_running", value),
-            app_event_bus.emit(AppEvents.CHANGE_ROOT_ACCESS, value),
+            self.event_bus.emit(RootHelperClientEvents.CHANGE_ROOT_ACCESS, value),
             (not value and self.server_watchdog.stop() or None)
         )[0]
     )
@@ -311,7 +318,7 @@ class RootHelperClient:
                                     match event:
                                         case StreamPipeEvent.CALL_WILL_TERMINATE:
                                             call.terminated = True
-                                            app_event_bus.emit(AppEvents.ROOT_REQUEST_WILL_TERMINATE, self, call)
+                                            self.event_bus.emit(RootHelperClientEvents.ROOT_REQUEST_WILL_TERMINATE, self, call)
                                         case _:
                                            print(f"[Server process]: Warning: Received unsupported event: {event}")
                                 except Exception as e:
@@ -399,10 +406,10 @@ class RootHelperClient:
         with self.set_request_status_lock:
             if in_progress:
                 self.running_actions.append(call)
-                app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, call, True)
+                self.event_bus.emit(RootHelperClientEvents.ROOT_REQUEST_STATUS, self, call, True)
             else:
                 self.running_actions.remove(call)
-                app_event_bus.emit(AppEvents.ROOT_REQUEST_STATUS, self, call, False)
+                self.event_bus.emit(RootHelperClientEvents.ROOT_REQUEST_STATUS, self, call, False)
             if not self.running_actions and not self.keep_unlocked and self.server_handshake_established() and self.is_server_process_running:
                 self.stop_root_helper()
 

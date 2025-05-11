@@ -1,7 +1,7 @@
 from gi.repository import Gtk, Adw, GObject
 from functools import partial
 from .app_events import AppEvents, app_event_bus
-from .root_helper_client import RootHelperClient, root_function, ServerCall
+from .root_helper_client import RootHelperClient, RootHelperClientEvents, root_function, ServerCall
 from .settings import *
 
 class RootAccessButton(Gtk.Overlay):
@@ -101,9 +101,9 @@ class RootAccessButton(Gtk.Overlay):
         self.root_access_button.connect("clicked", self.toggle_root_access)
 
         # Subscribe to events
-        app_event_bus.subscribe(AppEvents.CHANGE_ROOT_ACCESS, self.root_access_changed)
-        app_event_bus.subscribe(AppEvents.ROOT_REQUEST_STATUS, self.root_requests_status_changed)
-        app_event_bus.subscribe(AppEvents.ROOT_REQUEST_WILL_TERMINATE, self.root_request_will_terminate)
+        RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.CHANGE_ROOT_ACCESS, self.root_access_changed)
+        RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.ROOT_REQUEST_STATUS, self.root_requests_status_changed)
+        RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.ROOT_REQUEST_WILL_TERMINATE, self.root_request_will_terminate)
         Settings.current.event_bus.subscribe(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, self.keep_root_unlocked_changed)
 
         # Set initial state based on root access status
