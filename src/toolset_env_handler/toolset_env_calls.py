@@ -155,13 +155,16 @@ def run_isolated_system_command(toolset_root: str, command_to_run: List[str], ho
                     ])
                 continue
 
-        result = start_toolset_command(fake_root=fake_root, bind_options=bind_options, command_to_run=command_to_run)
+        result = start_toolset_command._async_raw(lambda x: print(f"> A  {x}"), lambda x: print(f"[result A] --> {x} <-- [result]"), fake_root=fake_root, bind_options=bind_options, command_to_run=command_to_run)
         print(f":: {result}")
 
     finally:
         # Clean workdir.
         #shutil.rmtree(work_dir, ignore_errors=True)
         pass
+
+def std_handler(stream):
+    print(f">> {stream}")
 
 @root_function
 def start_toolset_command(fake_root: str, bind_options, command_to_run):
@@ -179,27 +182,10 @@ def start_toolset_command(fake_root: str, bind_options, command_to_run):
     ]
     exec_call = cmd_bwrap + bind_options + command_to_run
 
-#    sys.stdout.write("Hello, terminal!\n")
-#    sys.stdout.flush()  # Ensure it's written immediately
-
     try:
-        # Capture the stdout and stderr
-        result = subprocess.run(
-            exec_call,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=True
-        )
-
-        # Return both stdout and stderr as strings
-        output = result.stdout.decode()  # stdout captured
-        error = result.stderr.decode()   # stderr captured
-
-        # You can return either or both, for example:
-        if result.returncode == 0:
-            return output  # Return standard output
-        else:
-            return error   # Return error output if there was a failure
+        result = subprocess.run(exec_call)  # exec_call is a list like ['ls', '-la']
+        # Note: If root_function fails execution it should raise exception. Returning anything is interpreted as a result
+        return result.returncode
 
     except subprocess.CalledProcessError as e:
         return f"Error occurred: {e.stderr.decode()}"  # In case of a subprocess error

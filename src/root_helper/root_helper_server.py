@@ -580,7 +580,7 @@ class StreamWrapper:
     def flush(self):
         self.stream.flush()
 
-def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, respond_callback) -> Any | None:
+def _run_function_with_streaming_output(conn: socket.socket, job: Job, func, args, kwargs, respond_callback) -> Any | None:
     """Takes a function and runs it as separate process while sending its output to stdout_callback and stderr_callback."""
     """Spawned process runs in sync, so this function only after given function is ready."""
     """Returns what given function returns or throws if given function throws."""
@@ -589,7 +589,7 @@ def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, resp
     result_queue = multiprocessing.Queue()
 
     proc = multiprocessing.Process(
-        target=_run_and_capture_target,
+        target=_run_and_capture_streams,
         args=(func, args, kwargs, write_fd, result_queue)
     )
     job.process = proc
@@ -597,13 +597,15 @@ def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, resp
     os.close(write_fd)
 
     def stream_reader(job: Job):
+        """Reads back from StreamWrapper."""
         with os.fdopen(read_fd, 'r') as pipe:
             for line in pipe:
                 try:
                     data = json.loads(line)
                     respond_callback(conn=conn, job=job, code=ServerResponseStatusCode.OK, pipe=data["pipe"], response=data["message"])
                 except json.JSONDecodeError as e:
-                    stderr_callback(f"[parser error] {e}: {line}")
+                    print(f"[Server]: Error: Failed to read from StreamWrapper read_fd pipe: {e}")
+                    print(f"[Server]: Failed line: {line}")
 
     reader_thread = threading.Thread(
         target=stream_reader,
@@ -624,17 +626,37 @@ def _run_function_with_streaming_output(conn, job: Job, func, args, kwargs, resp
     else:
         return None
 
-def _run_and_capture_target(func, args, kwargs, write_fd, result_queue):
-    """Runs function and redirects current stdout and stderr from it to StreamWrapper objects."""
-    with os.fdopen(write_fd, 'w', buffering=1) as f:
-        stdout_wrapper = StreamWrapper(f, StreamPipe.STDOUT)
-        stderr_wrapper = StreamWrapper(f, StreamPipe.STDERR)
-        with redirect_stdout(stdout_wrapper), redirect_stderr(stderr_wrapper):
-            try:
-                result = func(*args, **kwargs)
-                result_queue.put(result)
-            except Exception as e:
-                result_queue.put(e)
+def _run_and_capture_streams(func, args, kwargs, write_fd, result_queue):
+    # Create two pipes for capturing stdout and stderr separately
+    # Never call this method directly, it needs to be spawned as multiprocessing.Process through _run_function_with_streaming_output.
+    stdout_r, stdout_w = os.pipe()
+    stderr_r, stderr_w = os.pipe()
+
+    # Duplicate write ends over original stdout/stderr
+    os.dup2(stdout_w, 1)
+    os.dup2(stderr_w, 2)
+    os.close(stdout_w)
+    os.close(stderr_w)
+
+    def forward_stream(read_fd, pipe_name):
+        with os.fdopen(read_fd, 'r') as reader, os.fdopen(write_fd, 'w', buffering=1) as writer:
+            for line in reader:
+                payload = json.dumps({
+                    "pipe": pipe_name,
+                    "message": line.rstrip("\n")
+                })
+                writer.write(payload + "\n")
+                writer.flush()
+
+    # Start background threads to forward raw output as JSON
+    threading.Thread(target=forward_stream, args=(stdout_r, StreamPipe.STDOUT.value), daemon=True).start()
+    threading.Thread(target=forward_stream, args=(stderr_r, StreamPipe.STDERR.value), daemon=True).start()
+
+    try:
+        result = func(*args, **kwargs)
+        result_queue.put(result)
+    except Exception as e:
+        result_queue.put(e)
 
 class WatchDog:
     def __init__(self, func: callable, ns: float = 5.0):
