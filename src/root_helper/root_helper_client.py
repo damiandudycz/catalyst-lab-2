@@ -37,7 +37,7 @@ class RootHelperClient:
         self.token = None
         self.keep_unlocked = Settings.current.keep_root_unlocked
         self.server_watchdog = WatchDog(lambda: self.ping_server())
-        self.set_request_status_lock = threading.Lock()
+        self.set_request_status_lock = threading.RLock()
         Settings.current.event_bus.subscribe(
             SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED,
             self.keep_root_unlocked_changed
