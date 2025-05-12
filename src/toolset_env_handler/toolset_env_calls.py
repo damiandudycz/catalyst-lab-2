@@ -169,9 +169,8 @@ def run_isolated_system_command(toolset_root: str, command_to_run: List[str], ho
 
 @root_function
 def start_toolset_command(work_dir: str, fake_root: str, bind_options, command_to_run):
-    import shutil
+    import shutil, subprocess
     cmd_bwrap = [
-        "unshare", "--user", "--map-root-user", "--mount", "--pid", "--fork",
         "bwrap",
         "--die-with-parent",
         "--cap-add", "CAP_DAC_OVERRIDE", "--cap-add", "CAP_SYS_ADMIN", "--cap-add", "CAP_FOWNER", "--cap-add", "CAP_SETGID",
