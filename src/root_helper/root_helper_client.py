@@ -30,7 +30,7 @@ class RootHelperClient:
     # Lifecycle:
 
     def __init__(self):
-        self.event_bus: EventBus[SettingsEvents] = EventBus[SettingsEvents]()
+        self.event_bus: EventBus[RootHelperClientEvents] = EventBus[RootHelperClientEvents]()
         self.socket_path = RootHelperServer.get_socket_path(os.getuid())
         self.main_process = None
         self.running_actions: List[ServerCall] = []
@@ -306,9 +306,11 @@ class RootHelperClient:
                             case StreamPipe.RETURN:
                                 response_string = content
                             case StreamPipe.STDOUT:
+                                call.output_append(content)
                                 if handler:
                                     GLib.idle_add(handler, content)
                             case StreamPipe.STDERR:
+                                call.output_append(content)
                                 if handler:
                                     GLib.idle_add(handler, content)
                             case StreamPipe.EVENTS:
@@ -427,6 +429,10 @@ class RootHelperClient:
     def keep_root_unlocked_changed(self, value: bool):
         self.keep_unlocked = value
 
+@final
+class ServerCallEvents(Enum):
+    NEW_OUTPUT_LINE = auto() # new line added to collected output
+
 @dataclass
 class ServerCall:
     """Captures details about ongoing server call."""
@@ -436,6 +442,9 @@ class ServerCall:
     client: RootHelperClient
     call_id: uuid.UUID = field(default_factory=uuid.uuid4)
     terminated: bool = False # Mark as terminated. Might still be terminating.
+    output: List[str] = field(default_factory=list) # Contains output lines from stdout and stderr
+    output_lock: threading.Lock = field(default_factory=threading.Lock)
+    event_bus: EventBus[ServerCallEvents] = field(default_factory=lambda: EventBus[ServerCallEvents]())
 
     @property
     def is_cancellable(self) -> bool:
@@ -449,6 +458,15 @@ class ServerCall:
             return
         if self.thread:
             self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
+
+    def output_append(self, line: str):
+        with self.output_lock:
+            self.output.append(line)
+            self.event_bus.emit(ServerCallEvents.NEW_OUTPUT_LINE, self, line)
+
+    def get_output(self) -> List[str]:
+        with self.output_lock:
+            return self.output
 
 # ------------------------------------------------------------------------------
 # @root_function decorator.
@@ -513,4 +531,3 @@ class ServerCallError(Exception):
         return f"Server error (code={self.error_code}): {self.message}"
 # Define error codes and their corresponding messages as class variables
 ServerCallError.SERVER_NOT_RESPONDING = ServerCallError(1, "The server is not responding.")
-ServerCallError.SERVER_PROCESS_NOT_AVAILABLE = ServerCallError(2, "The server starting process is not available.")

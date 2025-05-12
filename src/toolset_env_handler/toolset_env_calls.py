@@ -11,7 +11,7 @@ from typing import Optional
 from collections import namedtuple
 from .environment import RuntimeEnv
 from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
-from .root_helper_client import root_function
+from .root_helper_client import root_function, ServerCall, ServerCallEvents
 
 @dataclass
 class BindMount:
@@ -21,28 +21,32 @@ class BindMount:
     store_changes: bool = False     # True if changes should be stored outside isolated env
     resolve_host_path: bool = True  # Whether to resolve path through runtime_env
 
-def run_isolated_system_command(toolset_root: str, command_to_run: List[str], hot_fixes: Optional[List[HotFix]] = None, additional_bindings: Optional[List[BindMount]] = None):
+def run_isolated_system_command(toolset_root: str, command_to_run: str, store_changes: bool = False, hot_fixes: Optional[List[HotFix]] = None, additional_bindings: Optional[List[BindMount]] = None):
     """Runs the given command in an isolated Linux environment with host tools mounted as read-only."""
 
     runtime_env = RuntimeEnv.current()
 
+    resolved_toolset_root = str(Path(toolset_root).resolve())
+    if resolved_toolset_root == "/" and store_changes:
+        raise RuntimeError("Cannot use store_changes with host toolset")
+
     _system_bindings = [ # System.
-        BindMount(mount_path="/usr",   toolset_path="/usr"),
-        BindMount(mount_path="/bin",   toolset_path="/bin"),
-        BindMount(mount_path="/sbin",  toolset_path="/sbin"),
-        BindMount(mount_path="/lib",   toolset_path="/lib"),
-        BindMount(mount_path="/lib32", toolset_path="/lib32"),
-        BindMount(mount_path="/lib64", toolset_path="/lib64"),
+        BindMount(mount_path="/usr",   toolset_path="/usr",   store_changes=store_changes),
+        BindMount(mount_path="/bin",   toolset_path="/bin",   store_changes=store_changes),
+        BindMount(mount_path="/sbin",  toolset_path="/sbin",  store_changes=store_changes),
+        BindMount(mount_path="/lib",   toolset_path="/lib",   store_changes=store_changes),
+        BindMount(mount_path="/lib32", toolset_path="/lib32", store_changes=store_changes),
+        BindMount(mount_path="/lib64", toolset_path="/lib64", store_changes=store_changes),
     ]
     _devices_bindings = [ # Devices.
         BindMount(mount_path="/dev/kvm", host_path="/dev/kvm"),
     ]
     _config_bindings = [ # Config.
-        BindMount(mount_path="/etc", toolset_path="/etc"),
+        BindMount(mount_path="/etc", toolset_path="/etc", store_changes=store_changes),
         BindMount(mount_path="/etc/resolv.conf", host_path="/etc/resolv.conf"), # Take resolv.conf directly from main system
     ]
     _working_bindings = [ # Working.
-        BindMount(mount_path="/var", toolset_path="/var"),
+        BindMount(mount_path="/var", toolset_path="/var", store_changes=store_changes),
         BindMount(mount_path="/tmp"), # Create empty tmp when running env
     ]
     # All bindings.
@@ -53,7 +57,7 @@ def run_isolated_system_command(toolset_root: str, command_to_run: List[str], ho
         if bind.host_path and bind.toolset_path:
             raise ValueError(f"BindMount for mount_path '{bind.mount_path}' has both host_path and toolset_path set. Only one is allowed.")
         if bind.toolset_path:
-            bind.host_path = os.path.join(toolset_root, bind.toolset_path.lstrip("/"))
+            bind.host_path = os.path.join(resolved_toolset_root, bind.toolset_path.lstrip("/"))
 
     work_dir = Path(tempfile.mkdtemp(prefix="gentoo_toolset_spawn_"))
     try:
@@ -72,7 +76,7 @@ def run_isolated_system_command(toolset_root: str, command_to_run: List[str], ho
         # Collect required hotfix patched files and add to bindings:
         hotfix_patches = [fix.get_patch_spec for fix in (hot_fixes or [])]
         for patch in hotfix_patches:
-            patched_file_path = apply_patch_and_store_for_isolated_system(runtime_env, toolset_root, hotfixes_workdir, patch)
+            patched_file_path = apply_patch_and_store_for_isolated_system(runtime_env, resolved_toolset_root, hotfixes_workdir, patch)
             if patched_file_path is not None:
                 # Convert patch file to BindMount structure
                 patched_file_binding = BindMount(mount_path=patch.source_path, host_path=patched_file_path, resolve_host_path=False)
@@ -155,40 +159,48 @@ def run_isolated_system_command(toolset_root: str, command_to_run: List[str], ho
                     ])
                 continue
 
-        start_toolset_command._async_raw(
-            lambda x: print(f"[TOOLSET]: {x}"),
-            lambda x: print(f"[TOOLSET]: Returned: {x}"),
+        toolset_call = start_toolset_command._async_raw(
+            #lambda x: print(f"[TOOLSET]: {x}"),
+            completion_handler=lambda x: print(f"[TOOLSET] -> {x}"),
             work_dir=str(work_dir),
             fake_root=fake_root,
             bind_options=bind_options,
             command_to_run=command_to_run
         )
 
+        toolset_call.event_bus.subscribe(
+            ServerCallEvents.NEW_OUTPUT_LINE,
+            monitor_output
+        )
+
     except Exception as e:
         print(f"[TOOLSET]: [Error]: {e}")
 
-@root_function
-def start_toolset_command(work_dir: str, fake_root: str, bind_options, command_to_run):
-    import shutil, subprocess
-    cmd_bwrap = [
-        "bwrap",
-        "--die-with-parent",
-        "--cap-add", "CAP_DAC_OVERRIDE", "--cap-add", "CAP_SYS_ADMIN", "--cap-add", "CAP_FOWNER", "--cap-add", "CAP_SETGID",
-        "--unshare-uts", "--unshare-ipc", "--unshare-pid", "--unshare-cgroup",
-        "--hostname", "catalyst-lab",
-        "--bind", fake_root, "/",
-        "--dev", "/dev",
-        "--proc", "/proc",
-        "--setenv", "HOME", "/"
-    ]
-    exec_call = cmd_bwrap + bind_options + command_to_run
+def monitor_output(call: ServerCall, line: str):
+    print(f"> {line}")
 
+@root_function
+def start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str], command_to_run: str):
+    import shutil, subprocess
+    cmd_bwrap = (
+        "bwrap "
+        "--die-with-parent "
+        "--cap-add CAP_DAC_OVERRIDE --cap-add CAP_SYS_ADMIN --cap-add CAP_FOWNER --cap-add CAP_SETGID "
+        "--unshare-uts --unshare-ipc --unshare-pid --unshare-cgroup "
+        "--hostname catalyst-lab "
+        "--bind " + fake_root + " / "
+        "--dev /dev "
+        "--proc /proc "
+        "--setenv HOME / "
+    )
+    arguments_string = " ".join(bind_options) + " /bin/sh -c '" + command_to_run + "'"
+    exec_call = cmd_bwrap + arguments_string
     try:
-        result = subprocess.run(exec_call).returncode
+        result = subprocess.run(exec_call, shell=True).returncode
         if result != 0:
             raise RuntimeError(f"Toolset call returned exit code: {result}")
     except Exception as e:
-        # Note: We don't handle exceptions here, because if root function throws, the exception will be just returned as a result of this call, which is what we want.
+        # Note: We don't handle exceptions here, because if the root function throws, the exception will be just returned as a result of this call, which is what we want.
         raise e
     finally:
         shutil.rmtree(work_dir, ignore_errors=False)

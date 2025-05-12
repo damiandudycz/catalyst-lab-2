@@ -87,15 +87,27 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
-        self.async_call = stubborn_worker._async_raw(lambda x: print(f"> A  {x}"), lambda x: print(f"[result A] --> {x} <-- [result]"))
+        self.async_call = stubborn_worker._async(
+            lambda x: print(f"[TEST]: {x}"),
+            lambda x: print(f"[TEST] -> {x}")
+        )
         print(self.async_call)
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
         # Testing only
         run_isolated_system_command(
-            toolset_root="/",
-            command_to_run=["ls", "-la", "/"],
+            toolset_root="/home/damiandudycz/gentoo_stage3",
+            command_to_run=("catalyst -s stable"),
+            #command_to_run=(
+            #    "mkdir -p /etc/portage/package.accept_keywords && "
+            #    "mkdir -p /etc/portage/package.use && "
+            #    "echo dev-util/catalyst > /etc/portage/package.accept_keywords/catalyst && "
+            #    "echo \">=sys-apps/util-linux-2.40.4 python\" >> /etc/portage/package.use/catalyst && "
+            #    "echo \">=sys-boot/grub-2.12-r6 grub_platforms_efi-32\" >> /etc/portage/package.use/catalyst && "
+            #    "emerge catalyst"
+            #),
+            store_changes=True,
             additional_bindings=[
                 BindMount(mount_path="/var/db/repos/gentoo", host_path="/home/damiandudycz/gentoo-portage", store_changes=True, resolve_host_path=False),
                 BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
