@@ -101,8 +101,8 @@ class RootHelperClient:
         threading.Thread(target=monitor_error_codes, daemon=True).start()
 
         # Send token and runtime dir
-        self.main_process.stdin.write(token.encode() + b'\n')
-        self.main_process.stdin.flush()
+        # TODO: This method of passing sometimes fails, leaving server waiting for that data.
+        self.main_process.stdin.write(token.encode() + b' ')
         self.main_process.stdin.write(xdg_runtime_dir.encode() + b'\n')
         self.main_process.stdin.flush()
 

@@ -30,8 +30,6 @@ class EnvironmentsSection(Gtk.Box):
         # Subscribe to relevant events
         Settings.current.event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
 
-        self.async_call = None # TODO: Delete, this is for testing
-
     def toolsets_updated(self):
         self._load_system_toolset()
         self._load_external_toolsets()
@@ -97,9 +95,9 @@ class EnvironmentsSection(Gtk.Box):
         # Testing only
         run_isolated_system_command(
             toolset_root="/",
-            command_to_run=["emerge", "--sync"],
+            command_to_run=["ls", "-la", "/"],
             additional_bindings=[
-                BindMount(mount_path="/var/db/repos", host_path="/home/damiandudycz/Repos_gentoo", store_changes=True, resolve_host_path=False),
+                BindMount(mount_path="/var/db/repos/gentoo", host_path="/home/damiandudycz/gentoo-portage", store_changes=True, resolve_host_path=False),
                 BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
             ]
         )

@@ -48,9 +48,9 @@ class RootHelperServer:
         self.pid_lock: int | None = None
         self._jobs_lock = threading.Lock()
         self._jobs: List[Job] = []
-        self.client_watchdog = WatchDog(lambda: self.check_client())
-        print("[Server]: " + "Welcome")
         self.read_initial_session_data()
+        self.validate_session()
+        self.client_watchdog = WatchDog(lambda: self.check_client())
         devnull_read = open(os.devnull, 'r')
         sys.stdin = devnull_read
         if RootHelperServer.hide_logs:
@@ -66,11 +66,10 @@ class RootHelperServer:
 
     def read_initial_session_data(self):
         """Reads session uuid, token and runtime env from STDIN and os.env."""
+        print("[Server]: " + "Welcome")
         self.uid: int = int(os.environ.get("PKEXEC_UID"))
-        print("[Server]: " + "Please provide session token:")
-        self.session_token = sys.stdin.readline().strip()
-        print("[Server]: " + "Please provide runtime dir:")
-        os.environ["CL_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip()
+        print("[Server]: " + "Please provide session token and runtime dir:")
+        self.session_token, os.environ["CL_SERVER_RUNTIME_DIR"] = sys.stdin.readline().strip().split(' ', 1)
         self.runtime_dir: str = RootHelperServer.get_runtime_dir(
             self.uid, runtime_env_name="CL_SERVER_RUNTIME_DIR"
         )

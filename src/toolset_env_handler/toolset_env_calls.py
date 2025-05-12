@@ -155,31 +155,27 @@ def run_isolated_system_command(toolset_root: str, command_to_run: List[str], ho
                     ])
                 continue
 
-        result = start_toolset_command._async_raw(
-            lambda x: print(f"[TOOLSET {fake_root}]: {x}"),
-            lambda x: print(f"[TOOLSET {fake_root}]: Return: {x}") and shutil.rmtree(work_dir, ignore_errors=True),
+        start_toolset_command._async_raw(
+            lambda x: print(f"[TOOLSET]: {x}"),
+            lambda x: print(f"[TOOLSET]: Returned: {x}"),
+            work_dir=str(work_dir),
             fake_root=fake_root,
             bind_options=bind_options,
             command_to_run=command_to_run
         )
-        print(f":: {result}")
 
-    finally:
-        # Clean workdir.
-        print("Done")
-        #shutil.rmtree(work_dir, ignore_errors=True)
-
-def std_handler(stream):
-    print(f">> {stream}")
+    except Exception as e:
+        print(f"[TOOLSET]: [Error]: {e}")
 
 @root_function
-def start_toolset_command(fake_root: str, bind_options, command_to_run):
+def start_toolset_command(work_dir: str, fake_root: str, bind_options, command_to_run):
+    import shutil
     cmd_bwrap = [
+        "unshare", "--user", "--map-root-user", "--mount", "--pid", "--fork",
         "bwrap",
         "--die-with-parent",
         "--cap-add", "CAP_DAC_OVERRIDE", "--cap-add", "CAP_SYS_ADMIN", "--cap-add", "CAP_FOWNER", "--cap-add", "CAP_SETGID",
         "--unshare-uts", "--unshare-ipc", "--unshare-pid", "--unshare-cgroup",
-        #"--unshare-user", "--uid", "0", "--gid", "0", # Only add when running as user, not root (pkexec)
         "--hostname", "catalyst-lab",
         "--bind", fake_root, "/",
         "--dev", "/dev",
@@ -189,12 +185,14 @@ def start_toolset_command(fake_root: str, bind_options, command_to_run):
     exec_call = cmd_bwrap + bind_options + command_to_run
 
     try:
-        result = subprocess.run(exec_call)  # exec_call is a list like ['ls', '-la']
-        # Note: If root_function fails execution it should raise exception. Returning anything is interpreted as a result
-        return result.returncode
-
-    except subprocess.CalledProcessError as e:
-        return f"Error occurred: {e.stderr.decode()}"  # In case of a subprocess error
+        result = subprocess.run(exec_call).returncode
+        if result != 0:
+            raise RuntimeError(f"Toolset call returned exit code: {result}")
+    except Exception as e:
+        # Note: We don't handle exceptions here, because if root function throws, the exception will be just returned as a result of this call, which is what we want.
+        raise e
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=False)
 
 #run_isolated_system_command(
 #    runtime_env=RuntimeEnv.current(),
