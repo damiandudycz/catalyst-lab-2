@@ -34,10 +34,10 @@ class WelcomeSection(Gtk.Box):
         # Setup buttons
         self.setup_sections_visibility()
         # Subscribe to relevant events
-        Settings.current.event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.setup_sections_visibility)
+        Settings.current().event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.setup_sections_visibility)
 
     def setup_sections_visibility(self):
-        initial_setup_done = Settings.current.get_toolsets()
+        initial_setup_done = Settings.current().get_toolsets()
         self.setup_environments_section.set_visible(not initial_setup_done)
         self.suggested_actions_section.set_visible(initial_setup_done)
 

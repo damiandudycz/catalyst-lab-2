@@ -28,7 +28,7 @@ class EnvironmentsSection(Gtk.Box):
         # Setup external env entries
         self._load_external_toolsets()
         # Subscribe to relevant events
-        Settings.current.event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
+        Settings.current().event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
 
     def toolsets_updated(self):
         self._load_system_toolset()
@@ -52,7 +52,7 @@ class EnvironmentsSection(Gtk.Box):
 
         # Refresh the list
         external_toolsets = [
-            toolset for toolset in Settings.current.get_toolsets()
+            toolset for toolset in Settings.current().get_toolsets()
             if toolset.env == ToolsetEnv.EXTERNAL
         ]
 
@@ -97,8 +97,8 @@ class EnvironmentsSection(Gtk.Box):
     def on_validate_system_toolset_pressed(self, button):
         # Testing only
         run_isolated_system_command(
-            toolset_root="/home/damiandudycz/gentoo_stage3",
-            command_to_run=("catalyst -s stable"),
+            toolset_root="/",
+            command_to_run=("emerge --info"),
             #command_to_run=(
             #    "mkdir -p /etc/portage/package.accept_keywords && "
             #    "mkdir -p /etc/portage/package.use && "
@@ -107,7 +107,7 @@ class EnvironmentsSection(Gtk.Box):
             #    "echo \">=sys-boot/grub-2.12-r6 grub_platforms_efi-32\" >> /etc/portage/package.use/catalyst && "
             #    "emerge catalyst"
             #),
-            store_changes=True,
+            #store_changes=True,
             additional_bindings=[
                 BindMount(mount_path="/var/db/repos/gentoo", host_path="/home/damiandudycz/gentoo-portage", store_changes=True, resolve_host_path=False),
                 BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)

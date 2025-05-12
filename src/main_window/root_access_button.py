@@ -71,7 +71,7 @@ class RootAccessButton(Gtk.Overlay):
         # CheckButton for "Keep root access unlocked"
         self.keep_unlocked_checkbox = Gtk.CheckButton(label="Keep unlocked")
         self.keep_unlocked_checkbox.get_style_context().add_class("caption-heading")
-        self.keep_unlocked_checkbox.set_active(Settings.current.keep_root_unlocked)
+        self.keep_unlocked_checkbox.set_active(Settings.current().keep_root_unlocked)
         self.keep_unlocked_checkbox.set_focusable(False)
         self.keep_unlocked_checkbox.connect("toggled", self.on_keep_unlocked_toggled)
         self.keep_unlocked_checkbox.set_margin_top(6)
@@ -104,7 +104,7 @@ class RootAccessButton(Gtk.Overlay):
         RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.CHANGE_ROOT_ACCESS, self.root_access_changed)
         RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.ROOT_REQUEST_STATUS, self.root_requests_status_changed)
         RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.ROOT_REQUEST_WILL_TERMINATE, self.root_request_will_terminate)
-        Settings.current.event_bus.subscribe(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, self.keep_root_unlocked_changed)
+        Settings.current().event_bus.subscribe(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, self.keep_root_unlocked_changed)
 
         # Set initial state based on root access status
         self.root_access_changed(RootHelperClient.shared().is_server_process_running)

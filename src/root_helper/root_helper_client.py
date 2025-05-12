@@ -35,10 +35,10 @@ class RootHelperClient:
         self.main_process = None
         self.running_actions: List[ServerCall] = []
         self.token = None
-        self.keep_unlocked = Settings.current.keep_root_unlocked
+        self.keep_unlocked = Settings.current().keep_root_unlocked
         self.server_watchdog = WatchDog(lambda: self.ping_server())
         self.set_request_status_lock = threading.RLock()
-        Settings.current.event_bus.subscribe(
+        Settings.current().event_bus.subscribe(
             SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED,
             self.keep_root_unlocked_changed
         )
@@ -74,53 +74,59 @@ class RootHelperClient:
             if self.running_actions:
                 print("Error: Some actions are not finished yet.")
                 return False
-        if os.path.exists(self.socket_path):
-            os.remove(self.socket_path)
-        self.is_server_process_running = True
-        token = str(uuid.uuid4())
-        self.token = None
+        try:
+            if os.path.exists(self.socket_path):
+                os.remove(self.socket_path)
+            self.is_server_process_running = True
+            token = str(uuid.uuid4())
+            self.token = None
 
-        helper_host_path = self.extract_root_helper_to_run_user(os.getuid())
-        xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-        if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
-            cmd_prefix = ["flatpak-spawn", "--host"]
-        else:
-            cmd_prefix = []
-        cmd_authorize = ["pkexec"]
-        exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
+            helper_host_path = self.extract_root_helper_to_run_user(os.getuid())
+            xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+            if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
+                cmd_prefix = ["flatpak-spawn", "--host"]
+            else:
+                cmd_prefix = []
+            cmd_authorize = ["pkexec"]
+            exec_call = cmd_prefix + cmd_authorize + [helper_host_path]
 
-        # Start pkexec and pass token via stdin
-        # Note: This is flatpak-spawn process, not server process itself.
-        self.main_process = subprocess.Popen(exec_call, stdin=subprocess.PIPE)
+            # Start pkexec and pass token via stdin
+            # Note: This is flatpak-spawn process, not server process itself.
+            self.main_process = subprocess.Popen(exec_call, stdin=subprocess.PIPE)
 
-        # Waits until main_process finishes, to see if it was closed with error.
-        def monitor_error_codes():
-            if self.main_process.wait() != 0 and self.is_server_process_running:
-                print("[Server process]! Authorization failed or cancelled.")
+            # Waits until main_process finishes, to see if it was closed with error.
+            def monitor_error_codes():
+                if self.main_process.wait() != 0 and self.is_server_process_running:
+                    print("[Server process]! Authorization failed or cancelled.")
+                    self.is_server_process_running = False
+            threading.Thread(target=monitor_error_codes, daemon=True).start()
+
+            # Send token and runtime dir
+            # TODO: This method of passing sometimes fails, leaving server waiting for that data.
+            self.main_process.stdin.write(token.encode() + b' ')
+            self.main_process.stdin.write(xdg_runtime_dir.encode() + b'\n')
+            self.main_process.stdin.flush()
+
+            # Wait for the server initialization to return result.
+            if self.initialize_server_connectivity(token=token):
+                self.token = token
+                return True
+            else:
+                print("[Server process]! Server failed to initialize. Cleaning...")
+                if self.main_process and self.main_process.poll() is None:
+                    print("[Server process]: Terminating main process...")
+                    self.main_process.terminate()
+                    try:
+                        self.main_process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        print("[Server process]: Kill unresponsive main process...")
+                        self.main_process.kill()
+                        self.main_process.wait()
                 self.is_server_process_running = False
-        threading.Thread(target=monitor_error_codes, daemon=True).start()
-
-        # Send token and runtime dir
-        # TODO: This method of passing sometimes fails, leaving server waiting for that data.
-        self.main_process.stdin.write(token.encode() + b' ')
-        self.main_process.stdin.write(xdg_runtime_dir.encode() + b'\n')
-        self.main_process.stdin.flush()
-
-        # Wait for the server initialization to return result.
-        if self.initialize_server_connectivity(token=token):
-            self.token = token
-            return True
-        else:
-            print("[Server process]! Server failed to initialize. Cleaning...")
-            if self.main_process and self.main_process.poll() is None:
-                print("[Server process]: Terminating main process...")
-                self.main_process.terminate()
-                try:
-                    self.main_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    print("[Server process]: Kill unresponsive main process...")
-                    self.main_process.kill()
-                    self.main_process.wait()
+                self.main_process = None
+                return False
+        except Exception as e:
+            print(f"FAILED TO START SERVER: {e}")
             self.is_server_process_running = False
             self.main_process = None
             return False
@@ -177,9 +183,7 @@ class RootHelperClient:
             os.remove(output_path)
 
         # Load the embedded server code from resources
-        resource_path = "/com/damiandudycz/CatalystLab/root_helper/root_helper_server.py"
-        resource = Gio.Resource.load("/app/share/catalystlab/catalystlab.gresource")
-        data = resource.lookup_data(resource_path, Gio.ResourceLookupFlags.NONE)
+        data = Gio.resources_lookup_data('/com/damiandudycz/CatalystLab/root_helper/root_helper_server.py', Gio.ResourceLookupFlags.NONE)
         server_code = data.get_data().decode()
 
         # Collect the root functions (dynamically registered)

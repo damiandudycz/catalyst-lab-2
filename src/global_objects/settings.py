@@ -32,7 +32,7 @@ class Settings:
         """Determine the best writable config path based on runtime environment."""
         config_paths = {
             RuntimeEnv.FLATPAK: lambda: os.path.expanduser(f"~/.var/app/{os.environ.get('FLATPAK_ID')}/config"),
-            RuntimeEnv.HOST: lambda: os.environ["XDG_CONFIG_HOME"]
+            RuntimeEnv.HOST: lambda: os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
         }
         config_base = config_paths.get(RuntimeEnv.current())()
         return os.path.join(config_base, "settings.json")
@@ -77,7 +77,6 @@ class Settings:
             return cls.default()
 
     @classmethod
-    @property
     def current(cls) -> Settings:
         """Cached settings instance for global access."""
         if cls._current_instance is None:
