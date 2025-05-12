@@ -155,13 +155,19 @@ def run_isolated_system_command(toolset_root: str, command_to_run: List[str], ho
                     ])
                 continue
 
-        result = start_toolset_command._async_raw(lambda x: print(f"> A  {x}"), lambda x: print(f"[result A] --> {x} <-- [result]"), fake_root=fake_root, bind_options=bind_options, command_to_run=command_to_run)
+        result = start_toolset_command._async_raw(
+            lambda x: print(f"[TOOLSET {fake_root}]: {x}"),
+            lambda x: print(f"[TOOLSET {fake_root}]: Return: {x}") and shutil.rmtree(work_dir, ignore_errors=True),
+            fake_root=fake_root,
+            bind_options=bind_options,
+            command_to_run=command_to_run
+        )
         print(f":: {result}")
 
     finally:
         # Clean workdir.
+        print("Done")
         #shutil.rmtree(work_dir, ignore_errors=True)
-        pass
 
 def std_handler(stream):
     print(f">> {stream}")

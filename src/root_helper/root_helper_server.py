@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import os, socket, subprocess, sys, uuid, pwd, time, struct, signal, threading
-import json, multiprocessing
+import json, multiprocessing, select
 from enum import Enum, auto
 from functools import wraps
 from dataclasses import dataclass, asdict
@@ -36,7 +36,7 @@ class RootHelperServer:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperServer | None = None # Singleton shared instance.
-    hide_logs = False
+    hide_logs = True
     use_client_watchdog = True
 
     # --------------------------------------------------------------------------
@@ -357,8 +357,20 @@ class RootHelperServer:
             finally:
                 if close:
                     conn.shutdown(socket.SHUT_WR)
-                    conn.close()
-                    self.remove_job(job)
+                    # Wait for ACK from client
+                    try:
+                        # Wait for socket to be ready to read
+                        readable, writable, errored = select.select([conn], [], [], 5)
+                        if not readable:
+                            print("Socket not readable yet")
+                        conn.settimeout(5)
+                        if conn.recv(3) != b"ACK":
+                            print(f"[Server]: Warning: Incorrect ACK response from client: {data.decode()}")
+                    except Exception as e:
+                        print(f"[Server]: Warning: Failed to receive ACK from client: {e}")
+                    finally:
+                        conn.close()
+                        self.remove_job(job)
 
     # --------------------------------------------------------------------------
     # Jobs management (With thread safety built in).

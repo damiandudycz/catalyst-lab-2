@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal
-import threading, json, inspect, re
+import threading, json, inspect, re, select
 from enum import Enum
 from typing import Optional, Any
 from functools import wraps
@@ -292,9 +292,9 @@ class RootHelperClient:
         def worker(call: ServerCall) -> ServerResponse:
             try:
                 used_token = token if token is not None else self.token
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-                    s.connect(self.socket_path)
-                    s.sendall(f"{used_token} {call.call_id} {request_type} {message}".encode())
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+                    conn.connect(self.socket_path)
+                    conn.sendall(f"{used_token} {call.call_id} {request_type} {message}".encode())
                     current_message_type: StreamPipe | None = None
                     current_chars_left: int | None = None
                     current_buffer = ""
@@ -323,7 +323,7 @@ class RootHelperClient:
                                            print(f"[Server process]: Warning: Received unsupported event: {event}")
                                 except Exception as e:
                                        print(f"[Server process]: Warning: Failed to process event: {content}")
-                                if handler: # TODO: Decode if pass this to handler. Probably yes, and handler should decide which Pipes to process.
+                                if handler: # TODO: Decide if pass this to handler. Probably yes, and handler should decide which Pipes to process.
                                     GLib.idle_add(handler, content)
 
                     # Processing data returned over socket and combining them into messages.
@@ -347,20 +347,31 @@ class RootHelperClient:
                                 if remaining_fragment:
                                     process_fragment(remaining_fragment)
 
-                    while (chunk := s.recv(4096)):
+                    while (chunk := conn.recv(4096)):
                         fragment = chunk.decode()
                         process_fragment(fragment)
+
+                    # Send ACK
+                    try:
+                        readable, writable, errored = select.select([], [conn], [], 5)
+                        if writable:
+                            conn.sendall(b"ACK")
+                            conn.shutdown(socket.SHUT_WR)
+                        else:
+                            print("[Server process]: Warning: Failed to send ACK back. Socket not ready for writing.")
+                    except Exception as e:
+                        print(f"[Server process]: Warning: Failed to send ACK back: {e}")
 
                     server_response = ServerResponse.from_json(response_string)
                     if completion_handler:
                         result = server_response if raw else server_response.response
                         GLib.idle_add(completion_handler, result)
-                    return server_response
             except Exception as e:
-                return ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
+                server_response = ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
             finally:
                 if request.show_in_running_tasks:
                     self.set_request_status(call, False)
+                return server_response
 
         if asynchronous:
             async_call = ServerCall(request=request, thread=None, client=self)

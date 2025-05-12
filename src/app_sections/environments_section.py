@@ -99,6 +99,7 @@ class EnvironmentsSection(Gtk.Box):
             toolset_root="/",
             command_to_run=["emerge", "--sync"],
             additional_bindings=[
+                BindMount(mount_path="/var/db/repos", host_path="/home/damiandudycz/Repos_gentoo", store_changes=True, resolve_host_path=False),
                 BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
             ]
         )
@@ -118,7 +119,7 @@ def stubborn_worker():
         # You can either ignore or do something here, but the process will not exit
 
     # Override SIGTERM handler
-    #signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGTERM, handle_sigterm)
 
     print(f"Process {os.getpid()} started")
     while True:
