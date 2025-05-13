@@ -1,4 +1,10 @@
-# catalystlab
+# CatalystLab
+
+CatalystLab is a utility designed to simplify the process of building various
+Gentoo Linux stages. It leverages tools such as Catalyst, Releng, QEMU, and 
+others, while providing a streamlined and user-friendly interface. By 
+abstracting the complexity of these tools, CatalystLab enables users to work 
+efficiently without requiring in-depth knowledge of the underlying components.
 
 ## Main layout:
 
@@ -43,7 +49,10 @@ content_navigation_view is created and passed by main_window_content.
 
 These modules can also be created separately from other places of code if needed
 using:
-AppSectionDetails.create_section(self, content_navigation_view: Adw.NavigationView)
+AppSectionDetails.create_section(
+    self, 
+    content_navigation_view: Adw.NavigationView
+)
 
 If no further navigation is required by the module content_navigation_view can
 be set to NULL, but it's better to use main_navigation_view in this situation.
@@ -85,3 +94,4 @@ be set to NULL, but it's better to use main_navigation_view in this situation.
 - Tutorial
     - Create help module containing text and video helps
     - Allow opening help for specific subject from various parts of application
+

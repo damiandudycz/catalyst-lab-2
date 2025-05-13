@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/com/damiandudycz/CatalystLab">
-    <file preprocess="xml-stripblanks">main_window/main_window.ui</file>
-    <file preprocess="xml-stripblanks">main_window/main_window_side_menu.ui</file>
-    <file preprocess="xml-stripblanks">main_window/main_window_side_menu_button.ui</file>
-    <file preprocess="xml-stripblanks">main_window/main_window_content.ui</file>
-    <file preprocess="xml-stripblanks">app_sections/welcome_section.ui</file>
-    <file preprocess="xml-stripblanks">app_sections/environments_section.ui</file>
+    <file preprocess="xml-stripblanks">ui/main_window/main_window.ui</file>
+    <file preprocess="xml-stripblanks">ui/main_window/main_window_side_menu.ui</file>
+    <file preprocess="xml-stripblanks">ui/main_window/main_window_side_menu_button.ui</file>
+    <file preprocess="xml-stripblanks">ui/main_window/main_window_content.ui</file>
+    <file preprocess="xml-stripblanks">ui/app_sections/welcome_section.ui</file>
+    <file preprocess="xml-stripblanks">ui/app_sections/environments_section.ui</file>
     <file preprocess="xml-stripblanks">gtk/help-overlay.ui</file>
     <file>patches/namespaces.patch</file>
     <file>root_helper/root_helper_server.py</file>

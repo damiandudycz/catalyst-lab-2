@@ -1,12 +1,9 @@
-import os
-import shutil
-import subprocess
+import os, shutil, subprocess, tempfile
 from gi.repository import Gio
+from enum import Enum, auto
 from pathlib import Path
 from dataclasses import dataclass
-from .environment import RuntimeEnv
-import tempfile
-from enum import Enum, auto
+from .runtime_env import RuntimeEnv
 
 class HotFix(Enum):
     SNAKEOIL_NAMESPACES_FAKE = auto()

@@ -33,21 +33,12 @@
             "name" : "catalystlab",
             "builddir" : true,
             "buildsystem" : "meson",
-            "sources" : [
-                {
-                    "type" : "git",
-                    "url" : "file:///home/damiandudycz/Developer"
-                }
-            ],
-            "build-commands" : [
-                "pip3 install requests"
-            ],
-            "config-opts" : [
-                "--libdir=lib"
-            ]
+            "config-opts" : ["--libdir=lib"]
+        },
+        {
+            "name": "python3-requests",
+            "buildsystem": "simple",
+            "build-commands": ["pip3 install requests"]
         }
-    ],
-    "build-options" : {
-        "env" : {        }
-    }
+    ]
 }

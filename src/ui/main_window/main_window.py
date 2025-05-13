@@ -8,7 +8,7 @@ from .app_section_details import AppSectionDetails
 from .app_events import AppEvents, app_event_bus
 from .navigation_view_extensions import *
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/main_window/main_window.ui')
 class CatalystlabWindow(Adw.ApplicationWindow):
     __gtype_name__ = 'CatalystlabWindow'
 

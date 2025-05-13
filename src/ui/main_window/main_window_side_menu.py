@@ -1,10 +1,10 @@
 from gi.repository import Gtk, GObject
+from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
 from .app_section_details import AppSectionDetails
 from .main_window_side_menu_button import MainWindowSideMenuButton
-from .app_events import AppEvents, app_event_bus
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_side_menu.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/main_window/main_window_side_menu.ui')
 class CatalystlabWindowSideMenu(Gtk.Box):
     __gtype_name__ = 'CatalystlabWindowSideMenu'
 

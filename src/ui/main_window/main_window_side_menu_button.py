@@ -2,7 +2,7 @@ from gi.repository import Gtk
 from .app_section import AppSection
 from .app_section_details import AppSectionDetails
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/main_window/main_window_side_menu_button.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/main_window/main_window_side_menu_button.ui')
 class MainWindowSideMenuButton(Gtk.ListBoxRow):
     __gtype_name__ = "MainWindowSideMenuButton"
 

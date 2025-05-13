@@ -1,7 +1,7 @@
 from gi.repository import Gtk, GObject
 from gi.repository import Adw
 from .app_section import AppSection
-from .environment import RuntimeEnv
+from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset
 from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
@@ -11,7 +11,7 @@ from .root_helper_client import RootHelperClient, root_function
 from .root_helper_server import ServerCommand
 import time
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/environments_section.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
     __gtype_name__ = "EnvironmentsSection"
 

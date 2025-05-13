@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-# Install project as host application
+# Use this script to install directly on host without Flatpak.
 
-BUILD_DIR="builddir"
+BUILD_DIR=".build"
 
 if [ ! -d "$BUILD_DIR" ]; then
     meson setup "$BUILD_DIR"

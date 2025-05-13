@@ -4,10 +4,9 @@ from typing import Self, Dict, List
 from pathlib import Path
 from dataclasses import dataclass
 from collections import namedtuple
-from .environment import RuntimeEnv
+from .runtime_env import RuntimeEnv
 from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
 from .root_helper_client import root_function, ServerCall, ServerCallEvents
-from .environment import RuntimeEnv
 from .toolset import Toolset
 
 class ToolsetContainer:

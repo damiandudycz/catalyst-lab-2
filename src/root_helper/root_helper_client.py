@@ -7,7 +7,7 @@ from typing import Any, Callable
 from functools import wraps
 from gi.repository import Gio, GLib
 from dataclasses import dataclass, field
-from .environment import RuntimeEnv
+from .runtime_env import RuntimeEnv
 from .app_events import AppEvents, app_event_bus
 from .settings import *
 from .root_helper_server import ServerCommand, ServerFunction

@@ -2,11 +2,11 @@ from gi.repository import Gtk, GObject
 from gi.repository import Adw
 from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
-from .environment import RuntimeEnv
-from .settings import Settings, SettingsEvents
+from .runtime_env import RuntimeEnv
 from .root_helper_client import RootHelperClient
+from .settings import Settings, SettingsEvents
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/app_sections/welcome_section.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/welcome_section.ui')
 class WelcomeSection(Gtk.Box):
     __gtype_name__ = "WelcomeSection"
 

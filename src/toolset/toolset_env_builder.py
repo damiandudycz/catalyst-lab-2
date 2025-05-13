@@ -2,10 +2,9 @@
 # It downloads stage3 matching host architecture, extracts it in tmp directory,
 # and emerges required tools like catalyst, qemu, releng.
 
+import tempfile, requests
 from urllib.parse import urlparse, unquote, ParseResult
 from pathlib import Path
-import tempfile
-import requests
 
 class ToolsetEnvBuilder:
 
