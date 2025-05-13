@@ -36,7 +36,7 @@ class EnvironmentsSection(Gtk.Box):
 
     def _load_system_toolset(self):
         if ToolsetEnv.SYSTEM.is_allowed_in_current_host():
-            system_toolset_selected = any(toolset.env == ToolsetEnv.SYSTEM for toolset in Settings.current.get_toolsets())
+            system_toolset_selected = any(toolset.env == ToolsetEnv.SYSTEM for toolset in Settings.current().get_toolsets())
             self._set_toolset_system_checkbox_active(system_toolset_selected)
             self.toolset_system_validate_button.set_visible(system_toolset_selected)
         else:
@@ -78,15 +78,15 @@ class EnvironmentsSection(Gtk.Box):
             return
         # If checkbox is checked, place it at the start of the list
         if checkbox.get_active():
-            Settings.current.add_toolset(ToolsetEnvHelper.system())
-        elif (ts := Settings.current.get_toolset_matching(lambda ts: ts.env == ToolsetEnv.SYSTEM)):
-            Settings.current.remove_toolset(ts)
+            Settings.current().add_toolset(ToolsetEnvHelper.system())
+        elif (ts := Settings.current().get_toolset_matching(lambda ts: ts.env == ToolsetEnv.SYSTEM)):
+            Settings.current().remove_toolset(ts)
 
     @Gtk.Template.Callback()
     def on_add_toolset_activated(self, button):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
-        #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
+        #Settings.current().add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
         try:
             stubborn_worker._async(
                 lambda x: print(f"[TEST]: {x}"),

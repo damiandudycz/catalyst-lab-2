@@ -172,7 +172,7 @@ class RootAccessButton(Gtk.Overlay):
                 break
 
     def on_keep_unlocked_toggled(self, button):
-        Settings.current.keep_root_unlocked = button.get_active()
+        Settings.current().keep_root_unlocked = button.get_active()
 
     def keep_root_unlocked_changed(self, value: bool):
         print(f"-- {value}")
