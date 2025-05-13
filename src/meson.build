@@ -43,9 +43,10 @@ catalystlab_sources = [
   'app_sections/app_section_details.py',
   'app_sections/welcome_section.py',
   'app_sections/environments_section.py',
-  'toolset_env_builder/toolset_env_builder.py',
-  'toolset_env_handler/toolset_env_calls.py',
-  'toolset_env_handler/hotfix_patching.py',
+  'toolset/toolset.py',
+  'toolset/toolset_env_builder.py',
+  'toolset/toolset_container.py',
+  'toolset/hotfix_patching.py',
   'root_helper/root_helper_client.py',
   'root_helper/root_helper_server.py'
 ]

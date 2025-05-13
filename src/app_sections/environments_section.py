@@ -1,10 +1,11 @@
 from gi.repository import Gtk, GObject
 from gi.repository import Adw
 from .app_section import AppSection
-from .environment import RuntimeEnv, ToolsetEnv, ToolsetEnvHelper
+from .environment import RuntimeEnv
+from .toolset import ToolsetEnv, Toolset
 from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset_env_calls import run_isolated_system_command, BindMount
+from .toolset_container import ToolsetContainer
 from .hotfix_patching import HotFix
 from .root_helper_client import RootHelperClient, root_function
 from .root_helper_server import ServerCommand
@@ -78,7 +79,7 @@ class EnvironmentsSection(Gtk.Box):
             return
         # If checkbox is checked, place it at the start of the list
         if checkbox.get_active():
-            Settings.current().add_toolset(ToolsetEnvHelper.system())
+            Settings.current().add_toolset(Toolset.system())
         elif (ts := Settings.current().get_toolset_matching(lambda ts: ts.env == ToolsetEnv.SYSTEM)):
             Settings.current().remove_toolset(ts)
 
@@ -86,7 +87,7 @@ class EnvironmentsSection(Gtk.Box):
     def on_add_toolset_activated(self, button):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
-        #Settings.current().add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
+        #Settings.current().add_toolset(Toolset.external("FILE_PATH"))
         try:
             stubborn_worker._async(
                 lambda x: print(f"[TEST]: {x}"),
@@ -98,9 +99,13 @@ class EnvironmentsSection(Gtk.Box):
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
         # Testing only
-        run_isolated_system_command(
-            toolset_root="/",
-            command_to_run=("emerge --info"),
+        toolset_container = ToolsetContainer.container_for_toolset(toolset=Toolset.system())
+        toolset_container.spawn()
+        print(f"{toolset_container} -> {toolset_container.toolset.toolset_root()} : {toolset_container.work_dir}")
+        toolset_container.run_command(command="emerge nano")
+        #run_isolated_system_command(
+        #    toolset_root="/",
+        #    command_to_run=("emerge --info"),
             #command_to_run=(
             #    "mkdir -p /etc/portage/package.accept_keywords && "
             #    "mkdir -p /etc/portage/package.use && "
@@ -110,11 +115,11 @@ class EnvironmentsSection(Gtk.Box):
             #    "emerge catalyst"
             #),
             #store_changes=True,
-            additional_bindings=[
-                BindMount(mount_path="/var/db/repos/gentoo", host_path="/home/damiandudycz/gentoo-portage", store_changes=True, resolve_host_path=False),
-                BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
-            ]
-        )
+        #    additional_bindings=[
+        #        BindMount(mount_path="/var/db/repos/gentoo", host_path="/home/damiandudycz/gentoo-portage", store_changes=True, resolve_host_path=False),
+        #        BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
+        #    ]
+        #)
 
 @root_function
 def stubborn_worker():

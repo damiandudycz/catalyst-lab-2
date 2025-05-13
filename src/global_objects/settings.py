@@ -4,7 +4,8 @@ import json
 import os
 from enum import Enum, auto
 from uuid import UUID
-from .environment import RuntimeEnv, ToolsetEnvHelper
+from .environment import RuntimeEnv
+from .toolset import Toolset
 from .event_bus import EventBus
 
 @final
@@ -20,7 +21,7 @@ class Settings:
 
     _current_instance: Settings | None = None  # Internal cache
 
-    def __init__(self, toolsets: List[ToolsetEnvHelper], keep_root_unlocked: bool = False):
+    def __init__(self, toolsets: List[Toolset], keep_root_unlocked: bool = False):
         self._toolsets = toolsets
         self._keep_root_unlocked = keep_root_unlocked
         self.event_bus: EventBus[SettingsEvents] = EventBus[SettingsEvents]()
@@ -53,7 +54,7 @@ class Settings:
     def init_from(cls, data: dict) -> Settings:
         """Initialize settings from a dictionary."""
         toolsets_data = data.get("toolsets", [])
-        toolsets = [ToolsetEnvHelper.init_from(ts) for ts in toolsets_data]
+        toolsets = [Toolset.init_from(ts) for ts in toolsets_data]
         keep_root_unlocked = data.get("keep_root_unlocked", True)
         return cls(toolsets, keep_root_unlocked=keep_root_unlocked)
 
@@ -85,28 +86,28 @@ class Settings:
 
     # Toolsets management:
 
-    def get_toolsets(self) -> List[ToolsetEnvHelper]:
+    def get_toolsets(self) -> List[Toolset]:
         return self._toolsets
 
-    def get_toolset_by_id(self, uuid: UUID) -> ToolsetEnvHelper | None:
+    def get_toolset_by_id(self, uuid: UUID) -> Toolset | None:
         """Return the toolset that matches the given UUID, or None if not found."""
         for toolset in self._toolsets:
             if getattr(toolset, "uuid", None) == uuid:
                 return toolset
         return None
 
-    def get_toolset_matching(self, matching: Callable[[ToolsetEnvHelper], bool]) -> ToolsetEnvHelper | None:
+    def get_toolset_matching(self, matching: Callable[[Toolset], bool]) -> Toolset | None:
         for toolset in self._toolsets:
             if matching(toolset):
                 return toolset
         return None
 
-    def add_toolset(self, toolset: ToolsetEnvHelper):
+    def add_toolset(self, toolset: Toolset):
         self._toolsets.append(toolset)
         self.event_bus.emit(SettingsEvents.TOOLSETS_CHANGED)
         self.save()
 
-    def remove_toolset(self, toolset: ToolsetEnvHelper):
+    def remove_toolset(self, toolset: Toolset):
         """Remove the specified toolset if it exists in the list."""
         if toolset in self._toolsets:
             self._toolsets.remove(toolset)
