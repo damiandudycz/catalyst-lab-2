@@ -112,19 +112,7 @@ class RootHelperClient:
                 self.token = token
                 return True
             else:
-                print("[Server process]! Server failed to initialize. Cleaning...")
-                if self.main_process and self.main_process.poll() is None:
-                    print("[Server process]: Terminating main process...")
-                    self.main_process.terminate()
-                    try:
-                        self.main_process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        print("[Server process]: Kill unresponsive main process...")
-                        self.main_process.kill()
-                        self.main_process.wait()
-                self.is_server_process_running = False
-                self.main_process = None
-                return False
+                raise RuntimeError("Failed to initialize connection.")
         except Exception as e:
             print(f"FAILED TO START SERVER: {e}")
             self.is_server_process_running = False
@@ -140,20 +128,12 @@ class RootHelperClient:
             token = self.token
             self.token = None
             self.server_watchdog.stop()
-            # TODO: Race condition between marking EXIT as finished and completion_handler=self.clean_unfinished_jobs. Probably in handling send_request in separate thread.
             self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=self.clean_unfinished_jobs, token=token)
         except Exception as e:
             print("[Server process]: Warning: Failed to send EXIT command. Some process might be left working orphined.")
             self.clean_unfinished_jobs()
         finally:
             self.is_server_process_running = False
-            if self.main_process and self.main_process.poll() is None:
-                # Note: This only kills main process if it was left.
-                # pkexec or flatpak-spawn.
-                # Server needs to quit by itself after [EXIT] command.
-                # That's why it's safe to kill this even before EXIT completes.
-                self.main_process.kill()
-                self.main_process.wait()
             self.main_process = None
             print("[Server process]: Closed.")
 
@@ -240,14 +220,6 @@ class RootHelperClient:
             except Exception as e:
                 print(f"Unexpected error while waiting for server: {e}")
                 break
-        print(f"Server initialization failed.")
-        if self.main_process and self.main_process.poll() is None:
-            self.main_process.terminate()
-            try:
-                self.main_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.main_process.kill()
-                self.main_process.wait()
         return False
 
     def ensure_server_ready(self, allow_auto_start=True) -> bool:
@@ -329,8 +301,6 @@ class RootHelperClient:
                                            print(f"[Server process]: Warning: Received unsupported event: {event}")
                                 except Exception as e:
                                        print(f"[Server process]: Warning: Failed to process event: {content}")
-                                if handler: # TODO: Decide if pass this to handler. Probably yes, and handler should decide which Pipes to process.
-                                    GLib.idle_add(handler, content)
 
                     # Processing data returned over socket and combining them into messages.
                     # Format: <StreamPipe.raw>:<Length>:<Message>. eq: 0:11:Hello World

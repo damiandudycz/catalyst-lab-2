@@ -648,6 +648,8 @@ def _run_and_capture_streams(func, args, kwargs, write_fd, result_queue):
     os.dup2(stderr_w, 2)
     os.close(stdout_w)
     os.close(stderr_w)
+    sys.stdout = open(1, 'w', buffering=1, encoding='utf-8', errors='replace')
+    sys.stderr = open(2, 'w', buffering=1, encoding='utf-8', errors='replace')
 
     def forward_stream(read_fd, pipe_name):
         with os.fdopen(read_fd, 'r') as reader, os.fdopen(write_fd, 'w', buffering=1) as writer:

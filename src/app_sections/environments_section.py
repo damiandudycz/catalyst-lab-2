@@ -87,11 +87,13 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder = ToolsetEnvBuilder()
         #toolset_env_builder.build_toolset()
         #Settings.current.add_toolset(ToolsetEnvHelper.external("FILE_PATH"))
-        self.async_call = stubborn_worker._async(
-            lambda x: print(f"[TEST]: {x}"),
-            lambda x: print(f"[TEST] -> {x}")
-        )
-        print(self.async_call)
+        try:
+            stubborn_worker._async(
+                lambda x: print(f"[TEST]: {x}"),
+                lambda x: print(f"[TEST] -> {x}")
+            )
+        except Exception as e:
+            print(e)
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
@@ -115,14 +117,6 @@ class EnvironmentsSection(Gtk.Box):
         )
 
 @root_function
-def test(x: int):
-    print("AAA")
-    time.sleep(5)
-    print("BBB")
-    time.sleep(1)
-    return x
-
-@root_function
 def stubborn_worker():
     def handle_sigterm(signum, frame):
         print(f"Process {os.getpid()} received SIGTERM but will ignore it.")
@@ -132,6 +126,9 @@ def stubborn_worker():
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     print(f"Process {os.getpid()} started")
+    i = 0
     while True:
+        print(f"Tick {i}...")
+        i += 1
         time.sleep(1)
 
