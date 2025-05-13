@@ -56,7 +56,7 @@ class ToolsetContainer:
                 BindMount(mount_path="/lib64", toolset_path="/lib64", store_changes=store_changes),
             ]
             _devices_bindings = [ # Devices.
-                BindMount(mount_path="/dev/kvm", host_path="/dev/kvm"),
+                BindMount(mount_path="/dev/kvm", host_path="/dev/kvm", store_changes=True) # Store changes is added only to use --dev-bind flag
             ]
             _config_bindings = [ # Config.
                 BindMount(mount_path="/etc", toolset_path="/etc", store_changes=store_changes),
@@ -156,7 +156,7 @@ class ToolsetContainer:
                         continue
                     # Char devices:
                     if stat.S_ISCHR(os.stat(resolved_host_path).st_mode):
-                        flag = "--bind" if binding.store_changes else "--ro-bind"
+                        flag = "--dev-bind" if binding.store_changes else "--ro-bind"
                         bind_options.extend([flag, binding.host_path, binding.mount_path])
                         continue
                     # Standard files:
@@ -251,11 +251,12 @@ class BindMount:
 
 @root_function
 def _start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str], command_to_run: str):
-    import shutil, subprocess
+    import subprocess
+    #subprocess.run(["chown", "-R", "root:root", work_dir], check=True) # This could change the ownership of work_dir for root, but probably is not needed.
     cmd_bwrap = (
         "bwrap "
         "--die-with-parent "
-        "--cap-add CAP_DAC_OVERRIDE --cap-add CAP_SYS_ADMIN --cap-add CAP_FOWNER --cap-add CAP_SETGID "
+        #"--cap-add CAP_DAC_OVERRIDE --cap-add CAP_SYS_ADMIN --cap-add CAP_FOWNER --cap-add CAP_SETGID "
         "--unshare-uts --unshare-ipc --unshare-pid --unshare-cgroup "
         "--hostname catalyst-lab "
         "--bind " + fake_root + " / "
