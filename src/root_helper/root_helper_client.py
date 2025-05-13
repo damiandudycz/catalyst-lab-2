@@ -3,7 +3,7 @@ from __future__ import annotations
 import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal
 import threading, json, inspect, re, select
 from enum import Enum
-from typing import Optional, Any
+from typing import Any, Callable
 from functools import wraps
 from gi.repository import Gio, GLib
 from dataclasses import dataclass, field
@@ -457,7 +457,7 @@ def root_function(func):
             *args,
             **kwargs
         )
-    def _async(handler: callable = None, completion_handler: callable = None, *args, **kwargs):
+    def _async(handler: callable | None = None, completion_handler: callable | None = None, *args, **kwargs):
         return RootHelperClient.shared().call_root_function(
             func.__name__,
             *args,
@@ -466,7 +466,7 @@ def root_function(func):
             completion_handler=completion_handler,
             **kwargs
         )
-    def _raw(*args, completion_handler: callable = None, **kwargs):
+    def _raw(*args, completion_handler: callable | None = None, **kwargs):
         return RootHelperClient.shared().call_root_function(
             func.__name__,
             *args,
@@ -474,7 +474,7 @@ def root_function(func):
             completion_handler=completion_handler,
             **kwargs
         )
-    def _async_raw(handler: callable = None, completion_handler: callable = None, *args, **kwargs):
+    def _async_raw(handler: callable | None = None, completion_handler: callable | None = None, *args, **kwargs):
         return RootHelperClient.shared().call_root_function(
             func.__name__,
             *args,

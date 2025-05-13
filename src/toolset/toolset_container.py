@@ -11,8 +11,12 @@ from .environment import RuntimeEnv
 from .toolset import Toolset
 
 class ToolsetContainer:
+
     containers_lock = threading.Lock()
     containers: Dict[Toolset, ToolsetContainer] = {}
+
+    # --------------------------------------------------------------------------
+    # Lifecycle:
 
     def __init__(self, toolset: Toolset):
         self.toolset = toolset
@@ -33,6 +37,9 @@ class ToolsetContainer:
             if toolset not in cls.containers:
                 cls.containers[toolset] = cls(toolset)
             return cls.containers[toolset]
+
+    # --------------------------------------------------------------------------
+    # Spawning cycle:
 
     def spawn(self, store_changes: bool = False, hot_fixes: List[HotFix] | None = None, additional_bindings: List[BindMount] | None = None):
         """Prepare /tmp folders for bwrap calls."""
@@ -196,7 +203,6 @@ class ToolsetContainer:
             # Remove /tmp folders. TODO: After root_calls this dirs contains root owned files and directories, making it impossible to remove as user.
             if self.work_dir:
                 shutil.rmtree(self.work_dir, ignore_errors=True)
-
             # Reset spawned settings:
             self.work_dir = None
             self.hot_fixes = None
@@ -205,39 +211,36 @@ class ToolsetContainer:
             self.bind_options = None
             self.spawned = False
 
-    def run_command(self, command: str):
+    # --------------------------------------------------------------------------
+    # Calling commands:
+
+    def run_command(self, command: str, handler: callable | None = None, completion_handler: callable | None = None) -> ServerCall:
     # TODO: Add required parameters checks, like store_changes matches spawned env, required bindings are set correctly etc.
-    # TODO: Make this run async.
-        print(f"Run: {command}")
         with self.access_lock:
             if not self.spawned:
                 raise RuntimeError(f"ToolsetContainer for {self.toolset} is not spawned.")
             if self.in_use:
                 raise RuntimeError(f"ToolsetContainer for {self.toolset} is currently in use.")
-
             self.in_use = True
 
+            def on_complete(completion_handler: callable | None, result: ServerResponse):
+                with self.access_lock:
+                    self.in_use = False
+                if completion_handler:
+                    completion_handler(result)
             try:
                 fake_root = os.path.join(self.work_dir, "fake_root")
-                toolset_call = _start_toolset_command._async_raw(
+                return _start_toolset_command._async_raw(
+                    handler=handler,
+                    # Wraps completion block to set in_use flag additionally after it's done
+                    completion_handler=lambda x: on_complete(completion_handler, x),
                     work_dir=str(self.work_dir),
                     fake_root=fake_root,
                     bind_options=self.bind_options,
                     command_to_run=command
                 )
-
-                def monitor_output(call: ServerCall, line: str):
-                    print(f"> {line}")
-
-                toolset_call.event_bus.subscribe(
-                    ServerCallEvents.NEW_OUTPUT_LINE,
-                    monitor_output
-                )
-
-                toolset_call.thread.join()
-                self.in_use = False
             except Exception as e:
-                print(e)
+                print(f"Failed to execute command: {e}")
                 self.in_use = False
                 raise e
 
@@ -256,7 +259,6 @@ def _start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str
     cmd_bwrap = (
         "bwrap "
         "--die-with-parent "
-        #"--cap-add CAP_DAC_OVERRIDE --cap-add CAP_SYS_ADMIN --cap-add CAP_FOWNER --cap-add CAP_SETGID "
         "--unshare-uts --unshare-ipc --unshare-pid --unshare-cgroup "
         "--hostname catalyst-lab "
         "--bind " + fake_root + " / "
@@ -271,6 +273,7 @@ def _start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str
         if result != 0:
             raise RuntimeError(f"Toolset call returned exit code: {result}")
     except Exception as e:
-        # Note: We don't handle exceptions here, because if the root function throws, the exception will be just returned as a result of this call, which is what we want.
+        # Note: We don't handle exceptions here, because if the root function throws,
+        # the exception will be just returned as a result of this call, which is what we want.
         raise e
 

@@ -7,21 +7,10 @@ import uuid
 from .environment import RuntimeEnv
 
 @final
-class ToolsetEnv(Enum):
-    SYSTEM   = auto() # Using tools from system, either through HOST or FLATPAK RuntimeEnv.
-    EXTERNAL = auto() # Using tools from given .squashfs installation.
-
-    def is_allowed_in_current_host(self) -> bool:
-        """Can selected ToolsetEnv be used in current host. SYSTEM only allowed in gentoo, EXTERNAL allowed anywhere."""
-        match self:
-            case ToolsetEnv.SYSTEM:
-                return RuntimeEnv.is_running_in_gentoo_host()
-            case ToolsetEnv.EXTERNAL:
-                return True
-
-@final
 class Toolset:
-    """Class containing details of the Toolset instances. Only metadata, no functionalities. Functionalities are handled by ToolsetContainer."""
+    """Class containing details of the Toolset instances."""
+    """Only metadata, no functionalities."""
+    """Functionalities are handled by ToolsetContainer."""
     def __init__(self, env: ToolsetEnv, uuid: UUID, **kwargs):
         self.uuid = uuid
         self.env = env
@@ -53,6 +42,15 @@ class Toolset:
                 kwargs["squashfs_file"] = squashfs_file
         return cls(env, uuid_value, **kwargs)
 
+    def serialize(self) -> dict:
+        data = {
+            "uuid": str(self.uuid),
+            "env": self.env.name
+        }
+        if self.env == ToolsetEnv.EXTERNAL:
+            data["squashfs_file"] = self.squashfs_file
+        return data
+
     @staticmethod
     def system() -> Toolset:
         """Create a Toolset with the SYSTEM environment."""
@@ -63,15 +61,6 @@ class Toolset:
         """Create a Toolset with the EXTERNAL environment and a specified squashfs file."""
         return Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), squashfs_file=squashfs_file)
 
-    def serialize(self) -> dict:
-        data = {
-            "uuid": str(self.uuid),
-            "env": self.env.name
-        }
-        if self.env == ToolsetEnv.EXTERNAL:
-            data["squashfs_file"] = self.squashfs_file
-        return data
-
     def is_allowed_in_current_host() -> bool:
         return self.env.is_running_in_gentoo_host()
 
@@ -81,4 +70,17 @@ class Toolset:
                 return "/"
             case ToolsetEnv.EXTERNAL:
                 return self.squashfs_file # TODO: For now squashfs_file and root dir are mixed concepts.
+
+@final
+class ToolsetEnv(Enum):
+    SYSTEM   = auto() # Using tools from system, either through HOST or FLATPAK RuntimeEnv.
+    EXTERNAL = auto() # Using tools from given .squashfs installation.
+
+    def is_allowed_in_current_host(self) -> bool:
+        """Can selected ToolsetEnv be used in current host. SYSTEM only allowed in gentoo, EXTERNAL allowed anywhere."""
+        match self:
+            case ToolsetEnv.SYSTEM:
+                return RuntimeEnv.is_running_in_gentoo_host()
+            case ToolsetEnv.EXTERNAL:
+                return True
 

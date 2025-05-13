@@ -99,10 +99,20 @@ class EnvironmentsSection(Gtk.Box):
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):
         # Testing only
-        toolset_container = ToolsetContainer.container_for_toolset(toolset=Toolset.system())
-        toolset_container.spawn()
+        system_toolset = next(
+            (toolset for toolset in Settings.current().get_toolsets() if toolset.env == ToolsetEnv.SYSTEM),
+            None  # default if no match found
+        )
+
+        if not system_toolset:
+            raise RuntimeError("System host env not available")
+
+        toolset_container = ToolsetContainer.container_for_toolset(system_toolset)
+        if not toolset_container.spawned:
+            toolset_container.spawn()
         print(f"{toolset_container} -> {toolset_container.toolset.toolset_root()} : {toolset_container.work_dir}")
-        toolset_container.run_command(command="emerge --sync")
+        call = toolset_container.run_command(command="emerge --info", completion_handler=lambda x: print(f">>>> {x}"))
+        print(call)
         #run_isolated_system_command(
         #    toolset_root="/",
         #    command_to_run=("emerge --info"),
