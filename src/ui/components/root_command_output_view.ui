@@ -21,6 +21,9 @@
             <property name="right-margin">10</property>
             <property name="top-margin">10</property>
             <property name="bottom-margin">10</property>
+            <style>
+              <class name="transparent-bg"/>
+            </style>
           </object>
         </child>
       </object>

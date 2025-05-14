@@ -11,5 +11,6 @@
     <file preprocess="xml-stripblanks">gtk/help-overlay.ui</file>
     <file>patches/namespaces.patch</file>
     <file>root_helper/root_helper_server.py</file>
+    <file>style.css</file>
   </gresource>
 </gresources>
