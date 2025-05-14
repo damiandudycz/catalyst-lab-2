@@ -27,6 +27,8 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         app_event_bus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
         app_event_bus.subscribe(AppEvents.PUSH_VIEW, self.navigation_view.push_view)
         app_event_bus.subscribe(AppEvents.PUSH_SECTION, self.navigation_view.push_section)
+        app_event_bus.subscribe(AppEvents.PRESENT_VIEW, self._present_view)
+        app_event_bus.subscribe(AppEvents.PRESENT_SECTION, self._present_section)
         # Load initial section page:
         app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSectionDetails.initial_section)
         # Connect sidebar_toggle_breakpoint actions
@@ -60,3 +62,23 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         self.split_view.set_show_sidebar(self.allow_side_menu)
         self.content_view.sidebar_toggle_button_visible = self.allow_side_menu and CatalystlabWindow.allow_side_menu_toggle
 
+    def _present_section(self, section: AppSection):
+        section_details = AppSectionDetails(section)
+        #nav_view = Adw.NavigationView()
+        view = section_details.create_section(content_navigation_view=None)
+        title = section_details.title
+        #page = Adw.NavigationPage.new(view, title)
+        #nav_view.push(page)
+        self._present_view(view, title)
+
+    def _present_view(self, view: Gtk.Widget, title: str):
+        header = Adw.HeaderBar()
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.set_content(view)
+        toolbar_view.add_top_bar(header)
+        window = Adw.Window()
+        window.set_transient_for(self.get_root())
+        window.set_modal(True)
+        window.set_title(title)
+        window.set_content(toolbar_view)
+        window.present()

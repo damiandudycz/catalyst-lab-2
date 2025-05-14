@@ -6,49 +6,27 @@
   <requires lib="Adw" version="1.0"/>
 
   <!-- Template -->
-  <template class="RootCommandOutputView" parent="AdwWindow">
-    <!-- Window properties -->
-    <property name="default-width">800</property>
-    <property name="default-height">600</property>
-    <property name="modal">true</property>
-
-    <!-- Window content -->
-    <property name="content">
-
-      <object class="GtkBox" id="content_box">
-        <property name="orientation">vertical</property>
+  <template class="RootCommandOutputView" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="width-request">640</property>
+    <property name="height-request">480</property>
+    <child>
+      <object class="GtkScrolledWindow" id="scrolled_window">
+        <property name="vexpand">true</property>
         <child>
-          <object class="AdwHeaderBar">
-            <property name="title-widget">
-              <object class="AdwWindowTitle" id="window_title">
-                <property name="title">Root process details</property>
-              </object>
-            </property>
+          <object class="GtkTextView" id="text_view">
+            <property name="wrap-mode">word</property>
+            <property name="editable">false</property>
+            <property name="cursor-visible">false</property>
+            <property name="monospace">true</property>
+            <property name="left-margin">10</property>
+            <property name="right-margin">10</property>
+            <property name="top-margin">10</property>
+            <property name="bottom-margin">10</property>
           </object>
-        </child>
-        <child>
-
-          <!-- Add a GtkScrolledWindow to make the text view scrollable -->
-          <object class="GtkScrolledWindow" id="scrolled_window">
-            <property name="vexpand">true</property>
-            <child>
-              <object class="GtkTextView" id="text_view">
-                <property name="wrap-mode">word</property>
-                <property name="editable">false</property>
-                <property name="cursor-visible">false</property>
-                <property name="monospace">true</property>
-                <property name="left-margin">10</property>
-                <property name="right-margin">10</property>
-                <property name="top-margin">10</property>
-                <property name="bottom-margin">10</property>
-              </object>
-            </child>
-          </object>
-
         </child>
       </object>
-
-    </property>
+    </child>
 
   </template>
 </interface>
