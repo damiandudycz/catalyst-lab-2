@@ -92,7 +92,8 @@ class RootHelperClient:
 
             # Start pkexec and pass token via stdin
             # Note: This is flatpak-spawn process, not server process itself.
-            self.main_process = subprocess.Popen(exec_call, stdin=subprocess.PIPE)
+            self.main_process = subprocess.Popen(exec_call, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            time.sleep(0.1) # This helps prevent an issue with server not being ready to read from stdin at start. Probably not the best solution, might find better one.
 
             # Waits until main_process finishes, to see if it was closed with error.
             def monitor_error_codes():

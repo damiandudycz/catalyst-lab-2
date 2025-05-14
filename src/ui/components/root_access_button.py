@@ -3,6 +3,7 @@ from functools import partial
 from .app_events import AppEvents, app_event_bus
 from .root_helper_client import RootHelperClient, RootHelperClientEvents, root_function, ServerCall
 from .settings import *
+from .root_command_output_view import RootCommandOutputView
 
 class RootAccessButton(Gtk.Overlay):
 
@@ -160,7 +161,7 @@ class RootAccessButton(Gtk.Overlay):
         self.popover.hide()
 
     def add_request_to_list(self, call: ServerCall):
-        action_row = RootActionInfoRow(call=call)
+        action_row = RootActionInfoRow(call=call, parent=self)
         self.task_list_box.append(action_row)
         self.displayed_requests_views.append(action_row)
 
@@ -178,9 +179,10 @@ class RootAccessButton(Gtk.Overlay):
         print(f"-- {value}")
 
 class RootActionInfoRow(Gtk.Box):
-    def __init__(self, call: ServerCall):
+    def __init__(self, call: ServerCall, parent: RootAccessButton):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.call = call
+        self.parent = parent
         self.set_hexpand(True)
 
         # Divider (separator at the top)
@@ -193,11 +195,13 @@ class RootActionInfoRow(Gtk.Box):
         row_box.set_valign(Gtk.Align.CENTER)
 
         # Create label on the left
-        self.label = Gtk.Label(label=call.request.function_name)
-        self.label.get_style_context().add_class("caption-heading")
-        self.label.set_xalign(0)
-        self.label.set_hexpand(True)
-        row_box.append(self.label)
+        self.name_button = Gtk.Button(label=call.request.function_name)
+        #self.name_button.set_hexpand(True)
+        self.name_button.get_style_context().add_class("flat")
+        #self.name_button.set_can_focus(False)
+        #self.name_button.set_focusable(False)
+        self.name_button.connect("clicked", self.show_output)
+        row_box.append(self.name_button)
 
         # Icon button on the right
         icon = Gtk.Image.new_from_icon_name("window-close-symbolic")
@@ -222,11 +226,17 @@ class RootActionInfoRow(Gtk.Box):
     def close_call(self, button: Gtk.Button):
         self.call.cancel()
 
+    def show_output(self, button: Gtk.Button):
+        self.parent.popover.hide()
+        dialog = RootCommandOutputView(parent=self.get_root(), call=self.call)
+        dialog.present()
+
     def mark_terminating(self, terminating: bool = True):
         if terminating:
-            self.label.get_style_context().add_class("dim-label")
+            self.name_button.get_style_context().add_class("dim-label")
         else:
-            self.label.get_style_context().remove_class("dim-label")
+            self.name_button.get_style_context().remove_class("dim-label")
         if self.button:
             self.button.set_sensitive(not terminating and self.call.is_cancellable)
+        self.name_button.set_sensitive(not terminating)
 

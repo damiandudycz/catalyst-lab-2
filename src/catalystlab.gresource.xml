@@ -7,6 +7,7 @@
     <file preprocess="xml-stripblanks">ui/main_window/main_window_content.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/welcome_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/environments_section.ui</file>
+    <file preprocess="xml-stripblanks">ui/components/root_command_output_view.ui</file>
     <file preprocess="xml-stripblanks">gtk/help-overlay.ui</file>
     <file>patches/namespaces.patch</file>
     <file>root_helper/root_helper_server.py</file>

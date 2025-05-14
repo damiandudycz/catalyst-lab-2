@@ -111,7 +111,7 @@ class EnvironmentsSection(Gtk.Box):
         if not toolset_container.spawned:
             toolset_container.spawn()
         print(f"{toolset_container} -> {toolset_container.toolset.toolset_root()} : {toolset_container.work_dir}")
-        call = toolset_container.run_command(command="emerge --info", completion_handler=lambda x: print(f">>>> {x}"))
+        call = toolset_container.run_command(command="emerge --sync", completion_handler=lambda x: print(f">>>> {x}"))
         print(call)
         #run_isolated_system_command(
         #    toolset_root="/",
@@ -142,9 +142,8 @@ def stubborn_worker():
 
     print(f"Process {os.getpid()} started")
     i = 0
-    return 3
     while True:
         print(f"Tick {i}...")
         i += 1
-        time.sleep(1)
+        time.sleep(0.01)
 
