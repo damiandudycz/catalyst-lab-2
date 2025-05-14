@@ -8,8 +8,6 @@
   <!-- Template -->
   <template class="RootCommandOutputView" parent="GtkBox">
     <property name="orientation">vertical</property>
-    <property name="width-request">640</property>
-    <property name="height-request">480</property>
     <child>
       <object class="GtkScrolledWindow" id="scrolled_window">
         <property name="vexpand">true</property>

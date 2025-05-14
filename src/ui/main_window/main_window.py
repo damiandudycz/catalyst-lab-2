@@ -64,21 +64,30 @@ class CatalystlabWindow(Adw.ApplicationWindow):
 
     def _present_section(self, section: AppSection):
         section_details = AppSectionDetails(section)
-        #nav_view = Adw.NavigationView()
         view = section_details.create_section(content_navigation_view=None)
         title = section_details.title
-        #page = Adw.NavigationPage.new(view, title)
-        #nav_view.push(page)
-        self._present_view(view, title)
+        self._present_view(view, title, 640, 480)
 
-    def _present_view(self, view: Gtk.Widget, title: str):
+    def _present_view(self, view: Gtk.Widget, title: str, width: int = -1, height: int = -1):
         header = Adw.HeaderBar()
         toolbar_view = Adw.ToolbarView()
-        toolbar_view.set_content(view)
+        # Container centers the content.
+        container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        container.append(view)
+        toolbar_view.set_content(container)
         toolbar_view.add_top_bar(header)
         window = Adw.Window()
         window.set_transient_for(self.get_root())
         window.set_modal(True)
         window.set_title(title)
-        window.set_content(toolbar_view)
+        if hasattr(view, "content_navigation_view"):
+            # If view supports content_navigation_view (is section) embed it into new nav_view
+            nav_view = Adw.NavigationView()
+            view.content_navigation_view = nav_view
+            page = Adw.NavigationPage.new(toolbar_view, title)
+            nav_view.push(page)
+            window.set_content(nav_view)
+        else:
+            window.set_content(toolbar_view)
+        window.set_default_size(width, height)
         window.present()

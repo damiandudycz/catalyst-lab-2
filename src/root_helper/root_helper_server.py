@@ -36,7 +36,7 @@ class RootHelperServer:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperServer | None = None # Singleton shared instance.
-    hide_logs = True
+    hide_logs = False
     use_client_watchdog = True
 
     # --------------------------------------------------------------------------

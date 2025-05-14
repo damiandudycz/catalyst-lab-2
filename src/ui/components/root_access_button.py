@@ -229,9 +229,7 @@ class RootActionInfoRow(Gtk.Box):
     def show_output(self, button: Gtk.Button):
         self.parent.popover.hide()
         command_output_view = RootCommandOutputView(call=self.call)
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, command_output_view, self.call.request.function_name)
-        #from .app_section import AppSection
-        #app_event_bus.emit(AppEvents.PRESENT_SECTION, AppSection.HOME)
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, command_output_view, self.call.request.function_name, 640, 480)
 
     def mark_terminating(self, terminating: bool = True):
         if terminating:
