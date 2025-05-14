@@ -11,7 +11,7 @@ from .root_helper_client import RootHelperClient, root_function
 from .root_helper_server import ServerCommand
 import time
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments_section.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
     __gtype_name__ = "EnvironmentsSection"
 
@@ -111,25 +111,8 @@ class EnvironmentsSection(Gtk.Box):
         if not toolset_container.spawned:
             toolset_container.spawn()
         print(f"{toolset_container} -> {toolset_container.toolset.toolset_root()} : {toolset_container.work_dir}")
-        call = toolset_container.run_command(command="emerge --sync", completion_handler=lambda x: print(f">>>> {x}"))
+        call = toolset_container.run_command(command="find /var/db/repos", completion_handler=lambda x: print(f">>>> {x}"))
         print(call)
-        #run_isolated_system_command(
-        #    toolset_root="/",
-        #    command_to_run=("emerge --info"),
-            #command_to_run=(
-            #    "mkdir -p /etc/portage/package.accept_keywords && "
-            #    "mkdir -p /etc/portage/package.use && "
-            #    "echo dev-util/catalyst > /etc/portage/package.accept_keywords/catalyst && "
-            #    "echo \">=sys-apps/util-linux-2.40.4 python\" >> /etc/portage/package.use/catalyst && "
-            #    "echo \">=sys-boot/grub-2.12-r6 grub_platforms_efi-32\" >> /etc/portage/package.use/catalyst && "
-            #    "emerge catalyst"
-            #),
-            #store_changes=True,
-        #    additional_bindings=[
-        #        BindMount(mount_path="/var/db/repos/gentoo", host_path="/home/damiandudycz/gentoo-portage", store_changes=True, resolve_host_path=False),
-        #        BindMount(mount_path="/var/tmp/catalyst/snapshots", host_path="/home/damiandudycz/Snapshots", store_changes=True, resolve_host_path=False)
-        #    ]
-        #)
 
 @root_function
 def stubborn_worker():

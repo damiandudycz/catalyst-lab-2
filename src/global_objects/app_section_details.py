@@ -14,9 +14,11 @@ class AppSectionDetails:
     SECTION_CONFIG = {
         #                        .module,              .label,         .title,         .icon,                        .show_in_side_bar, .show_side_bar
         AppSection.HOME:         (WelcomeSection,      "Home",         "Catalyst Lab", "go-home-symbolic",           True,  False),
+        AppSection.PROJECTS:     (EnvironmentsSection, "Projects",     "Projects",     "preferences-other-symbolic", True,  True),
+        AppSection.BUILDS:       (Gtk.Button,          "Builds",       "Builds",       "emblem-ok-symbolic",         True,  True),
         AppSection.ENVIRONMENTS: (EnvironmentsSection, "Environments", "Environments", "preferences-other-symbolic", True,  True),
         AppSection.SNAPSHOTS:    (EnvironmentsSection, "Snapshots",    "Snapshots",    "preferences-other-symbolic", True,  True),
-        AppSection.BUILDS:       (Gtk.Button,          "Builds",       "Builds",       "emblem-ok-symbolic",         True,  True),
+        AppSection.BUGS:         (Gtk.Button,          "Bugs",         "Bugs",         "help-faq-symbolic",          True,  True),
         AppSection.HELP:         (Gtk.Button,          "Help",         "Help",         "help-faq-symbolic",          True,  True),
         AppSection.ABOUT:        (WelcomeSection,      "About",        "About",        "help-about-symbolic",        True,  True),
     }

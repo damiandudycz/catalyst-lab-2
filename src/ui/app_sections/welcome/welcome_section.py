@@ -6,7 +6,7 @@ from .runtime_env import RuntimeEnv
 from .root_helper_client import RootHelperClient
 from .settings import Settings, SettingsEvents
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/welcome_section.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/welcome/welcome_section.ui')
 class WelcomeSection(Gtk.Box):
     __gtype_name__ = "WelcomeSection"
 

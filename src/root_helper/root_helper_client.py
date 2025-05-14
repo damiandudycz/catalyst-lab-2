@@ -14,11 +14,6 @@ from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_server import RootHelperServer, StreamPipe, StreamPipeEvent, WatchDog
 
-@final
-class RootHelperClientEvents(Enum):
-    CHANGE_ROOT_ACCESS = auto() # root_helper_client unlocked / locked root access
-    ROOT_REQUEST_STATUS = auto() # calls when state of root_function is changed (in progress / finished)
-
 class RootHelperClient:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
@@ -401,6 +396,11 @@ class RootHelperClient:
 
     def keep_root_unlocked_changed(self, value: bool):
         self.keep_unlocked = value
+
+@final
+class RootHelperClientEvents(Enum):
+    CHANGE_ROOT_ACCESS = auto() # root_helper_client unlocked / locked root access
+    ROOT_REQUEST_STATUS = auto() # calls when state of root_function is changed (in progress / finished)
 
 @final
 class ServerCallEvents(Enum):
