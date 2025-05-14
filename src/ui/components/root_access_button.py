@@ -1,7 +1,7 @@
 from gi.repository import Gtk, Adw, GObject
 from functools import partial
 from .app_events import AppEvents, app_event_bus
-from .root_helper_client import RootHelperClient, RootHelperClientEvents, root_function, ServerCall
+from .root_helper_client import RootHelperClient, RootHelperClientEvents, root_function, ServerCall, ServerCallEvents
 from .settings import *
 from .root_command_output_view import RootCommandOutputView
 
@@ -104,7 +104,6 @@ class RootAccessButton(Gtk.Overlay):
         # Subscribe to events
         RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.CHANGE_ROOT_ACCESS, self.root_access_changed)
         RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.ROOT_REQUEST_STATUS, self.root_requests_status_changed)
-        RootHelperClient.shared().event_bus.subscribe(RootHelperClientEvents.ROOT_REQUEST_WILL_TERMINATE, self.root_request_will_terminate)
         Settings.current().event_bus.subscribe(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, self.keep_root_unlocked_changed)
 
         # Set initial state based on root access status
@@ -142,13 +141,6 @@ class RootAccessButton(Gtk.Overlay):
         self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
         #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and RootHelperClient.shared().is_server_process_running)
         #self.root_tasks_separator.set_visible(RootHelperClient.shared().running_actions)
-
-    def root_request_will_terminate(self, client: RootHelperClient, call: ServerCall):
-        # Mark task as terminating
-        view = next((view for view in self.displayed_requests_views if view.call == call), None)
-        if view:
-            view.mark_terminating()
-        pass
 
     def disable_root_access(self, sender):
         """Disable root access when the button is clicked."""
@@ -223,6 +215,8 @@ class RootActionInfoRow(Gtk.Box):
 
         self.mark_terminating(call.terminated)
 
+        self.call.event_bus.subscribe(ServerCallEvents.CALL_WILL_TERMINATE, self.call_will_terminate)
+
     def close_call(self, button: Gtk.Button):
         self.call.cancel()
 
@@ -230,6 +224,9 @@ class RootActionInfoRow(Gtk.Box):
         self.parent.popover.hide()
         command_output_view = RootCommandOutputView(call=self.call)
         app_event_bus.emit(AppEvents.PRESENT_VIEW, command_output_view, self.call.request.function_name, 640, 480)
+
+    def call_will_terminate(self):
+       self.mark_terminating()
 
     def mark_terminating(self, terminating: bool = True):
         if terminating:

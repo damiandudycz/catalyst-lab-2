@@ -18,7 +18,6 @@ from .root_helper_server import RootHelperServer, StreamPipe, StreamPipeEvent, W
 class RootHelperClientEvents(Enum):
     CHANGE_ROOT_ACCESS = auto() # root_helper_client unlocked / locked root access
     ROOT_REQUEST_STATUS = auto() # calls when state of root_function is changed (in progress / finished)
-    ROOT_REQUEST_WILL_TERMINATE = auto() # Root call was marked to be terminated.
 
 class RootHelperClient:
 
@@ -296,8 +295,7 @@ class RootHelperClient:
                                     event = StreamPipeEvent(int(content))
                                     match event:
                                         case StreamPipeEvent.CALL_WILL_TERMINATE:
-                                            call.terminated = True
-                                            self.event_bus.emit(RootHelperClientEvents.ROOT_REQUEST_WILL_TERMINATE, self, call)
+                                            call.mark_terminated()
                                         case _:
                                            print(f"[Server process]: Warning: Received unsupported event: {event}")
                                 except Exception as e:
@@ -407,6 +405,7 @@ class RootHelperClient:
 @final
 class ServerCallEvents(Enum):
     NEW_OUTPUT_LINE = auto() # new line added to collected output
+    CALL_WILL_TERMINATE = auto()
 
 @dataclass
 class ServerCall:
@@ -437,11 +436,15 @@ class ServerCall:
     def output_append(self, line: str):
         with self.output_lock:
             self.output.append(line)
-            self.event_bus.emit(ServerCallEvents.NEW_OUTPUT_LINE, self, line)
+            self.event_bus.emit(ServerCallEvents.NEW_OUTPUT_LINE, line)
 
     def get_output(self) -> List[str]:
         with self.output_lock:
             return self.output
+
+    def mark_terminated(self):
+        self.terminated = True
+        self.event_bus.emit(ServerCallEvents.CALL_WILL_TERMINATE)
 
 # ------------------------------------------------------------------------------
 # @root_function decorator.

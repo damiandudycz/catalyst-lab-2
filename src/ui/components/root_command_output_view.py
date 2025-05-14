@@ -21,7 +21,7 @@ class RootCommandOutputView(Gtk.Box):
             self.append_line
         )
 
-    def append_line(self, call: ServerCall, line: str):
+    def append_line(self, line: str):
         # Get the current end iterator to ensure we insert at the very end
         end_iter = self.text_buffer.get_end_iter()
         self.text_buffer.insert(end_iter, "\n" + line)
