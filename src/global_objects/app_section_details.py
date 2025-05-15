@@ -18,6 +18,7 @@ class AppSectionDetails:
         AppSection.BUILDS:       (Gtk.Button,          "Builds",       "Builds",       "help-faq-symbolic",          True,  True),
         AppSection.ENVIRONMENTS: (EnvironmentsSection, "Environments", "Environments", "preferences-other-symbolic", True,  True),
         AppSection.SNAPSHOTS:    (Gtk.Button,          "Snapshots",    "Snapshots",    "help-faq-symbolic",          True,  True),
+        AppSection.RELENG:       (Gtk.Button,          "Releng",       "Releng",       "help-faq-symbolic",          True,  True),
         AppSection.TEMPLATES:    (Gtk.Button,          "Templates",    "Templates",    "help-faq-symbolic",          True,  True),
         AppSection.BUGS:         (Gtk.Button,          "Bugs",         "Bugs",         "help-faq-symbolic",          True,  True),
         AppSection.PREFERENCES:  (Gtk.Button,          "Preferences",  "Preferences",  "help-faq-symbolic",          True,  True),

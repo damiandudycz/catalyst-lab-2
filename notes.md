@@ -13,6 +13,8 @@ efficiently without requiring in-depth knowledge of the underlying components.
 ### General.
 - [ ] Create a view for monitoring ServerCall output. Open by clicking on server call on the list from RootButton.
 - [ ] Instead of manually registering AppSections, create a decorator that will take all section details and register a class.
+- [ ] In builds store logs - catalyst log, and links to detected bugs
+- [ ] In bugs allow linking to bugzilla issues
 
 ### Toolsets.
 - [ ] Use some kind of container for storing contents of toolset. This way container itself can still be owned by user, mounted when work needs to be done with it and accessed by root to modify / read.
