@@ -195,134 +195,20 @@ class RootHelperServer:
         """Listen for incoming client connections and spawn threads to handle them."""
         print("[Server]: " + f"Listening on socket {socket_path}...")
         server.listen()
-        while self.is_running:
-            try:
+        try:
+            while self.is_running:
                 conn, _ = server.accept()
                 print("[Server]: " + "Accepting connection...")
-                job = Job(server=self, conn=conn)
-                job.thread = threading.Thread(
-                    target=self.handle_connection,
-                    args=(job, session_token, allowed_uid)
+                job = Job(
+                    server=self, conn=conn,
+                    session_token=session_token, allowed_uid=allowed_uid
                 )
                 self.add_job(job)
-                job.thread.start()
-            except Exception as e:
-                print("[Server]: ERROR: " + f"Error accepting connection: {e}")
-                # Stop server after errors in single connection:
-                self.stop()
-                return
-        self.stop()
-
-    def handle_connection(self, job: Job, session_token: str, allowed_uid: int):
-        """Handle a single client connection in a separate thread."""
-        try:
-            # Validate peer credentials:
-            try:
-                ucred = job.conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-                pid, uid, gid = struct.unpack("3i", ucred)
-            except Exception:
-                job.respond(code=ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
-                return
-
-            if uid != allowed_uid:
-                job.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
-                return
-            if self.pid_lock is not None and self.pid_lock != pid:
-                job.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
-                return
-
-            # Receive request data:
-            data = job.conn.recv(4096).decode().strip()
-            if not data.startswith(session_token):
-                job.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
-                return
-            full_payload = data[len(session_token) + 1:]
-            if " " not in full_payload:
-                job.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
-                return
-            call_id_str, request_type, payload = full_payload.split(" ", 2)
-            job.call_id = uuid.UUID(call_id_str)
-
-            # Process request:
-            match request_type:
-                case "command":
-                    self.handle_command_request(job, pid, payload)
-                case "function":
-                    self.handle_function_request(job, pid, payload)
-                case _:
-                    job.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
-
+                job.start()
         except Exception as e:
-            print("[Server]: ERROR: " + f"Unexpected error in connection handler: {e}")
-            job.conn.close()
-
-    def handle_command_request(self, job: Job, pid: int, payload: str):
-        print("[Server]: " + "Processing command request")
-        try:
-            parts = payload.split(" ", 1)
-            cmd_type = parts[0]
-            cmd_value = parts[1] if len(parts) > 1 else None
-            cmd_enum = ServerCommand(cmd_type)
-            print("[Server]: " + f"Command: {cmd_enum}")
-            if self.pid_lock is None and cmd_enum != ServerCommand.HANDSHAKE:
-                job.respond(code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
-                return
-            match cmd_enum:
-                case ServerCommand.EXIT:
-                    job.respond(code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDOUT, response="Exiting...")
-                    self.stop(called_by_job=job, after_jobs_cleaned = lambda: job.respond(code=ServerResponseStatusCode.OK, response="Exited"))
-                case ServerCommand.PING:
-                    job.respond(code=ServerResponseStatusCode.OK, response="PONG")
-                case ServerCommand.HANDSHAKE:
-                    if self.pid_lock is None:
-                        self.pid_lock = pid
-                        if RootHelperServer.use_client_watchdog:
-                            self.client_watchdog.start()
-                        job.respond(code=ServerResponseStatusCode.OK, response="Initialization succeeded")
-                    else:
-                        job.respond(code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
-                case ServerCommand.CANCEL_CALL:
-                    # Handle call cancellation
-                    call_id=uuid.UUID(cmd_value)
-                    job_to_cancel = self.get_job_by_call_id(call_id)
-                    if job_to_cancel:
-                        def completion(did_schedule_for_termination: bool):
-                            if did_schedule_for_termination:
-                                job.respond(code=ServerResponseStatusCode.OK, response="Job terminated")
-                            else:
-                                job.respond(code=ServerResponseStatusCode.JOB_ALREADY_SCHEDULED_FOR_TERMINATION, response="Job was already terminated or scheduled for termination")
-                        job_to_cancel.terminate(completion=completion)
-                    else:
-                        job.respond(code=ServerResponseStatusCode.JOB_NOT_FOUND)
-        except ValueError as e:
-            job.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
-
-    def handle_function_request(self, job: Job, pid: int, payload: str):
-        print("[Server]: " + "Processing function request")
-        if self.pid_lock is None:
-            job.respond(code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
-            return
-        try:
-            func_struct = ServerFunction.from_json(payload)
-            print("[Server]: " + f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
-            if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
-                job.respond(code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.function_name}")
-            else:
-                try:
-                    result = _run_function_with_streaming_output(
-                        job,
-                        RootHelperServer.ROOT_FUNCTION_REGISTRY[func_struct.function_name],
-                        func_struct.args,
-                        func_struct.kwargs
-                    )
-                    if not job.mark_terminated:
-                        job.respond(code=ServerResponseStatusCode.OK, response=result)
-                except Exception as e:
-                    if not job.mark_terminated:
-                        job.respond(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
-        except ValueError:
-            if not job.mark_terminated:
-                job.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+            print("[Server]: ERROR: " + f"Error accepting connection: {e}")
+        finally:
+            self.stop()
 
     # --------------------------------------------------------------------------
     # Jobs management (With thread safety built in).
@@ -465,7 +351,7 @@ class Job:
     """thread is none at init, but it is set right after creating."""
     """This is because we need to pass the Job itself to the thread handler, so that it is able to set process later."""
 
-    def __init__(self, server: RootHelperServer, conn: socket.socket):
+    def __init__(self, server: RootHelperServer, conn: socket.socket, session_token: str, allowed_uid: int):
         self.server = server
         self.conn = conn
         self.thread: threading.Thread | None = None
@@ -473,6 +359,13 @@ class Job:
         self.mark_terminated = False
         self.call_id: uuid | None = None # Set when handle_connection is called
         self.thread_lock = threading.Lock()
+        self.thread = threading.Thread(
+            target=self.handle_connection,
+            args=(session_token, allowed_uid)
+        )
+
+    def start(self):
+        self.thread.start()
 
     def terminate(self, instant: bool = False, completion: callable | None = None) -> Job | None:
         """Schedules Job process to terminate and gives it 5 seconds to finish."""
@@ -536,6 +429,117 @@ class Job:
         start_time = time.time()
         while (time.time() - start_time < timeout and not all(job.thread is not None and not job.thread.is_alive() for job in jobs)):
             time.sleep(0.1)
+
+    def handle_connection(self, session_token: str, allowed_uid: int):
+        """Handle a single client connection in a separate thread."""
+        try:
+            # Validate peer credentials:
+            try:
+                ucred = self.conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+                pid, uid, gid = struct.unpack("3i", ucred)
+            except Exception:
+                self.respond(code=ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
+                return
+
+            if uid != allowed_uid:
+                self.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
+                return
+            if self.server.pid_lock is not None and self.server.pid_lock != pid:
+                self.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
+                return
+
+            # Receive request data:
+            data = self.conn.recv(4096).decode().strip()
+            if not data.startswith(session_token):
+                self.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
+                return
+            full_payload = data[len(session_token) + 1:]
+            if " " not in full_payload:
+                self.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                return
+            call_id_str, request_type, payload = full_payload.split(" ", 2)
+            self.call_id = uuid.UUID(call_id_str)
+
+            # Process request:
+            match request_type:
+                case "command":
+                    self.handle_command_request(pid, payload)
+                case "function":
+                    self.handle_function_request(pid, payload)
+                case _:
+                    self.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+
+        except Exception as e:
+            print("[Server]: ERROR: " + f"Unexpected error in connection handler: {e}")
+            job.conn.close()
+
+    def handle_command_request(self, pid: int, payload: str):
+        print("[Server]: " + "Processing command request")
+        try:
+            parts = payload.split(" ", 1)
+            cmd_type = parts[0]
+            cmd_value = parts[1] if len(parts) > 1 else None
+            cmd_enum = ServerCommand(cmd_type)
+            print("[Server]: " + f"Command: {cmd_enum}")
+            if self.server.pid_lock is None and cmd_enum != ServerCommand.HANDSHAKE:
+                self.respond(code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+                return
+            match cmd_enum:
+                case ServerCommand.EXIT:
+                    self.respond(code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDOUT, response="Exiting...")
+                    self.server.stop(called_by_job=self, after_jobs_cleaned = lambda: self.respond(code=ServerResponseStatusCode.OK, response="Exited"))
+                case ServerCommand.PING:
+                    self.respond(code=ServerResponseStatusCode.OK, response="PONG")
+                case ServerCommand.HANDSHAKE:
+                    if self.server.pid_lock is None:
+                        self.server.pid_lock = pid
+                        if RootHelperServer.use_client_watchdog:
+                            self.server.client_watchdog.start()
+                        self.respond(code=ServerResponseStatusCode.OK, response="Initialization succeeded")
+                    else:
+                        self.respond(code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
+                case ServerCommand.CANCEL_CALL:
+                    # Handle call cancellation
+                    call_id=uuid.UUID(cmd_value)
+                    job_to_cancel = self.server.get_job_by_call_id(call_id)
+                    if job_to_cancel:
+                        def completion(did_schedule_for_termination: bool):
+                            if did_schedule_for_termination:
+                                self.respond(code=ServerResponseStatusCode.OK, response="Job terminated")
+                            else:
+                                self.respond(code=ServerResponseStatusCode.JOB_ALREADY_SCHEDULED_FOR_TERMINATION, response="Job was already terminated or scheduled for termination")
+                        job_to_cancel.terminate(completion=completion)
+                    else:
+                        self.respond(code=ServerResponseStatusCode.JOB_NOT_FOUND)
+        except ValueError as e:
+            self.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+
+    def handle_function_request(self, pid: int, payload: str):
+        print("[Server]: " + "Processing function request")
+        if self.server.pid_lock is None:
+            self.respond(code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+            return
+        try:
+            func_struct = ServerFunction.from_json(payload)
+            print("[Server]: " + f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
+            if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
+                self.respond(code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.function_name}")
+            else:
+                try:
+                    result = _run_function_with_streaming_output(
+                        self,
+                        RootHelperServer.ROOT_FUNCTION_REGISTRY[func_struct.function_name],
+                        func_struct.args,
+                        func_struct.kwargs
+                    )
+                    if not self.mark_terminated:
+                        self.respond(code=ServerResponseStatusCode.OK, response=result)
+                except Exception as e:
+                    if not self.mark_terminated:
+                        self.respond(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+        except ValueError:
+            if not self.mark_terminated:
+                self.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
     def respond(self, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | StreamPipeEvent | None = None):
         # Final response, returning the result of function called.
