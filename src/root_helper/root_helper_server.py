@@ -595,10 +595,7 @@ def _run_function_with_streaming_output(job: Job, func, args, kwargs) -> Any | N
     read_fd, write_fd = os.pipe()
     result_queue = multiprocessing.Queue()
 
-    proc = multiprocessing.Process(
-        target=_run_and_capture_streams,
-        args=(func, args, kwargs, write_fd, result_queue)
-    )
+    proc = multiprocessing.Process(target=_run_and_capture_streams, args=(func, args, kwargs, write_fd, result_queue))
     job.process = proc
     proc.start()
     os.close(write_fd)
@@ -608,16 +605,14 @@ def _run_function_with_streaming_output(job: Job, func, args, kwargs) -> Any | N
         with os.fdopen(read_fd, 'r') as pipe:
             for line in pipe:
                 try:
-                    data = json.loads(line)
-                    job.respond(pipe=data["pipe"], response=data["message"])
-                except json.JSONDecodeError as e:
-                    print(f"[Server]: Error: Failed to read from StreamWrapper read_fd pipe: {e}")
+                    pipe_id_str, message = line.rstrip("\n").split(":", 1)
+                    pipe_id = int(pipe_id_str)
+                    job.respond(pipe=pipe_id, response=message)
+                except ValueError as e:
+                    print(f"[Server]: Error parsing line: {e}")
                     print(f"[Server]: Failed line: {line}")
 
-    reader_thread = threading.Thread(
-        target=stream_reader,
-        args=(job,)
-    )
+    reader_thread = threading.Thread(target=stream_reader, args=(job,))
     reader_thread.start()
 
     proc.join()
@@ -647,15 +642,14 @@ def _run_and_capture_streams(func, args, kwargs, write_fd, result_queue):
     sys.stdout = open(1, 'w', buffering=1, encoding='utf-8', errors='replace')
     sys.stderr = open(2, 'w', buffering=1, encoding='utf-8', errors='replace')
 
-    def forward_stream(read_fd, pipe_name):
+    def forward_stream(read_fd, pipe_id):
         with os.fdopen(read_fd, 'r') as reader, os.fdopen(write_fd, 'w', buffering=1) as writer:
             for line in reader:
-                payload = json.dumps({
-                    "pipe": pipe_name,
-                    "message": line.rstrip("\n")
-                })
-                writer.write(payload + "\n")
-                writer.flush()
+                line_cleaned = line.rstrip("\n")
+                if line_cleaned:
+                    payload = f"{pipe_id}:{line_cleaned}"
+                    writer.write(payload + "\n")
+                    writer.flush()
 
     # Start background threads to forward raw output as JSON
     threading.Thread(target=forward_stream, args=(stdout_r, StreamPipe.STDOUT.value), daemon=True).start()
