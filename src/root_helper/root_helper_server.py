@@ -29,9 +29,6 @@ class ServerResponseStatusCode(Enum):
     INITIALIZATION_ALREADY_DONE = auto()
     INITIALIZATION_NOT_DONE = auto()
 
-class StreamPipeEvent(Enum):
-    CALL_WILL_TERMINATE = auto()
-
 class RootHelperServer:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
@@ -224,24 +221,24 @@ class RootHelperServer:
                 ucred = job.conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
                 pid, uid, gid = struct.unpack("3i", ucred)
             except Exception:
-                self.respond(job=job, code=ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
+                job.respond(code=ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
                 return
 
             if uid != allowed_uid:
-                self.respond(job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
+                job.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
                 return
             if self.pid_lock is not None and self.pid_lock != pid:
-                self.respond(job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
+                job.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
                 return
 
             # Receive request data:
             data = job.conn.recv(4096).decode().strip()
             if not data.startswith(session_token):
-                self.respond(job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
+                job.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
             full_payload = data[len(session_token) + 1:]
             if " " not in full_payload:
-                self.respond(job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                job.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                 return
             call_id_str, request_type, payload = full_payload.split(" ", 2)
             job.call_id = uuid.UUID(call_id_str)
@@ -253,7 +250,7 @@ class RootHelperServer:
                 case "function":
                     self.handle_function_request(job, pid, payload)
                 case _:
-                    self.respond(job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                    job.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
         except Exception as e:
             print("[Server]: ERROR: " + f"Unexpected error in connection handler: {e}")
@@ -268,22 +265,22 @@ class RootHelperServer:
             cmd_enum = ServerCommand(cmd_type)
             print("[Server]: " + f"Command: {cmd_enum}")
             if self.pid_lock is None and cmd_enum != ServerCommand.HANDSHAKE:
-                self.respond(job=job, code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+                job.respond(code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
                 return
             match cmd_enum:
                 case ServerCommand.EXIT:
-                    self.respond(job=job, code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDOUT, response="Exiting...")
-                    self.stop(called_by_job=job, after_jobs_cleaned = lambda: self.respond(job=job, code=ServerResponseStatusCode.OK, response="Exited"))
+                    job.respond(code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDOUT, response="Exiting...")
+                    self.stop(called_by_job=job, after_jobs_cleaned = lambda: job.respond(code=ServerResponseStatusCode.OK, response="Exited"))
                 case ServerCommand.PING:
-                    self.respond(job=job, code=ServerResponseStatusCode.OK, response="PONG")
+                    job.respond(code=ServerResponseStatusCode.OK, response="PONG")
                 case ServerCommand.HANDSHAKE:
                     if self.pid_lock is None:
                         self.pid_lock = pid
                         if RootHelperServer.use_client_watchdog:
                             self.client_watchdog.start()
-                        self.respond(job=job, code=ServerResponseStatusCode.OK, response="Initialization succeeded")
+                        job.respond(code=ServerResponseStatusCode.OK, response="Initialization succeeded")
                     else:
-                        self.respond(job=job, code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
+                        job.respond(code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
                 case ServerCommand.CANCEL_CALL:
                     # Handle call cancellation
                     call_id=uuid.UUID(cmd_value)
@@ -291,89 +288,41 @@ class RootHelperServer:
                     if job_to_cancel:
                         def completion(did_schedule_for_termination: bool):
                             if did_schedule_for_termination:
-                                self.respond(job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
+                                job.respond(code=ServerResponseStatusCode.OK, response="Job terminated")
                             else:
-                                self.respond(job=job, code=ServerResponseStatusCode.JOB_ALREADY_SCHEDULED_FOR_TERMINATION, response="Job was already terminated or scheduled for termination")
+                                job.respond(code=ServerResponseStatusCode.JOB_ALREADY_SCHEDULED_FOR_TERMINATION, response="Job was already terminated or scheduled for termination")
                         job_to_cancel.terminate(completion=completion)
                     else:
-                        self.respond(job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
+                        job.respond(code=ServerResponseStatusCode.JOB_NOT_FOUND)
         except ValueError as e:
-            self.respond(job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+            job.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
     def handle_function_request(self, job: Job, pid: int, payload: str):
         print("[Server]: " + "Processing function request")
         if self.pid_lock is None:
-            self.respond(job=job, code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+            job.respond(code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
             return
         try:
             func_struct = ServerFunction.from_json(payload)
             print("[Server]: " + f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
             if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
-                self.respond(job=job, code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.function_name}")
+                job.respond(code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.function_name}")
             else:
                 try:
                     result = _run_function_with_streaming_output(
                         job,
                         RootHelperServer.ROOT_FUNCTION_REGISTRY[func_struct.function_name],
                         func_struct.args,
-                        func_struct.kwargs,
-                        self.respond
+                        func_struct.kwargs
                     )
                     if not job.mark_terminated:
-                        self.respond(job=job, code=ServerResponseStatusCode.OK, response=result)
+                        job.respond(code=ServerResponseStatusCode.OK, response=result)
                 except Exception as e:
                     if not job.mark_terminated:
-                        self.respond(job=job, code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+                        job.respond(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
         except ValueError:
             if not job.mark_terminated:
-                self.respond(job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
-
-    # TODO: Move this function into Job
-    def respond(self, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | StreamPipeEvent | None = None):
-        # Final response, returning the result of function called.
-        # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
-        with job.thread_lock:
-            if isinstance(pipe, int):
-                # If pipe was passed by ID, convert it back to pipe object
-                pipe = StreamPipe(pipe)
-            if code != ServerResponseStatusCode.OK and pipe != StreamPipe.RETURN:
-                raise RuntimeError("Return code != OK can be used only with RETURN pipe.")
-            if job.conn.fileno() == -1:
-                print("[Server]: ERROR: " + f"Connection already closed: {job.conn} / {job} [{response}]")
-                return
-            print("[Server]: " + f"Responding with code: {code}, response: {response}, on pipe: {pipe}")
-            match pipe:
-                case StreamPipe.RETURN:
-                    server_response = ServerResponse(code=code, response=response)
-                    response_formatted = server_response.to_json()
-                    close = True
-                case StreamPipe.STDOUT | StreamPipe.STDERR:
-                    response_formatted = response
-                    close = False
-                case StreamPipe.EVENTS:
-                    response_formatted = str(response.value)
-                    close = False
-            try:
-                job.conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
-            except Exception as e:
-                print("[Server]: ERROR: " + f"{e}")
-            finally:
-                if close:
-                    job.conn.shutdown(socket.SHUT_WR)
-                    # Wait for ACK from client
-                    try:
-                        # Wait for socket to be ready to read
-                        readable, writable, errored = select.select([job.conn], [], [], 5)
-                        if not readable:
-                            print("Socket not readable yet")
-                        job.conn.settimeout(5)
-                        if job.conn.recv(3) != b"ACK":
-                            print(f"[Server]: Warning: Incorrect ACK response from client: {data.decode()}")
-                    except Exception as e:
-                        print(f"[Server]: Warning: Failed to receive ACK from client: {e}")
-                    finally:
-                        job.conn.close()
-                        self.remove_job(job)
+                job.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
     # --------------------------------------------------------------------------
     # Jobs management (With thread safety built in).
@@ -419,6 +368,9 @@ def __init_server__():
 # ------------------------------------------------------------------------------
 # Helper functions and types.
 # ------------------------------------------------------------------------------
+
+class StreamPipeEvent(Enum):
+    CALL_WILL_TERMINATE = auto()
 
 class ServerCommand(str, Enum):
     EXIT = "[EXIT]"
@@ -545,13 +497,13 @@ class Job:
             return None
         self.mark_terminated = True
         try:
-            self.server.respond(job=self, code=ServerResponseStatusCode.OK, pipe=StreamPipe.EVENTS, response=StreamPipeEvent.CALL_WILL_TERMINATE)
+            self.respond(code=ServerResponseStatusCode.OK, pipe=StreamPipe.EVENTS, response=StreamPipeEvent.CALL_WILL_TERMINATE)
         except Exception as e:
             pass
         if instant:
             self.process.kill()
             self.process.join()
-            self.server.respond(job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
+            self.respond(code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
             if completion:
                 completion(True)
         else:
@@ -574,7 +526,7 @@ class Job:
             self.thread.join()
         else:
             print("[Server]: " + "Process did terminate.")
-        self.server.respond(job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
+        self.respond(code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
         if completion:
             completion(True)
 
@@ -584,6 +536,52 @@ class Job:
         start_time = time.time()
         while (time.time() - start_time < timeout and not all(job.thread is not None and not job.thread.is_alive() for job in jobs)):
             time.sleep(0.1)
+
+    def respond(self, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | StreamPipeEvent | None = None):
+        # Final response, returning the result of function called.
+        # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
+        with self.thread_lock:
+            if isinstance(pipe, int):
+                # If pipe was passed by ID, convert it back to pipe object
+                pipe = StreamPipe(pipe)
+            if code != ServerResponseStatusCode.OK and pipe != StreamPipe.RETURN:
+                raise RuntimeError("Return code != OK can be used only with RETURN pipe.")
+            if self.conn.fileno() == -1:
+                print("[Server]: ERROR: " + f"Connection already closed: {self.conn} / {self} [{response}]")
+                return
+            print("[Server]: " + f"Responding with code: {code}, response: {response}, on pipe: {pipe}")
+            match pipe:
+                case StreamPipe.RETURN:
+                    server_response = ServerResponse(code=code, response=response)
+                    response_formatted = server_response.to_json()
+                    close = True
+                case StreamPipe.STDOUT | StreamPipe.STDERR:
+                    response_formatted = response
+                    close = False
+                case StreamPipe.EVENTS:
+                    response_formatted = str(response.value)
+                    close = False
+            try:
+                self.conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
+            except Exception as e:
+                print("[Server]: ERROR: " + f"{e}")
+            finally:
+                if close:
+                    self.conn.shutdown(socket.SHUT_WR)
+                    # Wait for ACK from client
+                    try:
+                        # Wait for socket to be ready to read
+                        readable, writable, errored = select.select([self.conn], [], [], 5)
+                        if not readable:
+                            print("Socket not readable yet")
+                        self.conn.settimeout(5)
+                        if self.conn.recv(3) != b"ACK":
+                            print(f"[Server]: Warning: Incorrect ACK response from client: {data.decode()}")
+                    except Exception as e:
+                        print(f"[Server]: Warning: Failed to receive ACK from client: {e}")
+                    finally:
+                        self.conn.close()
+                        self.server.remove_job(job)
 
 class StreamWrapper:
     def __init__(self, stream, pipe: StreamPipe):
@@ -601,7 +599,7 @@ class StreamWrapper:
     def flush(self):
         self.stream.flush()
 
-def _run_function_with_streaming_output(job: Job, func, args, kwargs, respond_callback) -> Any | None:
+def _run_function_with_streaming_output(job: Job, func, args, kwargs) -> Any | None:
     """Takes a function and runs it as separate process while sending its output to stdout_callback and stderr_callback."""
     """Spawned process runs in sync, so this function only after given function is ready."""
     """Returns what given function returns or throws if given function throws."""
@@ -623,7 +621,7 @@ def _run_function_with_streaming_output(job: Job, func, args, kwargs, respond_ca
             for line in pipe:
                 try:
                     data = json.loads(line)
-                    respond_callback(job=job, code=ServerResponseStatusCode.OK, pipe=data["pipe"], response=data["message"])
+                    job.respond(code=ServerResponseStatusCode.OK, pipe=data["pipe"], response=data["message"])
                 except json.JSONDecodeError as e:
                     print(f"[Server]: Error: Failed to read from StreamWrapper read_fd pipe: {e}")
                     print(f"[Server]: Failed line: {line}")

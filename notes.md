@@ -32,4 +32,5 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] IMPORTANT! When output of running command is generated too fast, the pipe gets blocked, making server unresponsive.
 - [ ] Add timeout for decoding and send decoded as event
 - [ ] Combine handlers into one that also adds Pipe argument
+- [ ] For pipes decoding/encoding use simpler format <PipeID>:<Message>
 
