@@ -6,7 +6,7 @@ from .runtime_env import RuntimeEnv
 from .root_helper_client import RootHelperClient
 from .settings import Settings, SettingsEvents
 
-@app_section(label="Home", title="Welcome", icon="go-home-symbolic", show_side_bar=False, order=1_000)
+@app_section(title="Welcome", label="Home", icon="go-home-symbolic", show_side_bar=False, order=1_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/welcome/welcome_section.ui')
 class WelcomeSection(Gtk.Box):
     __gtype_name__ = "WelcomeSection"
@@ -24,7 +24,7 @@ class WelcomeSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        self.content_navigation_view.push_section(AppSection.ENVIRONMENTS)
+        self.content_navigation_view.push_section(AppSection.EnvironmentsSection)
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)

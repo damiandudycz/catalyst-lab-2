@@ -31,7 +31,7 @@
 
               <!-- Main split view -->
               <object class="AdwOverlaySplitView" id="split_view">
-                <!-- <property name="collapsed">True</property> -->
+                <property name="show-sidebar">False</property>
 
                 <!-- SideBar -->
                 <property name="sidebar">

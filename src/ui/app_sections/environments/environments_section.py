@@ -11,7 +11,7 @@ from .root_helper_client import RootHelperClient, root_function
 from .root_helper_server import ServerCommand
 import time
 
-@app_section(label="Environments", title="Environments", icon="preferences-other-symbolic", order=2_000)
+@app_section(title="Environments", icon="preferences-other-symbolic", order=2_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
     __gtype_name__ = "EnvironmentsSection"

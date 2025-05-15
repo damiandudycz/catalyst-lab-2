@@ -28,6 +28,8 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         app_event_bus.subscribe(AppEvents.PUSH_SECTION, self.navigation_view.push_section)
         app_event_bus.subscribe(AppEvents.PRESENT_VIEW, self._present_view)
         app_event_bus.subscribe(AppEvents.PRESENT_SECTION, self._present_section)
+        # Load initial section page:
+        app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.WelcomeSection)
         # Connect sidebar_toggle_breakpoint actions
         self.sidebar_toggle_breakpoint.connect("apply", self._on_sidebar_toggle_breakpoint_apply)
         self.sidebar_toggle_breakpoint.connect("unapply", self._on_sidebar_toggle_breakpoint_unapply)
