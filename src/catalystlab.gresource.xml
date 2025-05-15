@@ -9,8 +9,8 @@
     <file preprocess="xml-stripblanks">ui/app_sections/environments/environments_section.ui</file>
     <file preprocess="xml-stripblanks">ui/components/root_command_output_view.ui</file>
     <file preprocess="xml-stripblanks">gtk/help-overlay.ui</file>
+    <file>style.css</file>
     <file>patches/namespaces.patch</file>
     <file>root_helper/root_helper_server.py</file>
-    <file>style.css</file>
   </gresource>
 </gresources>

@@ -17,7 +17,6 @@ class CatalystlabApplication(Adw.Application):
         self.create_action('quit', lambda *_: self.quit(), ['<primary>q'])
         self.create_action('about', self.on_about_action)
         self.create_action('preferences', self.on_preferences_action)
-        self.load_css()
 
     def do_activate(self):
         """Called when the application is activated.
@@ -64,16 +63,6 @@ class CatalystlabApplication(Adw.Application):
         self.add_action(action)
         if shortcuts:
             self.set_accels_for_action(f"app.{name}", shortcuts)
-
-    def load_css(self):
-        css_provider = Gtk.CssProvider()
-        css_provider.load_from_resource("/com/damiandudycz/CatalystLab/style.css")
-        display = Gdk.Display.get_default()
-        Gtk.StyleContext.add_provider_for_display(
-            display,
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
 
 def main(version):
     """The application's entry point."""
