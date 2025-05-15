@@ -12,6 +12,7 @@ efficiently without requiring in-depth knowledge of the underlying components.
 
 ### General.
 - [ ] Create a view for monitoring ServerCall output. Open by clicking on server call on the list from RootButton.
+- [ ] Instead of manually registering AppSections, create a decorator that will take all section details and register a class.
 
 ### Toolsets.
 - [ ] Use some kind of container for storing contents of toolset. This way container itself can still be owned by user, mounted when work needs to be done with it and accessed by root to modify / read.
@@ -25,6 +26,7 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] Add display name property to root_function, to display in ServerCall. It should be provided like @root_call(name).
 - [x] Add timeout to requests, and use timeout for example in watchdog ping, exit
 - [x] Add possibility to call stop_root_helper without sending EXIT. This should be used for example when detecting that server is non responsive
+- [ ] It's possible that @root_functions are registered when they are first imported. If that's the case we can sometimes generate a server code with incomplete list of actions. To fix this we need to quickly import all modules containing root_functions or create some auto discovery service.
 
 ### RootHelperServer.
 - [ ] Find better way to pass server token to new server instance, as current one sometimes fails, leaving server initialization unresponsive and blocking entire application.
