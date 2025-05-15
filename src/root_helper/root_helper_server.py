@@ -205,7 +205,7 @@ class RootHelperServer:
                 job = Job(server=self, conn=conn)
                 job.thread = threading.Thread(
                     target=self.handle_connection,
-                    args=(job, conn, session_token, allowed_uid)
+                    args=(job, session_token, allowed_uid)
                 )
                 self.add_job(job)
                 job.thread.start()
@@ -216,32 +216,32 @@ class RootHelperServer:
                 return
         self.stop()
 
-    def handle_connection(self, job: Job, conn: socket.socket, session_token: str, allowed_uid: int):
+    def handle_connection(self, job: Job, session_token: str, allowed_uid: int):
         """Handle a single client connection in a separate thread."""
         try:
             # Validate peer credentials:
             try:
-                ucred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+                ucred = job.conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
                 pid, uid, gid = struct.unpack("3i", ucred)
             except Exception:
-                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
+                self.respond(job=job, code=ServerResponseStatusCode.AUTHORIZATION_FAILED_TO_GET_CONNECTION_CREDENTIALS)
                 return
 
             if uid != allowed_uid:
-                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
+                self.respond(job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_UID)
                 return
             if self.pid_lock is not None and self.pid_lock != pid:
-                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
+                self.respond(job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_PID)
                 return
 
             # Receive request data:
-            data = conn.recv(4096).decode().strip()
+            data = job.conn.recv(4096).decode().strip()
             if not data.startswith(session_token):
-                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
+                self.respond(job=job, code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
             full_payload = data[len(session_token) + 1:]
             if " " not in full_payload:
-                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                self.respond(job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
                 return
             call_id_str, request_type, payload = full_payload.split(" ", 2)
             job.call_id = uuid.UUID(call_id_str)
@@ -249,17 +249,17 @@ class RootHelperServer:
             # Process request:
             match request_type:
                 case "command":
-                    self.handle_command_request(job, conn, pid, payload)
+                    self.handle_command_request(job, pid, payload)
                 case "function":
-                    self.handle_function_request(job, conn, pid, payload)
+                    self.handle_function_request(job, pid, payload)
                 case _:
-                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+                    self.respond(job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
         except Exception as e:
             print("[Server]: ERROR: " + f"Unexpected error in connection handler: {e}")
-            conn.close()
+            job.conn.close()
 
-    def handle_command_request(self, job: Job, conn: socket.socket, pid: int, payload: str):
+    def handle_command_request(self, job: Job, pid: int, payload: str):
         print("[Server]: " + "Processing command request")
         try:
             parts = payload.split(" ", 1)
@@ -267,20 +267,23 @@ class RootHelperServer:
             cmd_value = parts[1] if len(parts) > 1 else None
             cmd_enum = ServerCommand(cmd_type)
             print("[Server]: " + f"Command: {cmd_enum}")
+            if self.pid_lock is None and cmd_enum != ServerCommand.HANDSHAKE:
+                self.respond(job=job, code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+                return
             match cmd_enum:
                 case ServerCommand.EXIT:
-                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDOUT, response="Exiting...")
-                    self.stop(called_by_job=job, after_jobs_cleaned = lambda: self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Exited"))
+                    self.respond(job=job, code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDOUT, response="Exiting...")
+                    self.stop(called_by_job=job, after_jobs_cleaned = lambda: self.respond(job=job, code=ServerResponseStatusCode.OK, response="Exited"))
                 case ServerCommand.PING:
-                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="PONG")
+                    self.respond(job=job, code=ServerResponseStatusCode.OK, response="PONG")
                 case ServerCommand.HANDSHAKE:
                     if self.pid_lock is None:
                         self.pid_lock = pid
                         if RootHelperServer.use_client_watchdog:
                             self.client_watchdog.start()
-                        self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Initialization succeeded")
+                        self.respond(job=job, code=ServerResponseStatusCode.OK, response="Initialization succeeded")
                     else:
-                        self.respond(conn=conn, job=job, code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
+                        self.respond(job=job, code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
                 case ServerCommand.CANCEL_CALL:
                     # Handle call cancellation
                     call_id=uuid.UUID(cmd_value)
@@ -288,44 +291,45 @@ class RootHelperServer:
                     if job_to_cancel:
                         def completion(did_schedule_for_termination: bool):
                             if did_schedule_for_termination:
-                                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
+                                self.respond(job=job, code=ServerResponseStatusCode.OK, response="Job terminated")
                             else:
-                                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_ALREADY_SCHEDULED_FOR_TERMINATION, response="Job was already terminated or scheduled for termination")
+                                self.respond(job=job, code=ServerResponseStatusCode.JOB_ALREADY_SCHEDULED_FOR_TERMINATION, response="Job was already terminated or scheduled for termination")
                         job_to_cancel.terminate(completion=completion)
                     else:
-                        self.respond(conn=conn, job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
+                        self.respond(job=job, code=ServerResponseStatusCode.JOB_NOT_FOUND)
         except ValueError as e:
-            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+            self.respond(job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def handle_function_request(self, job: Job, conn: socket.socket, pid: int, payload: str):
+    def handle_function_request(self, job: Job, pid: int, payload: str):
         print("[Server]: " + "Processing function request")
         if self.pid_lock is None:
-            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
-        else:
-            try:
-                func_struct = ServerFunction.from_json(payload)
-                print("[Server]: " + f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
-                if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
-                    self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.function_name}")
-                else:
-                    try:
-                        result = _run_function_with_streaming_output(
-                            conn,
-                            job,
-                            RootHelperServer.ROOT_FUNCTION_REGISTRY[func_struct.function_name],
-                            func_struct.args,
-                            func_struct.kwargs,
-                            self.respond
-                        )
-                        if not job.mark_terminated:
-                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.OK, response=result)
-                    except Exception as e:
-                        if not job.mark_terminated:
-                            self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
-            except ValueError:
-                self.respond(conn=conn, job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
+            self.respond(job=job, code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
+            return
+        try:
+            func_struct = ServerFunction.from_json(payload)
+            print("[Server]: " + f"Function: {func_struct.function_name} ({func_struct.args}) ({func_struct.kwargs})")
+            if func_struct.function_name not in RootHelperServer.ROOT_FUNCTION_REGISTRY:
+                self.respond(job=job, code=ServerResponseStatusCode.COMMAND_UNSUPPORTED_FUNC, response=f"{func_struct.function_name}")
+            else:
+                try:
+                    result = _run_function_with_streaming_output(
+                        job,
+                        RootHelperServer.ROOT_FUNCTION_REGISTRY[func_struct.function_name],
+                        func_struct.args,
+                        func_struct.kwargs,
+                        self.respond
+                    )
+                    if not job.mark_terminated:
+                        self.respond(job=job, code=ServerResponseStatusCode.OK, response=result)
+                except Exception as e:
+                    if not job.mark_terminated:
+                        self.respond(job=job, code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
+        except ValueError:
+            if not job.mark_terminated:
+                self.respond(job=job, code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
-    def respond(self, conn: socket.socket, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | StreamPipeEvent | None = None):
+    # TODO: Move this function into Job
+    def respond(self, job: Job, code: ServerResponseStatusCode = ServerResponseStatusCode.OK, pipe: StreamPipe | int = StreamPipe.RETURN, response: str | StreamPipeEvent | None = None):
         # Final response, returning the result of function called.
         # Closes connection. Does not contain stdout and stderr produced by the function, just the returned value if any.
         with job.thread_lock:
@@ -334,8 +338,8 @@ class RootHelperServer:
                 pipe = StreamPipe(pipe)
             if code != ServerResponseStatusCode.OK and pipe != StreamPipe.RETURN:
                 raise RuntimeError("Return code != OK can be used only with RETURN pipe.")
-            if conn.fileno() == -1:
-                print("[Server]: ERROR: " + f"Connection already closed: {conn} / {job} [{response}]")
+            if job.conn.fileno() == -1:
+                print("[Server]: ERROR: " + f"Connection already closed: {job.conn} / {job} [{response}]")
                 return
             print("[Server]: " + f"Responding with code: {code}, response: {response}, on pipe: {pipe}")
             match pipe:
@@ -350,25 +354,25 @@ class RootHelperServer:
                     response_formatted = str(response.value)
                     close = False
             try:
-                conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
+                job.conn.sendall(f"{pipe.value}:{len(response_formatted)}:".encode() + response_formatted.encode())
             except Exception as e:
                 print("[Server]: ERROR: " + f"{e}")
             finally:
                 if close:
-                    conn.shutdown(socket.SHUT_WR)
+                    job.conn.shutdown(socket.SHUT_WR)
                     # Wait for ACK from client
                     try:
                         # Wait for socket to be ready to read
-                        readable, writable, errored = select.select([conn], [], [], 5)
+                        readable, writable, errored = select.select([job.conn], [], [], 5)
                         if not readable:
                             print("Socket not readable yet")
-                        conn.settimeout(5)
-                        if conn.recv(3) != b"ACK":
+                        job.conn.settimeout(5)
+                        if job.conn.recv(3) != b"ACK":
                             print(f"[Server]: Warning: Incorrect ACK response from client: {data.decode()}")
                     except Exception as e:
                         print(f"[Server]: Warning: Failed to receive ACK from client: {e}")
                     finally:
-                        conn.close()
+                        job.conn.close()
                         self.remove_job(job)
 
     # --------------------------------------------------------------------------
@@ -435,6 +439,9 @@ class ServerCommand(str, Enum):
                 return False
         raise RuntimeError("Unsupported ServerCommand case")
 
+    def timeout(self) -> float | None:
+        return 5.0
+
 class ServerFunction:
     def __init__(self, function_name: str, *args, **kwargs):
         self.function_name = function_name
@@ -461,6 +468,9 @@ class ServerFunction:
     @property
     def show_in_running_tasks(self):
         return True
+
+    def timeout(self) -> float | None:
+        return None
 
 @dataclass
 class ServerResponse:
@@ -535,13 +545,13 @@ class Job:
             return None
         self.mark_terminated = True
         try:
-            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.OK, pipe=StreamPipe.EVENTS, response=StreamPipeEvent.CALL_WILL_TERMINATE)
+            self.server.respond(job=self, code=ServerResponseStatusCode.OK, pipe=StreamPipe.EVENTS, response=StreamPipeEvent.CALL_WILL_TERMINATE)
         except Exception as e:
             pass
         if instant:
             self.process.kill()
             self.process.join()
-            self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
+            self.server.respond(job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
             if completion:
                 completion(True)
         else:
@@ -556,7 +566,7 @@ class Job:
                 completion(False)
             return
         self.process.terminate()
-        self.thread.join(timeout=5) # Allow time for graceful termination for 5s
+        self.thread.join(timeout=3) # Allow time for graceful termination for 3s
         if self.process.is_alive():
             print("[Server]: WARNING: " + "Process did not terminate. Killing forcefully.")
             self.process.kill()
@@ -564,7 +574,7 @@ class Job:
             self.thread.join()
         else:
             print("[Server]: " + "Process did terminate.")
-        self.server.respond(conn=self.conn, job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
+        self.server.respond(job=self, code=ServerResponseStatusCode.JOB_WAS_TERMINATED)
         if completion:
             completion(True)
 
@@ -591,7 +601,7 @@ class StreamWrapper:
     def flush(self):
         self.stream.flush()
 
-def _run_function_with_streaming_output(conn: socket.socket, job: Job, func, args, kwargs, respond_callback) -> Any | None:
+def _run_function_with_streaming_output(job: Job, func, args, kwargs, respond_callback) -> Any | None:
     """Takes a function and runs it as separate process while sending its output to stdout_callback and stderr_callback."""
     """Spawned process runs in sync, so this function only after given function is ready."""
     """Returns what given function returns or throws if given function throws."""
@@ -613,7 +623,7 @@ def _run_function_with_streaming_output(conn: socket.socket, job: Job, func, arg
             for line in pipe:
                 try:
                     data = json.loads(line)
-                    respond_callback(conn=conn, job=job, code=ServerResponseStatusCode.OK, pipe=data["pipe"], response=data["message"])
+                    respond_callback(job=job, code=ServerResponseStatusCode.OK, pipe=data["pipe"], response=data["message"])
                 except json.JSONDecodeError as e:
                     print(f"[Server]: Error: Failed to read from StreamWrapper read_fd pipe: {e}")
                     print(f"[Server]: Failed line: {line}")

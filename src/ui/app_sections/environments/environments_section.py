@@ -89,10 +89,7 @@ class EnvironmentsSection(Gtk.Box):
         #toolset_env_builder.build_toolset()
         #Settings.current().add_toolset(Toolset.external("FILE_PATH"))
         try:
-            stubborn_worker._async(
-                lambda x: print(f"[TEST]: {x}"),
-                lambda x: print(f"[TEST] -> {x}")
-            )
+            stubborn_worker._async()
         except Exception as e:
             print(e)
 

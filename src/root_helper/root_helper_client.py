@@ -18,7 +18,7 @@ class RootHelperClient:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperClient | None = None # Singleton shared instance.
-    use_server_watchdog = True # Enable for release. Might disable for debugging.
+    use_server_watchdog = False # Enable for release. Might disable for debugging.
 
     # --------------------------------------------------------------------------
     # Lifecycle:
@@ -44,7 +44,6 @@ class RootHelperClient:
         return cls._instance
 
     is_server_process_running = property(
-        # Note: Use with self.
         fget=lambda self: getattr(self, "_is_server_process_running", False),
         fset=lambda self, value: (
             setattr(self, "_is_server_process_running", value),
@@ -114,7 +113,7 @@ class RootHelperClient:
             self.main_process = None
             return False
 
-    def stop_root_helper(self):
+    def stop_root_helper(self, instant: bool = False):
         """Stop the root helper process."""
         if not self.is_server_process_running:
             print(f"Server is already stopped")
@@ -123,7 +122,10 @@ class RootHelperClient:
             token = self.token
             self.token = None
             self.server_watchdog.stop()
-            self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=self.clean_unfinished_jobs, token=token)
+            if instant:
+                self.clean_unfinished_jobs()
+            else:
+                self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=self.clean_unfinished_jobs, token=token)
         except Exception as e:
             print("[Server process]: Warning: Failed to send EXIT command. Some process might be left working orphined.")
             self.clean_unfinished_jobs()
@@ -133,6 +135,8 @@ class RootHelperClient:
             print("[Server process]: Closed.")
 
     def clean_unfinished_jobs(self, exit_result: callable | None = None):
+        """Marks all jobs as finished, even if server didn't yet closed them."""
+        """If job is still on the list at this point it means it's orphined - we don't know if it's still running."""
         with self.set_request_status_lock:
             for call in self.running_actions[:]:
                 print(f"[Server process]: Warning: Call {call} was left orphined.")
@@ -206,15 +210,13 @@ class RootHelperClient:
                 if RootHelperClient.use_server_watchdog:
                     self.server_watchdog.start()
                 return response.code == ServerResponseStatusCode.OK
-            except ServerCallError as e:
+            except Exception as e:
                 if e == ServerCallError.SERVER_NOT_RESPONDING:
                     time.sleep(1)
                     continue
                 else:
+                    print(f"Unexpected error while waiting for server: {e}")
                     break
-            except Exception as e:
-                print(f"Unexpected error while waiting for server: {e}")
-                break
         return False
 
     def ensure_server_ready(self, allow_auto_start=True) -> bool:
@@ -244,12 +246,17 @@ class RootHelperClient:
         token: str | None = None
     ) -> ServerResponse | ServerCall: # For async always returns ServerCall or throws.
         """Send a command to the root helper server."""
+
+        print(f"Will send: {request.function_name}")
+
         if request != ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start):
+            print("Server not responding")
             if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
                 print("[Server process] Server communication broke.")
-                self.stop_root_helper() # This should never happen.
+                self.stop_root_helper(instant=True) # This should never happen.
             raise ServerCallError.SERVER_NOT_RESPONDING
         if request == ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start=False):
+            print("Server not responding")
             raise ServerCallError.SERVER_NOT_RESPONDING
 
         # Prepare message and type
@@ -260,12 +267,15 @@ class RootHelperClient:
             message = request.value if command_value is None else request.value + " " + command_value
         else:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
+
         def worker(call: ServerCall) -> ServerResponse:
+            print("Worker started")
             try:
                 used_token = token if token is not None else self.token
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
                     conn.connect(self.socket_path)
                     conn.sendall(f"{used_token} {call.call_id} {request_type} {message}".encode())
+                    print("Request uploaded to pipe")
                     current_message_type: StreamPipe | None = None
                     current_chars_left: int | None = None
                     current_buffer = ""
@@ -317,28 +327,34 @@ class RootHelperClient:
                                 if remaining_fragment:
                                     process_fragment(remaining_fragment)
 
+                    timeout = request.timeout()
+                    if timeout:
+                        conn.settimeout(timeout)
                     while (chunk := conn.recv(4096)):
                         fragment = chunk.decode()
                         process_fragment(fragment)
 
+                    print("Finished receiving data from server")
+
                     # Send ACK
-                    try:
-                        readable, writable, errored = select.select([], [conn], [], 5)
-                        if writable:
-                            conn.sendall(b"ACK")
-                            conn.shutdown(socket.SHUT_WR)
-                        else:
-                            print("[Server process]: Warning: Failed to send ACK back. Socket not ready for writing.")
-                    except Exception as e:
-                        print(f"[Server process]: Warning: Failed to send ACK back: {e}")
+                    readable, writable, errored = select.select([], [conn], [], 5)
+                    if writable:
+                        conn.sendall(b"ACK")
+                        conn.shutdown(socket.SHUT_WR)
+                    else:
+                        print("[Server process]: Warning: Failed to send ACK back. Socket not ready for writing.")
+                        raise RuntimeError("Failed to send ACK in time. Socket not ready to write.")
 
                     server_response = ServerResponse.from_json(response_string)
-                    if completion_handler:
-                        result = server_response if raw else server_response.response
-                        GLib.idle_add(completion_handler, result)
             except Exception as e:
+                print(f"Exception: {e}")
                 server_response = ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
+                self.stop_root_helper(instant=True)
             finally:
+                print(f"Response: {server_response} {request.function_name}")
+                if completion_handler:
+                    result = server_response if raw else server_response.response
+                    GLib.idle_add(completion_handler, result)
                 if request.show_in_running_tasks:
                     self.set_request_status(call, False)
                 return server_response

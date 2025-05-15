@@ -30,4 +30,6 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] Find better way to pass server token to new server instance, as current one sometimes fails, leaving server initialization unresponsive and blocking entire application.
 - [ ] Watchdog needs more complex check, because sometimes client can still work, but pipe gets broken or other issue arises. For example ping based
 - [ ] IMPORTANT! When output of running command is generated too fast, the pipe gets blocked, making server unresponsive.
+- [ ] Add timeout for decoding and send decoded as event
+- [ ] Combine handlers into one that also adds Pipe argument
 

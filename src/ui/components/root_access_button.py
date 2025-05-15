@@ -219,6 +219,7 @@ class RootActionInfoRow(Gtk.Box):
 
     def close_call(self, button: Gtk.Button):
         self.call.cancel()
+        self.mark_terminating() # Marks right away without waiting for server signal.
 
     def show_output(self, button: Gtk.Button):
         self.parent.popover.hide()
