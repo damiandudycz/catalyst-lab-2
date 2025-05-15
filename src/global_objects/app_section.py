@@ -7,7 +7,9 @@ class AppSection(Enum):
     BUILDS = auto()
     ENVIRONMENTS = auto()
     SNAPSHOTS = auto()
+    TEMPLATES = auto()
     BUGS = auto()
+    PREFERENCES = auto()
     HELP = auto()
     ABOUT = auto()
 

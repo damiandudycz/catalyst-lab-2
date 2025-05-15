@@ -23,14 +23,14 @@ efficiently without requiring in-depth knowledge of the underlying components.
 ### RootHelperClient.
 - [ ] Add structure that collects multiple root calls and keeps root opened while it’s not marked as finished. New calls should be possible to add to these groups live and executed one by one. This can be added to root_function decorator so that it can accept a group to add call to or create and return new one if not provided, but these decorators still need to also return ServerCall itself. These groups should accept also normal functions as user, to create long flow for some larger task.
 - [ ] Add display name property to root_function, to display in ServerCall. It should be provided like @root_call(name).
-- [ ] Add timeout to requests, and use timeout for example in watchdog ping, exit
-- [ ] Add possibility to call stop_root_helper without sending EXIT. This should be used for example when detecting that server is non responsive
+- [x] Add timeout to requests, and use timeout for example in watchdog ping, exit
+- [x] Add possibility to call stop_root_helper without sending EXIT. This should be used for example when detecting that server is non responsive
 
 ### RootHelperServer.
 - [ ] Find better way to pass server token to new server instance, as current one sometimes fails, leaving server initialization unresponsive and blocking entire application.
 - [ ] Watchdog needs more complex check, because sometimes client can still work, but pipe gets broken or other issue arises. For example ping based
-- [ ] IMPORTANT! When output of running command is generated too fast, the pipe gets blocked, making server unresponsive.
+- [x] IMPORTANT! When output of running command is generated too fast, the pipe gets blocked, making server unresponsive.
 - [ ] Add timeout for decoding and send decoded as event
 - [ ] Combine handlers into one that also adds Pipe argument
-- [ ] For pipes decoding/encoding use simpler format <PipeID>:<Message>
+- [x] For pipes decoding/encoding use simpler format <PipeID>:<Message>
 
