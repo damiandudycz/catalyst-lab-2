@@ -125,5 +125,5 @@ def stubborn_worker():
     while True:
         print(f"Tick {i}...")
         i += 1
-        time.sleep(0.001)
+        time.sleep(0.01)
 

@@ -390,7 +390,7 @@ class Job:
             return None
         self.mark_terminated = True
         try:
-            self.respond(code=ServerResponseStatusCode.OK, pipe=StreamPipe.EVENTS, response=StreamPipeEvent.CALL_WILL_TERMINATE)
+            self.respond(pipe=StreamPipe.EVENTS, response=StreamPipeEvent.CALL_WILL_TERMINATE)
         except Exception as e:
             pass
         if instant:
@@ -486,16 +486,16 @@ class Job:
                 return
             match cmd_enum:
                 case ServerCommand.EXIT:
-                    self.respond(code=ServerResponseStatusCode.OK, pipe=StreamPipe.STDOUT, response="Exiting...")
-                    self.server.stop(called_by_job=self, after_jobs_cleaned = lambda: self.respond(code=ServerResponseStatusCode.OK, response="Exited"))
+                    self.respond(pipe=StreamPipe.STDOUT, response="Exiting...")
+                    self.server.stop(called_by_job=self, after_jobs_cleaned = lambda: self.respond(response="Exited"))
                 case ServerCommand.PING:
-                    self.respond(code=ServerResponseStatusCode.OK, response="PONG")
+                    self.respond(response="PONG")
                 case ServerCommand.HANDSHAKE:
                     if self.server.pid_lock is None:
                         self.server.pid_lock = pid
                         if RootHelperServer.use_client_watchdog:
                             self.server.client_watchdog.start()
-                        self.respond(code=ServerResponseStatusCode.OK, response="Initialization succeeded")
+                        self.respond(response="Initialization succeeded")
                     else:
                         self.respond(code=ServerResponseStatusCode.INITIALIZATION_ALREADY_DONE, response="Initialization already finished")
                 case ServerCommand.CANCEL_CALL:
@@ -505,7 +505,7 @@ class Job:
                     if job_to_cancel:
                         def completion(did_schedule_for_termination: bool):
                             if did_schedule_for_termination:
-                                self.respond(code=ServerResponseStatusCode.OK, response="Job terminated")
+                                self.respond(response="Job terminated")
                             else:
                                 self.respond(code=ServerResponseStatusCode.JOB_ALREADY_SCHEDULED_FOR_TERMINATION, response="Job was already terminated or scheduled for termination")
                         job_to_cancel.terminate(completion=completion)
@@ -533,7 +533,7 @@ class Job:
                         func_struct.kwargs
                     )
                     if not self.mark_terminated:
-                        self.respond(code=ServerResponseStatusCode.OK, response=result)
+                        self.respond(response=result)
                 except Exception as e:
                     if not self.mark_terminated:
                         self.respond(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
@@ -587,22 +587,6 @@ class Job:
                         self.conn.close()
                         self.server.remove_job(job)
 
-class StreamWrapper:
-    def __init__(self, stream, pipe: StreamPipe):
-        self.stream = stream
-        self.pipe = pipe
-    def write(self, message):
-        if not message.strip():
-            return  # Skip empty messages
-        payload = json.dumps({
-            "pipe": self.pipe.value,
-            "message": message.rstrip("\n")
-        })
-        self.stream.write(payload + "\n")
-        self.stream.flush()
-    def flush(self):
-        self.stream.flush()
-
 def _run_function_with_streaming_output(job: Job, func, args, kwargs) -> Any | None:
     """Takes a function and runs it as separate process while sending its output to stdout_callback and stderr_callback."""
     """Spawned process runs in sync, so this function only after given function is ready."""
@@ -625,7 +609,7 @@ def _run_function_with_streaming_output(job: Job, func, args, kwargs) -> Any | N
             for line in pipe:
                 try:
                     data = json.loads(line)
-                    job.respond(code=ServerResponseStatusCode.OK, pipe=data["pipe"], response=data["message"])
+                    job.respond(pipe=data["pipe"], response=data["message"])
                 except json.JSONDecodeError as e:
                     print(f"[Server]: Error: Failed to read from StreamWrapper read_fd pipe: {e}")
                     print(f"[Server]: Failed line: {line}")
