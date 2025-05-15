@@ -7,6 +7,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Gio, Adw, Gdk
 from .main_window import CatalystlabWindow
 from .root_helper_client import RootHelperClient
+from .modules_scanner import scan_all_submodules
 
 class CatalystlabApplication(Adw.Application):
     """The main application singleton class."""
@@ -17,6 +18,7 @@ class CatalystlabApplication(Adw.Application):
         self.create_action('quit', lambda *_: self.quit(), ['<primary>q'])
         self.create_action('about', self.on_about_action)
         self.create_action('preferences', self.on_preferences_action)
+        scan_all_submodules("catalystlab")
 
     def do_activate(self):
         """Called when the application is activated.

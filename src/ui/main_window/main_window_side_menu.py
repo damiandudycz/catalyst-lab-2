@@ -1,7 +1,6 @@
 from gi.repository import Gtk, GObject
 from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
-from .app_section_details import AppSectionDetails
 from .main_window_side_menu_button import MainWindowSideMenuButton
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/main_window/main_window_side_menu.ui')
@@ -14,14 +13,13 @@ class CatalystlabWindowSideMenu(Gtk.Box):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Load main sections and add buttons for them.
-        for section in AppSection:
-            section_details = AppSectionDetails.init_from(section)
-            if section_details.show_in_side_bar:
+        for section in AppSection.all_sections:
+            if section.section_details.show_in_side_bar:
                 button = MainWindowSideMenuButton(section)
                 self.section_list.append(button)
         app_event_bus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
         # Set initial selected page
-        self.selected_section: AppSectionDetails = None
+        self.selected_section: AppSection = None
 
     def opened_app_section(self, section: AppSection):
         if self.selected_section == section:

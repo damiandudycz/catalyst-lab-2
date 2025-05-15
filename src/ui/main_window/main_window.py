@@ -4,7 +4,6 @@ from typing import Type
 from .main_window_side_menu import CatalystlabWindowSideMenu
 from .main_window_content import CatalystlabWindowContent
 from .app_section import AppSection
-from .app_section_details import AppSectionDetails
 from .app_events import AppEvents, app_event_bus
 from .navigation_view_extensions import *
 
@@ -29,8 +28,6 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         app_event_bus.subscribe(AppEvents.PUSH_SECTION, self.navigation_view.push_section)
         app_event_bus.subscribe(AppEvents.PRESENT_VIEW, self._present_view)
         app_event_bus.subscribe(AppEvents.PRESENT_SECTION, self._present_section)
-        # Load initial section page:
-        app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSectionDetails.initial_section)
         # Connect sidebar_toggle_breakpoint actions
         self.sidebar_toggle_breakpoint.connect("apply", self._on_sidebar_toggle_breakpoint_apply)
         self.sidebar_toggle_breakpoint.connect("unapply", self._on_sidebar_toggle_breakpoint_unapply)
@@ -45,9 +42,8 @@ class CatalystlabWindow(Adw.ApplicationWindow):
     # Managing side bar and toggle side bar button visibility for selected section and collapsed state:
 
     def opened_app_section(self, section: AppSection):
-        section_details = AppSectionDetails(section)
         self.content_view.open_app_section(section)
-        self.allow_side_menu = section_details.show_side_bar
+        self.allow_side_menu = section.section_details.show_side_bar
         self.split_view.set_show_sidebar(self.allow_side_menu and not self.split_view.get_collapsed())
         self.content_view.sidebar_toggle_button_visible = self.allow_side_menu and ( self.split_view.get_collapsed() or CatalystlabWindow.allow_side_menu_toggle )
         self.navigation_view.pop_to_tag("root")
@@ -63,9 +59,8 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         self.content_view.sidebar_toggle_button_visible = self.allow_side_menu and CatalystlabWindow.allow_side_menu_toggle
 
     def _present_section(self, section: AppSection):
-        section_details = AppSectionDetails(section)
-        view = section_details.create_section(content_navigation_view=None)
-        title = section_details.title
+        view = section(content_navigation_view=None)
+        title = section.section_details.title
         self._present_view(view, title, 640, 480)
 
     def _present_view(self, view: Gtk.Widget, title: str, width: int = -1, height: int = -1):

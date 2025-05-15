@@ -1,38 +1,24 @@
-from enum import Enum, auto
-
-class AppSection(Enum):
-    # Main sections of the application, as displayed in side menu:
-    HOME = auto()
-    PROJECTS = auto()
-    BUILDS = auto()
-    ENVIRONMENTS = auto()
-    SNAPSHOTS = auto()
-    RELENG = auto()
-    TEMPLATES = auto()
-    BUGS = auto()
-    PREFERENCES = auto()
-    HELP = auto()
-    ABOUT = auto()
-
 import inspect
-from typing import Type, List
+import threading
+from typing import Type, List, ClassVar
 from dataclasses import dataclass
 from gi.repository import Adw
 
-class AppSectionNew:
-    """This is both - metadata for sections, and a repository for all sections."""
-    # Shared
-    all_sections: List[Type] = []
+@dataclass
+class AppSection:
+    cls: Type
+    order: int
+    label: str
+    title: str
+    icon: str
+    show_in_side_bar: bool
+    show_side_bar: bool
 
-    def __init__(self, cls, label: str, title: str, icon: str, show_in_side_bar: bool, show_side_bar: bool):
-        self.cls = cls
-        self.label = label
-        self.title = title
-        self.icon = icon
-        self.show_in_side_bar = show_in_side_bar
-        self.show_side_bar = show_side_bar
+    # Registry
+    all_sections: ClassVar[List[Type]] = []
+    _lock: ClassVar[threading.Lock] = threading.Lock()
 
-def app_section(label: str, title: str, icon: str, show_in_side_bar: bool = True, show_side_bar: bool = True):
+def app_section(label: str, title: str, icon: str, show_in_side_bar: bool = True, show_side_bar: bool = True, order: int = 999_999_999):
     def decorator(cls: Type):
         # Validate __init__ signature:
         init = cls.__init__
@@ -47,17 +33,31 @@ def app_section(label: str, title: str, icon: str, show_in_side_bar: bool = True
         ):
             raise TypeError(f"{cls.__name__} must implement __init__(self, content_navigation_view: Adw.NavigationView, **kwargs)")
 
-        # Register class by name and in list:
-        setattr(AppSectionNew, cls.__name__, cls)
-        AppSectionNew.all_sections.append(cls)
-
         # Store metadata:
-        cls.section_details = AppSectionNew(cls=cls, label=label, title=title, icon=icon, show_in_side_bar=show_in_side_bar, show_side_bar=show_side_bar)
+        section = AppSection(
+            cls=cls,
+            order=order,
+            label=label,
+            title=title,
+            icon=icon,
+            show_in_side_bar=show_in_side_bar,
+            show_side_bar=show_side_bar,
+        )
+        cls.section_details = section
+
+        # Thread-safe update of registry
+        with AppSection._lock:
+            setattr(AppSection, cls.__name__, cls)
+            AppSection.all_sections.append(cls)
+            # Sort by order after appending
+            AppSection.all_sections.sort(key=lambda c: c.section_details.order)
 
         return cls
     return decorator
 
-#AppSectionNew.WelcomeSection == WelcomeSection
-#AppSectionNew.all_sections == [WelcomeSection]
-#WelcomeSection.section_details == AppSectionNew
-#WelcomeSection.section_details.cls = WelcomeSection
+    # Dependencies example:
+    # AppSection.all_sections == [WelcomeSection, ...]
+    # AppSection.WelcomeSection == WelcomeSection
+    # WelcomeSection.section_details == AppSection
+    # WelcomeSection.section_details.cls = WelcomeSection
+

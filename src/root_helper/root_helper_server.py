@@ -699,3 +699,4 @@ class WatchDog:
                 self._thread.join()
             self._started = False
             self._thread = None
+

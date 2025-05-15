@@ -2,7 +2,6 @@ from gi.repository import Gtk, GObject, Adw
 from functools import partial
 from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
-from .app_section_details import AppSectionDetails
 from .main_window_side_menu import CatalystlabWindowSideMenu
 from .root_helper_client import RootHelperClient, root_function
 from .root_helper_server import ServerCommand, ServerFunction
@@ -29,8 +28,7 @@ class CatalystlabWindowContent(Gtk.Box):
         """Load content of selected main section."""
         navigation_view = Adw.NavigationView()
 
-        section_details = AppSectionDetails.init_from(section)
-        section_view = section_details.create_section(content_navigation_view=navigation_view)
+        section_view = section(content_navigation_view=navigation_view)
 
         header = Adw.HeaderBar()
 
@@ -38,7 +36,7 @@ class CatalystlabWindowContent(Gtk.Box):
         toolbar_view.set_content(section_view)
         toolbar_view.add_top_bar(header)
 
-        page = Adw.NavigationPage.new(toolbar_view, section_details.title)
+        page = Adw.NavigationPage.new(toolbar_view, section.section_details.title)
         navigation_view.push(page)
 
         # Add the root access button to the header
