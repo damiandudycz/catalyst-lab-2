@@ -13,7 +13,7 @@ class RootCommandOutputView(Gtk.Box):
     def __init__(self, call: ServerCall):
         super().__init__()
         self.text_buffer = self.text_view.get_buffer()
-        self.text_buffer.set_text("\n".join(call.output))
+        self.text_buffer.set_text("\n".join(call.get_output()))
         end_iter = self.text_buffer.get_end_iter()
         self.text_mark_end = self.text_buffer.create_mark("", end_iter, False)
         call.event_bus.subscribe(

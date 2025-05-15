@@ -85,7 +85,8 @@ class RootHelperClient:
 
             # Start pkexec and pass token via stdin
             # Note: This is flatpak-spawn process, not server process itself.
-            self.main_process = subprocess.Popen(exec_call, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # Note: DO NOT ADD stdout/stderr redirections to this. It can cause freezing after long output was produced.
+            self.main_process = subprocess.Popen(exec_call, stdin=subprocess.PIPE)
             time.sleep(0.5) # This helps prevent an issue with server not being ready to read from stdin at start. Probably not the best solution, might find better one.
 
             # Waits until main_process finishes, to see if it was closed with error.
@@ -246,9 +247,6 @@ class RootHelperClient:
         token: str | None = None
     ) -> ServerResponse | ServerCall: # For async always returns ServerCall or throws.
         """Send a command to the root helper server."""
-
-        print(f"Will send: {request.function_name}")
-
         if request != ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start):
             print("Server not responding")
             if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
@@ -275,12 +273,11 @@ class RootHelperClient:
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
                     conn.connect(self.socket_path)
                     conn.sendall(f"{used_token} {call.call_id} {request_type} {message}".encode())
-                    print("Request uploaded to pipe")
+
                     current_message_type: StreamPipe | None = None
                     current_chars_left: int | None = None
                     current_buffer = ""
                     response_string: str = None
-
                     def handle_message(message_type: StreamPipe, content: str):
                         nonlocal response_string
                         match message_type:
@@ -308,24 +305,45 @@ class RootHelperClient:
 
                     # Processing data returned over socket and combining them into messages.
                     # Format: <StreamPipe.raw>:<Length>:<Message>. eq: 0:11:Hello World
+                    header_buffer = ""
+                    current_message_type = None
+                    current_chars_left = None
+                    current_buffer = ""
                     def process_fragment(fragment: str):
-                        nonlocal current_message_type, current_chars_left, current_buffer
-                        if current_message_type is None:
-                            current_message_type, current_chars_left, start_buffer = fragment.split(":", 2)
-                            current_message_type = StreamPipe(int(current_message_type))
-                            current_chars_left = int(current_chars_left)
-                            process_fragment(start_buffer)
-                        else:
-                            append_fragment = fragment[:current_chars_left]
-                            remaining_fragment = fragment[current_chars_left:]
-                            current_buffer += append_fragment
-                            current_chars_left -= len(append_fragment)
-                            if current_chars_left == 0:
-                                handle_message(current_message_type, current_buffer)
-                                current_buffer = ""
-                                current_message_type = None
-                                if remaining_fragment:
-                                    process_fragment(remaining_fragment)
+                        nonlocal header_buffer, current_message_type, current_chars_left, current_buffer
+                        while fragment:
+                            if current_message_type is None:
+                                # Still parsing header
+                                header_buffer += fragment
+                                if ':' not in header_buffer:
+                                    return # Still not enough to parse
+                                parts = header_buffer.split(":", 2)
+                                if len(parts) < 3:
+                                    return # Incomplete header, wait for more data
+                                # Full header is ready
+                                type_str, length_str, rest = parts
+                                try:
+                                    current_message_type = StreamPipe(int(type_str))
+                                    current_chars_left = int(length_str)
+                                    current_buffer = ""
+                                    fragment = rest # Move on to actual content
+                                    header_buffer = "" # Reset for next header
+                                except Exception as e:
+                                    print(f"[Server]: Malformed header: {header_buffer}")
+                                    header_buffer = ""
+                                    raise e
+                            else:
+                                # Reading body
+                                append_fragment = fragment[:current_chars_left]
+                                remaining_fragment = fragment[current_chars_left:]
+                                current_buffer += append_fragment
+                                current_chars_left -= len(append_fragment)
+                                if current_chars_left == 0:
+                                    handle_message(current_message_type, current_buffer)
+                                    current_message_type = None
+                                    current_chars_left = None
+                                    current_buffer = ""
+                                fragment = remaining_fragment
 
                     timeout = request.timeout()
                     if timeout:
@@ -435,6 +453,9 @@ class ServerCall:
     output: List[str] = field(default_factory=list) # Contains output lines from stdout and stderr
     output_lock: threading.Lock = field(default_factory=threading.Lock)
     event_bus: EventBus[ServerCallEvents] = field(default_factory=lambda: EventBus[ServerCallEvents]())
+
+    def __repr__(self):
+        return f"ServerCall(request={self.request.function_name!r})"
 
     @property
     def is_cancellable(self) -> bool:
