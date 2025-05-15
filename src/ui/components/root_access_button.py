@@ -168,7 +168,8 @@ class RootAccessButton(Gtk.Overlay):
         Settings.current().keep_root_unlocked = button.get_active()
 
     def keep_root_unlocked_changed(self, value: bool):
-        print(f"-- {value}")
+        if value != self.keep_unlocked_checkbox.get_active():
+            self.keep_unlocked_checkbox.set_active(value)
 
 class RootActionInfoRow(Gtk.Box):
     def __init__(self, call: ServerCall, parent: RootAccessButton):
