@@ -14,15 +14,15 @@ class AppSectionDetails:
     SECTION_CONFIG = {
         #                        .module,              .label,         .title,         .icon,                        .show_in_side_bar, .show_side_bar
         AppSection.HOME:         (WelcomeSection,      "Home",         "Catalyst Lab", "go-home-symbolic",           True,  False),
-        AppSection.PROJECTS:     (EnvironmentsSection, "Projects",     "Projects",     "preferences-other-symbolic", True,  True),
-        AppSection.BUILDS:       (Gtk.Button,          "Builds",       "Builds",       "emblem-ok-symbolic",         True,  True),
+        AppSection.PROJECTS:     (Gtk.Button,          "Projects",     "Projects",     "help-faq-symbolic",          True,  True),
+        AppSection.BUILDS:       (Gtk.Button,          "Builds",       "Builds",       "help-faq-symbolic",          True,  True),
         AppSection.ENVIRONMENTS: (EnvironmentsSection, "Environments", "Environments", "preferences-other-symbolic", True,  True),
-        AppSection.SNAPSHOTS:    (EnvironmentsSection, "Snapshots",    "Snapshots",    "preferences-other-symbolic", True,  True),
-        AppSection.TEMPLATES:    (EnvironmentsSection, "Templates",    "Templates",    "preferences-other-symbolic", True,  True),
+        AppSection.SNAPSHOTS:    (Gtk.Button,          "Snapshots",    "Snapshots",    "help-faq-symbolic",          True,  True),
+        AppSection.TEMPLATES:    (Gtk.Button,          "Templates",    "Templates",    "help-faq-symbolic",          True,  True),
         AppSection.BUGS:         (Gtk.Button,          "Bugs",         "Bugs",         "help-faq-symbolic",          True,  True),
         AppSection.PREFERENCES:  (Gtk.Button,          "Preferences",  "Preferences",  "help-faq-symbolic",          True,  True),
         AppSection.HELP:         (Gtk.Button,          "Help",         "Help",         "help-faq-symbolic",          True,  True),
-        AppSection.ABOUT:        (WelcomeSection,      "About",        "About",        "help-about-symbolic",        True,  True),
+        AppSection.ABOUT:        (Gtk.Button,          "About",        "About",        "help-faq-symbolic",          True,  True),
     }
 
     def __init__(self, section: AppSection):
