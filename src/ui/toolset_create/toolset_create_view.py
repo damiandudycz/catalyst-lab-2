@@ -201,14 +201,32 @@ class ToolsetCreateView(Gtk.Box):
         self._installation_rows = []
         check_buttons_group = []
         for step in steps:
-            row = ToolsetInstallationStepRow(step=step)
+            row = ToolsetInstallationStepRow(step=step, owner=self)
             self.installation_steps_list.add(row)
             self._installation_rows.append(row)
 
+    def _scroll_to_tool_row(self, row: ToolsetInstallationStepRow):
+        def _scroll():
+            scrolled_window = self.installation_steps_list.get_ancestor(Gtk.ScrolledWindow)
+            if not scrolled_window:
+                return False
+            vadjustment = scrolled_window.get_vadjustment()
+            _, y = row.translate_coordinates(self.installation_steps_list, 0, 0)
+            row_height = row.get_allocated_height()
+            visible_height = vadjustment.get_page_size()
+            center_y = y + row_height / 2 - visible_height / 2
+            max_value = vadjustment.get_upper() - vadjustment.get_page_size()
+            scroll_to = max(0, min(center_y, max_value))
+            vadjustment.set_value(scroll_to)
+            return False
+        GLib.idle_add(_scroll)
+
 class ToolsetInstallationStepRow(Adw.ActionRow):
-    def __init__(self, step: ToolsetInstallationStep):
+
+    def __init__(self, step: ToolsetInstallationStep, owner: ToolsetCreateView):
         super().__init__(title=step.name)
         self.step = step
+        self.owner = owner
         label = Gtk.Label(label=step.description)
         label.add_css_class("dim-label")
         label.add_css_class("caption")
@@ -218,6 +236,8 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
             ToolsetInstallationStepEvent.STATE_CHANGED,
             self._step_state_changed
         )
+
     def _step_state_changed(self, state: ToolsetInstallationStepState):
         self.set_sensitive(state != ToolsetInstallationStepState.SCHEDULED)
+        self.owner._scroll_to_tool_row(self)
 
