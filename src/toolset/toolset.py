@@ -1,12 +1,18 @@
 from __future__ import annotations
-import os, json, uuid, shutil, tempfile, threading, stat
-from enum import Enum, auto
-from typing import final
+import os, uuid, shutil, tempfile, threading, stat, time, subprocess
+from gi.repository import Gtk, GLib, Adw
+from typing import final, ClassVar
 from dataclasses import dataclass
+from enum import Enum, auto
 from pathlib import Path
 from collections import namedtuple
+from abc import ABC, abstractmethod
+from urllib.parse import ParseResult
 from .root_function import root_function
 from .runtime_env import RuntimeEnv
+from .toolset_env_builder import ToolsetEnvBuilder
+from .architecture import Architecture
+from .event_bus import EventBus
 
 @final
 class Toolset:
@@ -320,7 +326,6 @@ def _start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str
         # the exception will be just returned as a result of this call, which is what we want.
         raise e
 
-
 @final
 class ToolsetEnv(Enum):
     SYSTEM   = auto() # Using tools from system, either through HOST or FLATPAK RuntimeEnv.
@@ -333,4 +338,150 @@ class ToolsetEnv(Enum):
                 return RuntimeEnv.is_running_in_gentoo_host()
             case ToolsetEnv.EXTERNAL:
                 return True
+
+# ------------------------------------------------------------------------------
+# Toolset installation.
+# ------------------------------------------------------------------------------
+
+class ToolsetInstallation:
+    """Class handling process of installing new toolset."""
+
+class ToolsetInstallationStage(Enum):
+    """Current state of installation."""
+    SETUP = auto()     # Collecting details about toolset.
+    INSTALL = auto()   # Installing toolset (whole process).
+    COMPLETED = auto() # Toolset created sucessfully.
+    FAILED = auto()    # Toolset failed at any step.
+
+# ------------------------------------------------------------------------------
+# Toolset applications.
+
+@dataclass(frozen=True)
+class ToolsetApplication:
+    """Additional tools installed in toolsets, like Catalyst, Qemu."""
+    ALL: ClassVar[list[ToolsetApplication]] = []
+    name: str
+    description: str
+    is_recommended: bool
+    is_highly_recommended: bool
+    def __post_init__(self):
+        # Automatically add new instances to ToolsetApplication.ALL
+        ToolsetApplication.ALL.append(self)
+
+ToolsetApplication.CATALYST = ToolsetApplication(name="Catalyst", description="Required to build Gentoo stages", is_recommended=True, is_highly_recommended=True)
+ToolsetApplication.QEMU = ToolsetApplication(name="Qemu", description="Allows building stages for different architectures", is_recommended=True, is_highly_recommended=False)
+
+# ------------------------------------------------------------------------------
+# Installation process steps.
+
+class ToolsetInstallationStepState(Enum):
+    """Stage of single installation step."""
+    SCHEDULED = auto()   # Step scheduled for execution.
+    IN_PROGRESS = auto() # Step started and is in progress.
+    COMPLETED = auto()   # Step completed successfully.
+    FAILED = auto()      # Step failed.
+
+@final
+class ToolsetInstallationStepEvent(Enum):
+    """Events produced by installation steps."""
+    STATE_CHANGED = auto()
+
+class ToolsetInstallationStep(ABC):
+    """Base class for toolset installation steps."""
+    def __init__(self, name: str, description: str, installer: ToolsetCreateView):
+        self.state = ToolsetInstallationStepState.SCHEDULED
+        self.name = name
+        self.description = description
+        self.installer = installer
+        self.event_bus: EventBus[ToolsetInstallationStepEvent] = EventBus[ToolsetInstallationStepEvent]()
+    @abstractmethod
+    def start(self):
+        self._update_state(ToolsetInstallationStepState.IN_PROGRESS)
+    def complete(self, state: ToolsetInstallationStepState):
+        """Call this when step finishes."""
+        self._update_state(state=state)
+        # If state was success continue installation
+        if state == ToolsetInstallationStepState.COMPLETED:
+            GLib.idle_add(self.installer._continue_installation)
+        else:
+            pass # TODO: Show installation failed screen and cleanup created objects.
+    def _update_state(self, state: ToolsetInstallationStepState):
+        self.state = state
+        self.event_bus.emit(ToolsetInstallationStepEvent.STATE_CHANGED, state)
+
+# Steps implementations:
+
+class ToolsetInstallationStepDownload(ToolsetInstallationStep):
+    def __init__(self, url: ParseResult, installer: ToolsetCreateView):
+        super().__init__(name="Download stage tarball", description="Downloading Gentoo stage tarball", installer=installer)
+        self.url = url
+    def start(self):
+        super().start()
+        print(f"Downloading {self.url} ...")
+        time.sleep(3)
+        self.complete(ToolsetInstallationStepState.COMPLETED)
+
+class ToolsetInstallationStepExtract(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Extract stage tarball", description="Extracts Gentoo stage tarball to work directory", installer=installer)
+    def start(self):
+        super().start()
+        print(f"Extracting ...")
+        time.sleep(3)
+        self.complete(ToolsetInstallationStepState.COMPLETED)
+
+class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Spawn environment", description="Prepares Gentoo environment for work", installer=installer)
+    def start(self):
+        super().start()
+        print(f"Spawning ...")
+        time.sleep(3)
+        self.complete(ToolsetInstallationStepState.COMPLETED)
+
+class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Update portage", description="Synchronizes portage tree", installer=installer)
+    def start(self):
+        super().start()
+        print(f"Syncing ...")
+        time.sleep(3)
+        self.complete(ToolsetInstallationStepState.COMPLETED)
+
+class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
+    def __init__(self, app: ToolsetApplication, installer: ToolsetCreateView):
+        super().__init__(name=f"Install {app.name}", description=f"Configures and emerges {app.name}", installer=installer)
+        self.app = app
+    def start(self):
+        super().start()
+        print(f"Installing {self.app} ...")
+        time.sleep(3)
+        self.complete(ToolsetInstallationStepState.COMPLETED)
+
+class ToolsetInstallationStepVerify(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Verify stage", description="Checks if toolset works correctly", installer=installer)
+    def start(self):
+        super().start()
+        print(f"Verifying ...")
+        time.sleep(3)
+        self.complete(ToolsetInstallationStepState.COMPLETED)
+
+class ToolsetInstallationStepCompress(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Compress", description="Compresses toolset into .squashfs file", installer=installer)
+    def start(self):
+        super().start()
+        print(f"Compressing ...")
+        time.sleep(3)
+        self.complete(ToolsetInstallationStepState.COMPLETED)
+
+class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Cleanup", description="Unspawns toolset and cleans up", installer=installer)
+    def start(self):
+        super().start()
+        print(f"Cleaning ...")
+        time.sleep(3)
+        self.complete(ToolsetInstallationStepState.COMPLETED)
 

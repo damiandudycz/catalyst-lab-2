@@ -13,132 +13,7 @@ from abc import ABC, abstractmethod
 from .event_bus import EventBus
 from typing import final
 import time
-
-@dataclass(frozen=True)
-class ToolsetApplication:
-    ALL: ClassVar[list[ToolsetApplication]] = []
-    name: str
-    description: str
-    is_recommended: bool
-    is_highly_recommended: bool
-    def __post_init__(self):
-        # Automatically add new instances to ToolsetApplication.ALL
-        ToolsetApplication.ALL.append(self)
-
-ToolsetApplication.CATALYST = ToolsetApplication(name="Catalyst", description="Required to build Gentoo stages", is_recommended=True, is_highly_recommended=True)
-ToolsetApplication.QEMU = ToolsetApplication(name="Qemu", description="Allows building stages for different architectures", is_recommended=True, is_highly_recommended=False)
-
-class ToolsetCreateViewStage(Enum):
-    SETUP = auto()
-    INSTALL = auto()
-    COMPLETED = auto()
-    FAILED = auto()
-
-class ToolsetInstallationStepState(Enum):
-    SCHEDULED = auto()
-    IN_PROGRESS = auto()
-    COMPLETED = auto()
-    FAILED = auto()
-
-@final
-class ToolsetInstallationStepEvent(Enum):
-    STATE_CHANGED = auto()
-
-class ToolsetInstallationStep(ABC):
-    def __init__(self, name: str, description: str, installer: ToolsetCreateView):
-        self.state = ToolsetInstallationStepState.SCHEDULED
-        self.name = name
-        self.description = description
-        self.installer = installer
-        self.event_bus: EventBus[ToolsetInstallationStepEvent] = EventBus[ToolsetInstallationStepEvent]()
-    @abstractmethod
-    def start(self):
-        self._update_state(ToolsetInstallationStepState.IN_PROGRESS)
-    def complete(self, state: ToolsetInstallationStepState):
-        """Call this when step finishes"""
-        self._update_state(state=state)
-        # If state was success continue installation
-        if state == ToolsetInstallationStepState.COMPLETED:
-            GLib.idle_add(self.installer._continue_installation)
-        else:
-            pass # TODO: Show installation failed screen and cleanup created objects.
-    def _update_state(self, state: ToolsetInstallationStepState):
-        self.state = state
-        self.event_bus.emit(ToolsetInstallationStepEvent.STATE_CHANGED, state)
-
-class ToolsetInstallationStepDownload(ToolsetInstallationStep):
-    def __init__(self, url: ParseResult, installer: ToolsetCreateView):
-        super().__init__(name="Download stage tarball", description="Downloading Gentoo stage tarball", installer=installer)
-        self.url = url
-    def start(self):
-        super().start()
-        print(f"Downloading {self.url} ...")
-        time.sleep(3)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
-
-class ToolsetInstallationStepExtract(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Extract stage tarball", description="Extracts Gentoo stage tarball to work directory", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Extracting ...")
-        time.sleep(3)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
-
-class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Spawn environment", description="Prepares Gentoo environment for work", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Spawning ...")
-        time.sleep(3)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
-
-class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Update portage", description="Synchronizes portage tree", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Syncing ...")
-        time.sleep(3)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
-
-class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
-    def __init__(self, app: ToolsetApplication, installer: ToolsetCreateView):
-        super().__init__(name=f"Install {app.name}", description=f"Configures and emerges {app.name}", installer=installer)
-        self.app = app
-    def start(self):
-        super().start()
-        print(f"Installing {self.app} ...")
-        time.sleep(3)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
-
-class ToolsetInstallationStepVerify(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Verify stage", description="Checks if toolset works correctly", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Verifying ...")
-        time.sleep(3)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
-
-class ToolsetInstallationStepCompress(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Compress", description="Compresses toolset into .squashfs file", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Compressing ...")
-        time.sleep(3)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
-
-class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Cleanup", description="Unspawns toolset and cleans up", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Cleaning ...")
-        time.sleep(3)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
+from .toolset import ToolsetInstallation, ToolsetInstallationStage, ToolsetApplication, ToolsetInstallationStep, ToolsetInstallationStepState, ToolsetInstallationStepEvent, ToolsetInstallationStepDownload, ToolsetInstallationStepExtract, ToolsetInstallationStepSpawn, ToolsetInstallationStepUpdatePortage, ToolsetInstallationStepInstallApp, ToolsetInstallationStepVerify, ToolsetInstallationStepCompress, ToolsetInstallationStepCleanup
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_create/toolset_create_view.ui')
 class ToolsetCreateView(Gtk.Box):
@@ -155,14 +30,16 @@ class ToolsetCreateView(Gtk.Box):
     back_button = Gtk.Template.Child()
     next_button = Gtk.Template.Child()
 
-    def __init__(self):
+    def __init__(self, installation_in_progress: ToolsetInstallation | None = None):
         super().__init__()
+        self.installation_in_progress = installation_in_progress
         self.selected_stage: ParseResult | None = None
         self.architecture = Architecture.HOST
         self.carousel.connect('page-changed', self.on_page_changed)
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: True for app in ToolsetApplication.ALL}
         self._load_applications_rows()
-        self._set_current_stage(ToolsetCreateViewStage.SETUP)
+        # TODO: Set state correctly for current installation_in_progress object.
+        self._set_current_stage(ToolsetInstallationStage.SETUP)
         ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
 
     def on_page_changed(self, carousel, pspec):
@@ -194,7 +71,7 @@ class ToolsetCreateView(Gtk.Box):
             self._start_installation()
 
     def _start_installation(self):
-        self._set_current_stage(ToolsetCreateViewStage.INSTALL)
+        self._set_current_stage(ToolsetInstallationStage.INSTALL)
         # Collect steps to perform
         steps: list[ToolsetInstallationStep] = []
         steps.append(ToolsetInstallationStepDownload(url=self.selected_stage, installer=self))
@@ -315,11 +192,11 @@ class ToolsetCreateView(Gtk.Box):
             row.set_activatable_widget(check_button)
             self.tools_list.add(row)
 
-    def _set_current_stage(self, stage: ToolsetCreateViewStage):
+    def _set_current_stage(self, stage: ToolsetInstallationStage):
         self.current_stage = stage
         # Setup views visibility:
-        self.setup_view.set_visible(stage == ToolsetCreateViewStage.SETUP)
-        self.install_view.set_visible(stage == ToolsetCreateViewStage.INSTALL)
+        self.setup_view.set_visible(stage == ToolsetInstallationStage.SETUP)
+        self.install_view.set_visible(stage == ToolsetInstallationStage.INSTALL)
 
     def _update_installation_steps(self, steps: list[ToolsetInstallationStep]):
         if hasattr(self, "_installation_rows"):
@@ -345,7 +222,6 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
             ToolsetInstallationStepEvent.STATE_CHANGED,
             self._step_state_changed
         )
-
     def _step_state_changed(self, state: ToolsetInstallationStepState):
         self.set_sensitive(state != ToolsetInstallationStepState.SCHEDULED)
 
