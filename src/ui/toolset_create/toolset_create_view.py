@@ -1,19 +1,24 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib
 from gi.repository import Adw
-from .toolset_env_builder import ToolsetEnvBuilder
 from urllib.parse import ParseResult
-from .architecture import Architecture
-import os, re
-from datetime import datetime
 from dataclasses import dataclass
 from typing import ClassVar
 from enum import Enum, auto
 from abc import ABC, abstractmethod
+import os, re, time
+from datetime import datetime
+from .toolset_env_builder import ToolsetEnvBuilder
+from .architecture import Architecture
 from .event_bus import EventBus
-from typing import final
-import time
-from .toolset import ToolsetInstallation, ToolsetInstallationStage, ToolsetApplication, ToolsetInstallationStep, ToolsetInstallationStepState, ToolsetInstallationStepEvent, ToolsetInstallationStepDownload, ToolsetInstallationStepExtract, ToolsetInstallationStepSpawn, ToolsetInstallationStepUpdatePortage, ToolsetInstallationStepInstallApp, ToolsetInstallationStepVerify, ToolsetInstallationStepCompress, ToolsetInstallationStepCleanup
+from .toolset import (
+    ToolsetInstallation,
+    ToolsetInstallationStage,
+    ToolsetApplication,
+    ToolsetInstallationStep,
+    ToolsetInstallationStepState,
+    ToolsetInstallationStepEvent
+)
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_create/toolset_create_view.ui')
 class ToolsetCreateView(Gtk.Box):
@@ -38,9 +43,11 @@ class ToolsetCreateView(Gtk.Box):
         self.carousel.connect('page-changed', self.on_page_changed)
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: True for app in ToolsetApplication.ALL}
         self._load_applications_rows()
-        # TODO: Set state correctly for current installation_in_progress object.
-        self._set_current_stage(ToolsetInstallationStage.SETUP)
-        ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
+        self._set_current_stage(ToolsetInstallationStage.SETUP if installation_in_progress is None else ToolsetInstallationStage.INSTALL)
+        if installation_in_progress:
+            self._update_installation_steps(steps=installation_in_progress.steps)
+        else:
+            ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
 
     def on_page_changed(self, carousel, pspec):
         self.current_page = int(carousel.get_position())
@@ -71,33 +78,19 @@ class ToolsetCreateView(Gtk.Box):
             self._start_installation()
 
     def _start_installation(self):
-        self._set_current_stage(ToolsetInstallationStage.INSTALL)
-        # Collect steps to perform
-        steps: list[ToolsetInstallationStep] = []
-        steps.append(ToolsetInstallationStepDownload(url=self.selected_stage, installer=self))
-        steps.append(ToolsetInstallationStepExtract(installer=self))
-        steps.append(ToolsetInstallationStepSpawn(installer=self))
-        steps.append(ToolsetInstallationStepUpdatePortage(installer=self))
-        for app, selected in filter(lambda item: item[1], self.tools_selection.items()):
-            steps.append(ToolsetInstallationStepInstallApp(app=app, installer=self))
-        steps.append(ToolsetInstallationStepVerify(installer=self))
-        steps.append(ToolsetInstallationStepCleanup(installer=self))
-        steps.append(ToolsetInstallationStepCompress(installer=self))
-        self._update_installation_steps(steps=steps)
-        self._installation_steps = steps
-        # Begin installation
-        self._continue_installation()
-
-    def _continue_installation(self):
-        """Get next step from the list that was not finished and starts it."""
-        next_step = next(
-            (step for step in self._installation_steps if step.state == ToolsetInstallationStepState.SCHEDULED),
-            None
+        selected_apps = [app for app, selected in self.tools_selection.items() if selected]
+        self.installation_in_progress = ToolsetInstallation(
+            stage_url=self.selected_stage,
+            selected_apps=selected_apps,
+            on_finished=self._on_installation_finished
         )
-        if next_step:
-            next_step.start() # TODO: In completion handler call self._continue_installation
-        else:
-            pass # All steps done, show success. Create new Toolset entry.
+        self._update_installation_steps(self.installation_in_progress.steps)
+        self._set_current_stage(ToolsetInstallationStage.INSTALL)
+        self.installation_in_progress.start()
+
+    def _on_installation_finished(self):
+        print("Toolset installation completed.")
+        # Optionally show success or navigate to another view
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):

@@ -344,7 +344,42 @@ class ToolsetEnv(Enum):
 # ------------------------------------------------------------------------------
 
 class ToolsetInstallation:
-    """Class handling process of installing new toolset."""
+    """Handles the full toolset installation lifecycle."""
+
+    installations_in_progress: list[ToolsetInstallation] = []
+
+    def __init__(self, stage_url: ParseResult, selected_apps: list[ToolsetApplication], on_finished: Callable[[], None] | None = None):
+        self.stage_url = stage_url
+        self.selected_apps = selected_apps
+        self.on_finished = on_finished
+        self.steps: list[ToolsetInstallationStep] = []
+        self._setup_steps()
+
+    def _setup_steps(self):
+        self.steps.append(ToolsetInstallationStepDownload(url=self.stage_url, installer=self))
+        self.steps.append(ToolsetInstallationStepExtract(installer=self))
+        self.steps.append(ToolsetInstallationStepSpawn(installer=self))
+        self.steps.append(ToolsetInstallationStepUpdatePortage(installer=self))
+        for app in self.selected_apps:
+            self.steps.append(ToolsetInstallationStepInstallApp(app=app, installer=self))
+        self.steps.append(ToolsetInstallationStepVerify(installer=self))
+        self.steps.append(ToolsetInstallationStepCleanup(installer=self))
+        self.steps.append(ToolsetInstallationStepCompress(installer=self))
+
+    def start(self):
+        ToolsetInstallation.installations_in_progress.append(self)
+        self._continue_installation()
+
+    def _continue_installation(self):
+        next_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.SCHEDULED), None)
+        if next_step:
+            next_step_thread = threading.Thread(target=next_step.start)
+            next_step_thread.start()
+        else:
+            # TODO: Detect if some step failed and pass result to on_finished()
+            ToolsetInstallation.installations_in_progress.remove(self)
+            if self.on_finished:
+                self.on_finished()
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""
@@ -401,10 +436,7 @@ class ToolsetInstallationStep(ABC):
         """Call this when step finishes."""
         self._update_state(state=state)
         # If state was success continue installation
-        if state == ToolsetInstallationStepState.COMPLETED:
-            GLib.idle_add(self.installer._continue_installation)
-        else:
-            pass # TODO: Show installation failed screen and cleanup created objects.
+        GLib.idle_add(self.installer._continue_installation)
     def _update_state(self, state: ToolsetInstallationStepState):
         self.state = state
         self.event_bus.emit(ToolsetInstallationStepEvent.STATE_CHANGED, state)

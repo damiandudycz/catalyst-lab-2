@@ -5,7 +5,7 @@ from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset
 from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset import Toolset
+from .toolset import Toolset, ToolsetInstallation
 from .hotfix_patching import HotFix
 from .root_function import root_function
 from .root_helper_client import RootHelperClient
