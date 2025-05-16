@@ -13,10 +13,10 @@ from .settings import *
 from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_server import RootHelperServer, StreamPipe, StreamPipeEvent, WatchDog
+from .root_function import ROOT_FUNCTION_REGISTRY
 
 class RootHelperClient:
 
-    ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperClient | None = None # Singleton shared instance.
     use_server_watchdog = False # Enable for release. Might disable for debugging.
 
@@ -188,10 +188,10 @@ class RootHelperClient:
     def collect_root_function_sources(self) -> str:
         """Returns all registered root function sources as a single"""
         """Python string, with @root_function decorators removed."""
-        if not RootHelperClient.ROOT_FUNCTION_REGISTRY:
+        if not ROOT_FUNCTION_REGISTRY:
             return ""
         sources = []
-        for func in RootHelperClient.ROOT_FUNCTION_REGISTRY.values():
+        for func in ROOT_FUNCTION_REGISTRY.values():
             try:
                 source = inspect.getsource(func)
                 sources.append(source.strip())
@@ -482,54 +482,6 @@ class ServerCall:
     def mark_terminated(self):
         self.terminated = True
         self.event_bus.emit(ServerCallEvents.CALL_WILL_TERMINATE)
-
-# ------------------------------------------------------------------------------
-# @root_function decorator.
-# ------------------------------------------------------------------------------
-
-def root_function(func):
-    """Registers a function and replaces it with a proxy that calls the root server."""
-    """All these calls can throw in case server call fails to start."""
-    RootHelperClient.ROOT_FUNCTION_REGISTRY[func.__name__] = func
-    @wraps(func)
-    def proxy_function(*args, **kwargs):
-        return RootHelperClient.shared().call_root_function(
-            func.__name__,
-            *args,
-            **kwargs
-        )
-    def _async(handler: callable | None = None, completion_handler: callable | None = None, *args, **kwargs):
-        return RootHelperClient.shared().call_root_function(
-            func.__name__,
-            *args,
-            handler=handler,
-            asynchronous=True,
-            completion_handler=completion_handler,
-            **kwargs
-        )
-    def _raw(*args, completion_handler: callable | None = None, **kwargs):
-        return RootHelperClient.shared().call_root_function(
-            func.__name__,
-            *args,
-            raw=True,
-            completion_handler=completion_handler,
-            **kwargs
-        )
-    def _async_raw(handler: callable | None = None, completion_handler: callable | None = None, *args, **kwargs):
-        return RootHelperClient.shared().call_root_function(
-            func.__name__,
-            *args,
-            handler=handler,
-            asynchronous=True,
-            raw=True,
-            completion_handler=completion_handler,
-            **kwargs
-        )
-    # Attach variants
-    proxy_function._async = _async
-    proxy_function._raw = _raw
-    proxy_function._async_raw = _async_raw
-    return proxy_function
 
 # ------------------------------------------------------------------------------
 # Helper functions and types.

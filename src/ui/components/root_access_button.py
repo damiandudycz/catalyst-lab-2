@@ -1,7 +1,8 @@
 from gi.repository import Gtk, Adw, GObject
 from functools import partial
 from .app_events import AppEvents, app_event_bus
-from .root_helper_client import RootHelperClient, RootHelperClientEvents, root_function, ServerCall, ServerCallEvents
+from .root_function import root_function
+from .root_helper_client import RootHelperClient, RootHelperClientEvents, ServerCall, ServerCallEvents
 from .settings import *
 from .root_command_output_view import RootCommandOutputView
 

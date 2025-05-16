@@ -5,9 +5,10 @@ from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset
 from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset_container import ToolsetContainer
+from .toolset import Toolset
 from .hotfix_patching import HotFix
-from .root_helper_client import RootHelperClient, root_function
+from .root_function import root_function
+from .root_helper_client import RootHelperClient
 from .root_helper_server import ServerCommand
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
@@ -83,7 +84,7 @@ class EnvironmentsSection(Gtk.Box):
             return
         # If checkbox is checked, place it at the start of the list
         if checkbox.get_active():
-            Settings.current().add_toolset(Toolset.system())
+            Settings.current().add_toolset(Toolset.create_system())
         elif (ts := Settings.current().get_toolset_matching(lambda ts: ts.env == ToolsetEnv.SYSTEM)):
             Settings.current().remove_toolset(ts)
 
@@ -103,11 +104,10 @@ class EnvironmentsSection(Gtk.Box):
         if not system_toolset:
             raise RuntimeError("System host env not available")
 
-        toolset_container = ToolsetContainer.container_for_toolset(system_toolset)
-        if not toolset_container.spawned:
-            toolset_container.spawn()
-        print(f"{toolset_container} -> {toolset_container.toolset.toolset_root()} : {toolset_container.work_dir}")
-        call = toolset_container.run_command(command="find /var/db/repos", completion_handler=lambda x: print(f">>>> {x}"))
+        if not system_toolset.spawned:
+            system_toolset.spawn()
+        print(f"{system_toolset} -> {system_toolset.toolset_root()} : {system_toolset.work_dir}")
+        call = system_toolset.run_command(command="find /var/db/repos", completion_handler=lambda x: print(f">>>> {x}"))
         print(call)
 
 @root_function
