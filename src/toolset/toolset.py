@@ -346,13 +346,15 @@ class ToolsetEnv(Enum):
 class ToolsetInstallation:
     """Handles the full toolset installation lifecycle."""
 
-    installations_in_progress: list[ToolsetInstallation] = []
+    # Remembers installations started in current app cycle. Never removed, even after finishing.
+    started_installations: list[ToolsetInstallation] = []
 
-    def __init__(self, stage_url: ParseResult, selected_apps: list[ToolsetApplication], on_finished: Callable[[], None] | None = None):
+    def __init__(self, stage_url: ParseResult, allow_binpkgs: bool, selected_apps: list[ToolsetApplication]):
         self.stage_url = stage_url
+        self.allow_binpkgs = allow_binpkgs
         self.selected_apps = selected_apps
-        self.on_finished = on_finished
         self.steps: list[ToolsetInstallationStep] = []
+        self.status = ToolsetInstallationStage.INSTALL # TODO: emit status
         self._setup_steps()
 
     def _setup_steps(self):
@@ -367,23 +369,23 @@ class ToolsetInstallation:
         self.steps.append(ToolsetInstallationStepCompress(installer=self))
 
     def start(self):
-        ToolsetInstallation.installations_in_progress.append(self)
+        ToolsetInstallation.started_installations.append(self)
         self._continue_installation()
 
     def _continue_installation(self):
         next_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.SCHEDULED), None)
-        if next_step:
+        failed_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.FAILED), None)
+        if failed_step:
+            self.status = ToolsetInstallationStage.FAILED
+        elif next_step:
             next_step_thread = threading.Thread(target=next_step.start)
             next_step_thread.start()
         else:
-            # TODO: Detect if some step failed and pass result to on_finished()
-            ToolsetInstallation.installations_in_progress.remove(self)
-            if self.on_finished:
-                self.on_finished()
+            self.status = ToolsetInstallationStage.COMPLETED
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""
-    SETUP = auto()     # Collecting details about toolset.
+    SETUP = auto()     # Installation not started yet, still collecting details.
     INSTALL = auto()   # Installing toolset (whole process).
     COMPLETED = auto() # Toolset created sucessfully.
     FAILED = auto()    # Toolset failed at any step.
@@ -486,7 +488,7 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
         self.app = app
     def start(self):
         super().start()
-        print(f"Installing {self.app} ...")
+        print(f"Installing {self.app.name} ...")
         time.sleep(3)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 

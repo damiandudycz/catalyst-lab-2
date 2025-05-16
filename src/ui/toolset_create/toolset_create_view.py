@@ -27,6 +27,7 @@ class ToolsetCreateView(Gtk.Box):
     setup_view = Gtk.Template.Child()
     install_view = Gtk.Template.Child()
     carousel = Gtk.Template.Child()
+    allow_binpkgs_checkbox = Gtk.Template.Child()
     configuration_page = Gtk.Template.Child()
     tools_page = Gtk.Template.Child()
     stages_list = Gtk.Template.Child()
@@ -40,11 +41,13 @@ class ToolsetCreateView(Gtk.Box):
         self.installation_in_progress = installation_in_progress
         self.selected_stage: ParseResult | None = None
         self.architecture = Architecture.HOST
+        self.allow_binpkgs = True
         self.carousel.connect('page-changed', self.on_page_changed)
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: True for app in ToolsetApplication.ALL}
+        self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
         self._set_current_stage(ToolsetInstallationStage.SETUP if installation_in_progress is None else ToolsetInstallationStage.INSTALL)
-        if installation_in_progress:
+        if installation_in_progress and installation_in_progress.status != ToolsetInstallationStage.SETUP:
             self._update_installation_steps(steps=installation_in_progress.steps)
         else:
             ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
@@ -77,20 +80,20 @@ class ToolsetCreateView(Gtk.Box):
         else:
             self._start_installation()
 
+    @Gtk.Template.Callback()
+    def on_allow_binpkgs_toggled(self, checkbox):
+        self.allow_binpkgs = checkbox.get_active()
+
     def _start_installation(self):
         selected_apps = [app for app, selected in self.tools_selection.items() if selected]
         self.installation_in_progress = ToolsetInstallation(
             stage_url=self.selected_stage,
-            selected_apps=selected_apps,
-            on_finished=self._on_installation_finished
+            allow_binpkgs=self.allow_binpkgs,
+            selected_apps=selected_apps
         )
         self._update_installation_steps(self.installation_in_progress.steps)
         self._set_current_stage(ToolsetInstallationStage.INSTALL)
         self.installation_in_progress.start()
-
-    def _on_installation_finished(self):
-        print("Toolset installation completed.")
-        # Optionally show success or navigate to another view
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
