@@ -9,6 +9,8 @@ from .toolset_container import ToolsetContainer
 from .hotfix_patching import HotFix
 from .root_helper_client import RootHelperClient, root_function
 from .root_helper_server import ServerCommand
+from .toolset_create_view import ToolsetCreateView
+from .app_events import app_event_bus, AppEvents
 import time
 
 @app_section(title="Environments", icon="preferences-other-symbolic", order=2_000)
@@ -24,6 +26,7 @@ class EnvironmentsSection(Gtk.Box):
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
+        self.content_navigation_view = content_navigation_view
         self._ignore_toolset_checkbox_signal = False
         # Setup host env entry
         self._load_system_toolset()
@@ -86,13 +89,8 @@ class EnvironmentsSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_add_toolset_activated(self, button):
-        #toolset_env_builder = ToolsetEnvBuilder()
-        #toolset_env_builder.build_toolset()
-        #Settings.current().add_toolset(Toolset.external("FILE_PATH"))
-        try:
-            stubborn_worker._async()
-        except Exception as e:
-            print(e)
+        #self.content_navigation_view.push_view(ToolsetCreateView(), title="New toolset")
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(), "New toolset", 640, 480)
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):

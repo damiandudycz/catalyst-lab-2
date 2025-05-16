@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+
+  <!-- Libraries -->
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
+  <template class="ToolsetCreateView" parent="GtkBox">
+    <property name="orientation">vertical</property>
+
+    <child>
+      <object class="AdwCarousel" id="carousel">
+        <property name="vexpand">True</property>
+
+        <!-- Page 1: Welcome screen -->
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">24</property>
+            <property name="valign">center</property>
+            <property name="vexpand">True</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+
+            <child>
+              <object class="GtkImage">
+                <property name="icon-name">preferences-other-symbolic</property>
+                <property name="pixel-size">128</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Create new toolset environment</property>
+                <property name="halign">center</property>
+                <property name="wrap">True</property>
+                <style>
+                  <class name="title-1"/>
+                </style>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label">This wizard will help you prepare new external toolset for Catalyst Lab. It will download Gentoo Stage3 image and install required tools in it.</property>
+                <property name="halign">center</property>
+                <property name="wrap">True</property>
+                <property name="justify">fill</property>
+                <attributes>
+                  <attribute name="foreground" value="grey"/>
+                </attributes>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="halign">center</property>
+                <property name="width-request">300</property>
+                <child>
+                  <object class="GtkListBox">
+                    <property name="selection-mode">none</property>
+                    <style>
+                      <class name="boxed-list"/>
+                    </style>
+                    <child>
+                      <object class="AdwButtonRow">
+                        <property name="title">Configure toolset</property>
+                        <property name="activatable">True</property>
+                        <signal name="activated" handler="on_start_row_activated"/>
+                        <style>
+                          <class name="suggested-action"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+          </object>
+        </child>
+
+        <!-- Page 2: Configuration -->
+        <child>
+          <object class="GtkBox" id="configuration_page">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Select Gentoo image</property>
+                <property name="halign">center</property>
+                <style>
+                  <class name="title-2"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 3: Preparation status -->
+        <child>
+          <object class="GtkBox" id="status_page">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Step 2 or more content goes here...</property>
+                <property name="halign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+      </object>
+    </child>
+
+    <!-- Page Indicator Dots -->
+    <child>
+      <object class="AdwCarouselIndicatorDots">
+        <property name="carousel">carousel</property>
+        <property name="halign">center</property>
+        <property name="margin-top">12</property>
+        <property name="margin-bottom">12</property>
+      </object>
+    </child>
+
+  </template>
+</interface>
+
