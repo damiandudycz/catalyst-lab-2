@@ -8,7 +8,9 @@ from .runtime_env import RuntimeEnv
 from .hotfix_patching import PatchSpec, HotFix, apply_patch_and_store_for_isolated_system
 from .root_helper_client import root_function, ServerCall, ServerCallEvents
 from .toolset import Toolset
+from typing import final
 
+@final
 class ToolsetContainer:
 
     containers_lock = threading.Lock()
@@ -214,7 +216,7 @@ class ToolsetContainer:
     # Calling commands:
 
     def run_command(self, command: str, handler: callable | None = None, completion_handler: callable | None = None) -> ServerCall:
-    # TODO: Add required parameters checks, like store_changes matches spawned env, required bindings are set correctly etc.
+        # TODO: Add required parameters checks, like store_changes matches spawned env, required bindings are set correctly etc.
         with self.access_lock:
             if not self.spawned:
                 raise RuntimeError(f"ToolsetContainer for {self.toolset} is not spawned.")

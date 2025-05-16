@@ -57,7 +57,7 @@ catalystlab_sources = [
   'ui/main_window/main_window_side_menu.py',
   'ui/main_window/main_window_side_menu_button.py',
   'ui/components/root_access_button.py',
-  'ui/components/root_command_output_view.py'
+  'ui/root_command_output/root_command_output_view.py'
 ]
 
 install_data(catalystlab_sources, install_dir: moduledir)

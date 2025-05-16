@@ -19,6 +19,7 @@ class AppSection:
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
 def app_section(title: str, label: str | None = None, icon: str = "default-icon", show_in_side_bar: bool = True, show_side_bar: bool = True, order: int = 999_999_999):
+    """app_section decorator."""
     def decorator(cls: Type):
         # Validate __init__ signature:
         init = cls.__init__

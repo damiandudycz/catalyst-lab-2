@@ -4,7 +4,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw, GObject
 from .root_helper_client import ServerCall, ServerCallEvents
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/components/root_command_output_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/root_command_output/root_command_output_view.ui')
 class RootCommandOutputView(Gtk.Box):
     __gtype_name__ = 'RootCommandOutputView'
 
