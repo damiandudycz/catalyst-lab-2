@@ -1,7 +1,7 @@
 from __future__ import annotations
-import os, uuid, shutil, tempfile, threading, stat, time, subprocess
+import os, uuid, shutil, tempfile, threading, stat, time, subprocess, requests, tarfile
 from gi.repository import Gtk, GLib, Adw
-from typing import final, ClassVar
+from typing import final, ClassVar, Dict
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
@@ -13,6 +13,7 @@ from .runtime_env import RuntimeEnv
 from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture
 from .event_bus import EventBus
+from .root_helper_server import ServerResponse, ServerResponseStatusCode
 
 @final
 class Toolset:
@@ -120,7 +121,8 @@ class Toolset:
             ]
             _working_bindings = [ # Working.
                 BindMount(mount_path="/var", toolset_path="/var", store_changes=store_changes),
-                BindMount(mount_path="/tmp"), # Create empty tmp when running env
+                BindMount(mount_path="/tmp", create_if_missing=True), # Create empty tmp when running env
+                BindMount(mount_path="/var/db/repos", create_if_missing=True), # Keep portage tree in tmp directory
             ]
             # All bindings.
             bindings = ( _system_bindings + _config_bindings + _devices_bindings + _working_bindings + (additional_bindings or []) )
@@ -190,7 +192,7 @@ class Toolset:
                     # Handle not existing host paths.
                     if binding.host_path is not None and not os.path.exists(resolved_host_path):
                         # Create in host is store_changes is set.
-                        if binding.store_changes:
+                        if binding.create_if_missing and binding.store_changes: # TODO: Think this logic through
                             print(f"Path {resolved_host_path} not found. Creating directory in host.")
                             os.makedirs(resolved_host_path)
                         # Skip not existing bindings with host_path set:
@@ -300,6 +302,7 @@ class BindMount:
     toolset_path: str | None = None # Host path relative to toolset root.
     store_changes: bool = False     # True if changes should be stored outside isolated env.
     resolve_host_path: bool = True  # Whether to resolve path through runtime_env.
+    create_if_missing: bool = False # Creates directory if not found on host.
 
 @root_function
 def _start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str], command_to_run: str):
@@ -315,8 +318,9 @@ def _start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str
         "--proc /proc "
         "--setenv HOME / "
     )
-    arguments_string = " ".join(bind_options) + " /bin/sh -c '" + command_to_run + "'"
+    arguments_string = " ".join(bind_options) + " bash -c '" + command_to_run + "'"
     exec_call = cmd_bwrap + arguments_string
+    print(exec_call)
     try:
         result = subprocess.run(exec_call, shell=True).returncode
         if result != 0:
@@ -406,14 +410,36 @@ class ToolsetApplication:
     ALL: ClassVar[list[ToolsetApplication]] = []
     name: str
     description: str
-    is_recommended: bool
-    is_highly_recommended: bool
+    package: str
+    is_recommended: bool = False
+    is_highly_recommended: bool = False
+    portage_config: Dict[str, str] = {} # eq: { "packages.use": ["Entry1", "Entry2"], "package.accept_keywords": ["Entry1", "Entry2"] }
     def __post_init__(self):
         # Automatically add new instances to ToolsetApplication.ALL
         ToolsetApplication.ALL.append(self)
 
-ToolsetApplication.CATALYST = ToolsetApplication(name="Catalyst", description="Required to build Gentoo stages", is_recommended=True, is_highly_recommended=True)
-ToolsetApplication.QEMU = ToolsetApplication(name="Qemu", description="Allows building stages for different architectures", is_recommended=True, is_highly_recommended=False)
+ToolsetApplication.CATALYST = ToolsetApplication(
+    name="Catalyst", description="Required to build Gentoo stages",
+    package="dev-util/catalyst",
+    is_recommended=True, is_highly_recommended=True,
+    portage_config={
+        "package.use" : [],
+        "package.accept_keywords" : [
+            "dev-util/catalyst" # Enables stable version of catalyst
+        ]
+    }
+)
+ToolsetApplication.QEMU = ToolsetApplication(
+    name="Qemu", description="Allows building stages for different architectures",
+    package="app-emulation/qemu",
+    is_recommended=True,
+    portage_config={
+        "package.use" : [],
+        "package.accept_keywords" : [
+            "dev-util/catalyst"
+        ]
+    }
+)
 
 # ------------------------------------------------------------------------------
 # Installation process steps.
@@ -429,6 +455,7 @@ class ToolsetInstallationStepState(Enum):
 class ToolsetInstallationStepEvent(Enum):
     """Events produced by installation steps."""
     STATE_CHANGED = auto()
+    PROGRESS_CHANGED = auto()
 
 class ToolsetInstallationStep(ABC):
     """Base class for toolset installation steps."""
@@ -449,6 +476,9 @@ class ToolsetInstallationStep(ABC):
     def _update_state(self, state: ToolsetInstallationStepState):
         self.state = state
         self.event_bus.emit(ToolsetInstallationStepEvent.STATE_CHANGED, state)
+    def _update_progress(self, progress: float):
+        print(f"Progress: {progress}")
+        self.event_bus.emit(ToolsetInstallationStepEvent.PROGRESS_CHANGED, progress)
 
 # Steps implementations:
 
@@ -459,8 +489,25 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Downloading {self.url} ...")
-        time.sleep(1)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
+        try:
+            response = requests.get(self.url.geturl(), stream=True, timeout=10)
+            response.raise_for_status()
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            chunk_size = 1024 * 1024 # 1MB chunks.
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                self.installer.tmp_stage_file = tmp_file
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        tmp_file.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size:
+                            progress = downloaded / total_size
+                            self._update_progress(progress)
+            self.complete(ToolsetInstallationStepState.COMPLETED)
+        except Exception as e:
+            print(f"[{self.name}] Error during download: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
@@ -468,26 +515,71 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Extracting ...")
-        time.sleep(1)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
+        try:
+            tmp_stage_file = self.installer.tmp_stage_file.name
+            if not os.path.isfile(tmp_stage_file):
+                raise FileNotFoundError(f"Stage tarball not found: {tmp_stage_file}")
+            tmp_stage_extract_dir = tempfile.mkdtemp(prefix="gentoo_stage_extract_")
+            self.installer.tmp_stage_extract_dir = tmp_stage_extract_dir
+            extract(tmp_stage_file, tmp_stage_extract_dir)
+            self.complete(ToolsetInstallationStepState.COMPLETED)
+        except Exception as e:
+            print(f"Error extracting stage tarball: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
+@root_function
+def extract(tarball: str, directory: str):
+    """Extracts an .xz tarball as root to preserve special files and ownership."""
+    import tarfile
+    with tarfile.open(tarball, mode='r:xz') as tar:
+        total_size = sum(member.size for member in tar.getmembers())
+        extracted_size = 0
+        for member in tar.getmembers():
+            tar.extract(member, path=directory)
+            extracted_size += member.size
+            progress = extracted_size / total_size if total_size else 0
+            # TODO: Pass progress back to ToolsetInstallationStepExtract
 
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Spawn environment", description="Prepares Gentoo environment for work", installer=installer)
+        super().__init__(name="Create environment", description="Prepares Gentoo environment for work", installer=installer)
     def start(self):
         super().start()
         print(f"Spawning ...")
-        time.sleep(1)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
+        tmp_stage_extract_dir = self.installer.tmp_stage_extract_dir
+        try:
+            if not os.path.isdir(tmp_stage_extract_dir):
+                raise FileNotFoundError(f"Stage extract dir not found: {tmp_stage_extract_dir}")
+            tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), squashfs_file=tmp_stage_extract_dir)
+            self.installer.tmp_toolset = tmp_toolset
+            tmp_toolset.spawn(store_changes=True) # TODO: Add tmp dirs for portage etc., mount with store_changes
+            self._update_progress(1.0)
+            self.complete(ToolsetInstallationStepState.COMPLETED)
+        except Exception as e:
+            print(f"Error spawning temporary toolset: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Update portage", description="Synchronizes portage tree", installer=installer)
+        super().__init__(name="Synchronize portage", description="Synchronizes portage tree", installer=installer)
     def start(self):
         super().start()
         print(f"Syncing ...")
-        time.sleep(1)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
+        tmp_toolset = self.installer.tmp_toolset
+        try:
+            if tmp_toolset is None:
+                raise FileNotFoundError(f"Temporary toolset not available")
+            def completion_handler(response: ServerResponse):
+                print(response)
+                if response.code == ServerResponseStatusCode.OK:
+                    self._update_progress(1.0)
+                    self.complete(ToolsetInstallationStepState.COMPLETED)
+                else:
+                    self.complete(ToolsetInstallationStepState.FAILED)
+            server_call = tmp_toolset.run_command(command="emerge --sync", handler=lambda x: print(f"--> {x}"), completion_handler=completion_handler)
+            server_call.thread.join()
+        except Exception as e:
+            print(f"Error synchronizing portage: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
     def __init__(self, app: ToolsetApplication, installer: ToolsetCreateView):
@@ -495,9 +587,22 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
         self.app = app
     def start(self):
         super().start()
-        print(f"Installing {self.app.name} ...")
-        time.sleep(1)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
+        tmp_toolset = self.installer.tmp_toolset
+        try:
+            if tmp_toolset is None:
+                raise FileNotFoundError(f"Temporary toolset not available")
+            def completion_handler(response: ServerResponse):
+                print(response)
+                if response.code == ServerResponseStatusCode.OK:
+                    self._update_progress(1.0)
+                    self.complete(ToolsetInstallationStepState.COMPLETED)
+                else:
+                    self.complete(ToolsetInstallationStepState.FAILED)
+            server_call = tmp_toolset.run_command(command=f"emerge {self.app.package}", handler=lambda x: print(f"--> {x}"), completion_handler=completion_handler)
+            server_call.thread.join()
+        except Exception as e:
+            print(f"Error installing package {self.app.name}: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):

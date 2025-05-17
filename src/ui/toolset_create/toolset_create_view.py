@@ -271,21 +271,42 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
         super().__init__(title=step.name)
         self.step = step
         self.owner = owner
-        label = Gtk.Label(label=step.description)
-        label.add_css_class("dim-label")
-        label.add_css_class("caption")
-        self.add_suffix(label)
+        self.description_label = Gtk.Label(label=step.description)
+        self.description_label.add_css_class("dim-label")
+        self.description_label.add_css_class("caption")
+        self.progress_label = Gtk.Label(label="...")
+        self.progress_label.add_css_class("dim-label")
+        self.progress_label.add_css_class("caption")
+        self._change_sufix(self.progress_label if step.state == ToolsetInstallationStepState.IN_PROGRESS else self.description_label)
         self.set_sensitive(step.state != ToolsetInstallationStepState.SCHEDULED)
         self._set_status_icon(state=step.state)
         step.event_bus.subscribe(
             ToolsetInstallationStepEvent.STATE_CHANGED,
             self._step_state_changed
         )
+        step.event_bus.subscribe(
+            ToolsetInstallationStepEvent.PROGRESS_CHANGED,
+            self._step_progress_changed
+        )
+
+    def _change_sufix(self, sufix_widget: Gtk.Widget):
+        if hasattr(self, "sufix_widget"):
+            self.remove(self.sufix_widget)
+        self.add_suffix(sufix_widget)
+        self.sufix_widget = sufix_widget
+
+    def _step_progress_changed(self, progress: float):
+        self.progress_label.set_label(f"{int(progress * 100)}%")
 
     def _step_state_changed(self, state: ToolsetInstallationStepState):
         self.set_sensitive(state != ToolsetInstallationStepState.SCHEDULED)
         self._set_status_icon(state=state)
         self.owner._scroll_to_installation_step_row(self)
+        match state:
+            case ToolsetInstallationStepState.SCHEDULED | ToolsetInstallationStepState.COMPLETED | ToolsetInstallationStepState.FAILED:
+                self._change_sufix(self.description_label)
+            case ToolsetInstallationStepState.IN_PROGRESS:
+                self._change_sufix(self.progress_label)
 
     def _set_status_icon(self, state: ToolsetInstallationStepState):
         if not hasattr(self, "status_icon"):
