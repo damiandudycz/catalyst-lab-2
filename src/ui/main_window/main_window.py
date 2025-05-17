@@ -87,4 +87,5 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         else:
             window.set_content(toolbar_view)
         window.set_default_size(width, height)
+        view._window = window
         window.present()

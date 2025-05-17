@@ -14,6 +14,7 @@ from .event_bus import EventBus
 from .toolset import (
     ToolsetInstallation,
     ToolsetInstallationStage,
+    ToolsetInstallationEvent,
     ToolsetApplication,
     ToolsetInstallationStep,
     ToolsetInstallationStepState,
@@ -35,10 +36,13 @@ class ToolsetCreateView(Gtk.Box):
     tools_list = Gtk.Template.Child()
     back_button = Gtk.Template.Child()
     next_button = Gtk.Template.Child()
+    cancel_button = Gtk.Template.Child()
+    finish_button = Gtk.Template.Child()
 
-    def __init__(self, installation_in_progress: ToolsetInstallation | None = None):
+    def __init__(self, installation_in_progress: ToolsetInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.installation_in_progress = installation_in_progress
+        self.content_navigation_view = content_navigation_view
         self.selected_stage: ParseResult | None = None
         self.architecture = Architecture.HOST
         self.allow_binpkgs = True
@@ -46,11 +50,18 @@ class ToolsetCreateView(Gtk.Box):
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: True for app in ToolsetApplication.ALL}
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
-        self._set_current_stage(ToolsetInstallationStage.SETUP if installation_in_progress is None else ToolsetInstallationStage.INSTALL)
+        self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else ToolsetInstallationStage.SETUP)
         if installation_in_progress and installation_in_progress.status != ToolsetInstallationStage.SETUP:
             self._update_installation_steps(steps=installation_in_progress.steps)
+            self.bind_installation_events(self.installation_in_progress)
         else:
             ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
+
+    def bind_installation_events(self, installation_in_progress: ToolsetInstallation):
+        installation_in_progress.event_bus.subscribe(
+            ToolsetInstallationEvent.STATE_CHANGED,
+            self._set_current_stage
+        )
 
     def on_page_changed(self, carousel, pspec):
         self.current_page = int(carousel.get_position())
@@ -92,7 +103,8 @@ class ToolsetCreateView(Gtk.Box):
             selected_apps=selected_apps
         )
         self._update_installation_steps(self.installation_in_progress.steps)
-        self._set_current_stage(ToolsetInstallationStage.INSTALL)
+        self._set_current_stage(self.installation_in_progress.status)
+        self.bind_installation_events(self.installation_in_progress)
         self.installation_in_progress.start()
 
     @Gtk.Template.Callback()
@@ -102,6 +114,13 @@ class ToolsetCreateView(Gtk.Box):
     @Gtk.Template.Callback()
     def on_cancel_pressed(self, _):
         pass
+
+    @Gtk.Template.Callback()
+    def on_finish_pressed(self, _):
+        if hasattr(self, "_window"):
+            self._window.close()
+        elif hasattr(self, "content_navigation_view"):
+            self.content_navigation_view.pop()
 
     def _update_stages_result(self, result: list[ParseResult] | Exception):
         self.selected_stage = None
@@ -192,7 +211,27 @@ class ToolsetCreateView(Gtk.Box):
         self.current_stage = stage
         # Setup views visibility:
         self.setup_view.set_visible(stage == ToolsetInstallationStage.SETUP)
-        self.install_view.set_visible(stage == ToolsetInstallationStage.INSTALL)
+        self.install_view.set_visible(stage != ToolsetInstallationStage.SETUP)
+        self.cancel_button.set_visible(stage == ToolsetInstallationStage.INSTALL)
+        self.finish_button.set_visible(stage != ToolsetInstallationStage.INSTALL)
+        # Add label with summary for completion states:
+        def display_status(text: str, style: str | None):
+            label = Gtk.Label(label=text)
+            label.set_margin_top(12)
+            label.set_margin_bottom(12)
+            label.set_margin_start(24)
+            label.set_margin_end(24)
+            label.add_css_class("heading")
+            if style:
+                label.add_css_class(style)
+            self.installation_steps_list.add(label)
+            self._scroll_to_installation_steps_bottom()
+
+        match stage:
+            case ToolsetInstallationStage.COMPLETED:
+                display_status(text="Installation completed successfully.", style="success")
+            case ToolsetInstallationStage.FAILED:
+                display_status(text="Installation failed.", style="error")
 
     def _update_installation_steps(self, steps: list[ToolsetInstallationStep]):
         if hasattr(self, "_installation_rows"):
@@ -205,11 +244,9 @@ class ToolsetCreateView(Gtk.Box):
             self.installation_steps_list.add(row)
             self._installation_rows.append(row)
 
-    def _scroll_to_tool_row(self, row: ToolsetInstallationStepRow):
+    def _scroll_to_installation_step_row(self, row: ToolsetInstallationStepRow):
         def _scroll():
             scrolled_window = self.installation_steps_list.get_ancestor(Gtk.ScrolledWindow)
-            if not scrolled_window:
-                return False
             vadjustment = scrolled_window.get_vadjustment()
             _, y = row.translate_coordinates(self.installation_steps_list, 0, 0)
             row_height = row.get_allocated_height()
@@ -218,8 +255,15 @@ class ToolsetCreateView(Gtk.Box):
             max_value = vadjustment.get_upper() - vadjustment.get_page_size()
             scroll_to = max(0, min(center_y, max_value))
             vadjustment.set_value(scroll_to)
-            return False
         GLib.idle_add(_scroll)
+
+    def _scroll_to_installation_steps_bottom(self):
+        def _scroll():
+            scrolled_window = self.installation_steps_list.get_ancestor(Gtk.ScrolledWindow)
+            vadjustment = scrolled_window.get_vadjustment()
+            bottom = vadjustment.get_upper() - vadjustment.get_page_size()
+            vadjustment.set_value(bottom)
+        GLib.timeout_add(100, _scroll)
 
 class ToolsetInstallationStepRow(Adw.ActionRow):
 
@@ -232,6 +276,7 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
         label.add_css_class("caption")
         self.add_suffix(label)
         self.set_sensitive(step.state != ToolsetInstallationStepState.SCHEDULED)
+        self._set_status_icon(state=step.state)
         step.event_bus.subscribe(
             ToolsetInstallationStepEvent.STATE_CHANGED,
             self._step_state_changed
@@ -239,5 +284,18 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
 
     def _step_state_changed(self, state: ToolsetInstallationStepState):
         self.set_sensitive(state != ToolsetInstallationStepState.SCHEDULED)
-        self.owner._scroll_to_tool_row(self)
+        self._set_status_icon(state=state)
+        self.owner._scroll_to_installation_step_row(self)
 
+    def _set_status_icon(self, state: ToolsetInstallationStepState):
+        if not hasattr(self, "status_icon"):
+            self.status_icon = Gtk.Image()
+            self.status_icon.set_pixel_size(24)
+            self.add_prefix(self.status_icon)
+        icon_name = {
+            ToolsetInstallationStepState.SCHEDULED: "media-playback-pause",
+            ToolsetInstallationStepState.IN_PROGRESS: "media-playback-start",
+            ToolsetInstallationStepState.FAILED: "dialog-error",
+            ToolsetInstallationStepState.COMPLETED: "emblem-ok"
+        }.get(state)
+        self.status_icon.set_from_icon_name(icon_name)

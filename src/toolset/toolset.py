@@ -342,6 +342,10 @@ class ToolsetEnv(Enum):
 # ------------------------------------------------------------------------------
 # Toolset installation.
 # ------------------------------------------------------------------------------
+@final
+class ToolsetInstallationEvent(Enum):
+    """Events produced by installation."""
+    STATE_CHANGED = auto()
 
 class ToolsetInstallation:
     """Handles the full toolset installation lifecycle."""
@@ -354,7 +358,8 @@ class ToolsetInstallation:
         self.allow_binpkgs = allow_binpkgs
         self.selected_apps = selected_apps
         self.steps: list[ToolsetInstallationStep] = []
-        self.status = ToolsetInstallationStage.INSTALL # TODO: emit status
+        self.event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
+        self.status = ToolsetInstallationStage.INSTALL
         self._setup_steps()
 
     def _setup_steps(self):
@@ -377,11 +382,13 @@ class ToolsetInstallation:
         failed_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.FAILED), None)
         if failed_step:
             self.status = ToolsetInstallationStage.FAILED
+            self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
         elif next_step:
             next_step_thread = threading.Thread(target=next_step.start)
             next_step_thread.start()
         else:
             self.status = ToolsetInstallationStage.COMPLETED
+            self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""
@@ -452,7 +459,7 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Downloading {self.url} ...")
-        time.sleep(3)
+        time.sleep(1)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 
 class ToolsetInstallationStepExtract(ToolsetInstallationStep):
@@ -461,7 +468,7 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Extracting ...")
-        time.sleep(3)
+        time.sleep(1)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
@@ -470,7 +477,7 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Spawning ...")
-        time.sleep(3)
+        time.sleep(1)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 
 class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
@@ -479,7 +486,7 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Syncing ...")
-        time.sleep(3)
+        time.sleep(1)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
@@ -489,7 +496,7 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Installing {self.app.name} ...")
-        time.sleep(3)
+        time.sleep(1)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 
 class ToolsetInstallationStepVerify(ToolsetInstallationStep):
@@ -498,7 +505,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Verifying ...")
-        time.sleep(3)
+        time.sleep(1)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 
 class ToolsetInstallationStepCompress(ToolsetInstallationStep):
@@ -507,7 +514,7 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Compressing ...")
-        time.sleep(3)
+        time.sleep(1)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 
 class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
@@ -516,6 +523,6 @@ class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
     def start(self):
         super().start()
         print(f"Cleaning ...")
-        time.sleep(3)
+        time.sleep(1)
         self.complete(ToolsetInstallationStepState.COMPLETED)
 
