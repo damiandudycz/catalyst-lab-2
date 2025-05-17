@@ -293,9 +293,21 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
             self.status_icon.set_pixel_size(24)
             self.add_prefix(self.status_icon)
         icon_name = {
-            ToolsetInstallationStepState.SCHEDULED: "media-playback-pause",
-            ToolsetInstallationStepState.IN_PROGRESS: "media-playback-start",
-            ToolsetInstallationStepState.FAILED: "dialog-error",
-            ToolsetInstallationStepState.COMPLETED: "emblem-ok"
+            ToolsetInstallationStepState.SCHEDULED: "square-alt-arrow-right-svgrepo-com-symbolic",
+            ToolsetInstallationStepState.IN_PROGRESS: "menu-dots-square-svgrepo-com-symbolic",
+            ToolsetInstallationStepState.FAILED: "error-box-svgrepo-com-symbolic",
+            ToolsetInstallationStepState.COMPLETED: "check-square-svgrepo-com-symbolic"
         }.get(state)
+        styles = {
+            ToolsetInstallationStepState.SCHEDULED: "dimmed",
+            ToolsetInstallationStepState.IN_PROGRESS: "",
+            ToolsetInstallationStepState.FAILED: "error",
+            ToolsetInstallationStepState.COMPLETED: "success"
+        }
+        style = styles.get(state)
         self.status_icon.set_from_icon_name(icon_name)
+        for css_class in styles.values():
+            if css_class:
+                self.status_icon.remove_css_class(css_class)
+        if style:
+            self.status_icon.add_css_class(style)

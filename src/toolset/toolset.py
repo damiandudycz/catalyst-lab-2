@@ -506,7 +506,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
         super().start()
         print(f"Verifying ...")
         time.sleep(1)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
+        self.complete(ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
