@@ -296,12 +296,10 @@ class Toolset:
                 self.in_use = False
                 raise e
 
-    def validate(self, handler: callable | None = None) -> bool:
+    def analyze(self, handler: callable | None = None) -> bool:
         """Performs various sanity checks on toolset and stores gathered results."""
         """Returns true if all required checks succeeded."""
-        with self.access_lock:
-            if not self.spawned:
-                raise RuntimeError(f"Toolset {self} is not spawned.")
+        return True
         # TODO ...
 
 @dataclass
@@ -517,13 +515,10 @@ class ToolsetInstallationStep(ABC):
         self.state = state
         self.event_bus.emit(ToolsetInstallationStepEvent.STATE_CHANGED, state)
     def _update_progress(self, progress: float | None):
-        print(f"Progress: {progress}")
         self.progress = progress
         self.event_bus.emit(ToolsetInstallationStepEvent.PROGRESS_CHANGED, progress)
-    def run_command_in_toolset(self, tmp_toolset: str, command: str, progress_handler: Callable[[str], float | None] | None = None) -> bool:
+    def run_command_in_toolset(self, command: str, progress_handler: Callable[[str], float | None] | None = None) -> bool:
         try:
-            if tmp_toolset is None:
-                raise FileNotFoundError(f"Temporary toolset not available")
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -535,7 +530,7 @@ class ToolsetInstallationStep(ABC):
                 progress = progress_handler(output_line)
                 if progress is not None:
                     self._update_progress(progress)
-            server_call = tmp_toolset.run_command(
+            server_call = self.installer.tmp_toolset.run_command(
                 command=command,
                 handler=output_handler if progress_handler is not None else None,
                 completion_handler=completion_handler
@@ -556,7 +551,6 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
         self.url = url
     def start(self):
         super().start()
-        print(f"Downloading {self.url} ...")
         try:
             response = requests.get(self.url.geturl(), stream=True, timeout=10)
             response.raise_for_status()
@@ -574,7 +568,7 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
                             self._update_progress(progress)
             self.complete(ToolsetInstallationStepState.COMPLETED)
         except Exception as e:
-            print(f"[{self.name}] Error during download: {e}")
+            print(f"Error during download: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepExtract(ToolsetInstallationStep):
@@ -582,13 +576,8 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
         super().__init__(name="Extract stage tarball", description="Extracts Gentoo stage tarball to work directory", installer=installer)
     def start(self):
         super().start()
-        print(f"Extracting ...")
         try:
-            tmp_stage_file = self.installer.tmp_stage_file.name
-            if not os.path.isfile(tmp_stage_file):
-                raise FileNotFoundError(f"Stage tarball not found: {tmp_stage_file}")
-            tmp_stage_extract_dir = tempfile.mkdtemp(prefix="gentoo_stage_extract_")
-            self.installer.tmp_stage_extract_dir = tmp_stage_extract_dir
+            self.installer.tmp_stage_extract_dir = tempfile.mkdtemp(prefix="gentoo_stage_extract_")
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -606,8 +595,8 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
             server_call = extract._async_raw(
                 handler=output_handler,
                 completion_handler=completion_handler,
-                tarball=tmp_stage_file,
-                directory=tmp_stage_extract_dir
+                tarball=self.installer.tmp_stage_file.name,
+                directory=self.installer.tmp_stage_extract_dir
             )
             server_call.thread.join()
             done_event.wait()
@@ -615,39 +604,22 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error extracting stage tarball: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-@root_function
-def extract(tarball: str, directory: str):
-    """Extracts an .xz tarball as root to preserve special files and ownership."""
-    import tarfile
-    with tarfile.open(tarball, mode='r:xz') as tar:
-        total_size = sum(member.size for member in tar.getmembers())
-        extracted_size = 0
-        for member in tar.getmembers():
-            tar.extract(member, path=directory)
-            extracted_size += member.size
-            progress = extracted_size / total_size if total_size else 0
-            print(f"PROGRESS: {progress}")
 
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
         super().__init__(name="Create environment", description="Prepares Gentoo environment for work", installer=installer)
     def start(self):
         super().start()
-        print(f"Spawning ...")
-        tmp_stage_extract_dir = self.installer.tmp_stage_extract_dir
         try:
-            if not os.path.isdir(tmp_stage_extract_dir):
-                raise FileNotFoundError(f"Stage extract dir not found: {tmp_stage_extract_dir}")
-            tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), squashfs_file=tmp_stage_extract_dir)
-            self.installer.tmp_toolset = tmp_toolset
-            tmp_toolset.spawn(store_changes=True) # TODO: Add tmp dirs for portage etc., mount with store_changes
+            self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), squashfs_file=self.installer.tmp_stage_extract_dir)
+            self.installer.tmp_toolset.spawn(store_changes=True) # TODO: Add tmp dirs for portage etc., mount with store_changes
             commands = [
                 "env-update && source /etc/profile",
                 "getuto"
             ]
             for i, command in enumerate(commands):
                 print(f"# {command}")
-                result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command=command)
+                result = self.run_command_in_toolset(command=command)
                 self._update_progress((i + 1) / len(commands))
                 if not result:
                     self.complete(ToolsetInstallationStepState.FAILED)
@@ -662,22 +634,24 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
         super().__init__(name="Synchronize portage", description="Synchronizes portage tree", installer=installer)
     def start(self):
         super().start()
-        print(f"Syncing ...")
-        tmp_toolset = self.installer.tmp_toolset
-        def progress_handler(output_line: str) -> float or None:
-            pattern = (
-                r"\s*"                        # optional leading spaces
-                r"\d+[KMGTP]?"                # downloaded size (e.g., 45500K, 4.47T)
-                r"\s+(?:\.{1,10}\s*)+"        # progress dots (at least one group)
-                r"(\d{1,3})%"                 # percentage (captured)
-                r"\s+\d+(\.\d+)?[KMGTP]?"     # speed (like 4.47T, 14.5M)
-                r"(?:[= ]\d+(\.\d+)?s?)?"     # optional time (e.g., =2.2s, 0s)"
-            )
-            match = re.match(pattern, output_line)
-            if match:
-                return int(match.group(1)) / 100.0
-        result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command="emerge-webrsync", progress_handler=progress_handler)
-        self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
+        try:
+            def progress_handler(output_line: str) -> float or None:
+                pattern = (
+                    r"\s*"                        # optional leading spaces
+                    r"\d+[KMGTP]?"                # downloaded size (e.g., 45500K, 4.47T)
+                    r"\s+(?:\.{1,10}\s*)+"        # progress dots (at least one group)
+                    r"(\d{1,3})%"                 # percentage (captured)
+                    r"\s+\d+(\.\d+)?[KMGTP]?"     # speed (like 4.47T, 14.5M)
+                    r"(?:[= ]\d+(\.\d+)?s?)?"     # optional time (e.g., =2.2s, 0s)"
+                )
+                match = re.match(pattern, output_line)
+                if match:
+                    return int(match.group(1)) / 100.0
+            result = self.run_command_in_toolset(command="emerge-webrsync", progress_handler=progress_handler)
+            self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
+        except Exception as e:
+            print(f"Error synchronizing Portage: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
     def __init__(self, app: ToolsetApplication, installer: ToolsetCreateView):
@@ -685,19 +659,62 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
         self.app = app
     def start(self):
         super().start()
-        tmp_toolset = self.installer.tmp_toolset
-        def progress_handler(output_line: str) -> float or None:
-            pattern = r"^>>> Completed \((\d+) of (\d+)\)"
-            match = re.match(pattern, output_line)
-            if match:
-                n, m = map(int, match.groups())
-                return n / m
+        try:
+            def progress_handler(output_line: str) -> float or None:
+                pattern = r"^>>> Completed \((\d+) of (\d+)\)"
+                match = re.match(pattern, output_line)
+                if match:
+                    n, m = map(int, match.groups())
+                    return n / m
+            for config in self.app.portage_config:
+                insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app.name, toolset_root=self.installer.tmp_toolset.toolset_root())
+            flags = "--getbinpkg" if self.installer.allow_binpkgs else ""
+            result = self.run_command_in_toolset(command=f"emerge {flags} {self.app.package}", progress_handler=progress_handler)
+            self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
+        except Exception as e:
+            print(f"Error during app installation: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
 
-        for config in self.app.portage_config:
-            insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app.name, toolset_root=tmp_toolset.toolset_root())
-        flags = "--getbinpkg" if self.installer.allow_binpkgs else ""
-        result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command=f"emerge {flags} {self.app.package}", progress_handler=progress_handler)
-        self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
+class ToolsetInstallationStepVerify(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Verify stage", description="Checks if toolset works correctly", installer=installer)
+    def start(self):
+        super().start()
+        try:
+            analysis_result = self.installer.tmp_toolset.analyze()
+            self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
+        except Exception as e:
+            print(f"Error during toolset verification: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
+
+class ToolsetInstallationStepCompress(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Compress", description="Compresses toolset into .squashfs file", installer=installer)
+    def start(self):
+        super().start()
+        try:
+            print(f"Compressing ...")
+            time.sleep(1)
+            self.complete(ToolsetInstallationStepState.COMPLETED)
+        except Exception as e:
+            print(f"Error during toolset compression: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
+
+class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
+    def __init__(self, installer: ToolsetCreateView):
+        super().__init__(name="Cleanup", description="Unspawns toolset and cleans up", installer=installer)
+    def start(self):
+        super().start()
+        try:
+            print(f"Cleaning ...")
+            time.sleep(1)
+            self.complete(ToolsetInstallationStepState.COMPLETED)
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+            self.complete(ToolsetInstallationStepState.FAILED)
+
+# ------------------------------------------------------------------------------
+# Helper functions:
 
 @root_function
 def insert_portage_config(config_dir: str, config_entries: list[str], app_name: str, toolset_root: str):
@@ -709,30 +726,16 @@ def insert_portage_config(config_dir: str, config_entries: list[str], app_name: 
         for line in config_entries:
             f.write(line + "\n")
 
-class ToolsetInstallationStepVerify(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Verify stage", description="Checks if toolset works correctly", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Verifying ...")
-        time.sleep(1)
-        self.complete(ToolsetInstallationStepState.FAILED)
-
-class ToolsetInstallationStepCompress(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Compress", description="Compresses toolset into .squashfs file", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Compressing ...")
-        time.sleep(1)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
-
-class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
-        super().__init__(name="Cleanup", description="Unspawns toolset and cleans up", installer=installer)
-    def start(self):
-        super().start()
-        print(f"Cleaning ...")
-        time.sleep(1)
-        self.complete(ToolsetInstallationStepState.COMPLETED)
+@root_function
+def extract(tarball: str, directory: str):
+    """Extracts an .xz tarball as root to preserve special files and ownership."""
+    import tarfile
+    with tarfile.open(tarball, mode='r:xz') as tar:
+        total_size = sum(member.size for member in tar.getmembers())
+        extracted_size = 0
+        for member in tar.getmembers():
+            tar.extract(member, path=directory)
+            extracted_size += member.size
+            progress = extracted_size / total_size if total_size else 0
+            print(f"PROGRESS: {progress}") # This print must stay, it is used to receive progress by step implementation.
 
