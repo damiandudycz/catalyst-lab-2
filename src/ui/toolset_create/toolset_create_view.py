@@ -274,7 +274,7 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
         self.progress_label = Gtk.Label()
         self.progress_label.add_css_class("dim-label")
         self.progress_label.add_css_class("caption")
-        self.update_status_label()
+        self._update_status_label()
         self.add_suffix(self.progress_label)
         self.set_sensitive(step.state != ToolsetInstallationStepState.SCHEDULED)
         self._set_status_icon(state=step.state)
@@ -288,15 +288,15 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
         )
 
     def _step_progress_changed(self, progress: float | None):
-        self.update_status_label()
+        self._update_status_label()
 
     def _step_state_changed(self, state: ToolsetInstallationStepState):
         self.set_sensitive(state != ToolsetInstallationStepState.SCHEDULED)
         self._set_status_icon(state=state)
         self.owner._scroll_to_installation_step_row(self)
-        self.update_status_label()
+        self._update_status_label()
 
-    def update_status_label(self):
+    def _update_status_label(self):
         self.progress_label.set_label("" if self.step.state == ToolsetInstallationStepState.SCHEDULED else ("..." if self.step.progress is None else f"{int(self.step.progress * 100)}%"))
 
     def _set_status_icon(self, state: ToolsetInstallationStepState):

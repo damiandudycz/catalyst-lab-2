@@ -476,6 +476,8 @@ class ToolsetInstallationStep(ABC):
     def complete(self, state: ToolsetInstallationStepState):
         """Call this when step finishes."""
         self._update_state(state=state)
+        if state == ToolsetInstallationStepState.COMPLETED:
+           self._update_progress(1.0)
         # If state was success continue installation
         GLib.idle_add(self.installer._continue_installation)
     def _update_state(self, state: ToolsetInstallationStepState):
@@ -485,28 +487,25 @@ class ToolsetInstallationStep(ABC):
         print(f"Progress: {progress}")
         self.progress = progress
         self.event_bus.emit(ToolsetInstallationStepEvent.PROGRESS_CHANGED, progress)
-    def run_command_in_toolset(self, tmp_toolset: str, command: str) -> bool:
+    def run_command_in_toolset(self, tmp_toolset: str, command: str, progress_handler: Callable[[str], float | None] | None = None) -> bool:
         try:
             if tmp_toolset is None:
                 raise FileNotFoundError(f"Temporary toolset not available")
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
-                print(response)
                 nonlocal return_value
-                if response.code == ServerResponseStatusCode.OK:
-                    self._update_progress(1.0)
-                    return_value = True
+                return_value = response.code == ServerResponseStatusCode.OK
                 done_event.set()
             def output_handler(output_line: str):
-                print(output_line)
-                # TODO: Move this only to calls related to emerge
-                pattern = r"^>>> Completed \((\d+) of (\d+)\)"
-                match = re.match(pattern, output_line)
-                if match:
-                    n, m = map(int, match.groups())
-                    self._update_progress(float(n) / float(m))
-            server_call = tmp_toolset.run_command(command=command, handler=output_handler, completion_handler=completion_handler)
+                progress = progress_handler(output_line)
+                if progress is not None:
+                    self._update_progress(progress)
+            server_call = tmp_toolset.run_command(
+                command=command,
+                handler=output_handler if progress_handler is not None else None,
+                completion_handler=completion_handler
+            )
             server_call.thread.join()
             done_event.wait()
             return return_value
@@ -555,8 +554,29 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
                 raise FileNotFoundError(f"Stage tarball not found: {tmp_stage_file}")
             tmp_stage_extract_dir = tempfile.mkdtemp(prefix="gentoo_stage_extract_")
             self.installer.tmp_stage_extract_dir = tmp_stage_extract_dir
-            extract(tmp_stage_file, tmp_stage_extract_dir)
-            self.complete(ToolsetInstallationStepState.COMPLETED)
+            return_value = False
+            done_event = threading.Event()
+            def completion_handler(response: ServerResponse):
+                nonlocal return_value
+                return_value = response.code == ServerResponseStatusCode.OK
+                done_event.set()
+            def output_handler(output_line: str):
+                if output_line.startswith("PROGRESS: "):
+                    try:
+                        progress_str = output_line[len("PROGRESS: "):]
+                        progress_value = float(progress_str)
+                        self._update_progress(progress_value)
+                    except ValueError:
+                        pass
+            server_call = extract._async_raw(
+                handler=output_handler,
+                completion_handler=completion_handler,
+                tarball=tmp_stage_file,
+                directory=tmp_stage_extract_dir
+            )
+            server_call.thread.join()
+            done_event.wait()
+            self.complete(ToolsetInstallationStepState.COMPLETED if return_value else ToolsetInstallationStepState.FAILED)
         except Exception as e:
             print(f"Error extracting stage tarball: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
@@ -571,7 +591,7 @@ def extract(tarball: str, directory: str):
             tar.extract(member, path=directory)
             extracted_size += member.size
             progress = extracted_size / total_size if total_size else 0
-            # TODO: Pass progress back to ToolsetInstallationStepExtract
+            print(f"PROGRESS: {progress}")
 
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
@@ -609,9 +629,16 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
     def start(self):
         super().start()
         tmp_toolset = self.installer.tmp_toolset
+        def progress_handler(output_line: str) -> float or None:
+            pattern = r"^>>> Completed \((\d+) of (\d+)\)"
+            match = re.match(pattern, output_line)
+            if match:
+                n, m = map(int, match.groups())
+                return float(n) / float(m)
+
         for config in self.app.portage_config:
             insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app.name, toolset_root=tmp_toolset.toolset_root())
-        result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command=f"emerge {self.app.package}")
+        result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command=f"emerge {self.app.package}", progress_handler=progress_handler)
         self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
 
 @root_function
