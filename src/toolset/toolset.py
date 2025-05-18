@@ -619,7 +619,19 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
         super().start()
         print(f"Syncing ...")
         tmp_toolset = self.installer.tmp_toolset
-        result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command="emerge-webrsync")
+        def progress_handler(output_line: str) -> float or None:
+            pattern = (
+                r"\s*"                        # optional leading spaces
+                r"\d+[KMGTP]?"                # downloaded size (e.g., 45500K, 4.47T)
+                r"\s+(?:\.{1,10}\s*)+"        # progress dots (at least one group)
+                r"(\d{1,3})%"                 # percentage (captured)
+                r"\s+\d+(\.\d+)?[KMGTP]?"     # speed (like 4.47T, 14.5M)
+                r"(?:[= ]\d+(\.\d+)?s?)?"     # optional time (e.g., =2.2s, 0s)"
+            )
+            match = re.match(pattern, output_line)
+            if match:
+                return int(match.group(1)) / 100.0
+        result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command="emerge-webrsync", progress_handler=progress_handler)
         self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
