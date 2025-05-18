@@ -693,7 +693,6 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            print(f"Compressing ...")
             time.sleep(1)
             self.complete(ToolsetInstallationStepState.COMPLETED)
         except Exception as e:
@@ -706,7 +705,6 @@ class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            print(f"Cleaning ...")
             time.sleep(1)
             self.complete(ToolsetInstallationStepState.COMPLETED)
         except Exception as e:
