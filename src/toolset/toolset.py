@@ -390,18 +390,29 @@ class ToolsetInstallation:
         ToolsetInstallation.started_installations.append(self)
         self._continue_installation()
 
+    def cancel(self):
+        running_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.IN_PROGRESS), None)
+        if running_step:
+            running_step.cancel()
+
+    def _cleanup(self):
+        for step in reversed(self.steps): # Cleanup in reverse order
+            step.cleanup()
+
     def _continue_installation(self):
         next_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.SCHEDULED), None)
         failed_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.FAILED), None)
         if failed_step:
             self.status = ToolsetInstallationStage.FAILED
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
+            self._cleanup()
         elif next_step:
             next_step_thread = threading.Thread(target=next_step.start)
             next_step_thread.start()
         else:
             self.status = ToolsetInstallationStage.COMPLETED
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
+            self._cleanup()
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""
@@ -501,13 +512,31 @@ class ToolsetInstallationStep(ABC):
         self.installer = installer
         self.progress: float | None = None
         self.event_bus: EventBus[ToolsetInstallationStepEvent] = EventBus[ToolsetInstallationStepEvent]()
+        self._cancel_event = threading.Event()
     @abstractmethod
     def start(self):
+        self.server_call = None
+        self._cancel_event.clear()
         self._update_state(ToolsetInstallationStepState.IN_PROGRESS)
+    def cancel(self):
+        if self.state == ToolsetInstallationStepState.IN_PROGRESS:
+            self.complete(ToolsetInstallationStepState.FAILED)
+            self._cancel_event.set()
+    @abstractmethod
+    def cleanup(self) -> bool:
+        # TODO: Consider what to do if some cleaning fails, and next cleanings could mess up mounted files.
+        # Probably it is fine tough, as all real mapping should be done by bwrap call and not on real filesystem.
+        """Returns true if cleanup was needed and was started."""
+        if self.state == ToolsetInstallationStepState.SCHEDULED:
+            return False # No cleaning needed if job didn't start.
+        self.cancel()
+        return True
     def complete(self, state: ToolsetInstallationStepState):
         """Call this when step finishes."""
+        if self._cancel_event.is_set():
+            return
         self._update_state(state=state)
-        if state == ToolsetInstallationStepState.COMPLETED:
+        if self.state == ToolsetInstallationStepState.COMPLETED:
            self._update_progress(1.0)
         # If state was success continue installation
         GLib.idle_add(self.installer._continue_installation)
@@ -519,6 +548,7 @@ class ToolsetInstallationStep(ABC):
         self.event_bus.emit(ToolsetInstallationStepEvent.PROGRESS_CHANGED, progress)
     def run_command_in_toolset(self, command: str, progress_handler: Callable[[str], float | None] | None = None) -> bool:
         try:
+            self.server_call = None
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -530,12 +560,12 @@ class ToolsetInstallationStep(ABC):
                 progress = progress_handler(output_line)
                 if progress is not None:
                     self._update_progress(progress)
-            server_call = self.installer.tmp_toolset.run_command(
+            self.server_call = self.installer.tmp_toolset.run_command(
                 command=command,
                 handler=output_handler if progress_handler is not None else None,
                 completion_handler=completion_handler
             )
-            server_call.thread.join()
+            self.server_call.thread.join()
             done_event.wait()
             return return_value
         except Exception as e:
@@ -560,6 +590,8 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
             with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
                 self.installer.tmp_stage_file = tmp_file
                 for chunk in response.iter_content(chunk_size=chunk_size):
+                    if self._cancel_event.is_set():
+                        return
                     if chunk:
                         tmp_file.write(chunk)
                         downloaded += len(chunk)
@@ -570,6 +602,16 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error during download: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
+        if self.installer.tmp_stage_file:
+            try:
+                self.installer.tmp_stage_file.close()
+                os.remove(self.installer.tmp_stage_file.name)
+            except Exception as e:
+                print(f"Failed to delete temp file: {e}")
+        return True
 
 class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
@@ -592,18 +634,34 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
                         self._update_progress(progress_value)
                     except ValueError:
                         pass
-            server_call = extract._async_raw(
+            self.server_call = extract._async_raw(
                 handler=output_handler,
                 completion_handler=completion_handler,
                 tarball=self.installer.tmp_stage_file.name,
                 directory=self.installer.tmp_stage_extract_dir
             )
-            server_call.thread.join()
+            self.server_call.thread.join()
             done_event.wait()
             self.complete(ToolsetInstallationStepState.COMPLETED if return_value else ToolsetInstallationStepState.FAILED)
         except Exception as e:
             print(f"Error extracting stage tarball: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
+    def cancel(self):
+        super().cancel()
+        if self.server_call:
+            self.server_call.cancel()
+            if self.server_call.thread:
+                self.server_call.thread.join()
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
+        if self.installer.tmp_stage_extract_dir:
+            try: # TODO: Needs to clean as root
+                if os.path.exists(self.installer.tmp_stage_extract_dir):
+                    shutil.rmtree(self.installer.tmp_stage_extract_dir)
+            except Exception as e:
+                print(f"Failed to delete temp folder: {e}")
+        return True
 
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
@@ -618,6 +676,8 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
                 "getuto"
             ]
             for i, command in enumerate(commands):
+                if self._cancel_event.is_set():
+                    return
                 print(f"# {command}")
                 result = self.run_command_in_toolset(command=command)
                 self._update_progress((i + 1) / len(commands))
@@ -628,6 +688,15 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error spawning temporary toolset: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
+    def cancel(self):
+        super().cancel()
+        if self.server_call:
+            self.server_call.cancel()
+            if self.server_call.thread:
+                self.server_call.thread.join()
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
 
 class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
@@ -652,6 +721,15 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error synchronizing Portage: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
+    def cancel(self):
+        super().cancel()
+        if self.server_call:
+            self.server_call.cancel()
+            if self.server_call.thread:
+                self.server_call.thread.join()
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
 
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
     def __init__(self, app: ToolsetApplication, installer: ToolsetCreateView):
@@ -667,6 +745,8 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
                     n, m = map(int, match.groups())
                     return n / m
             for config in self.app.portage_config:
+                if self._cancel_event.is_set():
+                    return
                 insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app.name, toolset_root=self.installer.tmp_toolset.toolset_root())
             flags = "--getbinpkg" if self.installer.allow_binpkgs else ""
             result = self.run_command_in_toolset(command=f"emerge {flags} {self.app.package}", progress_handler=progress_handler)
@@ -674,6 +754,15 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error during app installation: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
+    def cancel(self):
+        super().cancel()
+        if self.server_call:
+            self.server_call.cancel()
+            if self.server_call.thread:
+                self.server_call.thread.join()
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
 
 class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
@@ -686,6 +775,9 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error during toolset verification: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
 
 class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
@@ -698,6 +790,9 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error during toolset compression: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
 
 class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetCreateView):
@@ -710,7 +805,9 @@ class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error during cleanup: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
 # ------------------------------------------------------------------------------
 # Helper functions:
 

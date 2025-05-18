@@ -120,7 +120,7 @@ class ToolsetCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_cancel_pressed(self, _):
-        pass
+        self.installation_in_progress.cancel()
 
     @Gtk.Template.Callback()
     def on_finish_pressed(self, _):
