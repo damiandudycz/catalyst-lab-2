@@ -1,6 +1,6 @@
 import weakref
 from enum import Enum
-from typing import final, TypeVar, Generic, Callable, Dict, List, Any, Union
+from typing import final, TypeVar, Generic, Callable, Dict, Any, Union
 from gi.repository import GLib
 
 EventBusType = TypeVar("EventBusType", bound=Enum)
@@ -9,7 +9,7 @@ EventBusType = TypeVar("EventBusType", bound=Enum)
 class EventBus(Generic[EventBusType]):
     def __init__(self, scheduler: Callable[..., Any] = GLib.idle_add):
         self.scheduler = scheduler
-        self._subscribers: Dict[EventBusType, List[Union[weakref.ReferenceType, weakref.WeakMethod]]] = {}
+        self._subscribers: Dict[EventBusType, list[Union[weakref.ReferenceType, weakref.WeakMethod]]] = {}
 
     def subscribe(self, event: EventBusType, callback: Callable):
         if event not in self._subscribers:

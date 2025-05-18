@@ -5,7 +5,7 @@ import json, multiprocessing, select
 from enum import Enum, auto
 from functools import wraps
 from dataclasses import dataclass, asdict
-from typing import Any, List
+from typing import Any, Callable
 from contextlib import redirect_stdout, redirect_stderr
 
 class StreamPipe(Enum):
@@ -44,7 +44,7 @@ class RootHelperServer:
         self.server_socket: socket.socket | None = None
         self.pid_lock: int | None = None
         self._jobs_lock = threading.Lock()
-        self._jobs: List[Job] = []
+        self._jobs: list[Job] = []
         self.read_initial_session_data()
         self.validate_session()
         self.client_watchdog = WatchDog(lambda: self.check_client())
@@ -114,7 +114,7 @@ class RootHelperServer:
             allowed_uid=self.uid
         )
 
-    def stop(self, called_by_job: Job | None = None, after_jobs_cleaned: callable | None = None):
+    def stop(self, called_by_job: Job | None = None, after_jobs_cleaned: Callable[[],None] | None = None):
         """Stop the server, closing the socket and removing any resources."""
         if not self.is_running:
             print("[Server]: ERROR: Server is not running")
@@ -367,7 +367,7 @@ class Job:
     def start(self):
         self.thread.start()
 
-    def terminate(self, instant: bool = False, completion: callable | None = None) -> Job | None:
+    def terminate(self, instant: bool = False, completion: Callable[[bool],None] | None = None) -> Job | None:
         """Schedules Job process to terminate and gives it 5 seconds to finish."""
         """Termination itself happens on separate thread so that multiple can be stopped at once."""
         """If instant flag is set, termination happens instantly on current thread, blocking it."""
@@ -404,7 +404,7 @@ class Job:
             self.cleanup_thread.start()
         return self
 
-    def terminate_and_cleanup(self, completion: callable | None = None):
+    def terminate_and_cleanup(self, completion: Callable[[bool],None] | None = None):
         if self.process is None or not self.process.is_alive():
             print("[Server]: " + "Process already stopped")
             if completion:
@@ -424,7 +424,7 @@ class Job:
             completion(True)
 
     @staticmethod
-    def join_all(jobs: List[Job], timeout: float):
+    def join_all(jobs: list[Job], timeout: float):
         """Waits for all job threads to finish or until the timeout expires."""
         start_time = time.time()
         while (time.time() - start_time < timeout and not all(job.thread is not None and not job.thread.is_alive() for job in jobs)):
@@ -660,7 +660,7 @@ class OutputCapture:
             result_queue.put(e)
 
 class WatchDog:
-    def __init__(self, func: callable, ns: float = 5.0):
+    def __init__(self, func: Callable[[],None], ns: float = 5.0):
         if not callable(func):
             raise ValueError("func must be callable")
         if not isinstance(ns, float) or ns <= 0:

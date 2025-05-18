@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Callable, final
+from typing import Callable, final
 import json
 import os
 from enum import Enum, auto
@@ -21,7 +21,7 @@ class Settings:
 
     _current_instance: Settings | None = None  # Internal cache
 
-    def __init__(self, toolsets: List[Toolset], keep_root_unlocked: bool = False):
+    def __init__(self, toolsets: list[Toolset], keep_root_unlocked: bool = False):
         self._toolsets = toolsets
         self._keep_root_unlocked = keep_root_unlocked
         self.event_bus: EventBus[SettingsEvents] = EventBus[SettingsEvents]()
@@ -86,7 +86,7 @@ class Settings:
 
     # Toolsets management:
 
-    def get_toolsets(self) -> List[Toolset]:
+    def get_toolsets(self) -> list[Toolset]:
         return self._toolsets
 
     def get_toolset_by_id(self, uuid: UUID) -> Toolset | None:

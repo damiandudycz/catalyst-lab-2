@@ -27,7 +27,7 @@ class RootHelperClient:
         self.event_bus: EventBus[RootHelperClientEvents] = EventBus[RootHelperClientEvents]()
         self.socket_path = RootHelperServer.get_socket_path(os.getuid())
         self.main_process = None
-        self.running_actions: List[ServerCall] = []
+        self.running_actions: list[ServerCall] = []
         self.token = None
         self.keep_unlocked = Settings.current().keep_root_unlocked
         self.server_watchdog = WatchDog(lambda: self.ping_server())
@@ -135,7 +135,7 @@ class RootHelperClient:
             self.main_process = None
             print("[Server process]: Closed.")
 
-    def clean_unfinished_jobs(self, exit_result: callable | None = None):
+    def clean_unfinished_jobs(self):
         """Marks all jobs as finished, even if server didn't yet closed them."""
         """If job is still on the list at this point it means it's orphined - we don't know if it's still running."""
         with self.set_request_status_lock:
@@ -240,10 +240,10 @@ class RootHelperClient:
         request: ServerCommand | ServerFunction,
         command_value: str | None = None,
         allow_auto_start: bool = True,
-        handler: callable = None,
+        handler: Callable[[str],None] | None = None,
         asynchronous: bool = False,
         raw: bool = False,
-        completion_handler: callable = None,
+        completion_handler: Callable[[ServerResponse | Any],None] | None = None,
         token: str | None = None
     ) -> ServerResponse | ServerCall: # For async always returns ServerCall or throws.
         """Send a command to the root helper server."""
@@ -395,10 +395,10 @@ class RootHelperClient:
         self,
         func_name: str,
         *args,
-        handler: callable = None,
+        handler: Callable[[str],None] | None = None,
         asynchronous: bool = False,
         raw: bool = False,
-        completion_handler: callable = None,
+        completion_handler: Callable[[ServerResponse | Any],None] | None = None,
         **kwargs
     ) -> Any | ServerResponse | ServerCall:
         """Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server."""
@@ -450,7 +450,7 @@ class ServerCall:
     client: RootHelperClient
     call_id: uuid.UUID = field(default_factory=uuid.uuid4)
     terminated: bool = False # Mark as terminated. Might still be terminating.
-    output: List[str] = field(default_factory=list) # Contains output lines from stdout and stderr
+    output: list[str] = field(default_factory=list) # Contains output lines from stdout and stderr
     output_lock: threading.Lock = field(default_factory=threading.Lock)
     event_bus: EventBus[ServerCallEvents] = field(default_factory=lambda: EventBus[ServerCallEvents]())
 
@@ -475,7 +475,7 @@ class ServerCall:
             self.output.append(line)
             self.event_bus.emit(ServerCallEvents.NEW_OUTPUT_LINE, line)
 
-    def get_output(self) -> List[str]:
+    def get_output(self) -> list[str]:
         with self.output_lock:
             return self.output
 

@@ -1,6 +1,6 @@
 import inspect
 import threading
-from typing import Type, List, ClassVar
+from typing import Type, ClassVar
 from dataclasses import dataclass
 from gi.repository import Adw
 
@@ -15,7 +15,7 @@ class AppSection:
     show_side_bar: bool
 
     # Registry
-    all_sections: ClassVar[List[Type]] = []
+    all_sections: ClassVar[list[Type]] = []
     _lock: ClassVar[threading.Lock] = threading.Lock()
 
 def app_section(title: str, label: str | None = None, icon: str = "default-icon", show_in_side_bar: bool = True, show_side_bar: bool = True, order: int = 999_999_999):

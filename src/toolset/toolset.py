@@ -38,9 +38,9 @@ class Toolset:
         self.in_use = False # Is any bwrap instance currently running on this toolset.
         # Current spawn settings:
         self.store_changes: bool = False
-        self.bind_options: List[str] | None = None # Binding options prepared in current spawn for bwrap command.
-        self.additional_bindings: List[BindMount] | None = None
-        self.hot_fixes: List[HotFix] | None = None
+        self.bind_options: list[str] | None = None # Binding options prepared in current spawn for bwrap command.
+        self.additional_bindings: list[BindMount] | None = None
+        self.hot_fixes: list[HotFix] | None = None
         self.work_dir: str | None = None
 
     @classmethod
@@ -92,7 +92,7 @@ class Toolset:
     # --------------------------------------------------------------------------
     # Spawning cycle:
 
-    def spawn(self, store_changes: bool = False, hot_fixes: List[HotFix] | None = None, additional_bindings: List[BindMount] | None = None):
+    def spawn(self, store_changes: bool = False, hot_fixes: list[HotFix] | None = None, additional_bindings: list[BindMount] | None = None):
         """Prepare /tmp folders for bwrap calls."""
         with self.access_lock:
             if self.spawned:
@@ -296,6 +296,14 @@ class Toolset:
                 self.in_use = False
                 raise e
 
+    def validate(self, handler: callable | None = None) -> bool:
+        """Performs various sanity checks on toolset and stores gathered results."""
+        """Returns true if all required checks succeeded."""
+        with self.access_lock:
+            if not self.spawned:
+                raise RuntimeError(f"Toolset {self} is not spawned.")
+
+
 @dataclass
 class BindMount:
     mount_path: str                 # Mount location inside the isolated environment.
@@ -306,7 +314,7 @@ class BindMount:
     create_if_missing: bool = False # Creates directory if not found on host.
 
 @root_function
-def _start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str], command_to_run: str):
+def _start_toolset_command(work_dir: str, fake_root: str, bind_options: list[str], command_to_run: str):
     import subprocess
     #subprocess.run(["chown", "-R", "root:root", work_dir], check=True) # This could change the ownership of work_dir for root, but probably is not needed.
     cmd_bwrap = (
