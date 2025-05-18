@@ -7,6 +7,7 @@ from .runtime_env import RuntimeEnv
 
 class HotFix(Enum):
     SNAKEOIL_NAMESPACES_FAKE = auto()
+    DEFAULT_NAMESERVERS = auto()
 
     @classmethod
     @property
@@ -20,6 +21,11 @@ class HotFix(Enum):
                 return PatchSpec( # This patch fakes unshare call making it possible to run catalyst inside isolated env.
                             source_path="/usr/lib/python3.12/site-packages/snakeoil/process/namespaces.py",
                             patch_filename="namespaces.patch"  # The patch file inside patches/
+                        )
+            case HotFix.DEFAULT_NAMESERVERS:
+                return PatchSpec( # Adds default Google nameservers
+                            source_path="/etc/resolv.conf",
+                            patch_filename="default-resolv-conf.patch"
                         )
 
 @dataclass
