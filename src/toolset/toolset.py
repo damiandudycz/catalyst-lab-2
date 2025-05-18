@@ -431,7 +431,14 @@ ToolsetApplication.CATALYST = ToolsetApplication(
     is_recommended=True, is_highly_recommended=True,
     portage_config=(
         ToolsetApplication.PortageConfig(directory="package.accept_keywords", entries=("dev-util/catalyst",)),
-        ToolsetApplication.PortageConfig(directory="package.use", entries=(">=sys-apps/util-linux-2.40.4 python",">=sys-boot/grub-2.12-r6 grub_platforms_efi-64",)),
+        ToolsetApplication.PortageConfig(
+            directory="package.use",
+            entries=(
+                ">=sys-apps/util-linux-2.40.4 python",
+                ">=sys-boot/grub-2.12-r6 grub_platforms_efi-64",
+                ">=sys-boot/grub-2.12-r6 grub_platforms_efi-32",
+            )
+        ),
     )
 )
 ToolsetApplication.GENTOO_SOURCES = ToolsetApplication(
@@ -442,7 +449,22 @@ ToolsetApplication.GENTOO_SOURCES = ToolsetApplication(
 ToolsetApplication.QEMU = ToolsetApplication(
     name="Qemu", description="Allows building stages for different architectures",
     package="app-emulation/qemu",
-    is_recommended=True
+    is_recommended=True,
+    portage_config=(
+        ToolsetApplication.PortageConfig(
+            directory="package.use",
+            entries=(
+                "app-emulation/qemu static-user",
+                "dev-libs/glib static-libs",
+                "sys-libs/zlib static-libs",
+                "sys-apps/attr static-libs",
+                "dev-libs/libpcre2 static-libs",
+                "sys-libs/libcap static-libs",
+                "*/* QEMU_SOFTMMU_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                "*/* QEMU_USER_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+            )
+        ),
+    )
 )
 
 # ------------------------------------------------------------------------------
@@ -498,6 +520,7 @@ class ToolsetInstallationStep(ABC):
                 return_value = response.code == ServerResponseStatusCode.OK
                 done_event.set()
             def output_handler(output_line: str):
+                print(output_line)
                 progress = progress_handler(output_line)
                 if progress is not None:
                     self._update_progress(progress)
@@ -650,7 +673,8 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
 
         for config in self.app.portage_config:
             insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app.name, toolset_root=tmp_toolset.toolset_root())
-        result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command=f"emerge {self.app.package}", progress_handler=progress_handler)
+        flags = "--getbinpkg" if self.installer.allow_binpkgs else ""
+        result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command=f"emerge {flags} {self.app.package}", progress_handler=progress_handler)
         self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
 
 @root_function
