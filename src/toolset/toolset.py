@@ -318,6 +318,8 @@ def _start_toolset_command(work_dir: str, fake_root: str, bind_options: List[str
         "--dev /dev "
         "--proc /proc "
         "--setenv HOME / "
+        "--setenv LANG C.UTF-8 "
+        "--setenv LC_ALL C.UTF-8 "
     )
     arguments_string = " ".join(bind_options) + " bash -c '" + command_to_run + "'"
     exec_call = cmd_bwrap + arguments_string
@@ -536,6 +538,7 @@ class ToolsetInstallationStep(ABC):
             print(f"Error synchronizing portage: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
             return False
+
 # Steps implementations:
 
 class ToolsetInstallationStepDownload(ToolsetInstallationStep):
@@ -629,8 +632,18 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
             tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), squashfs_file=tmp_stage_extract_dir)
             self.installer.tmp_toolset = tmp_toolset
             tmp_toolset.spawn(store_changes=True) # TODO: Add tmp dirs for portage etc., mount with store_changes
-            result_getuto = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command="getuto")
-            self.complete(ToolsetInstallationStepState.COMPLETED if result_getuto else ToolsetInstallationStepState.FAILED)
+            commands = [
+                "env-update && source /etc/profile",
+                "getuto"
+            ]
+            for i, command in enumerate(commands):
+                print(f"# {command}")
+                result = self.run_command_in_toolset(tmp_toolset=tmp_toolset, command=command)
+                self._update_progress((i + 1) / len(commands))
+                if not result:
+                    self.complete(ToolsetInstallationStepState.FAILED)
+                    return
+            self.complete(ToolsetInstallationStepState.COMPLETED)
         except Exception as e:
             print(f"Error spawning temporary toolset: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
@@ -669,7 +682,7 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
             match = re.match(pattern, output_line)
             if match:
                 n, m = map(int, match.groups())
-                return float(n) / float(m)
+                return n / m
 
         for config in self.app.portage_config:
             insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app.name, toolset_root=tmp_toolset.toolset_root())
