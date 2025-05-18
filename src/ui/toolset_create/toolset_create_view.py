@@ -25,17 +25,21 @@ from .toolset import (
 class ToolsetCreateView(Gtk.Box):
     __gtype_name__ = "ToolsetCreateView"
 
+    # Main views:
     setup_view = Gtk.Template.Child()
     install_view = Gtk.Template.Child()
+    # Setup view elements:
     carousel = Gtk.Template.Child()
-    allow_binpkgs_checkbox = Gtk.Template.Child()
+    welcome_page = Gtk.Template.Child()
     configuration_page = Gtk.Template.Child()
     tools_page = Gtk.Template.Child()
     stages_list = Gtk.Template.Child()
-    installation_steps_list = Gtk.Template.Child()
     tools_list = Gtk.Template.Child()
+    allow_binpkgs_checkbox = Gtk.Template.Child()
     back_button = Gtk.Template.Child()
     next_button = Gtk.Template.Child()
+    # Install view elements:
+    installation_steps_list = Gtk.Template.Child()
     cancel_button = Gtk.Template.Child()
     finish_button = Gtk.Template.Child()
 
@@ -96,7 +100,10 @@ class ToolsetCreateView(Gtk.Box):
         self.allow_binpkgs = checkbox.get_active()
 
     def _start_installation(self):
-        selected_apps = [app for app, selected in self.tools_selection.items() if selected]
+        selected_apps = [
+            app for app, selected in self.tools_selection.items()
+            if selected and all(self.tools_selection.get(dep, False) for dep in getattr(app, "dependencies", ()))
+        ]
         self.installation_in_progress = ToolsetInstallation(
             stage_url=self.selected_stage,
             allow_binpkgs=self.allow_binpkgs,
@@ -140,14 +147,14 @@ class ToolsetCreateView(Gtk.Box):
                 ))
                 self.selected_stage = sorted_stages[0]
             self._stage_rows = []
-            check_buttons_group = []
+            tools_check_buttons_group = []
             for stage in sorted_stages:
                 filename = os.path.basename(stage.geturl())
                 row = Adw.ActionRow(title=filename)
                 check_button = Gtk.CheckButton()
                 check_button.set_active(stage == self.selected_stage)
-                if check_buttons_group:
-                    check_button.set_group(check_buttons_group[0])
+                if tools_check_buttons_group:
+                    check_button.set_group(tools_check_buttons_group[0])
                 if ToolsetCreateView._is_recommended_stage(filename, self.architecture):
                     # Mark first entry as recommended
                     label = Gtk.Label(label="Recommended")
@@ -155,7 +162,7 @@ class ToolsetCreateView(Gtk.Box):
                     label.add_css_class("caption")
                     row.add_suffix(label)
                 check_button.connect("toggled", self._on_stage_selected, stage)
-                check_buttons_group.append(check_button)
+                tools_check_buttons_group.append(check_button)
                 row.add_prefix(check_button)
                 row.set_activatable_widget(check_button)
                 self.stages_list.add(row)
@@ -175,6 +182,7 @@ class ToolsetCreateView(Gtk.Box):
         """Callback for when a row's checkbox is toggled."""
         self.tools_selection[app] = button.get_active()
         self.setup_back_next_buttons()
+        self._update_dependencies()
 
     @staticmethod
     def _is_recommended_stage(filename: str, architecture: Architecture) -> bool:
@@ -191,21 +199,36 @@ class ToolsetCreateView(Gtk.Box):
             return False
 
     def _load_applications_rows(self):
+        self.tools_rows = {}
+        self.tools_check_buttons = {}
         for app in ToolsetApplication.ALL:
             row = Adw.ActionRow(title=app.name)
             row.set_subtitle(app.description)
             check_button = Gtk.CheckButton()
             check_button.set_active(self.tools_selection.get(app))
+            check_button.connect("toggled", self._on_tool_selected, app)
             if app.is_recommended or app.is_highly_recommended:
-                # Mark first entry as recommended
                 label = Gtk.Label(label="Recommended" if not app.is_highly_recommended else "Highly recommended")
                 label.add_css_class("dim-label")
                 label.add_css_class("caption")
                 row.add_suffix(label)
-            check_button.connect("toggled", self._on_tool_selected, app)
             row.add_prefix(check_button)
             row.set_activatable_widget(check_button)
             self.tools_list.add(row)
+            self.tools_rows[app] = row
+            self.tools_check_buttons[app] = check_button
+        # After building all rows, update sensitivity based on current state
+        self._update_dependencies()
+
+    def _update_dependencies(self):
+        for app, row in self.tools_rows.items():
+            dependencies_satisfied = all(
+                self.tools_check_buttons.get(dep, Gtk.CheckButton()).get_active()
+                for dep in getattr(app, "dependencies", ())
+            )
+            is_sensitive = dependencies_satisfied
+            row.set_sensitive(is_sensitive)
+            self.tools_check_buttons[app].set_sensitive(is_sensitive)
 
     def _set_current_stage(self, stage: ToolsetInstallationStage):
         self.current_stage = stage
@@ -238,7 +261,7 @@ class ToolsetCreateView(Gtk.Box):
             for row in self._installation_rows:
                 self.installation_steps_list.remove(row)
         self._installation_rows = []
-        check_buttons_group = []
+        tools_check_buttons_group = []
         for step in steps:
             row = ToolsetInstallationStepRow(step=step, owner=self)
             self.installation_steps_list.add(row)

@@ -302,7 +302,7 @@ class Toolset:
         with self.access_lock:
             if not self.spawned:
                 raise RuntimeError(f"Toolset {self} is not spawned.")
-
+        # TODO ...
 
 @dataclass
 class BindMount:
@@ -425,6 +425,7 @@ class ToolsetApplication:
     is_recommended: bool = False
     is_highly_recommended: bool = False
     portage_config: Tuple[ToolsetApplication.PortageConfig, ...] = field(default_factory=tuple)
+    dependencies: Tuple[ToolsetApplication, ...] = field(default_factory=tuple)
     def __post_init__(self):
         # Automatically add new instances to ToolsetApplication.ALL
         ToolsetApplication.ALL.append(self)
@@ -433,7 +434,6 @@ class ToolsetApplication:
          # eq: { "packages.use": ["Entry1", "Entry2"], "package.accept_keywords": ["Entry1", "Entry2"] }
         directory: str
         entries: Tuple[str, ...] = field(default_factory=tuple)
-
 
 ToolsetApplication.CATALYST = ToolsetApplication(
     name="Catalyst", description="Required to build Gentoo stages",
@@ -474,7 +474,8 @@ ToolsetApplication.QEMU = ToolsetApplication(
                 "*/* QEMU_USER_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
             )
         ),
-    )
+    ),
+    dependencies=(ToolsetApplication.GENTOO_SOURCES,)
 )
 
 # ------------------------------------------------------------------------------
