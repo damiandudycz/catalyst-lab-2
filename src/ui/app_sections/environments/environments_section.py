@@ -5,7 +5,7 @@ from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset
 from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent
+from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage
 from .hotfix_patching import HotFix
 from .root_function import root_function
 from .root_helper_client import RootHelperClient
@@ -85,17 +85,13 @@ class EnvironmentsSection(Gtk.Box):
         self._installation_rows = []
 
         for installation in started_installations:
-            action_row = Adw.ActionRow()
-            action_row.set_title(installation.name())
-            action_row.set_icon_name("preferences-other-symbolic")
-            action_row._installation = installation
+            action_row = ToolsetInstallationRow(installation=installation)
             action_row.connect("activated", self.on_installation_pressed)
-            action_row.set_activatable(True)
             self.toolset_installations_list.append(action_row)
             self._installation_rows.append(action_row)
 
     def on_installation_pressed(self, sender):
-        installation = getattr(sender, "_installation", None)
+        installation = getattr(sender, "installation", None)
         if installation:
             app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(installation_in_progress=installation), "New toolset", 640, 480)
 
@@ -127,29 +123,45 @@ class EnvironmentsSection(Gtk.Box):
             (toolset for toolset in Settings.current().get_toolsets() if toolset.env == ToolsetEnv.SYSTEM),
             None  # default if no match found
         )
-
         if not system_toolset:
             raise RuntimeError("System host env not available")
-
         if not system_toolset.spawned:
             system_toolset.spawn()
-        print(f"{system_toolset} -> {system_toolset.toolset_root()} : {system_toolset.work_dir}")
-        call = system_toolset.run_command(command="find /var/db/repos", completion_handler=lambda x: print(f">>>> {x}"))
-        print(call)
+        system_toolset.analyze()
 
-@root_function
-def stubborn_worker():
-    def handle_sigterm(signum, frame):
-        print(f"Process {os.getpid()} received SIGTERM but will ignore it.")
-        # You can either ignore or do something here, but the process will not exit
+class ToolsetInstallationRow(Adw.ActionRow):
 
-    # Override SIGTERM handler
-    signal.signal(signal.SIGTERM, handle_sigterm)
+    def __init__(self, installation: ToolsetInstallation):
+        super().__init__(title=installation.name())
+        self.installation = installation
+        self.set_activatable(True)
+        self._set_status_icon(status=installation.status)
+        installation.event_bus.subscribe(
+            ToolsetInstallationEvent.STATE_CHANGED,
+            self._set_status_icon
+        )
 
-    print(f"Process {os.getpid()} started")
-    i = 0
-    while True:
-        print(f"Tick {i}...")
-        i += 1
-        time.sleep(0.01)
-
+    def _set_status_icon(self, status: ToolsetInstallationStage):
+        if not hasattr(self, "status_icon"):
+            self.status_icon = Gtk.Image()
+            self.status_icon.set_pixel_size(24)
+            self.add_prefix(self.status_icon)
+        icon_name = {
+            ToolsetInstallationStage.SETUP: "square-alt-arrow-right-svgrepo-com-symbolic",
+            ToolsetInstallationStage.INSTALL: "menu-dots-square-svgrepo-com-symbolic",
+            ToolsetInstallationStage.FAILED: "error-box-svgrepo-com-symbolic",
+            ToolsetInstallationStage.COMPLETED: "check-square-svgrepo-com-symbolic"
+        }.get(status)
+        styles = {
+            ToolsetInstallationStage.SETUP: "dimmed",
+            ToolsetInstallationStage.INSTALL: "",
+            ToolsetInstallationStage.FAILED: "error",
+            ToolsetInstallationStage.COMPLETED: "success"
+        }
+        style = styles.get(status)
+        self.status_icon.set_from_icon_name(icon_name)
+        for css_class in styles.values():
+            if css_class:
+                self.status_icon.remove_css_class(css_class)
+        if style:
+            self.status_icon.add_css_class(style)

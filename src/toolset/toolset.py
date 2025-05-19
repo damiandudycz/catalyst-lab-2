@@ -388,7 +388,8 @@ class ToolsetInstallation:
         self.steps.append(ToolsetInstallationStepDownload(url=self.stage_url, installer=self))
         self.steps.append(ToolsetInstallationStepExtract(installer=self))
         self.steps.append(ToolsetInstallationStepSpawn(installer=self))
-        self.steps.append(ToolsetInstallationStepUpdatePortage(installer=self))
+        if self.selected_apps:
+            self.steps.append(ToolsetInstallationStepUpdatePortage(installer=self))
         for app in self.selected_apps:
             self.steps.append(ToolsetInstallationStepInstallApp(app=app, installer=self))
         self.steps.append(ToolsetInstallationStepVerify(installer=self))
