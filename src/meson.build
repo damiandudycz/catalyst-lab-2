@@ -37,6 +37,7 @@ catalystlab_sources = [
   'global_objects/settings.py',
   'global_objects/modules_scanner.py',
   'global_objects/architecture.py',
+  'global_objects/repository.py',
   'root_helper/root_function.py',
   'root_helper/root_helper_client.py',
   'root_helper/root_helper_server.py',

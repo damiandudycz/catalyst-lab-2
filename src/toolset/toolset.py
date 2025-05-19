@@ -15,9 +15,10 @@ from .architecture import Architecture
 from .event_bus import EventBus
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
+from .repository import Serializable, Repository
 
 @final
-class Toolset:
+class Toolset(Serializable):
     """Class containing details of the Toolset instances."""
     """Only metadata, no functionalities."""
     """Functionalities are handled by ToolsetContainer."""
@@ -49,7 +50,7 @@ class Toolset:
         try:
             uuid_value = uuid.UUID(data["uuid"])
             env = ToolsetEnv[data["env"]]
-            name = ToolsetEnv[data["name"]]
+            name = str(data["name"])
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         kwargs = {}

@@ -13,6 +13,7 @@ from .root_helper_server import ServerCommand
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
 import time
+from .repository import Serializable, Repository
 
 @app_section(title="Environments", icon="preferences-other-symbolic", order=2_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments/environments_section.ui')
@@ -97,7 +98,11 @@ class EnvironmentsSection(Gtk.Box):
             return
         # If checkbox is checked, place it at the start of the list
         if checkbox.get_active():
-            Settings.current().add_toolset(Toolset.create_system())
+            system_toolset = Toolset.create_system()
+            repository = Repository(cls=Toolset, collection=True)
+            repository.save([system_toolset])
+
+            Settings.current().add_toolset(system_toolset)
         elif (ts := Settings.current().get_toolset_matching(lambda ts: ts.env == ToolsetEnv.SYSTEM)):
             Settings.current().remove_toolset(ts)
 
