@@ -102,22 +102,6 @@
           </object>
         </child>
 
-        <child>
-          <object class="GtkLabel">
-            <property name="label">Started installations:</property>
-            <property name="halign">start</property>
-          </object>
-        </child>
-
-        <child>
-          <object class="GtkListBox" id="toolset_installations_list">
-            <property name="selection-mode">none</property>
-            <style>
-              <class name="boxed-list"/>
-            </style>
-          </object>
-        </child>
-
       </object>
     </child>
 

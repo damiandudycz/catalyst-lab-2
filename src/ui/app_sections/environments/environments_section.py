@@ -23,7 +23,6 @@ class EnvironmentsSection(Gtk.Box):
     toolset_system_checkbox = Gtk.Template.Child()
     toolset_system_validate_button = Gtk.Template.Child()
     toolset_add_button = Gtk.Template.Child()
-    toolset_installations_list = Gtk.Template.Child()
     external_toolsets_container = Gtk.Template.Child()
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
@@ -34,8 +33,6 @@ class EnvironmentsSection(Gtk.Box):
         self._load_system_toolset()
         # Setup external env entries
         self._load_external_toolsets()
-        # Setup ongoing installations
-        self._load_installations()
         # Subscribe to relevant events
         Settings.current().event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
         ToolsetInstallation.event_bus.subscribe(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, self.toolsets_installations_updated)
@@ -45,7 +42,7 @@ class EnvironmentsSection(Gtk.Box):
         self._load_external_toolsets()
 
     def toolsets_installations_updated(self, started_installations: list[ToolsetInstallation] = ToolsetInstallation.started_installations):
-        self._load_installations(started_installations=started_installations)
+        self._load_external_toolsets(started_installations=started_installations)
 
     def _load_system_toolset(self):
         if ToolsetEnv.SYSTEM.is_allowed_in_current_host():
@@ -57,7 +54,7 @@ class EnvironmentsSection(Gtk.Box):
             self._set_toolset_system_checkbox_active(False)
             self.toolset_system_validate_button.set_visible(False)
 
-    def _load_external_toolsets(self):
+    def _load_external_toolsets(self, started_installations: list[ToolsetInstallation] = ToolsetInstallation.started_installations):
         # Remove previously added toolset rows
         if hasattr(self, "_external_toolset_rows"):
             for row in self._external_toolset_rows:
@@ -77,18 +74,11 @@ class EnvironmentsSection(Gtk.Box):
             self.external_toolsets_container.insert(action_row, 0)
             self._external_toolset_rows.append(action_row)
 
-    def _load_installations(self, started_installations: list[ToolsetInstallation] = ToolsetInstallation.started_installations):
-        # Remove previously added installation rows
-        if hasattr(self, "_installation_rows"):
-            for row in self._installation_rows:
-                self.toolset_installations_list.remove(row)
-        self._installation_rows = []
-
         for installation in started_installations:
             action_row = ToolsetInstallationRow(installation=installation)
             action_row.connect("activated", self.on_installation_pressed)
-            self.toolset_installations_list.append(action_row)
-            self._installation_rows.append(action_row)
+            self.external_toolsets_container.insert(action_row, 0)
+            self._external_toolset_rows.append(action_row)
 
     def on_installation_pressed(self, sender):
         installation = getattr(sender, "installation", None)
