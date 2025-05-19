@@ -128,6 +128,7 @@ class ToolsetCreateView(Gtk.Box):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
             self.content_navigation_view.pop()
+        self.installation_in_progress.clean_from_started_installations()
 
     def _update_stages_result(self, result: list[ParseResult] | Exception):
         self.selected_stage = None
@@ -137,6 +138,8 @@ class ToolsetCreateView(Gtk.Box):
         # Refresh list of results
         if isinstance(result, Exception):
             error_label = Gtk.Label(label=f"Error: {str(result)}")
+            error_label.set_wrap(True)
+            error_label.set_halign(Gtk.Align.START)
             self.stages_list.add(error_label)
             self._stage_rows = [error_label]
         else:
@@ -224,10 +227,17 @@ class ToolsetCreateView(Gtk.Box):
 
     def _update_dependencies(self):
         for app, row in self.tools_rows.items():
-            dependencies_satisfied = all(
-                self.tools_check_buttons.get(dep, Gtk.CheckButton()).get_active() or dep.auto_select
-                for dep in getattr(app, "dependencies", ())
-            )
+            # Create the comma-separated string of unmet dependencies
+            unmet_dependencies = ", ".join([
+                dep.name for dep in getattr(app, "dependencies", ())
+                if not (self.tools_check_buttons.get(dep, Gtk.CheckButton()).get_active() or dep.auto_select)
+            ])
+            if unmet_dependencies:
+                 row.set_title(f"{app.name} (requires: {unmet_dependencies})")
+            else:
+                row.set_title(app.name)
+            # Check if all dependencies are satisfied (i.e., no unmet dependencies)
+            dependencies_satisfied = not unmet_dependencies
             is_sensitive = dependencies_satisfied
             row.set_sensitive(is_sensitive)
             self.tools_check_buttons[app].set_sensitive(is_sensitive)

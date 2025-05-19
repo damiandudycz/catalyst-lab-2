@@ -441,6 +441,12 @@ class ToolsetInstallation:
         ToolsetInstallation.started_installations.remove(self)
         ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
 
+    def clean_from_started_installations(self):
+        if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED:
+            if self in ToolsetInstallation.started_installations:
+                ToolsetInstallation.started_installations.remove(self)
+                ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
+
     def _cleanup(self):
         for step in reversed(self.steps): # Cleanup in reverse order
             step.cleanup()
@@ -515,7 +521,7 @@ ToolsetApplication.CATALYST = ToolsetApplication(
 ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
     name="Linux headers", description="Needed for qemu/cmake",
     package="sys-kernel/linux-headers",
-    is_recommended=True, auto_select=True
+    auto_select=True
 )
 ToolsetApplication.QEMU = ToolsetApplication(
     name="Qemu", description="Allows building stages for different architectures",
