@@ -202,6 +202,8 @@ class ToolsetCreateView(Gtk.Box):
         self.tools_rows = {}
         self.tools_check_buttons = {}
         for app in ToolsetApplication.ALL:
+            if app.auto_select:
+                continue # Don't show automatic dependencies
             row = Adw.ActionRow(title=app.name)
             row.set_subtitle(app.description)
             check_button = Gtk.CheckButton()
@@ -223,7 +225,7 @@ class ToolsetCreateView(Gtk.Box):
     def _update_dependencies(self):
         for app, row in self.tools_rows.items():
             dependencies_satisfied = all(
-                self.tools_check_buttons.get(dep, Gtk.CheckButton()).get_active()
+                self.tools_check_buttons.get(dep, Gtk.CheckButton()).get_active() or dep.auto_select
                 for dep in getattr(app, "dependencies", ())
             )
             is_sensitive = dependencies_satisfied

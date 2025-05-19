@@ -380,10 +380,34 @@ class ToolsetInstallation:
         self.stage_url = stage_url
         self.allow_binpkgs = allow_binpkgs
         self.selected_apps = selected_apps
+        self.process_selected_apps()
         self.steps: list[ToolsetInstallationStep] = []
         self.event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
         self.status = ToolsetInstallationStage.INSTALL
         self._setup_steps()
+
+    def process_selected_apps(self):
+        """Manage auto_select dependencies."""
+        apps = self.selected_apps[:]
+        # First, remove any app that is marked as auto_select
+        for app in self.selected_apps:
+            if app.auto_select:
+                print(f"Remove dep: {app.name}")
+                apps.remove(app)
+        # Add dependencies of selected apps that aren't already in the list
+        for app in self.selected_apps:
+            for dep in app.dependencies:
+                if dep not in apps:
+                    print(f"Add dep: {dep.name}")
+                    apps.append(dep)
+        # Sort the apps so that dependencies come before the apps that need them
+        # This assumes that each app has a list of dependencies and dependencies are in the `dependencies` list
+        def sort_key(app):
+            # Priority to apps that are dependencies of other apps (should come later in the list)
+            return [dep.name for dep in app.dependencies]
+        apps.sort(key=sort_key)  # Sort apps so that dependencies appear first
+        # Assign the sorted list back to selected_apps
+        self.selected_apps = apps
 
     def _setup_steps(self):
         self.steps.append(ToolsetInstallationStepDownload(url=self.stage_url, installer=self))
@@ -422,6 +446,8 @@ class ToolsetInstallation:
             step.cleanup()
 
     def _continue_installation(self):
+        if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED:
+            return # Prevents displaying multiple failure messages in some cases.
         next_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.SCHEDULED), None)
         failed_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.FAILED), None)
         if failed_step:
@@ -460,6 +486,7 @@ class ToolsetApplication:
     is_highly_recommended: bool = False
     portage_config: Tuple[ToolsetApplication.PortageConfig, ...] = field(default_factory=tuple)
     dependencies: Tuple[ToolsetApplication, ...] = field(default_factory=tuple)
+    auto_select: bool = False # Automatically select / deselect for apps that depends on this one.
     def __post_init__(self):
         # Automatically add new instances to ToolsetApplication.ALL
         ToolsetApplication.ALL.append(self)
@@ -488,7 +515,7 @@ ToolsetApplication.CATALYST = ToolsetApplication(
 ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
     name="Linux headers", description="Needed for qemu/cmake",
     package="sys-kernel/linux-headers",
-    is_recommended=True
+    is_recommended=True, auto_select=True
 )
 ToolsetApplication.QEMU = ToolsetApplication(
     name="Qemu", description="Allows building stages for different architectures",
