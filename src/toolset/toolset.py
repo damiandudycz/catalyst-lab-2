@@ -21,9 +21,10 @@ class Toolset:
     """Class containing details of the Toolset instances."""
     """Only metadata, no functionalities."""
     """Functionalities are handled by ToolsetContainer."""
-    def __init__(self, env: ToolsetEnv, uuid: UUID, **kwargs):
+    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, **kwargs):
         self.uuid = uuid
         self.env = env
+        self.name = name
         match env:
             case ToolsetEnv.SYSTEM:
                 pass
@@ -48,6 +49,7 @@ class Toolset:
         try:
             uuid_value = uuid.UUID(data["uuid"])
             env = ToolsetEnv[data["env"]]
+            name = ToolsetEnv[data["name"]]
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         kwargs = {}
@@ -59,12 +61,13 @@ class Toolset:
                 if not isinstance(squashfs_file, str):
                     raise ValueError("Missing or invalid 'squashfs_file' for EXTERNAL environment")
                 kwargs["squashfs_file"] = squashfs_file
-        return cls(env, uuid_value, **kwargs)
+        return cls(env, uuid_value, name, **kwargs)
 
     def serialize(self) -> dict:
         data = {
             "uuid": str(self.uuid),
-            "env": self.env.name
+            "env": self.env.name,
+            "name": self.name
         }
         if self.env == ToolsetEnv.EXTERNAL:
             data["squashfs_file"] = self.squashfs_file
@@ -73,12 +76,12 @@ class Toolset:
     @staticmethod
     def create_system() -> Toolset:
         """Create a Toolset with the SYSTEM environment."""
-        return Toolset(ToolsetEnv.SYSTEM, uuid.uuid4())
+        return Toolset(ToolsetEnv.SYSTEM, uuid.uuid4(), "Host system")
 
     @staticmethod
-    def create_external(squashfs_file: str) -> Toolset:
+    def create_external(squashfs_file: str, name: str) -> Toolset:
         """Create a Toolset with the EXTERNAL environment and a specified squashfs file."""
-        return Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), squashfs_file=squashfs_file)
+        return Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), name, squashfs_file=squashfs_file)
 
     def is_allowed_in_current_host() -> bool:
         return self.env.is_running_in_gentoo_host()
@@ -135,10 +138,11 @@ class Toolset:
                 if bind.toolset_path:
                     bind.host_path = os.path.join(resolved_toolset_root, bind.toolset_path.lstrip("/"))
 
-            work_dir = Path(tempfile.mkdtemp(prefix="gentoo_toolset_spawn_"))
             bind_options = []
             try:
                 OverlayPaths = namedtuple("OverlayPaths", ["upper", "work"])
+                # TODO: Creating all these directories as root
+                work_dir = Path(tempfile.mkdtemp(prefix="gentoo_toolset_spawn_")) # , dir="/var/tmp")
 
                 # Prepare work dirs:
                 fake_root = os.path.join(work_dir, "fake_root")
@@ -235,6 +239,7 @@ class Toolset:
                             ])
                         continue
             except Exception as e:
+                print(e)
                 shutil.rmtree(work_dir, ignore_errors=True)
                 raise e
 
@@ -358,13 +363,17 @@ class ToolsetEnv(Enum):
 @final
 class ToolsetInstallationEvent(Enum):
     """Events produced by installation."""
+    # Instance events:
     STATE_CHANGED = auto()
+    # Class events:
+    STARTED_INSTALLATIONS_CHANGED = auto()
 
 class ToolsetInstallation:
     """Handles the full toolset installation lifecycle."""
 
     # Remembers installations started in current app cycle. Never removed, even after finishing.
     started_installations: list[ToolsetInstallation] = []
+    event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
 
     def __init__(self, stage_url: ParseResult, allow_binpkgs: bool, selected_apps: list[ToolsetApplication]):
         self.stage_url = stage_url
@@ -386,14 +395,25 @@ class ToolsetInstallation:
         self.steps.append(ToolsetInstallationStepCleanup(installer=self))
         self.steps.append(ToolsetInstallationStepCompress(installer=self))
 
+    def name(self) -> str:
+        file_path = Path(self.stage_url.path)
+        suffixes = file_path.suffixes
+        filename_without_extension = file_path.stem
+        for suffix in suffixes:
+            filename_without_extension = filename_without_extension.rstrip(suffix)
+        return filename_without_extension
+
     def start(self):
         ToolsetInstallation.started_installations.append(self)
+        ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
         self._continue_installation()
 
     def cancel(self):
         running_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.IN_PROGRESS), None)
         if running_step:
             running_step.cancel()
+        ToolsetInstallation.started_installations.remove(self)
+        ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
 
     def _cleanup(self):
         for step in reversed(self.steps): # Cleanup in reverse order
@@ -413,6 +433,8 @@ class ToolsetInstallation:
             self.status = ToolsetInstallationStage.COMPLETED
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             self._cleanup()
+            ToolsetInstallation.started_installations.remove(self)
+            ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""
@@ -460,9 +482,9 @@ ToolsetApplication.CATALYST = ToolsetApplication(
         ),
     )
 )
-ToolsetApplication.GENTOO_SOURCES = ToolsetApplication(
-    name="Gentoo sources", description="Needed for qemu/cmake",
-    package="sys-kernel/gentoo-sources",
+ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
+    name="Linux headers", description="Needed for qemu/cmake",
+    package="sys-kernel/linux-headers",
     is_recommended=True
 )
 ToolsetApplication.QEMU = ToolsetApplication(
@@ -484,7 +506,7 @@ ToolsetApplication.QEMU = ToolsetApplication(
             )
         ),
     ),
-    dependencies=(ToolsetApplication.GENTOO_SOURCES,)
+    dependencies=(ToolsetApplication.LINUX_HEADERS,)
 )
 
 # ------------------------------------------------------------------------------
@@ -505,7 +527,7 @@ class ToolsetInstallationStepEvent(Enum):
 
 class ToolsetInstallationStep(ABC):
     """Base class for toolset installation steps."""
-    def __init__(self, name: str, description: str, installer: ToolsetCreateView):
+    def __init__(self, name: str, description: str, installer: ToolsetInstallation):
         self.state = ToolsetInstallationStepState.SCHEDULED
         self.name = name
         self.description = description
@@ -522,6 +544,10 @@ class ToolsetInstallationStep(ABC):
         if self.state == ToolsetInstallationStepState.IN_PROGRESS:
             self.complete(ToolsetInstallationStepState.FAILED)
             self._cancel_event.set()
+        if self.server_call:
+            self.server_call.cancel()
+            if self.server_call.thread:
+                self.server_call.thread.join()
     @abstractmethod
     def cleanup(self) -> bool:
         # TODO: Consider what to do if some cleaning fails, and next cleanings could mess up mounted files.
@@ -576,7 +602,7 @@ class ToolsetInstallationStep(ABC):
 # Steps implementations:
 
 class ToolsetInstallationStepDownload(ToolsetInstallationStep):
-    def __init__(self, url: ParseResult, installer: ToolsetCreateView):
+    def __init__(self, url: ParseResult, installer: ToolsetInstallation):
         super().__init__(name="Download stage tarball", description="Downloading Gentoo stage tarball", installer=installer)
         self.url = url
     def start(self):
@@ -614,12 +640,12 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
         return True
 
 class ToolsetInstallationStepExtract(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
+    def __init__(self, installer: ToolsetInstallation):
         super().__init__(name="Extract stage tarball", description="Extracts Gentoo stage tarball to work directory", installer=installer)
     def start(self):
         super().start()
         try:
-            self.installer.tmp_stage_extract_dir = tempfile.mkdtemp(prefix="gentoo_stage_extract_")
+            self.installer.tmp_stage_extract_dir = tempfile.mkdtemp(prefix="gentoo_stage_extract_") # , dir="/var/tmp"
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -646,12 +672,6 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error extracting stage tarball: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-    def cancel(self):
-        super().cancel()
-        if self.server_call:
-            self.server_call.cancel()
-            if self.server_call.thread:
-                self.server_call.thread.join()
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
@@ -664,13 +684,14 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
         return True
 
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
+    def __init__(self, installer: ToolsetInstallation):
         super().__init__(name="Create environment", description="Prepares Gentoo environment for work", installer=installer)
     def start(self):
         super().start()
         try:
-            self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), squashfs_file=self.installer.tmp_stage_extract_dir)
-            self.installer.tmp_toolset.spawn(store_changes=True) # TODO: Add tmp dirs for portage etc., mount with store_changes
+            self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), self.installer.name(), squashfs_file=self.installer.tmp_stage_extract_dir)
+            self.installer.tmp_toolset.spawn(store_changes=True, additional_bindings=[BindMount(mount_path="/var/cache", create_if_missing=True)])
+            # TODO: Add tmp dirs for portage etc., mount with store_changes
             commands = [
                 "env-update && source /etc/profile",
                 "getuto"
@@ -688,18 +709,12 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error spawning temporary toolset: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-    def cancel(self):
-        super().cancel()
-        if self.server_call:
-            self.server_call.cancel()
-            if self.server_call.thread:
-                self.server_call.thread.join()
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
 
 class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
+    def __init__(self, installer: ToolsetInstallation):
         super().__init__(name="Synchronize portage", description="Synchronizes portage tree", installer=installer)
     def start(self):
         super().start()
@@ -721,19 +736,13 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error synchronizing Portage: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-    def cancel(self):
-        super().cancel()
-        if self.server_call:
-            self.server_call.cancel()
-            if self.server_call.thread:
-                self.server_call.thread.join()
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
 
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
-    def __init__(self, app: ToolsetApplication, installer: ToolsetCreateView):
-        super().__init__(name=f"Install {app.name}", description=f"Configures and emerges {app.name}", installer=installer)
+    def __init__(self, app: ToolsetApplication, installer: ToolsetInstallation):
+        super().__init__(name=f"Install {app.name}", description=f"Emerges {app.package} package", installer=installer)
         self.app = app
     def start(self):
         super().start()
@@ -754,24 +763,18 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error during app installation: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-    def cancel(self):
-        super().cancel()
-        if self.server_call:
-            self.server_call.cancel()
-            if self.server_call.thread:
-                self.server_call.thread.join()
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
 
 class ToolsetInstallationStepVerify(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
+    def __init__(self, installer: ToolsetInstallation):
         super().__init__(name="Verify stage", description="Checks if toolset works correctly", installer=installer)
     def start(self):
         super().start()
         try:
             analysis_result = self.installer.tmp_toolset.analyze()
-            self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
+            self.complete(ToolsetInstallationStepState.COMPLETED if analysis_result else ToolsetInstallationStepState.FAILED)
         except Exception as e:
             print(f"Error during toolset verification: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
@@ -780,7 +783,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
             return False
 
 class ToolsetInstallationStepCompress(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
+    def __init__(self, installer: ToolsetInstallation):
         super().__init__(name="Compress", description="Compresses toolset into .squashfs file", installer=installer)
     def start(self):
         super().start()
@@ -795,7 +798,7 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
             return False
 
 class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetCreateView):
+    def __init__(self, installer: ToolsetInstallation):
         super().__init__(name="Cleanup", description="Unspawns toolset and cleans up", installer=installer)
     def start(self):
         super().start()

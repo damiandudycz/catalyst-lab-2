@@ -5,7 +5,7 @@ from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset
 from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset import Toolset, ToolsetInstallation
+from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent
 from .hotfix_patching import HotFix
 from .root_function import root_function
 from .root_helper_client import RootHelperClient
@@ -23,6 +23,7 @@ class EnvironmentsSection(Gtk.Box):
     toolset_system_checkbox = Gtk.Template.Child()
     toolset_system_validate_button = Gtk.Template.Child()
     toolset_add_button = Gtk.Template.Child()
+    toolset_installations_list = Gtk.Template.Child()
     external_toolsets_container = Gtk.Template.Child()
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
@@ -33,12 +34,18 @@ class EnvironmentsSection(Gtk.Box):
         self._load_system_toolset()
         # Setup external env entries
         self._load_external_toolsets()
+        # Setup ongoing installations
+        self._load_installations()
         # Subscribe to relevant events
         Settings.current().event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
+        ToolsetInstallation.event_bus.subscribe(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, self.toolsets_installations_updated)
 
     def toolsets_updated(self):
         self._load_system_toolset()
         self._load_external_toolsets()
+
+    def toolsets_installations_updated(self, started_installations: list[ToolsetInstallation] = ToolsetInstallation.started_installations):
+        self._load_installations(started_installations=started_installations)
 
     def _load_system_toolset(self):
         if ToolsetEnv.SYSTEM.is_allowed_in_current_host():
@@ -55,6 +62,7 @@ class EnvironmentsSection(Gtk.Box):
         if hasattr(self, "_external_toolset_rows"):
             for row in self._external_toolset_rows:
                 self.external_toolsets_container.remove(row)
+        self._external_toolset_rows = []
 
         # Refresh the list
         external_toolsets = [
@@ -62,15 +70,34 @@ class EnvironmentsSection(Gtk.Box):
             if toolset.env == ToolsetEnv.EXTERNAL
         ]
 
-        self._external_toolset_rows = []
-
         for toolset in external_toolsets:
             action_row = Adw.ActionRow()
             action_row.set_title("External toolset")
-            action_row.set_icon_name("user-desktop-symbolic")
-
+            action_row.set_icon_name("preferences-other-symbolic")
             self.external_toolsets_container.insert(action_row, 0)
             self._external_toolset_rows.append(action_row)
+
+    def _load_installations(self, started_installations: list[ToolsetInstallation] = ToolsetInstallation.started_installations):
+        # Remove previously added installation rows
+        if hasattr(self, "_installation_rows"):
+            for row in self._installation_rows:
+                self.toolset_installations_list.remove(row)
+        self._installation_rows = []
+
+        for installation in started_installations:
+            action_row = Adw.ActionRow()
+            action_row.set_title(installation.name())
+            action_row.set_icon_name("preferences-other-symbolic")
+            action_row._installation = installation
+            action_row.connect("activated", self.on_installation_pressed)
+            action_row.set_activatable(True)
+            self.toolset_installations_list.append(action_row)
+            self._installation_rows.append(action_row)
+
+    def on_installation_pressed(self, sender):
+        installation = getattr(sender, "_installation", None)
+        if installation:
+            app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(installation_in_progress=installation), "New toolset", 640, 480)
 
     # Sets the state without calling a callback.
     def _set_toolset_system_checkbox_active(self, active: bool):

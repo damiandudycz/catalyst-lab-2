@@ -262,13 +262,18 @@ class ToolsetCreateView(Gtk.Box):
                 self.installation_steps_list.remove(row)
         self._installation_rows = []
         tools_check_buttons_group = []
+        running_stage_row = None
         for step in steps:
             row = ToolsetInstallationStepRow(step=step, owner=self)
             self.installation_steps_list.add(row)
             self._installation_rows.append(row)
+            if step.state == ToolsetInstallationStepState.IN_PROGRESS:
+                running_stage_row = row
+        if running_stage_row:
+            GLib.idle_add(self._scroll_to_installation_step_row, running_stage_row)
 
     def _scroll_to_installation_step_row(self, row: ToolsetInstallationStepRow):
-        def _scroll():
+        def _scroll(widget):
             scrolled_window = self.installation_steps_list.get_ancestor(Gtk.ScrolledWindow)
             vadjustment = scrolled_window.get_vadjustment()
             _, y = row.translate_coordinates(self.installation_steps_list, 0, 0)
@@ -278,7 +283,7 @@ class ToolsetCreateView(Gtk.Box):
             max_value = vadjustment.get_upper() - vadjustment.get_page_size()
             scroll_to = max(0, min(center_y, max_value))
             vadjustment.set_value(scroll_to)
-        GLib.idle_add(_scroll)
+        GLib.idle_add(_scroll, row)
 
     def _scroll_to_installation_steps_bottom(self):
         def _scroll():
@@ -320,7 +325,9 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
         self._update_status_label()
 
     def _update_status_label(self):
-        self.progress_label.set_label("" if self.step.state == ToolsetInstallationStepState.SCHEDULED else ("..." if self.step.progress is None else f"{int(self.step.progress * 100)}%"))
+        self.progress_label.set_label(
+            "" if self.step.state == ToolsetInstallationStepState.SCHEDULED else ("..." if self.step.progress is None else f"{int(self.step.progress * 100)}%")
+        )
 
     def _set_status_icon(self, state: ToolsetInstallationStepState):
         if not hasattr(self, "status_icon"):
