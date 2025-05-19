@@ -3,7 +3,6 @@ from gi.repository import Adw
 from .app_section import AppSection, app_section
 from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset
-from .settings import Settings, SettingsEvents
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage
 from .hotfix_patching import HotFix
@@ -13,7 +12,7 @@ from .root_helper_server import ServerCommand
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
 import time
-from .repository import Serializable, Repository
+from .repository import Serializable, Repository, RepositoryEvent
 
 @app_section(title="Environments", icon="preferences-other-symbolic", order=2_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments/environments_section.ui')
@@ -35,10 +34,10 @@ class EnvironmentsSection(Gtk.Box):
         # Setup external env entries
         self._load_external_toolsets()
         # Subscribe to relevant events
-        Settings.current().event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.toolsets_updated)
+        Repository.TOOLSETS.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.toolsets_updated)
         ToolsetInstallation.event_bus.subscribe(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, self.toolsets_installations_updated)
 
-    def toolsets_updated(self):
+    def toolsets_updated(self, _):
         self._load_system_toolset()
         self._load_external_toolsets()
 
@@ -47,7 +46,7 @@ class EnvironmentsSection(Gtk.Box):
 
     def _load_system_toolset(self):
         if ToolsetEnv.SYSTEM.is_allowed_in_current_host():
-            system_toolset_selected = any(toolset.env == ToolsetEnv.SYSTEM for toolset in Settings.current().get_toolsets())
+            system_toolset_selected = any(toolset.env == ToolsetEnv.SYSTEM for toolset in Repository.TOOLSETS.value)
             self._set_toolset_system_checkbox_active(system_toolset_selected)
             self.toolset_system_validate_button.set_visible(system_toolset_selected)
         else:
@@ -64,13 +63,13 @@ class EnvironmentsSection(Gtk.Box):
 
         # Refresh the list
         external_toolsets = [
-            toolset for toolset in Settings.current().get_toolsets()
+            toolset for toolset in Repository.TOOLSETS.value
             if toolset.env == ToolsetEnv.EXTERNAL
         ]
 
         for toolset in external_toolsets:
             action_row = Adw.ActionRow()
-            action_row.set_title("External toolset")
+            action_row.set_title(toolset.name)
             action_row.set_icon_name("preferences-other-symbolic")
             self.external_toolsets_container.insert(action_row, 0)
             self._external_toolset_rows.append(action_row)
@@ -99,12 +98,9 @@ class EnvironmentsSection(Gtk.Box):
         # If checkbox is checked, place it at the start of the list
         if checkbox.get_active():
             system_toolset = Toolset.create_system()
-            repository = Repository(cls=Toolset, collection=True)
-            repository.save([system_toolset])
-
-            Settings.current().add_toolset(system_toolset)
-        elif (ts := Settings.current().get_toolset_matching(lambda ts: ts.env == ToolsetEnv.SYSTEM)):
-            Settings.current().remove_toolset(ts)
+            Repository.TOOLSETS.value.append(system_toolset)
+        elif (ts := next((ts for ts in Repository.TOOLSETS.value if ts.env == ToolsetEnv.SYSTEM), None)):
+            Repository.TOOLSETS.value.remove(ts)
 
     @Gtk.Template.Callback()
     def on_add_toolset_activated(self, button):
@@ -115,7 +111,7 @@ class EnvironmentsSection(Gtk.Box):
     def on_validate_system_toolset_pressed(self, button):
         # Testing only
         system_toolset = next(
-            (toolset for toolset in Settings.current().get_toolsets() if toolset.env == ToolsetEnv.SYSTEM),
+            (toolset for toolset in Repository.TOOLSETS.value if toolset.env == ToolsetEnv.SYSTEM),
             None  # default if no match found
         )
         if not system_toolset:

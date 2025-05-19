@@ -126,7 +126,7 @@ class RootHelperClient:
             if instant:
                 self.clean_unfinished_jobs()
             else:
-                self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=self.clean_unfinished_jobs, token=token)
+                self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=lambda _: self.clean_unfinished_jobs(), token=token)
         except Exception as e:
             print("[Server process]: Warning: Failed to send EXIT command. Some process might be left working orphined.")
             self.clean_unfinished_jobs()

@@ -437,6 +437,7 @@ class ToolsetInstallation:
             self._cleanup()
             ToolsetInstallation.started_installations.remove(self)
             ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
+            Repository.TOOLSETS.value.append(self.final_toolset)
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""
@@ -791,6 +792,8 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
         super().start()
         try:
             time.sleep(1)
+            # TODO: Move tmp_toolset to new location, update it's root and save in installer as final_toolset
+            self.installer.final_toolset = self.installer.tmp_toolset
             self.complete(ToolsetInstallationStepState.COMPLETED)
         except Exception as e:
             print(f"Error during toolset compression: {e}")
@@ -839,3 +842,4 @@ def extract(tarball: str, directory: str):
             progress = extracted_size / total_size if total_size else 0
             print(f"PROGRESS: {progress}") # This print must stay, it is used to receive progress by step implementation.
 
+Repository.TOOLSETS = Repository(cls=Toolset, collection=True)

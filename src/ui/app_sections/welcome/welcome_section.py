@@ -4,7 +4,7 @@ from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection, app_section
 from .runtime_env import RuntimeEnv
 from .root_helper_client import RootHelperClient
-from .settings import Settings, SettingsEvents
+from .repository import Repository, RepositoryEvent
 
 @app_section(title="Welcome", label="Home", icon="go-home-symbolic", show_side_bar=False, order=1_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/welcome/welcome_section.ui')
@@ -30,10 +30,10 @@ class WelcomeSection(Gtk.Box):
         super().__init__(**kwargs)
         self.content_navigation_view = content_navigation_view
         self.setup_sections_visibility()
-        Settings.current().event_bus.subscribe(SettingsEvents.TOOLSETS_CHANGED, self.setup_sections_visibility)
+        Repository.TOOLSETS.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.setup_sections_visibility)
 
-    def setup_sections_visibility(self):
-        initial_setup_done = Settings.current().get_toolsets()
+    def setup_sections_visibility(self, _ = None):
+        initial_setup_done = Repository.TOOLSETS.value
         self.setup_environments_section.set_visible(not initial_setup_done)
         self.suggested_actions_section.set_visible(initial_setup_done)
 
