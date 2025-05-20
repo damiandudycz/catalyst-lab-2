@@ -11,6 +11,7 @@ from datetime import datetime
 from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture
 from .event_bus import EventBus
+from .root_helper_client import RootHelperClient
 from .toolset import (
     ToolsetInstallation,
     ToolsetInstallationStage,
@@ -93,13 +94,15 @@ class ToolsetCreateView(Gtk.Box):
         if not is_last_page:
             self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page + 1), True)
         else:
-            self._start_installation()
+            RootHelperClient.shared().authorize_and_run(callback=self._start_installation)
 
     @Gtk.Template.Callback()
     def on_allow_binpkgs_toggled(self, checkbox):
         self.allow_binpkgs = checkbox.get_active()
 
-    def _start_installation(self):
+    def _start_installation(self, authorized: bool):
+        if not authorized:
+            return
         selected_apps = [
             app for app, selected in self.tools_selection.items()
             if selected and all(self.tools_selection.get(dep, False) for dep in getattr(app, "dependencies", ()))

@@ -232,6 +232,13 @@ class RootHelperClient:
         else:
             return False
 
+    def authorize_and_run(self, callback: Callable[[bool], None] | None = None):
+        def background_task():
+            result = self.ensure_server_ready(allow_auto_start=True)
+            if callback:
+                threading.Timer(0, lambda: callback(result)).start()
+        threading.Thread(target=background_task, daemon=True).start()
+
     # --------------------------------------------------------------------------
     # Handling requests to server / root functions:
 
