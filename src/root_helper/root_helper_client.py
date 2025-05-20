@@ -369,6 +369,11 @@ class RootHelperClient:
                 server_response = ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
                 self.stop_root_helper(instant=True)
             finally:
+                # If there are child calls, wait for them all to finish before returning
+                with call.children_lock:
+                    for child in call.children:
+                        if child.thread:
+                            child.thread.join()
                 print(f"<<< [{request.function_name} {server_response.code.name}] {server_response.response}")
                 if completion_handler:
                     result = server_response if raw else server_response.response
@@ -399,23 +404,26 @@ class RootHelperClient:
         asynchronous: bool = False,
         raw: bool = False,
         completion_handler: Callable[[ServerResponse | Any],None] | None = None,
+        parent: ServerCall | None = None,
         **kwargs
     ) -> Any | ServerResponse | ServerCall:
         """Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server."""
         function = ServerFunction(func_name, *args, **kwargs)
-        server_response = self.send_request(
+        result = self.send_request(
             function,
             handler=handler,
             asynchronous=asynchronous,
             raw=raw,
             completion_handler=completion_handler
         )
+        if parent and asynchronous:
+            parent.add_child(result)
         if asynchronous or raw: # Returns ServerCall for async or whole structure directly for sync_raw
-            return server_response
-        if server_response.code == ServerResponseStatusCode.OK:
-            return server_response.response
+            return result
+        if result.code == ServerResponseStatusCode.OK:
+            return result.response
         else:
-            raise RuntimeError(f"Root function error: {server_response.response}")
+            raise RuntimeError(f"Root function error: {result.response}")
 
     def set_request_status(self, call: ServerCall, in_progress: bool):
         with self.set_request_status_lock:
@@ -453,6 +461,8 @@ class ServerCall:
     output: list[str] = field(default_factory=list) # Contains output lines from stdout and stderr
     output_lock: threading.Lock = field(default_factory=threading.Lock)
     event_bus: EventBus[ServerCallEvents] = field(default_factory=lambda: EventBus[ServerCallEvents]())
+    children: list[ServerCall] = field(default_factory=list)
+    children_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def __repr__(self):
         return f"ServerCall(request={self.request.function_name!r})"
@@ -462,13 +472,24 @@ class ServerCall:
         """Only ServerFunctions are cancellable"""
         return isinstance(self.request, ServerFunction)
 
+    def add_child(self, child: ServerCall):
+        with self.children_lock:
+            self.children.append(child)
+
     def cancel(self):
         """Sends CANCEL_CALL <ID> to server. Can be used only with async calls that already started."""
-        if not self.is_cancellable:
-            print("[Server process]: Warning: Tried to cancel a call that is not cancellable")
-            return
-        if self.thread:
-            self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
+        def worker():
+            if not self.is_cancellable:
+                print("[Server process]: Warning: Tried to cancel a call that is not cancellable")
+                return
+            for child in self.children:
+                print(f"First cancel child: {child.request.function_name}")
+                child.cancel()
+                if child.thread:
+                    child.thread.join()
+            if self.thread:
+                self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
+        threading.Thread(target=worker, daemon=True).start()
 
     def output_append(self, line: str):
         with self.output_lock:

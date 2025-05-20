@@ -287,7 +287,7 @@ class Toolset(Serializable):
     # --------------------------------------------------------------------------
     # Calling commands:
 
-    def run_command(self, command: str, handler: callable | None = None, completion_handler: callable | None = None) -> ServerCall:
+    def run_command(self, command: str, parent: ServerCall | None = None, handler: callable | None = None, completion_handler: callable | None = None) -> ServerCall:
         # TODO: Add required parameters checks, like store_changes matches spawned env, required bindings are set correctly etc.
         with self.access_lock:
             if not self.spawned:
@@ -307,6 +307,7 @@ class Toolset(Serializable):
                     handler=handler,
                     # Wraps completion block to set in_use flag additionally after it's done
                     completion_handler=lambda x: on_complete(completion_handler, x),
+                    parent=parent,
                     work_dir=str(self.work_dir),
                     fake_root=fake_root,
                     bind_options=self.bind_options,
@@ -442,19 +443,20 @@ class ToolsetInstallation:
         return filename_without_extension
 
     def start(self):
-        def stall_server_completion_handler(result: ServerResponse):
-            if self.status == ToolsetInstallationStage.INSTALL:
-                self.cancel()
-        self.stall_server_call = stall_server._async_raw(completion_handler=stall_server_completion_handler)
-        ToolsetInstallation.started_installations.append(self)
-        ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
-        self._continue_installation()
+        try:
+            self.stall_server_call = stall_server._async_raw()
+            ToolsetInstallation.started_installations.append(self)
+            ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
+            self._continue_installation()
+        except Exception as e:
+            self.cancel()
 
     def cancel(self):
         running_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.IN_PROGRESS), None)
         if running_step:
             running_step.cancel()
-        ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
+        self.status = ToolsetInstallationStage.FAILED
+        self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
 
     def clean_from_started_installations(self):
         if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED:
@@ -494,6 +496,7 @@ class ToolsetInstallationStage(Enum):
     INSTALL = auto()   # Installing toolset (whole process).
     COMPLETED = auto() # Toolset created sucessfully.
     FAILED = auto()    # Toolset failed at any step.
+    #CANCELED = auto()  # Manually canceled.
 
 # ------------------------------------------------------------------------------
 # Toolset applications.
@@ -637,6 +640,7 @@ class ToolsetInstallationStep(ABC):
                     self._update_progress(progress)
             self.server_call = self.installer.tmp_toolset.run_command(
                 command=command,
+                parent=self.installer.stall_server_call,
                 handler=output_handler if progress_handler is not None else None,
                 completion_handler=completion_handler
             )
@@ -711,6 +715,7 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
                     except ValueError:
                         pass
             self.server_call = extract._async_raw(
+                parent=self.installer.stall_server_call,
                 handler=output_handler,
                 completion_handler=completion_handler,
                 tarball=self.installer.tmp_stage_file.name,
