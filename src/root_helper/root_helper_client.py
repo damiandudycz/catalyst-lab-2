@@ -267,7 +267,9 @@ class RootHelperClient:
             raise TypeError("command must be either a ServerCommand or ServerFunction instance")
 
         def worker(call: ServerCall) -> ServerResponse:
-            print("Worker started")
+            args = request.args if hasattr(request, "args") else ""
+            kwargs = request.kwargs if hasattr(request, "kwargs") else ""
+            print(f">>> [{request.function_name} {args} {kwargs}]")
             try:
                 used_token = token if token is not None else self.token
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
@@ -352,8 +354,6 @@ class RootHelperClient:
                         fragment = chunk.decode()
                         process_fragment(fragment)
 
-                    print("Finished receiving data from server")
-
                     # Send ACK
                     readable, writable, errored = select.select([], [conn], [], 5)
                     if writable:
@@ -369,7 +369,7 @@ class RootHelperClient:
                 server_response = ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
                 self.stop_root_helper(instant=True)
             finally:
-                print(f"Response: {server_response} {request.function_name}")
+                print(f"<<< [{request.function_name} {server_response.code.name}] {server_response.response}")
                 if completion_handler:
                     result = server_response if raw else server_response.response
                     GLib.idle_add(completion_handler, result)

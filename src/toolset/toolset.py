@@ -239,12 +239,12 @@ class Toolset(Serializable):
                             ])
                         continue
             except Exception as e:
-                print(e)
+                error = e
                 try:
-                    delete_temp_workdir(path=work_dir)
-                except Exception as e:
-                    print(e)
-                raise e
+                    delete_temp_workdir(path=str(work_dir))
+                except Exception as e2:
+                    error = ExceptionGroup("Multiple errors spawning environment", [error, e2])
+                raise error
 
             self.work_dir = work_dir
             self.hot_fixes = hot_fixes
@@ -261,18 +261,19 @@ class Toolset(Serializable):
             if self.in_use:
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             # Remove /tmp folders. TODO: After root_calls this dirs contains root owned files and directories, making it impossible to remove as user.
-            if self.work_dir:
-                try:
-                    delete_temp_workdir(path=self.work_dir)
-                except Exception as e:
-                    print(e)
-            # Reset spawned settings:
-            self.work_dir = None
-            self.hot_fixes = None
-            self.additional_bindings = None
-            self.store_changes = False
-            self.bind_options = None
-            self.spawned = False
+            try:
+                if self.work_dir:
+                    delete_temp_workdir(path=str(self.work_dir))
+            except Exception as e:
+                print(f"Error deleting toolset work_dir: {e}")
+            finally:
+                # Reset spawned settings:
+                self.work_dir = None
+                self.hot_fixes = None
+                self.additional_bindings = None
+                self.store_changes = False
+                self.bind_options = None
+                self.spawned = False
 
     # --------------------------------------------------------------------------
     # Calling commands:
@@ -397,13 +398,11 @@ class ToolsetInstallation:
         # First, remove any app that is marked as auto_select
         for app in self.selected_apps:
             if app.auto_select:
-                print(f"Remove dep: {app.name}")
                 apps.remove(app)
         # Add dependencies of selected apps that aren't already in the list
         for app in self.selected_apps:
             for dep in app.dependencies:
                 if dep not in apps:
-                    print(f"Add dep: {dep.name}")
                     apps.append(dep)
         # Sort the apps so that dependencies come before the apps that need them
         # This assumes that each app has a list of dependencies and dependencies are in the `dependencies` list
@@ -589,8 +588,6 @@ class ToolsetInstallationStep(ABC):
             if self.server_call.thread:
                 self.server_call.thread.join()
     def cleanup(self) -> bool:
-        # TODO: Consider what to do if some cleaning fails, and next cleanings could mess up mounted files.
-        # Probably it is fine tough, as all real mapping should be done by bwrap call and not on real filesystem.
         """Returns true if cleanup was needed and was started."""
         if self.state == ToolsetInstallationStepState.SCHEDULED:
             return False # No cleaning needed if job didn't start.
@@ -603,7 +600,7 @@ class ToolsetInstallationStep(ABC):
         self._update_state(state=state)
         if self.state == ToolsetInstallationStepState.COMPLETED:
            self._update_progress(1.0)
-        # If state was success continue installation
+        # Continue installation
         GLib.idle_add(self.installer._continue_installation)
     def _update_state(self, state: ToolsetInstallationStepState):
         self.state = state
@@ -613,7 +610,6 @@ class ToolsetInstallationStep(ABC):
         self.event_bus.emit(ToolsetInstallationStepEvent.PROGRESS_CHANGED, progress)
     def run_command_in_toolset(self, command: str, progress_handler: Callable[[str], float | None] | None = None) -> bool:
         try:
-            self.server_call = None
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -632,6 +628,7 @@ class ToolsetInstallationStep(ABC):
             )
             self.server_call.thread.join()
             done_event.wait()
+            self.server_call = None
             return return_value
         except Exception as e:
             print(f"Error synchronizing portage: {e}")
@@ -707,6 +704,7 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
             )
             self.server_call.thread.join()
             done_event.wait()
+            self.server_call = None
             self.complete(ToolsetInstallationStepState.COMPLETED if return_value else ToolsetInstallationStepState.FAILED)
         except Exception as e:
             print(f"Error extracting stage tarball: {e}")
@@ -714,7 +712,7 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        if self.installer.tmp_stage_extract_dir:
+        if hasattr(self.installer, "tmp_stage_extract_dir") and self.installer.tmp_stage_extract_dir:
             delete_temp_workdir(self.installer.tmp_stage_extract_dir)
             return True
         return False
@@ -835,12 +833,13 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
 
 @root_function
 def create_temp_workdir(prefix: str) -> str:
+    """Creates temp directory in /var/tmp/catalystlab, owned by the user."""
     import tempfile
     import os
     base_dir = "/var/tmp/catalystlab"
     os.makedirs(base_dir, exist_ok=True)
     temp_dir = tempfile.mkdtemp(prefix=prefix, dir=base_dir)
-    os.chmod(temp_dir, 0o755) # TODO: Instead chown by uid
+    os.chown(temp_dir, RootHelperServer.shared().uid, RootHelperServer.shared().uid)
     return temp_dir
 
 @root_function
@@ -893,3 +892,4 @@ def extract(tarball: str, directory: str):
             print(f"PROGRESS: {progress}") # This print must stay, it is used to receive progress by step implementation.
 
 Repository.TOOLSETS = Repository(cls=Toolset, collection=True)
+
