@@ -384,7 +384,7 @@ class RootHelperClient:
                 print(f"<<< [{request.function_name} {server_response.code.name}] {server_response.response}")
                 if completion_handler:
                     result = server_response if raw else server_response.response
-                    GLib.idle_add(completion_handler, result)
+                    completion_handler(result)
                 if request.show_in_running_tasks:
                     self.set_request_status(call, False)
                 return server_response

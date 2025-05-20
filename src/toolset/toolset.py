@@ -264,6 +264,7 @@ class Toolset(Serializable):
 
     def unspawn(self):
         """Clear /tmp folders."""
+        print("--- UNSPAWN")
         with self.access_lock:
             if not self.spawned:
                 raise RuntimeError(f"Toolset {self} is not spawned.")
@@ -299,6 +300,7 @@ class Toolset(Serializable):
             def on_complete(completion_handler: callable | None, result: ServerResponse):
                 with self.access_lock:
                     self.in_use = False
+                    print("--- COMPLETED")
                 if completion_handler:
                     completion_handler(result)
             try:
@@ -316,6 +318,7 @@ class Toolset(Serializable):
             except Exception as e:
                 print(f"Failed to execute command: {e}")
                 self.in_use = False
+                print("--- EXCEPT")
                 raise e
 
     def analyze(self, handler: callable | None = None) -> bool:
@@ -461,8 +464,6 @@ class ToolsetInstallation:
         self.status = ToolsetInstallationStage.FAILED if self.status == ToolsetInstallationStage.INSTALL else ToolsetInstallationStage.SETUP
         self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
         self._cleanup()
-        if self.stall_server_call:
-            self.stall_server_call.cancel()
 
     def clean_from_started_installations(self):
         if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED or self.status == ToolsetInstallationStage.SETUP:
@@ -471,8 +472,14 @@ class ToolsetInstallation:
                 ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
 
     def _cleanup(self):
-        for step in reversed(self.steps): # Cleanup in reverse order
-            step.cleanup()
+        def worker():
+            for step in reversed(self.steps): # Cleanup in reverse order
+                step.cleanup()
+            # Stop stalling root server after cleaning is done
+            if self.stall_server_call:
+                self.stall_server_call.cancel()
+        # Run cleaning on new thread, not to block main UI
+        threading.Thread(target=worker).start()
 
     def _continue_installation(self):
         if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED or self.status == ToolsetInstallationStage.SETUP:
@@ -604,18 +611,24 @@ class ToolsetInstallationStep(ABC):
         self._cancel_event.clear()
         self._update_state(ToolsetInstallationStepState.IN_PROGRESS)
     def cancel(self):
+        print("Cancelling ....")
         if self.state == ToolsetInstallationStepState.IN_PROGRESS:
             self.complete(ToolsetInstallationStepState.FAILED)
             self._cancel_event.set()
         if self.server_call:
+            print("Found server call")
             self.server_call.cancel()
             if self.server_call.thread:
+                print("Joining")
                 self.server_call.thread.join()
+                print("Thread finished")
+                self.server_call = None
     def cleanup(self) -> bool:
         """Returns true if cleanup was needed and was started."""
         if self.state == ToolsetInstallationStepState.SCHEDULED:
             return False # No cleaning needed if job didn't start.
         self.cancel()
+        print(f"::: Clean {self.name}")
         return True
     def complete(self, state: ToolsetInstallationStepState):
         """Call this when step finishes."""
@@ -639,6 +652,7 @@ class ToolsetInstallationStep(ABC):
             def completion_handler(response: ServerResponse):
                 nonlocal return_value
                 return_value = response.code == ServerResponseStatusCode.OK
+                self.server_call = None
                 done_event.set()
             def output_handler(output_line: str):
                 print(output_line)
@@ -721,6 +735,8 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
                         self._update_progress(progress_value)
                     except ValueError:
                         pass
+                    finally:
+                        self.server_call = None
             self.server_call = extract._async_raw(
                 parent=self.installer.stall_server_call,
                 handler=output_handler,
