@@ -8,6 +8,7 @@ from pathlib import Path
 from collections import namedtuple
 from abc import ABC, abstractmethod
 from urllib.parse import ParseResult
+from multiprocessing import Event
 from .root_function import root_function
 from .runtime_env import RuntimeEnv
 from .toolset_env_builder import ToolsetEnvBuilder
@@ -16,6 +17,14 @@ from .event_bus import EventBus
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
+
+@root_function
+def stall_server():
+    event = Event()
+    def handle_sigterm(signum, frame):
+        event.set()
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    event.wait()
 
 @final
 class Toolset(Serializable):
@@ -433,6 +442,10 @@ class ToolsetInstallation:
         return filename_without_extension
 
     def start(self):
+        def stall_server_completion_handler(result: ServerResponse):
+            if self.status == ToolsetInstallationStage.INSTALL:
+                self.cancel()
+        self.stall_server_call = stall_server._async_raw(completion_handler=stall_server_completion_handler)
         ToolsetInstallation.started_installations.append(self)
         ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
         self._continue_installation()
@@ -441,7 +454,6 @@ class ToolsetInstallation:
         running_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.IN_PROGRESS), None)
         if running_step:
             running_step.cancel()
-        ToolsetInstallation.started_installations.remove(self)
         ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
 
     def clean_from_started_installations(self):
@@ -463,6 +475,7 @@ class ToolsetInstallation:
             self.status = ToolsetInstallationStage.FAILED
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             self._cleanup()
+            self.stall_server_call.cancel()
         elif next_step:
             next_step_thread = threading.Thread(target=next_step.start)
             next_step_thread.start()
@@ -473,6 +486,7 @@ class ToolsetInstallation:
             ToolsetInstallation.started_installations.remove(self)
             ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
             Repository.TOOLSETS.value.append(self.final_toolset)
+            self.stall_server_call.cancel()
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""

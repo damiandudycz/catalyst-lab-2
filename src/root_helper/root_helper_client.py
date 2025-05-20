@@ -378,7 +378,7 @@ class RootHelperClient:
                 return server_response
 
         if asynchronous:
-            async_call = ServerCall(request=request, thread=None, client=self)
+            async_call = ServerCall(request=request, client=self)
             thread = threading.Thread(target=worker, args=(async_call,), daemon=True)
             async_call.thread = thread
             if request.show_in_running_tasks:
@@ -386,7 +386,7 @@ class RootHelperClient:
             thread.start()
             return async_call
         else:
-            sync_call = ServerCall(request=request, thread=None, client=self)
+            sync_call = ServerCall(request=request, client=self)
             if request.show_in_running_tasks:
                 self.set_request_status(sync_call, True)
             return worker(call=sync_call)
@@ -446,8 +446,8 @@ class ServerCall:
     """Captures details about ongoing server call."""
     """Can be used to join the thread later or send cancel request for single request."""
     request: ServerCommand | ServerFunction
-    thread: threading.Thread | None
     client: RootHelperClient
+    thread: threading.Thread | None = None
     call_id: uuid.UUID = field(default_factory=uuid.uuid4)
     terminated: bool = False # Mark as terminated. Might still be terminating.
     output: list[str] = field(default_factory=list) # Contains output lines from stdout and stderr

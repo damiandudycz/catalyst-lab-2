@@ -7,6 +7,7 @@ from functools import wraps
 from dataclasses import dataclass, asdict
 from typing import Any, Callable
 from contextlib import redirect_stdout, redirect_stderr
+from multiprocessing import Event
 
 class StreamPipe(Enum):
     RETURN = auto()
