@@ -399,7 +399,8 @@ class ToolsetInstallation:
         self.process_selected_apps()
         self.steps: list[ToolsetInstallationStep] = []
         self.event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
-        self.status = ToolsetInstallationStage.INSTALL
+        self.status = ToolsetInstallationStage.SETUP
+        self.stall_server_call = None
         self._setup_steps()
 
     def process_selected_apps(self):
@@ -445,6 +446,8 @@ class ToolsetInstallation:
     def start(self):
         try:
             self.stall_server_call = stall_server._async_raw()
+            self.status = ToolsetInstallationStage.INSTALL
+            self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             ToolsetInstallation.started_installations.append(self)
             ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
             self._continue_installation()
@@ -455,11 +458,14 @@ class ToolsetInstallation:
         running_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.IN_PROGRESS), None)
         if running_step:
             running_step.cancel()
-        self.status = ToolsetInstallationStage.FAILED
+        self.status = ToolsetInstallationStage.FAILED if self.status == ToolsetInstallationStage.INSTALL else ToolsetInstallationStage.SETUP
         self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
+        self._cleanup()
+        if self.stall_server_call:
+            self.stall_server_call.cancel()
 
     def clean_from_started_installations(self):
-        if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED:
+        if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED or self.status == ToolsetInstallationStage.SETUP:
             if self in ToolsetInstallation.started_installations:
                 ToolsetInstallation.started_installations.remove(self)
                 ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
@@ -469,7 +475,7 @@ class ToolsetInstallation:
             step.cleanup()
 
     def _continue_installation(self):
-        if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED:
+        if self.status == ToolsetInstallationStage.COMPLETED or self.status == ToolsetInstallationStage.FAILED or self.status == ToolsetInstallationStage.SETUP:
             return # Prevents displaying multiple failure messages in some cases.
         next_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.SCHEDULED), None)
         failed_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.FAILED), None)
@@ -477,7 +483,8 @@ class ToolsetInstallation:
             self.status = ToolsetInstallationStage.FAILED
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             self._cleanup()
-            self.stall_server_call.cancel()
+            if self.stall_server_call:
+                self.stall_server_call.cancel()
         elif next_step:
             next_step_thread = threading.Thread(target=next_step.start)
             next_step_thread.start()
@@ -488,7 +495,8 @@ class ToolsetInstallation:
             ToolsetInstallation.started_installations.remove(self)
             ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
             Repository.TOOLSETS.value.append(self.final_toolset)
-            self.stall_server_call.cancel()
+            if self.stall_server_call:
+                self.stall_server_call.cancel()
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""
@@ -496,7 +504,6 @@ class ToolsetInstallationStage(Enum):
     INSTALL = auto()   # Installing toolset (whole process).
     COMPLETED = auto() # Toolset created sucessfully.
     FAILED = auto()    # Toolset failed at any step.
-    #CANCELED = auto()  # Manually canceled.
 
 # ------------------------------------------------------------------------------
 # Toolset applications.
