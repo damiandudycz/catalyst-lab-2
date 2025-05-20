@@ -55,7 +55,7 @@ class RuntimeEnv(Enum):
                 first_part = path_parts[0] if path_parts else ""
                 # Check if this maps to something that exists in /run/host
                 host_candidate = os.path.join("/run/host", first_part)
-                if os.path.exists(host_candidate):
+                if os.path.exists(host_candidate) and not os.path.exists(path):
                     return os.path.join("/run/host", path.lstrip("/"))
                 else:
                     return path

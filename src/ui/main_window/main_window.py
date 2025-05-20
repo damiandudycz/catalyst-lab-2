@@ -60,8 +60,8 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         self.split_view.set_show_sidebar(self.allow_side_menu)
         self.content_view.sidebar_toggle_button_visible = self.allow_side_menu and CatalystlabWindow.allow_side_menu_toggle
 
-    def _present_section(self, section: AppSection):
-        view = section(content_navigation_view=None)
+    def _present_section(self, section: AppSection, **kwargs):
+        view = section(content_navigation_view=None, **kwargs)
         title = section.section_details.title
         self._present_view(view, title, 640, 480)
 

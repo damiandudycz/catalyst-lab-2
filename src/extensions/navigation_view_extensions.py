@@ -3,8 +3,8 @@ from gi.repository import Adw
 from .app_section import AppSection
 from .root_access_button import RootAccessButton
 
-def _push_section(self, section: AppSection):
-    view = section(content_navigation_view=self)
+def _push_section(self, section: AppSection, **kwargs):
+    view = section(content_navigation_view=self, **kwargs)
     title = section.section_details.title
     self.push_view(view, title)
 

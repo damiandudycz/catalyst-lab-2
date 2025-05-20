@@ -26,6 +26,7 @@ class EnvironmentsSection(Gtk.Box):
     external_toolsets_container = Gtk.Template.Child()
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
+        self.wizard_mode = kwargs.pop('wizard_mode', False)
         super().__init__(**kwargs)
         self.content_navigation_view = content_navigation_view
         self._ignore_toolset_checkbox_signal = False
@@ -83,7 +84,10 @@ class EnvironmentsSection(Gtk.Box):
     def on_installation_pressed(self, sender):
         installation = getattr(sender, "installation", None)
         if installation:
-            app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(installation_in_progress=installation), "New toolset", 640, 480)
+            if self.wizard_mode:
+                self.content_navigation_view.push_view(ToolsetCreateView(installation_in_progress=installation), title="New toolset")
+            else:
+                app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(installation_in_progress=installation), "New toolset", 640, 480)
 
     # Sets the state without calling a callback.
     def _set_toolset_system_checkbox_active(self, active: bool):
@@ -104,8 +108,10 @@ class EnvironmentsSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_add_toolset_activated(self, button):
-        #self.content_navigation_view.push_view(ToolsetCreateView(), title="New toolset")
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(), "New toolset", 640, 480)
+        if self.wizard_mode:
+            self.content_navigation_view.push_view(ToolsetCreateView(), title="New toolset")
+        else:
+            app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(), "New toolset", 640, 480)
 
     @Gtk.Template.Callback()
     def on_validate_system_toolset_pressed(self, button):

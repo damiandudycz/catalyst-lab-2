@@ -24,7 +24,7 @@ class WelcomeSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        self.content_navigation_view.push_section(AppSection.EnvironmentsSection)
+        self.content_navigation_view.push_section(AppSection.EnvironmentsSection, wizard_mode=True)
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)

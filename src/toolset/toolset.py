@@ -142,8 +142,7 @@ class Toolset(Serializable):
             bind_options = []
             try:
                 OverlayPaths = namedtuple("OverlayPaths", ["upper", "work"])
-                # TODO: Creating all these directories as root
-                work_dir = Path(tempfile.mkdtemp(prefix="gentoo_toolset_spawn_")) # , dir="/var/tmp")
+                work_dir = Path(create_temp_workdir(prefix="gentoo_toolset_spawn_"))
 
                 # Prepare work dirs:
                 fake_root = os.path.join(work_dir, "fake_root")
@@ -241,7 +240,10 @@ class Toolset(Serializable):
                         continue
             except Exception as e:
                 print(e)
-                shutil.rmtree(work_dir, ignore_errors=True)
+                try:
+                    delete_temp_workdir(path=work_dir)
+                except Exception as e:
+                    print(e)
                 raise e
 
             self.work_dir = work_dir
@@ -260,7 +262,10 @@ class Toolset(Serializable):
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             # Remove /tmp folders. TODO: After root_calls this dirs contains root owned files and directories, making it impossible to remove as user.
             if self.work_dir:
-                shutil.rmtree(self.work_dir, ignore_errors=True)
+                try:
+                    delete_temp_workdir(path=self.work_dir)
+                except Exception as e:
+                    print(e)
             # Reset spawned settings:
             self.work_dir = None
             self.hot_fixes = None
@@ -418,7 +423,6 @@ class ToolsetInstallation:
         for app in self.selected_apps:
             self.steps.append(ToolsetInstallationStepInstallApp(app=app, installer=self))
         self.steps.append(ToolsetInstallationStepVerify(installer=self))
-        self.steps.append(ToolsetInstallationStepCleanup(installer=self))
         self.steps.append(ToolsetInstallationStepCompress(installer=self))
 
     def name(self) -> str:
@@ -584,7 +588,6 @@ class ToolsetInstallationStep(ABC):
             self.server_call.cancel()
             if self.server_call.thread:
                 self.server_call.thread.join()
-    @abstractmethod
     def cleanup(self) -> bool:
         # TODO: Consider what to do if some cleaning fails, and next cleanings could mess up mounted files.
         # Probably it is fine tough, as all real mapping should be done by bwrap call and not on real filesystem.
@@ -681,7 +684,7 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            self.installer.tmp_stage_extract_dir = tempfile.mkdtemp(prefix="gentoo_stage_extract_") # , dir="/var/tmp"
+            self.installer.tmp_stage_extract_dir = create_temp_workdir(prefix="gentoo_stage_extract_")
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -712,12 +715,9 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
         if not super().cleanup():
             return False
         if self.installer.tmp_stage_extract_dir:
-            try: # TODO: Needs to clean as root
-                if os.path.exists(self.installer.tmp_stage_extract_dir):
-                    shutil.rmtree(self.installer.tmp_stage_extract_dir)
-            except Exception as e:
-                print(f"Failed to delete temp folder: {e}")
-        return True
+            delete_temp_workdir(self.installer.tmp_stage_extract_dir)
+            return True
+        return False
 
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetInstallation):
@@ -727,7 +727,6 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
         try:
             self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), self.installer.name(), squashfs_file=self.installer.tmp_stage_extract_dir)
             self.installer.tmp_toolset.spawn(store_changes=True, additional_bindings=[BindMount(mount_path="/var/cache", create_if_missing=True)])
-            # TODO: Add tmp dirs for portage etc., mount with store_changes
             commands = [
                 "env-update && source /etc/profile",
                 "getuto"
@@ -748,6 +747,10 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
+        if self.installer.tmp_toolset and self.installer.tmp_toolset.spawned:
+            self.installer.tmp_toolset.unspawn()
+            return True
+        return False
 
 class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetInstallation):
@@ -772,9 +775,6 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error synchronizing Portage: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-    def cleanup(self) -> bool:
-        if not super().cleanup():
-            return False
 
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
     def __init__(self, app: ToolsetApplication, installer: ToolsetInstallation):
@@ -799,9 +799,6 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error during app installation: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-    def cleanup(self) -> bool:
-        if not super().cleanup():
-            return False
 
 class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetInstallation):
@@ -814,9 +811,6 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
         except Exception as e:
             print(f"Error during toolset verification: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
-    def cleanup(self) -> bool:
-        if not super().cleanup():
-            return False
 
 class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetInstallation):
@@ -834,23 +828,37 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
+        # TODO: Does this need some cleaning?
 
-class ToolsetInstallationStepCleanup(ToolsetInstallationStep):
-    def __init__(self, installer: ToolsetInstallation):
-        super().__init__(name="Cleanup", description="Unspawns toolset and cleans up", installer=installer)
-    def start(self):
-        super().start()
-        try:
-            time.sleep(1)
-            self.complete(ToolsetInstallationStepState.COMPLETED)
-        except Exception as e:
-            print(f"Error during cleanup: {e}")
-            self.complete(ToolsetInstallationStepState.FAILED)
-    def cleanup(self) -> bool:
-        if not super().cleanup():
-            return False
 # ------------------------------------------------------------------------------
 # Helper functions:
+
+@root_function
+def create_temp_workdir(prefix: str) -> str:
+    import tempfile
+    import os
+    base_dir = "/var/tmp/catalystlab"
+    os.makedirs(base_dir, exist_ok=True)
+    temp_dir = tempfile.mkdtemp(prefix=prefix, dir=base_dir)
+    os.chmod(temp_dir, 0o755) # TODO: Instead chown by uid
+    return temp_dir
+
+@root_function
+def delete_temp_workdir(path: str) -> bool:
+    import os
+    import shutil
+    try:
+        resolved_path = os.path.realpath(path)
+        if not (resolved_path.startswith("/var/tmp/catalystlab/") and resolved_path != "/var/tmp/catalystlab"):
+            raise ValueError(f"Refusing to delete path outside /var/tmp/catalystlab: {resolved_path}")
+        if os.path.isdir(resolved_path):
+            shutil.rmtree(resolved_path)
+            return True
+        else:
+            raise FileNotFoundError(f"Path does not exist or is not a directory: {resolved_path}")
+    except Exception as e:
+        print(e)
+        return False
 
 @root_function
 def insert_portage_config(config_dir: str, config_entries: list[str], app_name: str, toolset_root: str):
@@ -864,12 +872,21 @@ def insert_portage_config(config_dir: str, config_entries: list[str], app_name: 
 
 @root_function
 def extract(tarball: str, directory: str):
-    """Extracts an .xz tarball as root to preserve special files and ownership."""
     import tarfile
+    import signal
+    import threading
+    _cancel_event = threading.Event()
+    def handle_sigterm(signum, frame):
+        _cancel_event.set()
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
+    """Extracts an .xz tarball as root to preserve special files and ownership."""
     with tarfile.open(tarball, mode='r:xz') as tar:
         total_size = sum(member.size for member in tar.getmembers())
         extracted_size = 0
         for member in tar.getmembers():
+            if _cancel_event.is_set():
+                return
             tar.extract(member, path=directory)
             extracted_size += member.size
             progress = extracted_size / total_size if total_size else 0
