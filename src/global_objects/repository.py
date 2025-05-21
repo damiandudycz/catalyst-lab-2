@@ -93,7 +93,7 @@ class Repository(Generic[T]):
         config_base = os.path.join(config_paths.get(RuntimeEnv.current())(), "catalystlab")
         return os.path.join(config_base, f"{self._alias}.json")
 
-    def _save(self):
+    def save(self):
         path = self._config_file()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         try:
@@ -116,17 +116,17 @@ class Repository(Generic[T]):
                 data = json.load(f)
             if self._collection:
                 items_data = data.get("items", [])
-                return TrackedList([self._cls.init_from(item) for item in items_data], self._save)
+                return TrackedList([self._cls.init_from(item) for item in items_data], self.save)
             else:
                 return self._cls.init_from(data)
         except (FileNotFoundError, json.JSONDecodeError, ValueError, AttributeError):
-            return TrackedList([], self._save) if self._collection else None
+            return TrackedList([], self.save) if self._collection else None
 
     def _delete(self) -> None:
         path = self._config_file()
         if os.path.isfile(path):
             os.remove(path)
-        self._value = TrackedList([], self._save) if self._collection else None
+        self._value = TrackedList([], self.save) if self._collection else None
 
     @property
     def value(self) -> T | TrackedList[T] | None:
@@ -136,15 +136,15 @@ class Repository(Generic[T]):
     def value(self, new_value: T | list[T] | None):
         if self._collection:
             if new_value is None:
-                self._value = TrackedList([], self._save)
+                self._value = TrackedList([], self.save)
                 self._delete()
             elif isinstance(new_value, TrackedList):
                 self._value = new_value
-                self._value._save_callback = self._save  # update callback if needed
-                self._save()
+                self._value._save_callback = self.save  # update callback if needed
+                self.save()
             elif isinstance(new_value, list):
-                self._value = TrackedList(new_value, self._save)
-                self._save()
+                self._value = TrackedList(new_value, self.save)
+                self.save()
             else:
                 raise TypeError("Expected a list or TrackedList of serializable items.")
         else:
@@ -152,5 +152,5 @@ class Repository(Generic[T]):
             if new_value is None:
                 self._delete()
             else:
-                self._save()
+                self.save()
 

@@ -9,6 +9,9 @@ def _push_section(self, section: AppSection, **kwargs):
     self.push_view(view, title)
 
 def _push_view(self, view: Gtk.Widget, title: str):
+    # If dealing view view without set content_navigation_view set it to self.
+    if not hasattr(view, "content_navigation_view") or view.content_navigation_view is None:
+        view.content_navigation_view = self # TODO: Test this
     # Create a header bar
     header = Adw.HeaderBar()
     # Wrap the content in a ToolbarView with the header

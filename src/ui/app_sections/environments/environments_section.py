@@ -4,7 +4,7 @@ from .app_section import AppSection, app_section
 from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage
+from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage, ToolsetApplication
 from .hotfix_patching import HotFix
 from .root_function import root_function
 from .root_helper_client import RootHelperClient
@@ -72,22 +72,51 @@ class EnvironmentsSection(Gtk.Box):
             action_row = Adw.ActionRow()
             action_row.set_title(toolset.name)
             action_row.set_icon_name("preferences-other-symbolic")
+            # Make subtitle from installed app versions
+            app_strings: [str] = []
+            for app in ToolsetApplication.ALL:
+                if app.auto_select:
+                    continue
+                version = toolset.get_installed_app_version(app)
+                if version is not None:
+                    app_strings.append(f"{app.name}: {version}")
+            if app_strings:
+                action_row.set_subtitle(", ".join(app_strings))
+            action_row.toolset = toolset
+            action_row.set_activatable(True)
+            action_row.connect("activated", self.on_external_toolset_row_pressed)
             self.external_toolsets_container.insert(action_row, 0)
             self._external_toolset_rows.append(action_row)
 
         for installation in started_installations:
             action_row = ToolsetInstallationRow(installation=installation)
-            action_row.connect("activated", self.on_installation_pressed)
+            action_row.connect("activated", self.on_installation_row_pressed)
             self.external_toolsets_container.insert(action_row, 0)
             self._external_toolset_rows.append(action_row)
 
-    def on_installation_pressed(self, sender):
+    def on_external_toolset_row_pressed(self, sender):
+        toolset = getattr(sender, "toolset", None)
+        if toolset is None:
+            return
+        def worker(authorized: bool):
+            if not authorized:
+                return
+            try:
+                if not toolset.spawned:
+                    toolset.spawn()
+                toolset.analyze()
+            except Exception as e:
+                print(e)
+        RootHelperClient.shared().authorize_and_run(callback=worker)
+
+    def on_installation_row_pressed(self, sender):
         installation = getattr(sender, "installation", None)
-        if installation:
-            if self.wizard_mode:
-                self.content_navigation_view.push_view(ToolsetCreateView(installation_in_progress=installation), title="New toolset")
-            else:
-                app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(installation_in_progress=installation), "New toolset", 640, 480)
+        if installation is None:
+            return
+        if self.wizard_mode:
+            self.content_navigation_view.push_view(ToolsetCreateView(installation_in_progress=installation), title="New toolset")
+        else:
+            app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(installation_in_progress=installation), "New toolset", 640, 480)
 
     # Sets the state without calling a callback.
     def _set_toolset_system_checkbox_active(self, active: bool):

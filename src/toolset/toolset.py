@@ -31,10 +31,11 @@ class Toolset(Serializable):
     """Class containing details of the Toolset instances."""
     """Only metadata, no functionalities."""
     """Functionalities are handled by ToolsetContainer."""
-    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, **kwargs):
+    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, apps: dict[str, str], **kwargs):
         self.uuid = uuid
         self.env = env
         self.name = name
+        self.apps = apps
         match env:
             case ToolsetEnv.SYSTEM:
                 pass
@@ -60,6 +61,7 @@ class Toolset(Serializable):
             uuid_value = uuid.UUID(data["uuid"])
             env = ToolsetEnv[data["env"]]
             name = str(data["name"])
+            apps = data.get("apps", {})
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         kwargs = {}
@@ -71,13 +73,14 @@ class Toolset(Serializable):
                 if not isinstance(squashfs_file, str):
                     raise ValueError("Missing or invalid 'squashfs_file' for EXTERNAL environment")
                 kwargs["squashfs_file"] = squashfs_file
-        return cls(env, uuid_value, name, **kwargs)
+        return cls(env, uuid_value, name, apps, **kwargs)
 
     def serialize(self) -> dict:
         data = {
             "uuid": str(self.uuid),
             "env": self.env.name,
-            "name": self.name
+            "name": self.name,
+            "apps": self.apps
         }
         if self.env == ToolsetEnv.EXTERNAL:
             data["squashfs_file"] = self.squashfs_file
@@ -300,7 +303,6 @@ class Toolset(Serializable):
             def on_complete(completion_handler: callable | None, result: ServerResponse):
                 with self.access_lock:
                     self.in_use = False
-                    print("--- COMPLETED")
                 if completion_handler:
                     completion_handler(result)
             try:
@@ -318,14 +320,68 @@ class Toolset(Serializable):
             except Exception as e:
                 print(f"Failed to execute command: {e}")
                 self.in_use = False
-                print("--- EXCEPT")
                 raise e
 
-    def analyze(self, handler: callable | None = None) -> bool:
+    # --------------------------------------------------------------------------
+    # Managing installed apps:
+
+    def get_installed_app_version(self, app: ToolsetApplication) -> str | None:
+        return self.apps.get(app.package, None)
+
+    def analyze(self, parent_call: ServerCall | None = None) -> bool:
         """Performs various sanity checks on toolset and stores gathered results."""
-        """Returns true if all required checks succeeded."""
-        return True
-        # TODO ...
+        """Returns true if all checks succeeded, even if version is not found."""
+        checks_succeded = True
+        for app in ToolsetApplication.ALL:
+            if parent_call is not None and parent_call.terminated:
+                checks_succeded = False
+                break
+            try:
+                self.perform_app_installed_version_check(app=app, parent_call=parent_call)
+                self.perform_app_additional_checks(app=app, parent_call=parent_call)
+            except Exception as e:
+                print(e)
+                checks_succeded = False
+        Repository.TOOLSETS.save() # Make sure changes are saved in repository.
+        return checks_succeded
+
+    def perform_app_installed_version_check(self, app: ToolsetApplication, parent_call: ServerCall | None = None):
+        """Checks the version of package installed in toolset."""
+        """Stores the value in toolset metadata."""
+        """If app is not found, stores none for this app in toolset metadata."""
+        """If version check fails, throws an exception."""
+        version_value = None
+        version_response_status = ServerResponseStatusCode.OK
+        done_event = threading.Event()
+        def completion_handler(response: ServerResponse):
+            nonlocal version_response_status
+            version_response_status = response.code
+            done_event.set()
+        def output_handler(output_line: str):
+            nonlocal version_value
+            if output_line:
+                version_value = output_line
+        server_call = self.run_command(
+            command=(
+                f"match=$(ls -d /var/db/pkg/{app.package}-* 2>/dev/null | head -n1); "
+                f"if [[ -n \"$match\" ]]; then basename \"$match\" | sed -E \"s/^$(basename \"{app.package}\")-//\"; fi"
+            ),
+            parent=parent_call,
+            handler=output_handler,
+            completion_handler=completion_handler
+        )
+        server_call.thread.join()
+        done_event.wait()
+        if version_response_status != ServerResponseStatusCode.OK:
+            self.apps.pop(app.package, None)
+            raise RuntimeError(f"Failed to get package version. App: {app.package}, Code: {version_response_status.name}")
+        if version_value is not None:
+            self.apps[app.package] = version_value
+        else:
+            self.apps.pop(app.package, None)
+
+    def perform_app_additional_checks(self, app: ToolsetApplication, parent_call: ServerCall | None = None):
+        pass # TODO: Implement
 
 @dataclass
 class BindMount:
@@ -846,7 +902,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            analysis_result = self.installer.tmp_toolset.analyze()
+            analysis_result = self.installer.tmp_toolset.analyze(parent_call=self.installer.stall_server_call)
             self.complete(ToolsetInstallationStepState.COMPLETED if analysis_result else ToolsetInstallationStepState.FAILED)
         except Exception as e:
             print(f"Error during toolset verification: {e}")
@@ -934,4 +990,3 @@ def extract(tarball: str, directory: str):
             print(f"PROGRESS: {progress}") # This print must stay, it is used to receive progress by step implementation.
 
 Repository.TOOLSETS = Repository(cls=Toolset, collection=True)
-

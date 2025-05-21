@@ -295,11 +295,11 @@ class RootHelperClient:
                             case StreamPipe.STDOUT:
                                 call.output_append(content)
                                 if handler:
-                                    GLib.idle_add(handler, content)
+                                    handler(content)
                             case StreamPipe.STDERR:
                                 call.output_append(content)
                                 if handler:
-                                    GLib.idle_add(handler, content)
+                                    handler(content)
                             case StreamPipe.EVENTS:
                                 # Handle EVENTS pipe:
                                 try:
