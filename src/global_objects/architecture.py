@@ -59,3 +59,31 @@ Architecture.HOST = _arch_mapping.get(platform.machine().lower())
 if Architecture.HOST is None:
     raise ValueError(f"Unsupported host architecture: {platform.machine()}")
 
+class Emulation:
+    qemu_interpreters: dict[Architecture, list[str]] = {
+        Architecture.x86: ["qemu-system-i386"],
+        Architecture.amd64: ["qemu-system-x86_64", "qemu-system-i386"],  # To run both 64-bit and 32-bit x86
+        Architecture.arm: ["qemu-system-arm"],
+        Architecture.arm64: ["qemu-system-aarch64"],
+        Architecture.hppa: ["qemu-system-hppa"],
+        Architecture.ia64: ["qemu-system-ia64"],
+        Architecture.mips: ["qemu-system-mips", "qemu-system-mipsel", "qemu-system-mips64", "qemu-system-mips64el"],
+        Architecture.ppc: ["qemu-system-ppc"],
+        Architecture.ppc64: ["qemu-system-ppc64"],
+        Architecture.ppc64le: ["qemu-system-ppc64le"],  # Often just part of qemu-system-ppc64 with option flags
+        Architecture.riscv: ["qemu-system-riscv32", "qemu-system-riscv64"],
+        Architecture.sparc: ["qemu-system-sparc", "qemu-system-sparc64"],
+        Architecture.alpha: ["qemu-system-alpha"],
+        Architecture.m68k: ["qemu-system-m68k"],
+        Architecture.loong: ["qemu-system-loongarch64"],
+        Architecture.s390: ["qemu-system-s390x"],  # s390 usually handled via s390x emulator
+        Architecture.s390x: ["qemu-system-s390x"],
+    }
+
+    @staticmethod
+    def get_all_qemu_systems() -> list[str]:
+        systems = set()
+        for interpreters in Emulation.qemu_interpreters.values():
+            systems.update(interpreters)
+        return sorted(systems)
+

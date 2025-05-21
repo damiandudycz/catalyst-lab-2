@@ -13,6 +13,7 @@ from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
 import time
 from .repository import Serializable, Repository, RepositoryEvent
+from typing import Any
 
 @app_section(title="Environments", icon="preferences-other-symbolic", order=2_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments/environments_section.ui')
@@ -80,6 +81,10 @@ class EnvironmentsSection(Gtk.Box):
                 version = toolset.get_installed_app_version(app)
                 if version is not None:
                     app_strings.append(f"{app.name}: {version}")
+            qemu_metadata: dict[str, Any] = toolset.metadata.get(ToolsetApplication.QEMU.package, {})
+            qemu_interpreters_metadata: list[str] = qemu_metadata.get("interpreters", [])
+            if qemu_interpreters_metadata:
+                app_strings.append(f"Interpreters: {len(qemu_interpreters_metadata)}")
             if app_strings:
                 action_row.set_subtitle(", ".join(app_strings))
             action_row.toolset = toolset

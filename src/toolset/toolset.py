@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, uuid, shutil, tempfile, threading, stat, time, subprocess, requests, tarfile, re
 from gi.repository import Gtk, GLib, Adw
-from typing import final, ClassVar, Dict
+from typing import final, ClassVar, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
@@ -12,7 +12,7 @@ from multiprocessing import Event
 from .root_function import root_function
 from .runtime_env import RuntimeEnv
 from .toolset_env_builder import ToolsetEnvBuilder
-from .architecture import Architecture
+from .architecture import Architecture, Emulation
 from .event_bus import EventBus
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
@@ -31,11 +31,12 @@ class Toolset(Serializable):
     """Class containing details of the Toolset instances."""
     """Only metadata, no functionalities."""
     """Functionalities are handled by ToolsetContainer."""
-    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, apps: dict[str, str], **kwargs):
+    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, apps: dict[str, str] = {}, metadata: dict[str, Any] = {}, **kwargs):
         self.uuid = uuid
         self.env = env
         self.name = name
         self.apps = apps
+        self.metadata = metadata
         match env:
             case ToolsetEnv.SYSTEM:
                 pass
@@ -62,6 +63,7 @@ class Toolset(Serializable):
             env = ToolsetEnv[data["env"]]
             name = str(data["name"])
             apps = data.get("apps", {})
+            metadata = data.get("metadata", {})
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         kwargs = {}
@@ -73,14 +75,15 @@ class Toolset(Serializable):
                 if not isinstance(squashfs_file, str):
                     raise ValueError("Missing or invalid 'squashfs_file' for EXTERNAL environment")
                 kwargs["squashfs_file"] = squashfs_file
-        return cls(env, uuid_value, name, apps, **kwargs)
+        return cls(env, uuid_value, name, apps, metadata, **kwargs)
 
     def serialize(self) -> dict:
         data = {
             "uuid": str(self.uuid),
             "env": self.env.name,
             "name": self.name,
-            "apps": self.apps
+            "apps": self.apps,
+            "metadata": self.metadata
         }
         if self.env == ToolsetEnv.EXTERNAL:
             data["squashfs_file"] = self.squashfs_file
@@ -273,7 +276,6 @@ class Toolset(Serializable):
                 raise RuntimeError(f"Toolset {self} is not spawned.")
             if self.in_use:
                 raise RuntimeError(f"Toolset {self} is currently in use.")
-            # Remove /tmp folders. TODO: After root_calls this dirs contains root owned files and directories, making it impossible to remove as user.
             try:
                 if self.work_dir:
                     delete_temp_workdir(path=str(self.work_dir))
@@ -337,15 +339,15 @@ class Toolset(Serializable):
                 checks_succeded = False
                 break
             try:
-                self.perform_app_installed_version_check(app=app, parent_call=parent_call)
-                self.perform_app_additional_checks(app=app, parent_call=parent_call)
+                self._perform_app_installed_version_check(app=app, parent_call=parent_call)
+                self._perform_app_additional_checks(app=app, parent_call=parent_call)
             except Exception as e:
                 print(e)
                 checks_succeded = False
         Repository.TOOLSETS.save() # Make sure changes are saved in repository.
         return checks_succeded
 
-    def perform_app_installed_version_check(self, app: ToolsetApplication, parent_call: ServerCall | None = None):
+    def _perform_app_installed_version_check(self, app: ToolsetApplication, parent_call: ServerCall | None = None):
         """Checks the version of package installed in toolset."""
         """Stores the value in toolset metadata."""
         """If app is not found, stores none for this app in toolset metadata."""
@@ -359,7 +361,17 @@ class Toolset(Serializable):
             done_event.set()
         def output_handler(output_line: str):
             nonlocal version_value
-            if output_line:
+            def is_valid_package_version(version: str) -> bool:
+                gentoo_version_regex = re.compile(
+                    r"""^
+                    \d+(\.\d+)*                  # version number: 1, 1.2, 1.2.3, etc.
+                    (_(alpha|beta|pre|rc|p)\d*)? # optional suffix: _alpha, _beta2, _p20230520, etc.
+                    (-r\d+)?                     # optional revision: -r1
+                    $""",
+                    re.VERBOSE
+                )
+                return bool(gentoo_version_regex.match(version))
+            if output_line and is_valid_package_version(output_line):
                 version_value = output_line
         server_call = self.run_command(
             command=(
@@ -380,8 +392,9 @@ class Toolset(Serializable):
         else:
             self.apps.pop(app.package, None)
 
-    def perform_app_additional_checks(self, app: ToolsetApplication, parent_call: ServerCall | None = None):
-        pass # TODO: Implement
+    def _perform_app_additional_checks(self, app: ToolsetApplication, parent_call: ServerCall | None = None):
+        if app.toolset_additional_analysis:
+            app.toolset_additional_analysis(app=app, toolset=self, parent_call=parent_call)
 
 @dataclass
 class BindMount:
@@ -583,6 +596,7 @@ class ToolsetApplication:
     portage_config: Tuple[ToolsetApplication.PortageConfig, ...] = field(default_factory=tuple)
     dependencies: Tuple[ToolsetApplication, ...] = field(default_factory=tuple)
     auto_select: bool = False # Automatically select / deselect for apps that depends on this one.
+    toolset_additional_analysis: Callable[[ToolsetApplication,Toolset,ServerCall|None],None] | None = None # Additional analysis for toolset
     def __post_init__(self):
         # Automatically add new instances to ToolsetApplication.ALL
         ToolsetApplication.ALL.append(self)
@@ -613,6 +627,19 @@ ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
     package="sys-kernel/linux-headers",
     auto_select=True
 )
+def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: Toolset, parent_call: ServerCall | None = None):
+    # FIXME: Fix when squashfs based toolsets are done.
+    bin_directory = Path(toolset.toolset_root()) / "bin"
+    qemu_systems = Emulation.get_all_qemu_systems()
+    found_qemu_binaries = []
+    for qemu_binary in qemu_systems:
+        binary_path = bin_directory / qemu_binary
+        if binary_path.is_file():
+            found_qemu_binaries.append(qemu_binary)
+    toolset.metadata[app.package] = {
+        "interpreters": found_qemu_binaries
+    }
+
 ToolsetApplication.QEMU = ToolsetApplication(
     name="Qemu", description="Allows building stages for different architectures",
     package="app-emulation/qemu",
@@ -632,7 +659,8 @@ ToolsetApplication.QEMU = ToolsetApplication(
             )
         ),
     ),
-    dependencies=(ToolsetApplication.LINUX_HEADERS,)
+    dependencies=(ToolsetApplication.LINUX_HEADERS,),
+    toolset_additional_analysis=toolset_additional_analysis_qemu
 )
 
 # ------------------------------------------------------------------------------
