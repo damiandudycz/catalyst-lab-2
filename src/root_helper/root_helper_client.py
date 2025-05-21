@@ -416,6 +416,29 @@ class RootHelperClient:
     ) -> Any | ServerResponse | ServerCall:
         """Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server."""
         function = ServerFunction(func_name, *args, **kwargs)
+
+        # Prevent calling if parent is already terminated
+        if parent is not None and parent.terminated:
+            server_response = ServerResponse(code=ServerResponseStatusCode.JOB_WAS_TERMINATED, response="Parent call is already terminated")
+            if asynchronous:
+                # Create ServerCall with instant failure
+                def noop():
+                    pass
+                empty_thread = threading.Thread(target=noop)
+                call = ServerCall(request=function, client=self, thread=empty_thread)
+                empty_thread.start()
+                def complete():
+                    call.mark_terminated()
+                    result = server_response if raw else server_response.response
+                    if completion_handler:
+                        completion_handler(result)
+                threading.Timer(0.01, complete).start() # Terminate after it was returned
+                return call
+            elif raw:
+                return server_response
+            else:
+                raise RuntimeError(f"Root function error: {result.response}")
+
         result = self.send_request(
             function,
             handler=handler,
@@ -423,7 +446,7 @@ class RootHelperClient:
             raw=raw,
             completion_handler=completion_handler
         )
-        if parent and asynchronous:
+        if parent is not None and asynchronous:
             parent.add_child(result)
         if asynchronous or raw: # Returns ServerCall for async or whole structure directly for sync_raw
             return result

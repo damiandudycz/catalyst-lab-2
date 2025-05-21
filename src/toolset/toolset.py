@@ -123,6 +123,8 @@ class Toolset(Serializable):
             resolved_toolset_root = str(Path(self.toolset_root()).resolve())
             if resolved_toolset_root == "/" and store_changes:
                 raise RuntimeError("Cannot use store_changes with host toolset")
+            if not os.path.isdir(resolved_toolset_root):
+                raise RuntimeError(f"Toolset root directory not found: {resolved_toolset_root}")
 
             _system_bindings = [ # System.
                 BindMount(mount_path="/usr",   toolset_path="/usr",   store_changes=store_changes),
@@ -513,7 +515,13 @@ class ToolsetInstallation:
         filename_without_extension = file_path.stem
         for suffix in suffixes:
             filename_without_extension = filename_without_extension.rstrip(suffix)
-        return filename_without_extension
+        parts = filename_without_extension.split("-")
+        if len(parts) > 2:
+            middle_parts = parts[1:]
+            installer_name = " ".join(middle_parts)
+        else:
+            installer_name = filename_without_extension
+        return installer_name
 
     def start(self):
         try:
@@ -849,7 +857,8 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), self.installer.name(), squashfs_file=self.installer.tmp_stage_extract_dir)
+            toolset_name = self.installer.name()
+            self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_file=self.installer.tmp_stage_extract_dir)
             self.installer.tmp_toolset.spawn(store_changes=True, additional_bindings=[BindMount(mount_path="/var/cache", create_if_missing=True)])
             commands = [
                 "env-update && source /etc/profile",
