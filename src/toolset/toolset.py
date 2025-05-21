@@ -9,6 +9,7 @@ from collections import namedtuple
 from abc import ABC, abstractmethod
 from urllib.parse import ParseResult
 from multiprocessing import Event
+from collections import namedtuple
 from .root_function import root_function
 from .runtime_env import RuntimeEnv
 from .toolset_env_builder import ToolsetEnvBuilder
@@ -466,10 +467,10 @@ class ToolsetInstallation:
     started_installations: list[ToolsetInstallation] = []
     event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
 
-    def __init__(self, stage_url: ParseResult, allow_binpkgs: bool, selected_apps: list[ToolsetApplication]):
+    def __init__(self, stage_url: ParseResult, allow_binpkgs: bool, apps_selection: list[ToolsetApplicationSelection]):
         self.stage_url = stage_url
         self.allow_binpkgs = allow_binpkgs
-        self.selected_apps = selected_apps
+        self.apps_selection = apps_selection
         self.process_selected_apps()
         self.steps: list[ToolsetInstallationStep] = []
         self.event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
@@ -479,33 +480,34 @@ class ToolsetInstallation:
 
     def process_selected_apps(self):
         """Manage auto_select dependencies."""
-        apps = self.selected_apps[:]
-        # First, remove any app that is marked as auto_select
-        for app in self.selected_apps:
-            if app.auto_select:
-                apps.remove(app)
-        # Add dependencies of selected apps that aren't already in the list
-        for app in self.selected_apps:
-            for dep in app.dependencies:
-                if dep not in apps:
-                    apps.append(dep)
-        # Sort the apps so that dependencies come before the apps that need them
-        # This assumes that each app has a list of dependencies and dependencies are in the `dependencies` list
-        def sort_key(app):
-            # Priority to apps that are dependencies of other apps (should come later in the list)
-            return [dep.name for dep in app.dependencies]
-        apps.sort(key=sort_key)  # Sort apps so that dependencies appear first
-        # Assign the sorted list back to selected_apps
-        self.selected_apps = apps
+        app_selections_by_app = { app_selection.app: app_selection for app_selection in self.apps_selection }
+        # Mark all dependencies as selected
+        for app_selection in self.apps_selection:
+            for dep in getattr(app_selection.app, "dependencies", []):
+                if dep in app_selections_by_app:
+                    app_selections_by_app[dep] = app_selections_by_app[dep]._replace(selected=True)
+        # Remove not selected entries
+        self.apps_selection = [sel for sel in self.apps_selection if sel.selected]
+        # Sort by dependencies
+        sorted_entries: list[ToolsetApplicationSelection] = []
+        def process_app_selection(app_selection: ToolsetApplicationSelection):
+            for dep in getattr(app_selection.app, "dependencies", []):
+                process_app_selection(app_selection=app_selections_by_app[dep])
+            if not app_selection in sorted_entries:
+                sorted_entries.append(app_selection)
+        for app_selection in self.apps_selection:
+            process_app_selection(app_selection=app_selection)
+        self.apps_selection = sorted_entries
 
     def _setup_steps(self):
         self.steps.append(ToolsetInstallationStepDownload(url=self.stage_url, installer=self))
         self.steps.append(ToolsetInstallationStepExtract(installer=self))
         self.steps.append(ToolsetInstallationStepSpawn(installer=self))
-        if self.selected_apps:
+        if self.apps_selection:
             self.steps.append(ToolsetInstallationStepUpdatePortage(installer=self))
-        for app in self.selected_apps:
-            self.steps.append(ToolsetInstallationStepInstallApp(app=app, installer=self))
+        for app_selection in self.apps_selection:
+            print(f">> Select: {app_selection.selected} {app_selection.app.name}, version: {app_selection.version.name}")
+            self.steps.append(ToolsetInstallationStepInstallApp(app_selection=app_selection, installer=self))
         self.steps.append(ToolsetInstallationStepVerify(installer=self))
         self.steps.append(ToolsetInstallationStepCompress(installer=self))
 
@@ -601,31 +603,57 @@ class ToolsetApplication:
     package: str
     is_recommended: bool = False
     is_highly_recommended: bool = False
-    portage_config: Tuple[ToolsetApplication.PortageConfig, ...] = field(default_factory=tuple)
+    versions: Tuple[Version, ...] = field(default_factory=tuple)
     dependencies: Tuple[ToolsetApplication, ...] = field(default_factory=tuple)
     auto_select: bool = False # Automatically select / deselect for apps that depends on this one.
     toolset_additional_analysis: Callable[[ToolsetApplication,Toolset,ServerCall|None],None] | None = None # Additional analysis for toolset
     def __post_init__(self):
         # Automatically add new instances to ToolsetApplication.ALL
         ToolsetApplication.ALL.append(self)
-    @dataclass(frozen=True)
-    class PortageConfig:
-         # eq: { "packages.use": ["Entry1", "Entry2"], "package.accept_keywords": ["Entry1", "Entry2"] }
-        directory: str
-        entries: Tuple[str, ...] = field(default_factory=tuple)
+
+ToolsetApplicationSelection = namedtuple("ToolsetApplicationSelection", ["app", "version", "selected"])
+
+@dataclass(frozen=True)
+class PortageConfig:
+     # eq: { "packages.use": ["Entry1", "Entry2"], "package.accept_keywords": ["Entry1", "Entry2"] }
+    directory: str
+    entries: Tuple[str, ...] = field(default_factory=tuple)
+@dataclass(frozen=True)
+class ToolsetApplicationVersion:
+    name: str
+    config: PortageConfig = field(default_factory=PortageConfig)
 
 ToolsetApplication.CATALYST = ToolsetApplication(
     name="Catalyst", description="Required to build Gentoo stages",
     package="dev-util/catalyst",
     is_recommended=True, is_highly_recommended=True,
-    portage_config=(
-        ToolsetApplication.PortageConfig(directory="package.accept_keywords", entries=("dev-util/catalyst",)),
-        ToolsetApplication.PortageConfig(
-            directory="package.use",
-            entries=(
-                ">=sys-apps/util-linux-2.40.4 python",
-                ">=sys-boot/grub-2.12-r6 grub_platforms_efi-64",
-                ">=sys-boot/grub-2.12-r6 grub_platforms_efi-32",
+    versions=(
+        ToolsetApplicationVersion(
+            name="Stable",
+            config=(
+                PortageConfig(directory="package.accept_keywords", entries=("dev-util/catalyst",)),
+                PortageConfig(
+                    directory="package.use",
+                    entries=(
+                        ">=sys-apps/util-linux-2.40.4 python",
+                        ">=sys-boot/grub-2.12-r6 grub_platforms_efi-64",
+                        ">=sys-boot/grub-2.12-r6 grub_platforms_efi-32",
+                    )
+                ),
+            )
+        ),
+        ToolsetApplicationVersion(
+            name="Experimental",
+            config=(
+                PortageConfig(directory="package.accept_keywords", entries=("dev-util/catalyst **",)),
+                PortageConfig(
+                    directory="package.use",
+                    entries=(
+                        ">=sys-apps/util-linux-2.40.4 python",
+                        ">=sys-boot/grub-2.12-r6 grub_platforms_efi-64",
+                        ">=sys-boot/grub-2.12-r6 grub_platforms_efi-32",
+                    )
+                ),
             )
         ),
     )
@@ -633,7 +661,13 @@ ToolsetApplication.CATALYST = ToolsetApplication(
 ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
     name="Linux headers", description="Needed for qemu/cmake",
     package="sys-kernel/linux-headers",
-    auto_select=True
+    auto_select=True,
+    versions=(
+            ToolsetApplicationVersion(
+                name="Stable",
+                config=None
+            ),
+        ),
 )
 def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: Toolset, parent_call: ServerCall | None = None):
     # FIXME: Fix when squashfs based toolsets are done.
@@ -652,18 +686,42 @@ ToolsetApplication.QEMU = ToolsetApplication(
     name="Qemu", description="Allows building stages for different architectures",
     package="app-emulation/qemu",
     is_recommended=True,
-    portage_config=(
-        ToolsetApplication.PortageConfig(
-            directory="package.use",
-            entries=(
-                "app-emulation/qemu static-user",
-                "dev-libs/glib static-libs",
-                "sys-libs/zlib static-libs",
-                "sys-apps/attr static-libs",
-                "dev-libs/libpcre2 static-libs",
-                "sys-libs/libcap static-libs",
-                "*/* QEMU_SOFTMMU_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
-                "*/* QEMU_USER_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+    versions=(
+        ToolsetApplicationVersion(
+            name="Stable",
+            config=(
+                PortageConfig(
+                    directory="package.use",
+                    entries=(
+                        "app-emulation/qemu static-user",
+                        "dev-libs/glib static-libs",
+                        "sys-libs/zlib static-libs",
+                        "sys-apps/attr static-libs",
+                        "dev-libs/libpcre2 static-libs",
+                        "sys-libs/libcap static-libs",
+                        "*/* QEMU_SOFTMMU_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                        "*/* QEMU_USER_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                    )
+                ),
+            )
+        ),
+        ToolsetApplicationVersion(
+            name="Experimental",
+            config=(
+                PortageConfig(directory="package.accept_keywords", entries=("app-emulation/qemu **",)),
+                PortageConfig(
+                    directory="package.use",
+                    entries=(
+                        "app-emulation/qemu static-user",
+                        "dev-libs/glib static-libs",
+                        "sys-libs/zlib static-libs",
+                        "sys-apps/attr static-libs",
+                        "dev-libs/libpcre2 static-libs",
+                        "sys-libs/libcap static-libs",
+                        "*/* QEMU_SOFTMMU_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                        "*/* QEMU_USER_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                    )
+                ),
             )
         ),
     ),
@@ -910,9 +968,9 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
             self.complete(ToolsetInstallationStepState.FAILED)
 
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
-    def __init__(self, app: ToolsetApplication, installer: ToolsetInstallation):
-        super().__init__(name=f"Install {app.name}", description=f"Emerges {app.package} package", installer=installer)
-        self.app = app
+    def __init__(self, app_selection: ToolsetApplicationSelection, installer: ToolsetInstallation):
+        super().__init__(name=f"Install {app_selection.app.name}", description=f"Emerges {app_selection.app.package} package", installer=installer)
+        self.app_selection = app_selection
     def start(self):
         super().start()
         try:
@@ -922,12 +980,13 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
                 if match:
                     n, m = map(int, match.groups())
                     return n / m
-            for config in self.app.portage_config:
-                if self._cancel_event.is_set():
-                    return
-                insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app.name, toolset_root=self.installer.tmp_toolset.toolset_root())
+            if self.app_selection.version.config:
+                for config in self.app_selection.version.config:
+                    if self._cancel_event.is_set():
+                        return
+                    insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app_selection.app.name, toolset_root=self.installer.tmp_toolset.toolset_root())
             flags = "--getbinpkg" if self.installer.allow_binpkgs else ""
-            result = self.run_command_in_toolset(command=f"emerge {flags} {self.app.package}", progress_handler=progress_handler)
+            result = self.run_command_in_toolset(command=f"emerge {flags} {self.app_selection.app.package}", progress_handler=progress_handler)
             self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
         except Exception as e:
             print(f"Error during app installation: {e}")

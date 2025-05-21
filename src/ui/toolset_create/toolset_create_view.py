@@ -17,6 +17,8 @@ from .toolset import (
     ToolsetInstallationStage,
     ToolsetInstallationEvent,
     ToolsetApplication,
+    ToolsetApplicationVersion,
+    ToolsetApplicationSelection,
     ToolsetInstallationStep,
     ToolsetInstallationStepState,
     ToolsetInstallationStepEvent
@@ -53,6 +55,7 @@ class ToolsetCreateView(Gtk.Box):
         self.allow_binpkgs = True
         self.carousel.connect('page-changed', self.on_page_changed)
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: True for app in ToolsetApplication.ALL}
+        self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else ToolsetInstallationStage.SETUP)
@@ -103,14 +106,18 @@ class ToolsetCreateView(Gtk.Box):
     def _start_installation(self, authorized: bool):
         if not authorized:
             return
-        selected_apps = [
-            app for app, selected in self.tools_selection.items()
-            if selected and all(self.tools_selection.get(dep, False) for dep in getattr(app, "dependencies", ()))
+        apps_selection = [
+            ToolsetApplicationSelection(
+                app=app,
+                version=self.tools_selection_versions[app],
+                selected=self.tools_selection[app] and all(self.tools_selection[dep] for dep in getattr(app, "dependencies", ()))
+            )
+            for app, _ in self.tools_selection.items()
         ]
         self.installation_in_progress = ToolsetInstallation(
             stage_url=self.selected_stage,
             allow_binpkgs=self.allow_binpkgs,
-            selected_apps=selected_apps
+            apps_selection=apps_selection
         )
         self._update_installation_steps(self.installation_in_progress.steps)
         self._set_current_stage(self.installation_in_progress.status)
@@ -210,18 +217,35 @@ class ToolsetCreateView(Gtk.Box):
         for app in ToolsetApplication.ALL:
             if app.auto_select:
                 continue # Don't show automatic dependencies
-            row = Adw.ActionRow(title=app.name)
+            row = Adw.ExpanderRow(title=app.name)
             row.set_subtitle(app.description)
             check_button = Gtk.CheckButton()
             check_button.set_active(self.tools_selection.get(app))
             check_button.connect("toggled", self._on_tool_selected, app)
-            if app.is_recommended or app.is_highly_recommended:
-                label = Gtk.Label(label="Recommended" if not app.is_highly_recommended else "Highly recommended")
-                label.add_css_class("dim-label")
-                label.add_css_class("caption")
-                row.add_suffix(label)
+
+            label = Gtk.Label(label=self.tools_selection_versions[app].name)
+            label.add_css_class("dim-label")
+            label.add_css_class("caption")
+            row.add_suffix(label)
+
+            for version in app.versions:
+                version_row = Adw.ActionRow(title=version.name)
+                version_row.set_activatable(True)
+                # Connect signal to update label when row is activated
+                def on_version_selected(version_row, version=version):
+                    self.tools_selection[version_row.app] = True
+                    self.tools_selection_versions[version_row.app] = version
+                    version_row.assoiciated_label.set_text(version.name)
+                    version_row.check_button.set_active(self.tools_selection.get(version_row.app))
+                    version_row.app_row.set_expanded(False)
+                version_row.assoiciated_label = label
+                version_row.app_row = row
+                version_row.app = app
+                version_row.check_button = check_button
+                version_row.connect("activated", on_version_selected)
+                row.add_row(version_row)
+
             row.add_prefix(check_button)
-            row.set_activatable_widget(check_button)
             self.tools_list.add(row)
             self.tools_rows[app] = row
             self.tools_check_buttons[app] = check_button
@@ -243,6 +267,8 @@ class ToolsetCreateView(Gtk.Box):
             dependencies_satisfied = not unmet_dependencies
             is_sensitive = dependencies_satisfied
             row.set_sensitive(is_sensitive)
+            if not is_sensitive:
+                row.set_expanded(False)
             self.tools_check_buttons[app].set_sensitive(is_sensitive)
 
     def _set_current_stage(self, stage: ToolsetInstallationStage):
