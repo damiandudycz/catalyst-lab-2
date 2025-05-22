@@ -126,7 +126,13 @@ class RootHelperClient:
             if instant:
                 self.clean_unfinished_jobs()
             else:
-                self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=lambda _: self.clean_unfinished_jobs(), token=token)
+                def complete_exit(response: ServerResponse):
+                    # Mark exit call as completed earlier.
+                    exit_call = next((action for action in self.running_actions if action.request == ServerCommand.EXIT), None)
+                    if exit_call:
+                        self.set_request_status(exit_call, False)
+                    self.clean_unfinished_jobs()
+                self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=complete_exit, token=token)
         except Exception as e:
             print("[Server process]: Warning: Failed to send EXIT command. Some process might be left working orphined.")
             self.clean_unfinished_jobs()
@@ -136,6 +142,7 @@ class RootHelperClient:
             print("[Server process]: Closed.")
 
     def clean_unfinished_jobs(self):
+        print("clean_unfinished_jobs")
         """Marks all jobs as finished, even if server didn't yet closed them."""
         """If job is still on the list at this point it means it's orphined - we don't know if it's still running."""
         with self.set_request_status_lock:
@@ -276,117 +283,133 @@ class RootHelperClient:
         def worker(call: ServerCall) -> ServerResponse:
             args = request.args if hasattr(request, "args") else ""
             kwargs = request.kwargs if hasattr(request, "kwargs") else ""
+            conn = None
+            response_string: str = None
             print(f">>> [{request.function_name} {args} {kwargs}]")
+
             try:
                 used_token = token if token is not None else self.token
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-                    conn.connect(self.socket_path)
-                    conn.sendall(f"{used_token} {call.call_id} {request_type} {message}".encode())
+                conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                conn.connect(self.socket_path)
+                conn.sendall(f"{used_token} {call.call_id} {request_type} {message}".encode())
 
-                    current_message_type: StreamPipe | None = None
-                    current_chars_left: int | None = None
-                    current_buffer = ""
-                    response_string: str = None
-                    def handle_message(message_type: StreamPipe, content: str):
-                        nonlocal response_string
-                        match message_type:
-                            case StreamPipe.RETURN:
-                                response_string = content
-                            case StreamPipe.STDOUT:
-                                call.output_append(content)
-                                if handler:
-                                    handler(content)
-                            case StreamPipe.STDERR:
-                                call.output_append(content)
-                                if handler:
-                                    handler(content)
-                            case StreamPipe.EVENTS:
-                                # Handle EVENTS pipe:
-                                try:
-                                    event = StreamPipeEvent(int(content))
-                                    match event:
-                                        case StreamPipeEvent.CALL_WILL_TERMINATE:
-                                            call.mark_terminated()
-                                        case _:
-                                           print(f"[Server process]: Warning: Received unsupported event: {event}")
-                                except Exception as e:
-                                       print(f"[Server process]: Warning: Failed to process event: {content}")
+                current_message_type: StreamPipe | None = None
+                current_chars_left: int | None = None
+                current_buffer = ""
 
-                    # Processing data returned over socket and combining them into messages.
-                    # Format: <StreamPipe.raw>:<Length>:<Message>. eq: 0:11:Hello World
-                    header_buffer = ""
-                    current_message_type = None
-                    current_chars_left = None
-                    current_buffer = ""
-                    def process_fragment(fragment: str):
-                        nonlocal header_buffer, current_message_type, current_chars_left, current_buffer
-                        while fragment:
-                            if current_message_type is None:
-                                # Still parsing header
-                                header_buffer += fragment
-                                if ':' not in header_buffer:
-                                    return # Still not enough to parse
-                                parts = header_buffer.split(":", 2)
-                                if len(parts) < 3:
-                                    return # Incomplete header, wait for more data
-                                # Full header is ready
-                                type_str, length_str, rest = parts
-                                try:
-                                    current_message_type = StreamPipe(int(type_str))
-                                    current_chars_left = int(length_str)
-                                    current_buffer = ""
-                                    fragment = rest # Move on to actual content
-                                    header_buffer = "" # Reset for next header
-                                except Exception as e:
-                                    print(f"[Server]: Malformed header: {header_buffer}")
-                                    header_buffer = ""
-                                    raise e
-                            else:
-                                # Reading body
-                                append_fragment = fragment[:current_chars_left]
-                                remaining_fragment = fragment[current_chars_left:]
-                                current_buffer += append_fragment
-                                current_chars_left -= len(append_fragment)
-                                if current_chars_left == 0:
-                                    handle_message(current_message_type, current_buffer)
-                                    current_message_type = None
-                                    current_chars_left = None
-                                    current_buffer = ""
-                                fragment = remaining_fragment
+                def handle_message(message_type: StreamPipe, content: str):
+                    nonlocal response_string
+                    match message_type:
+                        case StreamPipe.RETURN:
+                            response_string = content
+                        case StreamPipe.STDOUT:
+                            call.output_append(content)
+                            if handler:
+                                handler(content)
+                        case StreamPipe.STDERR:
+                            call.output_append(content)
+                            if handler:
+                                handler(content)
+                        case StreamPipe.EVENTS:
+                            try:
+                                event = StreamPipeEvent(int(content))
+                                match event:
+                                    case StreamPipeEvent.CALL_WILL_TERMINATE:
+                                        call.mark_terminated()
+                                    case _:
+                                        print(f"[Server process]: Warning: Received unsupported event: {event}")
+                            except Exception:
+                                print(f"[Server process]: Warning: Failed to process event: {content}")
 
-                    timeout = request.timeout()
-                    if timeout:
-                        conn.settimeout(timeout)
-                    while (chunk := conn.recv(4096)):
-                        fragment = chunk.decode()
-                        process_fragment(fragment)
+                header_buffer = ""
+                current_message_type = None
+                current_chars_left = None
+                current_buffer = ""
 
-                    # Send ACK
-                    readable, writable, errored = select.select([], [conn], [], 5)
-                    if writable:
-                        conn.sendall(b"ACK")
-                        conn.shutdown(socket.SHUT_WR)
-                    else:
-                        print("[Server process]: Warning: Failed to send ACK back. Socket not ready for writing.")
-                        raise RuntimeError("Failed to send ACK in time. Socket not ready to write.")
+                def process_fragment(fragment: str):
+                    nonlocal header_buffer, current_message_type, current_chars_left, current_buffer
+                    while fragment:
+                        if current_message_type is None:
+                            header_buffer += fragment
+                            if ':' not in header_buffer:
+                                return  # Not enough to parse yet
+                            parts = header_buffer.split(":", 2)
+                            if len(parts) < 3:
+                                return  # Incomplete header, wait for more data
+                            type_str, length_str, rest = parts
+                            try:
+                                current_message_type = StreamPipe(int(type_str))
+                                current_chars_left = int(length_str)
+                                current_buffer = ""
+                                fragment = rest
+                                header_buffer = ""
+                            except Exception as e:
+                                print(f"[Server]: Malformed header: {header_buffer}")
+                                header_buffer = ""
+                                raise e
+                        else:
+                            append_fragment = fragment[:current_chars_left]
+                            remaining_fragment = fragment[current_chars_left:]
+                            current_buffer += append_fragment
+                            current_chars_left -= len(append_fragment)
+                            if current_chars_left == 0:
+                                handle_message(current_message_type, current_buffer)
+                                current_message_type = None
+                                current_chars_left = None
+                                current_buffer = ""
+                            fragment = remaining_fragment
 
-                    server_response = ServerResponse.from_json(response_string)
+                timeout = request.timeout()
+                if timeout:
+                    conn.settimeout(timeout)
+
+                while (chunk := conn.recv(4096)):
+                    fragment = chunk.decode()
+                    process_fragment(fragment)
+
+                server_response = ServerResponse.from_json(response_string)
+
             except Exception as e:
                 print(f"Exception: {e}")
                 server_response = ServerResponse(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
                 self.stop_root_helper(instant=True)
+
             finally:
-                # If there are child calls, wait for them all to finish before returning
+                def send_ack():
+                    try:
+                        if conn:
+                            readable, writable, errored = select.select([], [conn], [], 5)
+                            if writable:
+                                conn.sendall(b"ACK")
+                                conn.shutdown(socket.SHUT_WR)
+                            else:
+                                print("[Server process]: Warning: Failed to send ACK back. Socket not ready for writing.")
+                                raise RuntimeError("Failed to send ACK in time. Socket not ready to write.")
+                    except Exception as e:
+                        print(f"[Server process]: Warning: Exception while sending ACK: {e}")
+
+                # Wait for any child threads to finish
                 with call.children_lock:
                     for child in call.children:
                         if child.thread:
                             child.thread.join()
+
                 print(f"<<< [{request.function_name} {server_response.code.name}] {server_response.response}")
                 if completion_handler:
                     result = server_response if raw else server_response.response
                     completion_handler(result)
                 if request.show_in_running_tasks:
-                    self.set_request_status(call, False)
+                    if request != ServerCommand.EXIT: # Exit call is completed earlier in completion_handler
+                        self.set_request_status(call, False)
+
+                send_ack()
+
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception as e:
+                        print(f"[Server process]: Warning: Exception closing socket: {e}")
+
                 return server_response
 
         if asynchronous:

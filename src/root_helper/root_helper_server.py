@@ -581,7 +581,8 @@ class Job:
                         if not readable:
                             print("Socket not readable yet")
                         self.conn.settimeout(5)
-                        if self.conn.recv(3) != b"ACK":
+                        data = self.conn.recv(3)
+                        if data != b"ACK":
                             print(f"[Server]: Warning: Incorrect ACK response from client: {data.decode()}")
                     except Exception as e:
                         print(f"[Server]: Warning: Failed to receive ACK from client: {e}")
