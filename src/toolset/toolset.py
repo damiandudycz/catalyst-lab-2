@@ -506,7 +506,6 @@ class ToolsetInstallation:
         if self.apps_selection:
             self.steps.append(ToolsetInstallationStepUpdatePortage(installer=self))
         for app_selection in self.apps_selection:
-            print(f">> Select: {app_selection.selected} {app_selection.app.name}, version: {app_selection.version.name}")
             self.steps.append(ToolsetInstallationStepInstallApp(app_selection=app_selection, installer=self))
         self.steps.append(ToolsetInstallationStepVerify(installer=self))
         self.steps.append(ToolsetInstallationStepCompress(installer=self))
@@ -611,7 +610,7 @@ class ToolsetApplication:
         # Automatically add new instances to ToolsetApplication.ALL
         ToolsetApplication.ALL.append(self)
 
-ToolsetApplicationSelection = namedtuple("ToolsetApplicationSelection", ["app", "version", "selected"])
+ToolsetApplicationSelection = namedtuple("ToolsetApplicationSelection", ["app", "version", "selected", "patches"])
 
 @dataclass(frozen=True)
 class PortageConfig:
@@ -985,6 +984,12 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
                     if self._cancel_event.is_set():
                         return
                     insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app_selection.app.name, toolset_root=self.installer.tmp_toolset.toolset_root())
+            for patch_file in self.app_selection.patches:
+                file_input_stream = patch_file.read()
+                file_info = file_input_stream.query_info("standard::size", None)
+                file_size = file_info.get_size()
+                patch_content = file_input_stream.read_bytes(file_size, None).get_data().decode()
+                insert_portage_patch(patch_content=patch_content, patch_filename=patch_file.get_basename(), app_package=self.app_selection.app.package, toolset_root=self.installer.tmp_toolset.toolset_root())
             flags = "--getbinpkg" if self.installer.allow_binpkgs else ""
             result = self.run_command_in_toolset(command=f"emerge {flags} {self.app_selection.app.package}", progress_handler=progress_handler)
             self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
@@ -1062,6 +1067,14 @@ def insert_portage_config(config_dir: str, config_entries: list[str], app_name: 
     with open(config_file_path, "w") as f:
         for line in config_entries:
             f.write(line + "\n")
+
+@root_function
+def insert_portage_patch(patch_content: str, patch_filename: str, app_package: str, toolset_root: str):
+    portage_dir = os.path.join(toolset_root, "etc", "portage", "patches", app_package)
+    os.makedirs(portage_dir, exist_ok=True)
+    patch_file_path = os.path.join(portage_dir, patch_filename)
+    with open(patch_file_path, "w", encoding="utf-8") as f:
+        f.write(patch_content)
 
 @root_function
 def extract(tarball: str, directory: str):

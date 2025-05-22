@@ -39,6 +39,7 @@
             "sources" : [
                 {
                     "type" : "git",
+                    "branch" : "main",
                     "url" : "https://github.com/damiandudycz/catalyst-lab-2"
                 }
             ]

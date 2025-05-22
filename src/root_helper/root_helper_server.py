@@ -34,7 +34,7 @@ class RootHelperServer:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperServer | None = None # Singleton shared instance.
-    hide_logs = True
+    hide_logs = False
     use_client_watchdog = True
 
     # --------------------------------------------------------------------------
@@ -450,6 +450,7 @@ class Job:
                 return
 
             # Receive request data:
+            # TODO: Get much more data in chunks if needed
             data = self.conn.recv(4096).decode().strip()
             if not data.startswith(session_token):
                 self.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)

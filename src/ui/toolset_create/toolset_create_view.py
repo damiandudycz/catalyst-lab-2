@@ -1,5 +1,5 @@
 from __future__ import annotations
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk, GLib, Gio
 from gi.repository import Adw
 from urllib.parse import ParseResult
 from dataclasses import dataclass
@@ -56,6 +56,7 @@ class ToolsetCreateView(Gtk.Box):
         self.carousel.connect('page-changed', self.on_page_changed)
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: True for app in ToolsetApplication.ALL}
         self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
+        self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile]] = {app: [] for app in ToolsetApplication.ALL}
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else ToolsetInstallationStage.SETUP)
@@ -110,7 +111,8 @@ class ToolsetCreateView(Gtk.Box):
             ToolsetApplicationSelection(
                 app=app,
                 version=self.tools_selection_versions[app],
-                selected=self.tools_selection[app] and all(self.tools_selection[dep] for dep in getattr(app, "dependencies", ()))
+                selected=self.tools_selection[app] and all(self.tools_selection[dep] for dep in getattr(app, "dependencies", ())),
+                patches=self.tools_selection_patches[app]
             )
             for app, _ in self.tools_selection.items()
         ]
@@ -191,11 +193,13 @@ class ToolsetCreateView(Gtk.Box):
                 self.selected_stage = None
         self.setup_back_next_buttons()
 
-    def _on_tool_selected(self, button: Gtk.CheckButton, app: ToolsetApplication):
+    def _on_tool_selected(self, button: Gtk.CheckButton, app: ToolsetApplication, row: Adw.ExpanderRow):
         """Callback for when a row's checkbox is toggled."""
         self.tools_selection[app] = button.get_active()
         self.setup_back_next_buttons()
         self._update_dependencies()
+        row.set_enable_expansion(self.tools_selection[app])
+        row.set_expanded(False)
 
     @staticmethod
     def _is_recommended_stage(filename: str, architecture: Architecture) -> bool:
@@ -211,53 +215,115 @@ class ToolsetCreateView(Gtk.Box):
         except ValueError:
             return False
 
+    def _update_application_info_label(self, row: Adw.ExpanderRow, app):
+        fragments = [self.tools_selection_versions[app].name]
+        if self.tools_selection_patches[app]:
+            fragments.append("Patched")
+        row.info_label.set_label(", ".join(fragments))
+
     def _load_applications_rows(self):
         self.tools_rows = {}
-        self.tools_check_buttons = {}
         for app in ToolsetApplication.ALL:
             if app.auto_select:
                 continue # Don't show automatic dependencies
             row = Adw.ExpanderRow(title=app.name)
             row.set_subtitle(app.description)
-            check_button = Gtk.CheckButton()
-            check_button.set_active(self.tools_selection.get(app))
-            check_button.connect("toggled", self._on_tool_selected, app)
+            row.set_enable_expansion(self.tools_selection[app])
 
-            label = Gtk.Label(label=self.tools_selection_versions[app].name)
+            check_button = Gtk.CheckButton()
+            check_button.set_active(self.tools_selection[app])
+            check_button.connect("toggled", self._on_tool_selected, app, row)
+            row.check_button = check_button
+            row.add_prefix(check_button)
+
+            label = Gtk.Label()
             label.add_css_class("dim-label")
             label.add_css_class("caption")
+            row.info_label = label
             row.add_suffix(label)
 
-            for version in app.versions:
-                version_row = Adw.ActionRow(title=version.name)
-                version_row.set_activatable(True)
-                # Connect signal to update label when row is activated
-                def on_version_selected(version_row, version=version):
-                    self.tools_selection[version_row.app] = True
-                    self.tools_selection_versions[version_row.app] = version
-                    version_row.assoiciated_label.set_text(version.name)
-                    version_row.check_button.set_active(self.tools_selection.get(version_row.app))
-                    version_row.app_row.set_expanded(False)
-                version_row.assoiciated_label = label
-                version_row.app_row = row
-                version_row.app = app
-                version_row.check_button = check_button
-                version_row.connect("activated", on_version_selected)
-                row.add_row(version_row)
+            versions_row = Adw.ActionRow()
+            versions_row.set_activatable(False)
 
-            row.add_prefix(check_button)
+            toggle_group = Adw.ToggleGroup()
+            toggle_group.add_css_class("round")
+            toggle_group.add_css_class("caption")
+            for version in app.versions:
+                toggle = Adw.Toggle(label=version.name)
+                toggle_group.add(toggle)
+            def on_toggle_clicked(group, pspec, app, app_row):
+                index = group.get_active()
+                self.tools_selection_versions[app] = app.versions[index]
+                self._update_application_info_label(row=app_row, app=app)
+            toggle_group.connect("notify::active", on_toggle_clicked, app, row)
+
+            wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+            wrapper.append(toggle_group)
+            versions_row.add_prefix(wrapper)
+            row.add_row(versions_row)
+
+            add_patch_button = Gtk.Button()
+            add_patch_button_content = Adw.ButtonContent(label="Add patch", icon_name="copy-svgrepo-com-symbolic")
+            add_patch_button.set_child(add_patch_button_content)
+            add_patch_button.get_style_context().add_class("flat")
+            add_patch_button.get_style_context().add_class("caption")
+            add_patch_button.connect("clicked", self._on_add_patch_clicked, app, row)
+            wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+            wrapper.append(add_patch_button)
+            versions_row.add_suffix(wrapper)
+
+            self._update_application_info_label(row=row, app=app)
             self.tools_list.add(row)
             self.tools_rows[app] = row
-            self.tools_check_buttons[app] = check_button
         # After building all rows, update sensitivity based on current state
         self._update_dependencies()
+
+    def _on_add_patch_clicked(self, add_patch_row, app, app_row):
+        def delete_patch_pressed(remove_button, app, app_row, patch_row):
+            self.tools_selection_patches[app].remove(remove_button.file)
+            app_row.remove(patch_row)
+            self._update_application_info_label(row=app_row, app=app)
+        def on_file_open_response(file_dialog, result):
+            try:
+                file = file_dialog.open_finish(result)
+                self.tools_selection_patches[app].append(file)
+                patch_row = Adw.ActionRow(title=file.get_basename(), subtitle="Patch file", icon_name="copy-svgrepo-com-symbolic")
+                remove_button = Gtk.Button()
+                remove_button_content = Adw.ButtonContent(label="Remove", icon_name="error-box-svgrepo-com-symbolic")
+                remove_button.set_child(remove_button_content)
+                remove_button.get_style_context().add_class("destructive-action")
+                remove_button.get_style_context().add_class("flat")
+                remove_button.get_style_context().add_class("caption")
+                remove_button.connect("clicked", delete_patch_pressed, app, app_row, patch_row)
+                remove_button.file = file
+                wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+                wrapper.append(remove_button)
+                patch_row.add_suffix(wrapper)
+                app_row.add_row(patch_row)
+                self._update_application_info_label(row=app_row, app=app)
+            except GLib.Error as e:
+                print("File open canceled or failed:", e)
+        def create_patch_file_filter():
+            file_filter = Gtk.FileFilter()
+            file_filter.set_name("Patch files (*.patch)")
+            file_filter.add_pattern("*.patch")
+            return file_filter
+        def create_filter_list():
+            store = Gio.ListStore.new(Gtk.FileFilter)
+            store.append(create_patch_file_filter())
+            return store
+        file_dialog = Gtk.FileDialog.new()
+        file_dialog.set_title("Select a .patch file")
+        filters = create_filter_list()
+        file_dialog.set_filters(filters)
+        file_dialog.open(self._window, None, on_file_open_response)
 
     def _update_dependencies(self):
         for app, row in self.tools_rows.items():
             # Create the comma-separated string of unmet dependencies
             unmet_dependencies = ", ".join([
                 dep.name for dep in getattr(app, "dependencies", ())
-                if not (self.tools_check_buttons.get(dep, Gtk.CheckButton()).get_active() or dep.auto_select)
+                if not (self.tools_selection[dep] or dep.auto_select)
             ])
             if unmet_dependencies:
                  row.set_title(f"{app.name} (requires: {unmet_dependencies})")
@@ -269,7 +335,7 @@ class ToolsetCreateView(Gtk.Box):
             row.set_sensitive(is_sensitive)
             if not is_sensitive:
                 row.set_expanded(False)
-            self.tools_check_buttons[app].set_sensitive(is_sensitive)
+            self.tools_rows[app].check_button.set_sensitive(is_sensitive)
 
     def _set_current_stage(self, stage: ToolsetInstallationStage):
         self.current_stage = stage
