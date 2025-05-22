@@ -30,12 +30,14 @@
         "*.a"
     ],
     "modules" : [
+    	"python3-requests.json",
+	"squashfs-tools.json",
         {
             "name" : "catalystlab",
             "builddir" : true,
             "buildsystem" : "meson",
             "config-opts" : ["--libdir=lib"],
-            "build-commands": ["pip3 install requests"],
+            "build-commands": [],
             "sources" : [
                 {
                     "type" : "git",

@@ -54,7 +54,7 @@ class ToolsetCreateView(Gtk.Box):
         self.architecture = Architecture.HOST
         self.allow_binpkgs = True
         self.carousel.connect('page-changed', self.on_page_changed)
-        self.tools_selection: Dict[ToolsetApplication, bool] = {app: True for app in ToolsetApplication.ALL}
+        self.tools_selection: Dict[ToolsetApplication, bool] = {app: not app.auto_select for app in ToolsetApplication.ALL}
         self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
         self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile]] = {app: [] for app in ToolsetApplication.ALL}
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
@@ -111,7 +111,7 @@ class ToolsetCreateView(Gtk.Box):
             ToolsetApplicationSelection(
                 app=app,
                 version=self.tools_selection_versions[app],
-                selected=self.tools_selection[app] and all(self.tools_selection[dep] for dep in getattr(app, "dependencies", ())),
+                selected=self.tools_selection[app],
                 patches=self.tools_selection_patches[app]
             )
             for app, _ in self.tools_selection.items()

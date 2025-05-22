@@ -1,0 +1,15 @@
+{
+    "name": "squashfs-tools",
+    "buildsystem": "simple",
+    "build-commands": [
+        "cd squashfs-tools && make",
+        "install -Dm755 squashfs-tools/mksquashfs /app/bin/mksquashfs"
+    ],
+    "sources": [
+        {
+            "type": "archive",
+            "url": "https://github.com/plougher/squashfs-tools/archive/refs/tags/4.6.1.tar.gz",
+            "sha256": "94201754b36121a9f022a190c75f718441df15402df32c2b520ca331a107511c"
+        }
+    ]
+}

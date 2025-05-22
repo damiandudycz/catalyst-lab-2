@@ -483,9 +483,11 @@ class ToolsetInstallation:
         app_selections_by_app = { app_selection.app: app_selection for app_selection in self.apps_selection }
         # Mark all dependencies as selected
         for app_selection in self.apps_selection:
-            for dep in getattr(app_selection.app, "dependencies", []):
-                if dep in app_selections_by_app:
-                    app_selections_by_app[dep] = app_selections_by_app[dep]._replace(selected=True)
+            print(f"{app_selection.app.name} : {app_selection.selected}")
+            if app_selection.selected:
+                for dep in getattr(app_selection.app, "dependencies", []):
+                    if dep in app_selections_by_app:
+                        app_selections_by_app[dep] = app_selections_by_app[dep]._replace(selected=True)
         # Remove not selected entries
         self.apps_selection = [sel for sel in self.apps_selection if sel.selected]
         # Sort by dependencies
@@ -1015,9 +1017,13 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            time.sleep(1)
-            # TODO: Move tmp_toolset to new location, update it's root and save in installer as final_toolset
+            self.installer.tmp_toolset_squashfs_dir = create_temp_workdir(prefix="gentoo_toolset_squashfs_")
+            self.installer.tmp_toolset_squashfs_file = os.path.join(self.installer.tmp_toolset_squashfs_dir, "toolset.squashfs")
+            # TODO: Add progress observation
+            create_squashfs(source_directory=self.installer.tmp_stage_extract_dir, output_file=self.installer.tmp_toolset_squashfs_file)
+            # TODO: Move .squashfs file to another location, and update bellow
             self.installer.final_toolset = self.installer.tmp_toolset
+            self.installer.final_toolset.squashfs_file = self.installer.tmp_toolset_squashfs_file
             self.complete(ToolsetInstallationStepState.COMPLETED)
         except Exception as e:
             print(f"Error during toolset compression: {e}")
@@ -1025,7 +1031,7 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        # TODO: Does this need some cleaning?
+        # TODO: Does this need some cleaning? Probably just remove self.installer.tmp_toolset_squashfs_dir
 
 # ------------------------------------------------------------------------------
 # Helper functions:
@@ -1097,5 +1103,11 @@ def extract(tarball: str, directory: str):
             extracted_size += member.size
             progress = extracted_size / total_size if total_size else 0
             print(f"PROGRESS: {progress}") # This print must stay, it is used to receive progress by step implementation.
+
+def create_squashfs(source_directory: str, output_file: str):
+    import subprocess
+    command = ['mksquashfs', source_directory, output_file]
+    subprocess.run(command, check=True)
+    print(f"SquashFS created successfully: {output_file}")
 
 Repository.TOOLSETS = Repository(cls=Toolset, collection=True)
