@@ -41,4 +41,5 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] Combine handlers into one that also adds Pipe argument
 - [x] For pipes decoding/encoding use simpler format <PipeID>:<Message>
 - [ ] Allow receiving calls longer than 4096
+- [x] Job.process doesn't seem to be initiated. Need to check
 

@@ -536,6 +536,8 @@ class ServerCall:
                 print("[Server process]: Warning: Tried to cancel a call that is not cancellable")
                 return
             for child in self.children:
+                if not child.thread.is_alive():
+                    continue
                 print(f"First cancel child: {child.request.function_name}")
                 child.cancel()
                 if child.thread:

@@ -293,32 +293,49 @@
         <!-- Bottom panel -->
         <child>
           <object class="GtkBox">
-            <property name="homogeneous">True</property>
-            <property name="hexpand">True</property>
-            <property name="margin-start">24</property>
-            <property name="margin-end">24</property>
-            <property name="margin-top">12</property>
-            <property name="margin-bottom">12</property>
-            <!-- Cancel button -->
+            <property name="orientation">vertical</property>
+
+            <!-- Progress bar at the top -->
+            <child>
+              <object class="GtkProgressBar" id="progress_bar">
+                <style>
+                  <class name="osd"/>
+                </style>
+              </object>
+            </child>
+
+            <!-- Main content area: buttons, etc -->
             <child>
               <object class="GtkBox">
-                <property name="halign">center</property>
+                <property name="homogeneous">True</property>
+                <property name="hexpand">True</property>
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">12</property>
+                <property name="margin-bottom">12</property>
+
+                <!-- Cancel and Finish Buttons -->
                 <child>
-                  <object class="GtkButton" id="cancel_button">
-                    <property name="label">Cancel</property>
-                    <signal name="clicked" handler="on_cancel_pressed"/>
-                    <style>
-                      <class name="destructive-action"/>
-                    </style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkButton" id="finish_button">
-                    <property name="label">Finish</property>
-                    <signal name="clicked" handler="on_finish_pressed"/>
-                    <style>
-                      <class name="suggested-action"/>
-                    </style>
+                  <object class="GtkBox">
+                    <property name="halign">center</property>
+                    <child>
+                      <object class="GtkButton" id="cancel_button">
+                        <property name="label">Cancel</property>
+                        <signal name="clicked" handler="on_cancel_pressed"/>
+                        <style>
+                          <class name="destructive-action"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="finish_button">
+                        <property name="label">Finish</property>
+                        <signal name="clicked" handler="on_finish_pressed"/>
+                        <style>
+                          <class name="suggested-action"/>
+                        </style>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>

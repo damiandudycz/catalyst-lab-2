@@ -163,14 +163,26 @@ class EnvironmentsSection(Gtk.Box):
 class ToolsetInstallationRow(Adw.ActionRow):
 
     def __init__(self, installation: ToolsetInstallation):
-        super().__init__(title=installation.name())
+        super().__init__(title=installation.name(), subtitle="Installation in progress")
         self.installation = installation
         self.set_activatable(True)
+        self.status_label = Gtk.Label()
+        self.status_label.add_css_class("dim-label")
+        self.status_label.add_css_class("caption")
+        self.add_suffix(self.status_label)
         self._set_status_icon(status=installation.status)
+        self._setup_progress_label(progress=installation.progress)
         installation.event_bus.subscribe(
             ToolsetInstallationEvent.STATE_CHANGED,
             self._set_status_icon
         )
+        installation.event_bus.subscribe(
+            ToolsetInstallationEvent.PROGRESS_CHANGED,
+            self._setup_progress_label
+        )
+
+    def _setup_progress_label(self, progress: float):
+        self.status_label.set_label(f"{int(progress * 100)}%")
 
     def _set_status_icon(self, status: ToolsetInstallationStage):
         if not hasattr(self, "status_icon"):

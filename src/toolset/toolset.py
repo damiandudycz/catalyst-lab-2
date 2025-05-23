@@ -144,8 +144,11 @@ class Toolset(Serializable):
             ]
             _working_bindings = [ # Working.
                 BindMount(mount_path="/var", toolset_path="/var", store_changes=store_changes),
-                BindMount(mount_path="/tmp", create_if_missing=True), # Create empty tmp when running env
-                BindMount(mount_path="/var/db/repos", create_if_missing=True), # Keep portage tree in tmp directory
+                # Work/tmp/cache directories that should always be stored in temporary directory, not in the real toolset.
+                BindMount(mount_path="/tmp", create_if_missing=True),
+                BindMount(mount_path="/var/tmp", create_if_missing=True),
+                BindMount(mount_path="/var/cache", create_if_missing=True),
+                BindMount(mount_path="/var/db/repos", create_if_missing=True),
             ]
             # All bindings.
             bindings = ( _system_bindings + _config_bindings + _devices_bindings + _working_bindings + (additional_bindings or []) )
@@ -457,6 +460,7 @@ class ToolsetInstallationEvent(Enum):
     """Events produced by installation."""
     # Instance events:
     STATE_CHANGED = auto()
+    PROGRESS_CHANGED = auto()
     # Class events:
     STARTED_INSTALLATIONS_CHANGED = auto()
 
@@ -476,6 +480,7 @@ class ToolsetInstallation:
         self.event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
         self.status = ToolsetInstallationStage.SETUP
         self.stall_server_call = None
+        self.progress: float = 0.0
         self._setup_steps()
 
     def process_selected_apps(self):
@@ -511,6 +516,16 @@ class ToolsetInstallation:
             self.steps.append(ToolsetInstallationStepInstallApp(app_selection=app_selection, installer=self))
         self.steps.append(ToolsetInstallationStepVerify(installer=self))
         self.steps.append(ToolsetInstallationStepCompress(installer=self))
+        # Observe all steps progress to calculate overall progress
+        for step in self.steps:
+            step.event_bus.subscribe(
+                ToolsetInstallationStepEvent.PROGRESS_CHANGED,
+                self._update_progress
+            )
+
+    def _update_progress(self, step_progress: float | None):
+        self.progress = sum(step.progress or 0 for step in self.steps) / len(self.steps)
+        self.event_bus.emit(ToolsetInstallationEvent.PROGRESS_CHANGED, self.progress)
 
     def name(self) -> str:
         file_path = Path(self.stage_url.path)
@@ -762,17 +777,13 @@ class ToolsetInstallationStep(ABC):
         self._cancel_event.clear()
         self._update_state(ToolsetInstallationStepState.IN_PROGRESS)
     def cancel(self):
-        print("Cancelling ....")
         if self.state == ToolsetInstallationStepState.IN_PROGRESS:
             self.complete(ToolsetInstallationStepState.FAILED)
             self._cancel_event.set()
         if self.server_call:
-            print("Found server call")
             self.server_call.cancel()
             if self.server_call.thread:
-                print("Joining")
                 self.server_call.thread.join()
-                print("Thread finished")
                 self.server_call = None
     def cleanup(self) -> bool:
         """Returns true if cleanup was needed and was started."""
@@ -918,7 +929,7 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
         try:
             toolset_name = self.installer.name()
             self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_file=self.installer.tmp_stage_extract_dir)
-            self.installer.tmp_toolset.spawn(store_changes=True, additional_bindings=[BindMount(mount_path="/var/cache", create_if_missing=True)])
+            self.installer.tmp_toolset.spawn(store_changes=True)
             commands = [
                 "env-update && source /etc/profile",
                 "getuto"
@@ -926,7 +937,6 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
             for i, command in enumerate(commands):
                 if self._cancel_event.is_set():
                     return
-                print(f"# {command}")
                 result = self.run_command_in_toolset(command=command)
                 self._update_progress((i + 1) / len(commands))
                 if not result:
@@ -1001,7 +1011,7 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
 
 class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def __init__(self, installer: ToolsetInstallation):
-        super().__init__(name="Verify stage", description="Checks if toolset works correctly", installer=installer)
+        super().__init__(name="Analyze toolset", description="Collects information about toolset", installer=installer)
     def start(self):
         super().start()
         try:
@@ -1020,7 +1030,14 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
             self.installer.tmp_toolset_squashfs_dir = create_temp_workdir(prefix="gentoo_toolset_squashfs_")
             self.installer.tmp_toolset_squashfs_file = os.path.join(self.installer.tmp_toolset_squashfs_dir, "toolset.squashfs")
             # TODO: Add progress observation
-            create_squashfs(source_directory=self.installer.tmp_stage_extract_dir, output_file=self.installer.tmp_toolset_squashfs_file)
+            self.installer.squashfs_process = create_squashfs(source_directory=self.installer.tmp_stage_extract_dir, output_file=self.installer.tmp_toolset_squashfs_file)
+            for line in self.installer.squashfs_process.stdout:
+                line = line.strip()
+                if line.isdigit():
+                    percent = int(line)
+                    self._update_progress(percent / 100.0)
+            self.installer.squashfs_process.wait()
+            self.installer.squashfs_process = None
             # TODO: Move .squashfs file to another location, and update bellow
             self.installer.final_toolset = self.installer.tmp_toolset
             self.installer.final_toolset.squashfs_file = self.installer.tmp_toolset_squashfs_file
@@ -1031,7 +1048,18 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        # TODO: Does this need some cleaning? Probably just remove self.installer.tmp_toolset_squashfs_dir
+        if self.state != ToolsetInstallationStepState.COMPLETED and self.installer.tmp_toolset_squashfs_file and os.path.isfile(self.installer.tmp_toolset_squashfs_file):
+            os.remove(self.installer.tmp_toolset_squashfs_file)
+    def cancel(self):
+        super().cancel()
+        proc = self.installer.squashfs_process
+        if proc and proc.poll() is None:
+            proc.terminate()
+            proc.wait(timeout=3)
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        self.installer.squashfs_process = None
 
 # ------------------------------------------------------------------------------
 # Helper functions:
@@ -1102,12 +1130,18 @@ def extract(tarball: str, directory: str):
             tar.extract(member, path=directory)
             extracted_size += member.size
             progress = extracted_size / total_size if total_size else 0
-            print(f"PROGRESS: {progress}") # This print must stay, it is used to receive progress by step implementation.
+            # This print must stay, it is used to receive progress by step implementation.
+            print(f"PROGRESS: {progress}", flush=True)
 
-def create_squashfs(source_directory: str, output_file: str):
-    import subprocess
-    command = ['mksquashfs', source_directory, output_file]
-    subprocess.run(command, check=True)
-    print(f"SquashFS created successfully: {output_file}")
+def create_squashfs(source_directory: str, output_file: str) -> subprocess.Popen:
+    command = ['mksquashfs', source_directory, output_file, '-quiet', '-percentage']
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
+    )
+    return process
 
 Repository.TOOLSETS = Repository(cls=Toolset, collection=True)

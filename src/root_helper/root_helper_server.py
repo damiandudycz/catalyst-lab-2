@@ -10,10 +10,10 @@ from contextlib import redirect_stdout, redirect_stderr
 from multiprocessing import Event
 
 class StreamPipe(Enum):
-    RETURN = auto()
-    STDOUT = auto()
-    STDERR = auto()
-    EVENTS = auto() # Sends special events to inform about call state etc.
+    STDOUT = 1
+    STDERR = 2
+    EVENTS = 3 # Sends special events to inform about call state etc.
+    RETURN = 4
 
 class ServerResponseStatusCode(Enum):
     OK = 0
@@ -355,7 +355,6 @@ class Job:
     def __init__(self, server: RootHelperServer, conn: socket.socket, session_token: str, allowed_uid: int):
         self.server = server
         self.conn = conn
-        self.thread: threading.Thread | None = None
         self.process: multiprocessing.Process | None = None
         self.mark_terminated = False
         self.call_id: uuid | None = None # Set when handle_connection is called
@@ -412,7 +411,7 @@ class Job:
                 completion(False)
             return
         self.process.terminate()
-        self.thread.join(timeout=3) # Allow time for graceful termination for 3s
+        self.process.join(timeout=3) # Allow time for graceful termination for 3s
         if self.process.is_alive():
             print("[Server]: WARNING: " + "Process did not terminate. Killing forcefully.")
             self.process.kill()
@@ -476,7 +475,6 @@ class Job:
             job.conn.close()
 
     def handle_command_request(self, pid: int, payload: str):
-        print("[Server]: " + "Processing command request")
         try:
             parts = payload.split(" ", 1)
             cmd_type = parts[0]
@@ -517,7 +515,6 @@ class Job:
             self.respond(code=ServerResponseStatusCode.COMMAND_DECODE_FAILED)
 
     def handle_function_request(self, pid: int, payload: str):
-        print("[Server]: " + "Processing function request")
         if self.server.pid_lock is None:
             self.respond(code=ServerResponseStatusCode.INITIALIZATION_NOT_DONE)
             return
@@ -597,9 +594,8 @@ class OutputCapture:
         read_fd, write_fd = os.pipe()
         result_queue = multiprocessing.Queue()
 
-        proc = multiprocessing.Process(target=OutputCapture._run_and_capture_streams, args=(func, args, kwargs, write_fd, result_queue))
-        job.process = proc
-        proc.start()
+        job.process = multiprocessing.Process(target=OutputCapture._run_and_capture_streams, args=(func, args, kwargs, write_fd, result_queue))
+        job.process.start()
         os.close(write_fd)
 
         def stream_reader(job: Job):
@@ -615,7 +611,7 @@ class OutputCapture:
         reader_thread = threading.Thread(target=stream_reader, args=(job,))
         reader_thread.start()
 
-        proc.join()
+        job.process.join()
         reader_thread.join()
 
         # Safe to use .empty() here because proc and reader_thread have been joined,
@@ -636,12 +632,12 @@ class OutputCapture:
         stderr_r, stderr_w = os.pipe()
 
         # Duplicate write ends over original stdout/stderr
-        os.dup2(stdout_w, 1)
-        os.dup2(stderr_w, 2)
+        os.dup2(stdout_w, StreamPipe.STDOUT.value)
+        os.dup2(stderr_w, StreamPipe.STDERR.value)
         os.close(stdout_w)
         os.close(stderr_w)
-        sys.stdout = open(1, 'w', buffering=1, encoding='utf-8', errors='replace')
-        sys.stderr = open(2, 'w', buffering=1, encoding='utf-8', errors='replace')
+        sys.stdout = open(StreamPipe.STDOUT.value, 'w', buffering=1, encoding='utf-8', errors='replace')
+        sys.stderr = open(StreamPipe.STDERR.value, 'w', buffering=1, encoding='utf-8', errors='replace')
 
         def forward_stream(read_fd, pipe_id):
             with os.fdopen(read_fd, 'r') as reader, os.fdopen(write_fd, 'w', buffering=1) as writer:

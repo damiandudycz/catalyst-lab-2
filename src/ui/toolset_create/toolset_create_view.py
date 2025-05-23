@@ -45,6 +45,7 @@ class ToolsetCreateView(Gtk.Box):
     installation_steps_list = Gtk.Template.Child()
     cancel_button = Gtk.Template.Child()
     finish_button = Gtk.Template.Child()
+    progress_bar = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: ToolsetInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -60,6 +61,7 @@ class ToolsetCreateView(Gtk.Box):
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else ToolsetInstallationStage.SETUP)
+        self.progress_bar.set_fraction(self.installation_in_progress.progress if self.installation_in_progress else 0)
         if installation_in_progress and installation_in_progress.status != ToolsetInstallationStage.SETUP:
             self._update_installation_steps(steps=installation_in_progress.steps)
             self.bind_installation_events(self.installation_in_progress)
@@ -68,9 +70,14 @@ class ToolsetCreateView(Gtk.Box):
 
     def bind_installation_events(self, installation_in_progress: ToolsetInstallation):
         installation_in_progress.event_bus.subscribe(
-            ToolsetInstallationEvent.STATE_CHANGED,
-            self._set_current_stage
+            ToolsetInstallationEvent.STATE_CHANGED, self._set_current_stage
         )
+        installation_in_progress.event_bus.subscribe(
+            ToolsetInstallationEvent.PROGRESS_CHANGED, self._update_progress
+        )
+
+    def _update_progress(self, progress):
+        self.progress_bar.set_fraction(self.installation_in_progress.progress)
 
     def on_page_changed(self, carousel, pspec):
         self.current_page = int(carousel.get_position())
@@ -123,6 +130,7 @@ class ToolsetCreateView(Gtk.Box):
         )
         self._update_installation_steps(self.installation_in_progress.steps)
         self._set_current_stage(self.installation_in_progress.status)
+        self.progress_bar.set_fraction(self.installation_in_progress.progress)
         self.bind_installation_events(self.installation_in_progress)
         self.installation_in_progress.start()
 
