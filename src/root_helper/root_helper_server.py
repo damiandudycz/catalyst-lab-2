@@ -12,8 +12,9 @@ from multiprocessing import Event
 class StreamPipe(Enum):
     STDOUT = 1
     STDERR = 2
-    EVENTS = 3 # Sends special events to inform about call state etc.
-    RETURN = 4
+    STDIN  = 3 # Different ID than system on puropse, this is only for communication: TODO: Handling this pipe
+    EVENTS = 4 # Sends special events to inform about call state etc.
+    RETURN = 5
 
 class ServerResponseStatusCode(Enum):
     OK = 0
@@ -340,6 +341,7 @@ def root_function(func):
     """Registers a function to be allowed to call from client."""
     """Server version of this decorator just collects these functions into ROOT_FUNCTION_REGISTRY."""
     RootHelperServer.ROOT_FUNCTION_REGISTRY[func.__name__] = func
+    return func
 
 # ------------------------------------------------------------------------------
 # Function processing with output handlers support.
@@ -558,7 +560,7 @@ class Job:
                     server_response = ServerResponse(code=code, response=response)
                     response_formatted = server_response.to_json()
                     close = True
-                case StreamPipe.STDOUT | StreamPipe.STDERR:
+                case StreamPipe.STDOUT | StreamPipe.STDERR | StreamPipe.STDIN:
                     response_formatted = response
                     close = False
                 case StreamPipe.EVENTS:

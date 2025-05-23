@@ -32,12 +32,13 @@ class Toolset(Serializable):
     """Class containing details of the Toolset instances."""
     """Only metadata, no functionalities."""
     """Functionalities are handled by ToolsetContainer."""
-    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, apps: dict[str, str] = {}, metadata: dict[str, Any] = {}, **kwargs):
+    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, apps: dict[str, str] = {}, metadata: dict[str, Any] = {}, squashfs_binding_dir: str | None = None, **kwargs):
         self.uuid = uuid
         self.env = env
         self.name = name
         self.apps = apps
         self.metadata = metadata
+        self.squashfs_binding_dir = squashfs_binding_dir # Directory used as toolset_root, mounted when settin up or spawning.
         match env:
             case ToolsetEnv.SYSTEM:
                 pass
@@ -76,7 +77,7 @@ class Toolset(Serializable):
                 if not isinstance(squashfs_file, str):
                     raise ValueError("Missing or invalid 'squashfs_file' for EXTERNAL environment")
                 kwargs["squashfs_file"] = squashfs_file
-        return cls(env, uuid_value, name, apps, metadata, **kwargs)
+        return cls(env, uuid_value, name, apps, metadata, None, **kwargs)
 
     def serialize(self) -> dict:
         data = {
@@ -103,12 +104,13 @@ class Toolset(Serializable):
     def is_allowed_in_current_host() -> bool:
         return self.env.is_running_in_gentoo_host()
 
-    def toolset_root(self) -> str:
+    def toolset_root(self) -> str | None:
         match self.env:
             case ToolsetEnv.SYSTEM:
                 return "/"
             case ToolsetEnv.EXTERNAL:
-                return self.squashfs_file # TODO: For now squashfs_file and root dir are mixed concepts.
+                return self.squashfs_binding_dir
+
     # --------------------------------------------------------------------------
     # Spawning cycle:
 
@@ -120,6 +122,13 @@ class Toolset(Serializable):
 
             # Prepare /tmp directories and bind_options
             runtime_env = RuntimeEnv.current()
+
+            if self.squashfs_file and store_changes:
+                raise RuntimeError("Mounting SquashFS toolsets is currently not supported.")
+
+            # Create squashfs mounting if needed.
+            if self.squashfs_file:
+                self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.squashfs_file)
 
             resolved_toolset_root = str(Path(self.toolset_root()).resolve())
             if resolved_toolset_root == "/" and store_changes:
@@ -217,7 +226,7 @@ class Toolset(Serializable):
                     )
                     # Handle not existing host paths.
                     if binding.host_path is not None and not os.path.exists(resolved_host_path):
-                        # Create in host is store_changes is set.
+                        # Create in host if store_changes is set.
                         if binding.create_if_missing and binding.store_changes: # TODO: Think this logic through
                             print(f"Path {resolved_host_path} not found. Creating directory in host.")
                             os.makedirs(resolved_host_path)
@@ -275,20 +284,23 @@ class Toolset(Serializable):
             self.spawned = True
 
     def unspawn(self):
-        """Clear /tmp folders."""
-        print("--- UNSPAWN")
+        """Clear tmp folders."""
         with self.access_lock:
             if not self.spawned:
                 raise RuntimeError(f"Toolset {self} is not spawned.")
             if self.in_use:
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             try:
+                if self.squashfs_binding_dir:
+                    umount_squashfs(mount_point=self.squashfs_binding_dir)
                 if self.work_dir:
                     delete_temp_workdir(path=str(self.work_dir))
             except Exception as e:
                 print(f"Error deleting toolset work_dir: {e}")
+                raise e
             finally:
                 # Reset spawned settings:
+                self.squashfs_binding_dir = None
                 self.work_dir = None
                 self.hot_fixes = None
                 self.additional_bindings = None
@@ -346,10 +358,14 @@ class Toolset(Serializable):
                 break
             try:
                 self._perform_app_installed_version_check(app=app, parent_call=parent_call)
+            except Exception as e:
+                print(f"Error in installed version check: {e}")
+                checks_succeeded = False
+            try:
                 self._perform_app_additional_checks(app=app, parent_call=parent_call)
             except Exception as e:
-                print(e)
-                checks_succeded = False
+                print(f"Error in additional checks: {e}")
+                checks_succeeded = False
         Repository.TOOLSETS.save() # Make sure changes are saved in repository.
         return checks_succeded
 
@@ -597,8 +613,6 @@ class ToolsetInstallation:
             ToolsetInstallation.started_installations.remove(self)
             ToolsetInstallation.event_bus.emit(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, ToolsetInstallation.started_installations)
             Repository.TOOLSETS.value.append(self.final_toolset)
-            if self.stall_server_call:
-                self.stall_server_call.cancel()
 
 class ToolsetInstallationStage(Enum):
     """Current state of installation."""
@@ -686,7 +700,6 @@ ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
         ),
 )
 def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: Toolset, parent_call: ServerCall | None = None):
-    # FIXME: Fix when squashfs based toolsets are done.
     bin_directory = Path(toolset.toolset_root()) / "bin"
     qemu_systems = Emulation.get_all_qemu_systems()
     found_qemu_binaries = []
@@ -928,7 +941,7 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
         super().start()
         try:
             toolset_name = self.installer.name()
-            self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_file=self.installer.tmp_stage_extract_dir)
+            self.installer.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_binding_dir=self.installer.tmp_stage_extract_dir)
             self.installer.tmp_toolset.spawn(store_changes=True)
             commands = [
                 "env-update && source /etc/profile",
@@ -1016,6 +1029,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
         super().start()
         try:
             analysis_result = self.installer.tmp_toolset.analyze(parent_call=self.installer.stall_server_call)
+            self.installer.tmp_toolset.unspawn()
             self.complete(ToolsetInstallationStepState.COMPLETED if analysis_result else ToolsetInstallationStepState.FAILED)
         except Exception as e:
             print(f"Error during toolset verification: {e}")
@@ -1029,7 +1043,6 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
         try:
             self.installer.tmp_toolset_squashfs_dir = create_temp_workdir(prefix="gentoo_toolset_squashfs_")
             self.installer.tmp_toolset_squashfs_file = os.path.join(self.installer.tmp_toolset_squashfs_dir, "toolset.squashfs")
-            # TODO: Add progress observation
             self.installer.squashfs_process = create_squashfs(source_directory=self.installer.tmp_stage_extract_dir, output_file=self.installer.tmp_toolset_squashfs_file)
             for line in self.installer.squashfs_process.stdout:
                 line = line.strip()
@@ -1081,15 +1094,34 @@ def delete_temp_workdir(path: str) -> bool:
     import shutil
     try:
         resolved_path = os.path.realpath(path)
+        # Ensure we're operating strictly inside the expected directory
         if not (resolved_path.startswith("/var/tmp/catalystlab/") and resolved_path != "/var/tmp/catalystlab"):
             raise ValueError(f"Refusing to delete path outside /var/tmp/catalystlab: {resolved_path}")
-        if os.path.isdir(resolved_path):
-            shutil.rmtree(resolved_path)
-            return True
-        else:
+        if not os.path.isdir(resolved_path):
             raise FileNotFoundError(f"Path does not exist or is not a directory: {resolved_path}")
+        # Walk through the directory and delete only non-mount contents
+        for root, dirs, files in os.walk(resolved_path, topdown=False):
+            for name in files:
+                file_path = os.path.join(root, name)
+                try:
+                    if not os.path.ismount(file_path):
+                        os.remove(file_path)
+                except Exception as e:
+                    print(f"Failed to delete file {file_path}: {e}")
+
+            for name in dirs:
+                dir_path = os.path.join(root, name)
+                try:
+                    if not os.path.ismount(dir_path):
+                        os.rmdir(dir_path)
+                except Exception as e:
+                    print(f"Failed to delete directory {dir_path}: {e}")
+        # Finally, attempt to remove the root directory if it's not a mount
+        if not os.path.ismount(resolved_path):
+            os.rmdir(resolved_path)
+        return True
     except Exception as e:
-        print(e)
+        print(f"Error: {e}")
         return False
 
 @root_function
@@ -1109,6 +1141,22 @@ def insert_portage_patch(patch_content: str, patch_filename: str, app_package: s
     patch_file_path = os.path.join(portage_dir, patch_filename)
     with open(patch_file_path, "w", encoding="utf-8") as f:
         f.write(patch_content)
+
+@root_function
+def mount_squashfs(squashfs_path: str) -> str:
+    import os
+    import subprocess
+    """Creates tmp directory and mounts squashfs file to it"""
+    mount_point = create_temp_workdir(prefix="toolset_squashfs_mount_")
+    subprocess.run(['mount', '-o', 'loop,ro', squashfs_path, mount_point], check=True)
+    return mount_point
+
+@root_function
+def umount_squashfs(mount_point: str):
+    import os
+    import subprocess
+    subprocess.run(['umount', mount_point], check=True)
+    delete_temp_workdir(path=mount_point)
 
 @root_function
 def extract(tarball: str, directory: str):

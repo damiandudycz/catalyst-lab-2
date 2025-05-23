@@ -30,8 +30,9 @@
         "*.a"
     ],
     "modules" : [
-    	"python3-requests.json",
-	"squashfs-tools.json",
+    	"dependencies/python3-requests.json",
+	"dependencies/squashfs-tools.json",
+	"dependencies/bwrap.json",
         {
             "name" : "catalystlab",
             "builddir" : true,

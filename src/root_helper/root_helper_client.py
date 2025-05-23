@@ -283,9 +283,16 @@ class RootHelperClient:
         def worker(call: ServerCall) -> ServerResponse:
             args = request.args if hasattr(request, "args") else ""
             kwargs = request.kwargs if hasattr(request, "kwargs") else ""
+            all_args: list[str] = []
+            if args:
+                all_args.append(f"{args}")
+            if kwargs:
+                all_args.append(f"{kwargs}")
+            if command_value:
+                all_args.append(f"{command_value}")
             conn = None
             response_string: str = None
-            print(f">>> [{request.function_name} {args} {kwargs}]")
+            print(f">>> [{request.function_name} {', '.join(all_args)}]")
 
             try:
                 used_token = token if token is not None else self.token
@@ -302,6 +309,10 @@ class RootHelperClient:
                     match message_type:
                         case StreamPipe.RETURN:
                             response_string = content
+                        case StreamPipe.STDIN:
+                            call.output_append(content)
+                            if handler:
+                                handler(content)
                         case StreamPipe.STDOUT:
                             call.output_append(content)
                             if handler:

@@ -100,16 +100,15 @@ class EnvironmentsSection(Gtk.Box):
             self._external_toolset_rows.append(action_row)
 
     def on_external_toolset_row_pressed(self, sender):
-        toolset = getattr(sender, "toolset", None)
-        if toolset is None:
-            return
         def worker(authorized: bool):
             if not authorized:
                 return
             try:
-                if not toolset.spawned:
-                    toolset.spawn()
-                toolset.analyze()
+                if not sender.toolset.spawned:
+                    sender.toolset.spawn()
+                    sender.toolset.analyze()
+                else:
+                    sender.toolset.unspawn()
             except Exception as e:
                 print(e)
         RootHelperClient.shared().authorize_and_run(callback=worker)
