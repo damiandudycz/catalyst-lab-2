@@ -27,6 +27,10 @@ def stall_server():
     signal.signal(signal.SIGTERM, handle_sigterm)
     event.wait()
 
+class ToolsetEvents(Enum):
+    SPAWNED_CHANGED = auto()
+    IN_USE_CHANGED = auto()
+
 @final
 class Toolset(Serializable):
     """Class containing details of the Toolset instances."""
@@ -44,8 +48,8 @@ class Toolset(Serializable):
                 pass
             case ToolsetEnv.EXTERNAL:
                 self.squashfs_file = kwargs.get("squashfs_file")
-                if not isinstance(self.squashfs_file, str):
-                    raise ValueError("EXTERNAL requires a 'squashfs_file' keyword argument (str)")
+                if not isinstance(self.squashfs_file, str) and not self.squashfs_binding_dir:
+                    raise ValueError("EXTERNAL requires a 'squashfs_file' or a 'squashfs_binding_dir'")
             case _:
                 raise ValueError(f"Unknown env: {env}")
         self.access_lock = threading.Lock()
@@ -57,6 +61,7 @@ class Toolset(Serializable):
         self.additional_bindings: list[BindMount] | None = None
         self.hot_fixes: list[HotFix] | None = None
         self.work_dir: str | None = None
+        self.event_bus = EventBus[ToolsetEvents]()
 
     @classmethod
     def init_from(cls, data: dict) -> Toolset:
@@ -282,6 +287,7 @@ class Toolset(Serializable):
             self.store_changes = store_changes
             self.bind_options = bind_options
             self.spawned = True
+            self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
 
     def unspawn(self):
         """Clear tmp folders."""
@@ -307,6 +313,7 @@ class Toolset(Serializable):
                 self.store_changes = False
                 self.bind_options = None
                 self.spawned = False
+                self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
 
     # --------------------------------------------------------------------------
     # Calling commands:
@@ -319,10 +326,12 @@ class Toolset(Serializable):
             if self.in_use:
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             self.in_use = True
+            self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
 
             def on_complete(completion_handler: callable | None, result: ServerResponse):
                 with self.access_lock:
                     self.in_use = False
+                    self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
                 if completion_handler:
                     completion_handler(result)
             try:
@@ -340,6 +349,7 @@ class Toolset(Serializable):
             except Exception as e:
                 print(f"Failed to execute command: {e}")
                 self.in_use = False
+                self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
                 raise e
 
     # --------------------------------------------------------------------------

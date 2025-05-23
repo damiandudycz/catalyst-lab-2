@@ -2,7 +2,7 @@ from gi.repository import Gtk, GObject
 from gi.repository import Adw
 from .app_section import AppSection, app_section
 from .runtime_env import RuntimeEnv
-from .toolset import ToolsetEnv, Toolset
+from .toolset import ToolsetEnv, Toolset, ToolsetEvents
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage, ToolsetApplication
 from .hotfix_patching import HotFix
@@ -11,6 +11,7 @@ from .root_helper_client import RootHelperClient
 from .root_helper_server import ServerCommand
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
+from .status_indicator import StatusIndicator, StatusIndicatorState
 import time
 from .repository import Serializable, Repository, RepositoryEvent
 from typing import Any
@@ -70,34 +71,16 @@ class EnvironmentsSection(Gtk.Box):
         ]
 
         for toolset in external_toolsets:
-            action_row = Adw.ActionRow()
-            action_row.set_title(toolset.name)
-            action_row.set_icon_name("preferences-other-symbolic")
-            # Make subtitle from installed app versions
-            app_strings: [str] = []
-            for app in ToolsetApplication.ALL:
-                if app.auto_select:
-                    continue
-                version = toolset.get_installed_app_version(app)
-                if version is not None:
-                    app_strings.append(f"{app.name}: {version}")
-            qemu_metadata: dict[str, Any] = toolset.metadata.get(ToolsetApplication.QEMU.package, {})
-            qemu_interpreters_metadata: list[str] = qemu_metadata.get("interpreters", [])
-            if qemu_interpreters_metadata:
-                app_strings.append(f"Interpreters: {len(qemu_interpreters_metadata)}")
-            if app_strings:
-                action_row.set_subtitle(", ".join(app_strings))
-            action_row.toolset = toolset
-            action_row.set_activatable(True)
-            action_row.connect("activated", self.on_external_toolset_row_pressed)
-            self.external_toolsets_container.insert(action_row, 0)
-            self._external_toolset_rows.append(action_row)
+            toolset_row = ToolsetRow(toolset=toolset)
+            toolset_row.connect("activated", self.on_external_toolset_row_pressed)
+            self.external_toolsets_container.insert(toolset_row, 0)
+            self._external_toolset_rows.append(toolset_row)
 
         for installation in started_installations:
-            action_row = ToolsetInstallationRow(installation=installation)
-            action_row.connect("activated", self.on_installation_row_pressed)
-            self.external_toolsets_container.insert(action_row, 0)
-            self._external_toolset_rows.append(action_row)
+            installation_row = ToolsetInstallationRow(installation=installation)
+            installation_row.connect("activated", self.on_installation_row_pressed)
+            self.external_toolsets_container.insert(installation_row, 0)
+            self._external_toolset_rows.append(installation_row)
 
     def on_external_toolset_row_pressed(self, sender):
         def worker(authorized: bool):
@@ -107,7 +90,7 @@ class EnvironmentsSection(Gtk.Box):
                 if not sender.toolset.spawned:
                     sender.toolset.spawn()
                     #sender.toolset.analyze()
-                    sender.toolset.run_command(command="emerge --info")
+                    sender.toolset.run_command(command="emerge --sync")
                 else:
                     sender.toolset.unspawn()
             except Exception as e:
@@ -159,6 +142,50 @@ class EnvironmentsSection(Gtk.Box):
         if not system_toolset.spawned:
             system_toolset.spawn()
         system_toolset.analyze()
+
+class ToolsetRow(Adw.ActionRow):
+
+    def __init__(self, toolset: Toolset):
+        super().__init__(title=toolset.name, subtitle="Installation in progress", icon_name="preferences-other-symbolic")
+        self.toolset = toolset
+        # Status indicator
+        self.status_indicator = StatusIndicator()
+        self.add_suffix(self.status_indicator)
+        # Make subtitle from installed app versions
+        app_strings: [str] = []
+        for app in ToolsetApplication.ALL:
+            if app.auto_select:
+                continue
+            version = toolset.get_installed_app_version(app)
+            if version is not None:
+                app_strings.append(f"{app.name}: {version}")
+        qemu_metadata: dict[str, Any] = toolset.metadata.get(ToolsetApplication.QEMU.package, {})
+        qemu_interpreters_metadata: list[str] = qemu_metadata.get("interpreters", [])
+        if qemu_interpreters_metadata:
+            app_strings.append(f"Interpreters: {len(qemu_interpreters_metadata)}")
+        if app_strings:
+            self.set_subtitle(", ".join(app_strings))
+        self.toolset = toolset
+        self.set_activatable(True)
+        self._setup_status_indicator()
+        # events
+        toolset.event_bus.subscribe(
+            ToolsetEvents.SPAWNED_CHANGED,
+            self._setup_status_indicator
+        )
+        toolset.event_bus.subscribe(
+            ToolsetEvents.IN_USE_CHANGED,
+            self._setup_status_indicator
+        )
+
+    def _setup_status_indicator(self, data: Any | None = None):
+        self.status_indicator.set_blinking(self.toolset.in_use)
+        if self.toolset.spawned and self.toolset.store_changes:
+            self.status_indicator.set_state(StatusIndicatorState.ENABLED_UNSAFE)
+        elif self.toolset.spawned:
+            self.status_indicator.set_state(StatusIndicatorState.ENABLED)
+        else:
+            self.status_indicator.set_state(StatusIndicatorState.DISABLED)
 
 class ToolsetInstallationRow(Adw.ActionRow):
 
