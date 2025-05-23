@@ -106,7 +106,8 @@ class EnvironmentsSection(Gtk.Box):
             try:
                 if not sender.toolset.spawned:
                     sender.toolset.spawn()
-                    sender.toolset.analyze()
+                    #sender.toolset.analyze()
+                    sender.toolset.run_command(command="emerge --info")
                 else:
                     sender.toolset.unspawn()
             except Exception as e:

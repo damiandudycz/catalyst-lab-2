@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal
-import threading, json, inspect, re, select
+import threading, json, inspect, re, select, shutil
 from enum import Enum
 from typing import Any, Callable
 from functools import wraps
@@ -161,10 +161,8 @@ class RootHelperClient:
         # Runtime directory where the generated server code will be placed.
         runtime_dir = RootHelperServer.get_runtime_dir(uid)
         output_path = os.path.join(runtime_dir, "root-helper-server.py")
-
         # Ensure the directory exists
         os.makedirs(runtime_dir, exist_ok=True)
-
         # If the file already exists, remove it
         if os.path.exists(output_path):
             os.remove(output_path)
@@ -172,13 +170,10 @@ class RootHelperClient:
         # Load the embedded server code from resources
         data = Gio.resources_lookup_data('/com/damiandudycz/CatalystLab/root_helper/root_helper_server.py', Gio.ResourceLookupFlags.NONE)
         server_code = data.get_data().decode()
-
         # Collect the root functions (dynamically registered)
         injected_functions = self.collect_root_function_sources()
-
         # Combine the server code with the dynamically injected functions
         full_code = server_code + "\n\n" + injected_functions
-
         # Add the `if __name__ == "__main__":` block to run the server
         # This needs to be added bellow dynamic functions.
         full_code += """\n\nif __name__ == "__main__":\n    __init_server__()"""
@@ -186,9 +181,15 @@ class RootHelperClient:
         # Write the full code to the output file
         with open(output_path, "w") as f:
             f.write(full_code)
-
         # Make the script executable
         os.chmod(output_path, 0o700)
+
+        # Install bundled bwrap if running as flatpak.
+        # This is used to make sure bwrap supports required capabilities.
+        # Host system might have bwrap but with older version.
+        if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
+            bwrap_output_path = os.path.join(runtime_dir, "bwrap")
+            shutil.copy("/app/bin/bwrap", bwrap_output_path)
 
         return output_path
 

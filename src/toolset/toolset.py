@@ -431,8 +431,10 @@ class BindMount:
 def _start_toolset_command(work_dir: str, fake_root: str, bind_options: list[str], command_to_run: str):
     import subprocess
     #subprocess.run(["chown", "-R", "root:root", work_dir], check=True) # This could change the ownership of work_dir for root, but probably is not needed.
+    run_dir = RootHelperServer.get_runtime_dir(uid=RootHelperServer.shared().uid, runtime_env_name="CL_SERVER_RUNTIME_DIR")
+    bwrap_path = os.path.join(run_dir, "bwrap")
     cmd_bwrap = (
-        "bwrap "
+        f"{bwrap_path} "
         "--die-with-parent "
         "--unshare-uts --unshare-ipc --unshare-pid --unshare-cgroup "
         "--hostname catalyst-lab "
