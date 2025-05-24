@@ -17,7 +17,7 @@ class SettingsEvents(Enum):
 class Settings(Serializable):
     """Global application settings."""
 
-    def __init__(self, keep_root_unlocked: bool = False, toolsets_location: str = "~/CatalystLab/Toolsets"):
+    def __init__(self, keep_root_unlocked: bool = True, toolsets_location: str = "~/CatalystLab/Toolsets"):
         self._keep_root_unlocked = keep_root_unlocked
         self._toolsets_location = toolsets_location
         self.event_bus: EventBus[SettingsEvents] = EventBus[SettingsEvents]()

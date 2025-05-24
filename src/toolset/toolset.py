@@ -1066,7 +1066,8 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
             self.installer.squashfs_process = None
             def sanitize_filename_linux(name: str) -> str:
                 return name.replace('/', '_').replace('\0', '_')
-            file_name = f"{sanitize_filename_linux(self.installer.name())}.squashfs"
+            random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+            file_name = f"{sanitize_filename_linux(self.installer.name())}_{random_id}.squashfs"
             file_path = os.path.join(os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.toolsets_location)), file_name)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             shutil.move(self.installer.tmp_toolset_squashfs_file, file_path)

@@ -89,8 +89,8 @@ class EnvironmentsSection(Gtk.Box):
             try:
                 if not sender.toolset.spawned:
                     sender.toolset.spawn()
-                    #sender.toolset.analyze()
-                    sender.toolset.run_command(command="emerge --sync")
+                    sender.toolset.analyze()
+                    #sender.toolset.run_command(command="emerge --sync")
                 else:
                     sender.toolset.unspawn()
             except Exception as e:
@@ -146,7 +146,7 @@ class EnvironmentsSection(Gtk.Box):
 class ToolsetRow(Adw.ActionRow):
 
     def __init__(self, toolset: Toolset):
-        super().__init__(title=toolset.name, subtitle="Installation in progress", icon_name="preferences-other-symbolic")
+        super().__init__(title=toolset.name, icon_name="preferences-other-symbolic")
         self.toolset = toolset
         # Status indicator
         self.status_indicator = StatusIndicator()
@@ -167,6 +167,8 @@ class ToolsetRow(Adw.ActionRow):
             app_strings.append(f"Interpreters: {len(qemu_interpreters_metadata)}")
         if app_strings:
             self.set_subtitle(", ".join(app_strings))
+        else:
+            self.set_subtitle("")
         self.toolset = toolset
         self.set_activatable(True)
         self._setup_status_indicator()
