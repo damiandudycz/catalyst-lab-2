@@ -72,18 +72,17 @@ class Repository(Generic[T]):
 
     registered_aliases: list[str] = []
 
-    def __init__(self, cls: Type[T], collection: bool = False, alias: str | None = None):
+    def __init__(self, cls: Type[T], collection: bool = False, alias: str | None = None, default_factory: Callable[[None],T] | None = None):
         self._cls = cls
         self._collection = collection
         self._alias = alias or (cls.__name__.lower() if not collection else f"{cls.__name__.lower()}_list")
+        self._default_factory = default_factory
         self.event_bus: EventBus[RepositoryEvent] = EventBus[RepositoryEvent]()
-
         if self._alias in Repository.registered_aliases:
             raise RuntimeError(f"Repository with alias {self._alias} is already in use. Use shared instance for the same values.")
         else:
             Repository.registered_aliases.append(self._alias)
-
-        self._value: T | TrackedList[T] | None = self._load()
+        self._value: T | TrackedList[T] = self._load()
 
     def _config_file(self) -> str:
         config_paths = {
@@ -109,7 +108,7 @@ class Repository(Generic[T]):
         finally:
             self.event_bus.emit(RepositoryEvent.VALUE_CHANGED, self._value)
 
-    def _load(self) -> T | TrackedList[T] | None:
+    def _load(self) -> T | TrackedList[T]:
         path = self._config_file()
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -120,25 +119,24 @@ class Repository(Generic[T]):
             else:
                 return self._cls.init_from(data)
         except (FileNotFoundError, json.JSONDecodeError, ValueError, AttributeError):
-            return TrackedList([], self.save) if self._collection else None
+            return TrackedList([], self.save) if self._collection else self._default_factory()
 
-    def _delete(self) -> None:
+    def _delete(self):
         path = self._config_file()
         if os.path.isfile(path):
             os.remove(path)
-        self._value = TrackedList([], self.save) if self._collection else None
+        self._value = TrackedList([], self.save) if self._collection else self._default_factory()
+
+    def reset(self):
+        self._delete()
 
     @property
-    def value(self) -> T | TrackedList[T] | None:
+    def value(self) -> T | TrackedList[T]:
         return self._value
-
     @value.setter
-    def value(self, new_value: T | list[T] | None):
+    def value(self, new_value: T | list[T]):
         if self._collection:
-            if new_value is None:
-                self._value = TrackedList([], self.save)
-                self._delete()
-            elif isinstance(new_value, TrackedList):
+            if isinstance(new_value, TrackedList):
                 self._value = new_value
                 self._value._save_callback = self.save  # update callback if needed
                 self.save()
@@ -149,8 +147,5 @@ class Repository(Generic[T]):
                 raise TypeError("Expected a list or TrackedList of serializable items.")
         else:
             self._value = new_value
-            if new_value is None:
-                self._delete()
-            else:
-                self.save()
+            self.save()
 
