@@ -35,7 +35,7 @@ class RootHelperServer:
 
     ROOT_FUNCTION_REGISTRY = {} # Registry for collecting root functions.
     _instance: RootHelperServer | None = None # Singleton shared instance.
-    hide_logs = True
+    hide_logs = False
     use_client_watchdog = True
 
     # --------------------------------------------------------------------------
@@ -554,7 +554,7 @@ class Job:
             if self.conn.fileno() == -1:
                 print("[Server]: ERROR: " + f"Connection already closed: {self.conn} / {self} [{response}]")
                 return
-            print("[Server]: " + f"Responding (code: {code.name}, pipe: {pipe.name}): {response}")
+            #print("[Server]: " + f"Responding (code: {code.name}, pipe: {pipe.name}): {response}")
             match pipe:
                 case StreamPipe.RETURN:
                     server_response = ServerResponse(code=code, response=response)

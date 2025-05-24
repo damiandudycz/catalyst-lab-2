@@ -584,11 +584,11 @@ class ToolsetInstallation:
             self.cancel()
 
     def cancel(self):
+        self.status = ToolsetInstallationStage.FAILED if self.status == ToolsetInstallationStage.INSTALL else ToolsetInstallationStage.SETUP
+        self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
         running_step = next((step for step in self.steps if step.state == ToolsetInstallationStepState.IN_PROGRESS), None)
         if running_step:
             running_step.cancel()
-        self.status = ToolsetInstallationStage.FAILED if self.status == ToolsetInstallationStage.INSTALL else ToolsetInstallationStage.SETUP
-        self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
         self._cleanup()
 
     def clean_from_started_installations(self):
@@ -812,7 +812,7 @@ class ToolsetInstallationStep(ABC):
             self.server_call.cancel()
             if self.server_call.thread:
                 self.server_call.thread.join()
-                self.server_call = None
+            self.server_call = None
     def cleanup(self) -> bool:
         """Returns true if cleanup was needed and was started."""
         if self.state == ToolsetInstallationStepState.SCHEDULED:
@@ -842,7 +842,6 @@ class ToolsetInstallationStep(ABC):
             def completion_handler(response: ServerResponse):
                 nonlocal return_value
                 return_value = response.code == ServerResponseStatusCode.OK
-                self.server_call = None
                 done_event.set()
             def output_handler(output_line: str):
                 print(output_line)
@@ -925,8 +924,6 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
                         self._update_progress(progress_value)
                     except ValueError:
                         pass
-                    finally:
-                        self.server_call = None
             self.server_call = extract._async_raw(
                 parent=self.installer.stall_server_call,
                 handler=output_handler,
@@ -936,8 +933,9 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
             )
             self.server_call.thread.join()
             done_event.wait()
-            self.server_call = None
-            self.complete(ToolsetInstallationStepState.COMPLETED if return_value else ToolsetInstallationStepState.FAILED)
+            if not self._cancel_event.is_set():
+                self.server_call = None
+                self.complete(ToolsetInstallationStepState.COMPLETED if return_value else ToolsetInstallationStepState.FAILED)
         except Exception as e:
             print(f"Error extracting stage tarball: {e}")
             self.complete(ToolsetInstallationStepState.FAILED)
@@ -1030,7 +1028,7 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
                 file_size = file_info.get_size()
                 patch_content = file_input_stream.read_bytes(file_size, None).get_data().decode()
                 insert_portage_patch(patch_content=patch_content, patch_filename=patch_file.get_basename(), app_package=self.app_selection.app.package, toolset_root=self.installer.tmp_toolset.toolset_root())
-            flags = "--getbinpkg" if self.installer.allow_binpkgs else ""
+            flags = "--getbinpkg --deep --update --changed-use" if self.installer.allow_binpkgs else "--deep --update --changed-use"
             result = self.run_command_in_toolset(command=f"emerge {flags} {self.app_selection.app.package}", progress_handler=progress_handler)
             self.complete(ToolsetInstallationStepState.COMPLETED if result else ToolsetInstallationStepState.FAILED)
         except Exception as e:
@@ -1066,9 +1064,14 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
                     self._update_progress(percent / 100.0)
             self.installer.squashfs_process.wait()
             self.installer.squashfs_process = None
-            # TODO: Move .squashfs file to another location, and update bellow
+            def sanitize_filename_linux(name: str) -> str:
+                return name.replace('/', '_').replace('\0', '_')
+            file_name = f"{sanitize_filename_linux(self.installer.name())}.squashfs"
+            file_path = os.path.join(os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.toolsets_location)), file_name)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            shutil.move(self.installer.tmp_toolset_squashfs_file, file_path)
             self.installer.final_toolset = self.installer.tmp_toolset
-            self.installer.final_toolset.squashfs_file = self.installer.tmp_toolset_squashfs_file
+            self.installer.final_toolset.squashfs_file = file_path
             self.complete(ToolsetInstallationStepState.COMPLETED)
         except Exception as e:
             print(f"Error during toolset compression: {e}")
@@ -1078,6 +1081,8 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
             return False
         if self.state != ToolsetInstallationStepState.COMPLETED and self.installer.tmp_toolset_squashfs_file and os.path.isfile(self.installer.tmp_toolset_squashfs_file):
             os.remove(self.installer.tmp_toolset_squashfs_file)
+        if self.installer.tmp_toolset_squashfs_dir:
+            delete_temp_workdir(path=self.installer.tmp_toolset_squashfs_dir)
     def cancel(self):
         super().cancel()
         proc = self.installer.squashfs_process
@@ -1114,29 +1119,12 @@ def delete_temp_workdir(path: str) -> bool:
             raise ValueError(f"Refusing to delete path outside /var/tmp/catalystlab: {resolved_path}")
         if not os.path.isdir(resolved_path):
             raise FileNotFoundError(f"Path does not exist or is not a directory: {resolved_path}")
-        # Walk through the directory and delete only non-mount contents
-        for root, dirs, files in os.walk(resolved_path, topdown=False):
-            for name in files:
-                file_path = os.path.join(root, name)
-                try:
-                    if not os.path.ismount(file_path):
-                        os.remove(file_path)
-                except Exception as e:
-                    print(f"Failed to delete file {file_path}: {e}")
-
-            for name in dirs:
-                dir_path = os.path.join(root, name)
-                try:
-                    if not os.path.ismount(dir_path):
-                        os.rmdir(dir_path)
-                except Exception as e:
-                    print(f"Failed to delete directory {dir_path}: {e}")
-        # Finally, attempt to remove the root directory if it's not a mount
-        if not os.path.ismount(resolved_path):
-            os.rmdir(resolved_path)
+        # TODO: Detect if path contains any bindings and raise if it does. Note: os.path.ismount will probably not work for this.
+        shutil.rmtree(path)
+        print(f"Successfully deleted the directory: {path}")
         return True
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Failed to delete directory {path}: {e}")
         return False
 
 @root_function
