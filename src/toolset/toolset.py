@@ -297,7 +297,7 @@ class Toolset(Serializable):
             if self.in_use:
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             try:
-                if self.squashfs_binding_dir:
+                if self.squashfs_binding_dir and self.squashfs_file: # Only umount if both are set, because if only squashfs_binding_dir is, it means it's beining configured for the first time.
                     umount_squashfs(mount_point=self.squashfs_binding_dir)
                 if self.work_dir:
                     delete_temp_workdir(path=str(self.work_dir))
@@ -571,7 +571,10 @@ class ToolsetInstallation:
 
     def start(self):
         try:
-            self.stall_server_call = stall_server._async_raw()
+            def stall_server_call_completion_handler(result: ServerResponse):
+                if self.status == ToolsetInstallationStage.INSTALL:
+                    self.cancel()
+            self.stall_server_call = stall_server._async_raw(completion_handler=stall_server_call_completion_handler)
             self.status = ToolsetInstallationStage.INSTALL
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             ToolsetInstallation.started_installations.append(self)

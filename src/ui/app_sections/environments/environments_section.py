@@ -150,6 +150,8 @@ class ToolsetRow(Adw.ActionRow):
         self.toolset = toolset
         # Status indicator
         self.status_indicator = StatusIndicator()
+        self.status_indicator.set_margin_start(6)
+        self.status_indicator.set_margin_end(6)
         self.add_suffix(self.status_indicator)
         # Make subtitle from installed app versions
         app_strings: [str] = []
@@ -190,48 +192,49 @@ class ToolsetRow(Adw.ActionRow):
 class ToolsetInstallationRow(Adw.ActionRow):
 
     def __init__(self, installation: ToolsetInstallation):
-        super().__init__(title=installation.name(), subtitle="Installation in progress")
+        super().__init__(
+            title=installation.name(),
+            icon_name="preferences-other-symbolic"
+        )
         self.installation = installation
         self.set_activatable(True)
-        self.status_label = Gtk.Label()
-        self.status_label.add_css_class("dim-label")
-        self.status_label.add_css_class("caption")
-        self.add_suffix(self.status_label)
-        self._set_status_icon(status=installation.status)
-        self._setup_progress_label(progress=installation.progress)
+        self.progress_label = Gtk.Label()
+        self.progress_label.add_css_class("dim-label")
+        self.progress_label.add_css_class("caption")
+        self.add_suffix(self.progress_label)
+        self._set_status(status=installation.status)
+        self._set_progress_label(installation.progress)
         installation.event_bus.subscribe(
             ToolsetInstallationEvent.STATE_CHANGED,
-            self._set_status_icon
+            self._set_status
         )
         installation.event_bus.subscribe(
             ToolsetInstallationEvent.PROGRESS_CHANGED,
-            self._setup_progress_label
+            self._set_progress_label
         )
 
-    def _setup_progress_label(self, progress: float):
-        self.status_label.set_label(f"{int(progress * 100)}%")
+    def _set_progress_label(self, progress):
+        self.progress_label.set_label(f"{int(progress * 100)}%")
 
-    def _set_status_icon(self, status: ToolsetInstallationStage):
+    def _set_status(self, status: ToolsetInstallationStage):
         if not hasattr(self, "status_icon"):
             self.status_icon = Gtk.Image()
             self.status_icon.set_pixel_size(24)
-            self.add_prefix(self.status_icon)
-        icon_name = {
-            ToolsetInstallationStage.SETUP: "square-alt-arrow-right-svgrepo-com-symbolic",
-            ToolsetInstallationStage.INSTALL: "menu-dots-square-svgrepo-com-symbolic",
-            ToolsetInstallationStage.FAILED: "error-box-svgrepo-com-symbolic",
-            ToolsetInstallationStage.COMPLETED: "check-square-svgrepo-com-symbolic"
-        }.get(status)
-        styles = {
-            ToolsetInstallationStage.SETUP: "dimmed",
-            ToolsetInstallationStage.INSTALL: "",
-            ToolsetInstallationStage.FAILED: "error",
-            ToolsetInstallationStage.COMPLETED: "success"
+            self.add_suffix(self.status_icon)
+        status_props = {
+            ToolsetInstallationStage.SETUP: (False, "", "", "Preparing installation"),
+            ToolsetInstallationStage.INSTALL: (False, "", "", "Installation in progress"),
+            ToolsetInstallationStage.FAILED: (True, "error-box-svgrepo-com-symbolic", "error", "Installation failed"),
+            ToolsetInstallationStage.COMPLETED: (True, "check-square-svgrepo-com-symbolic", "success", "Installation completed"),
         }
-        style = styles.get(status)
+        visible, icon_name, style, subtitle = status_props.get(status, (False, "", ""))
+        self.progress_label.set_visible(not visible)
+        self.status_icon.set_visible(visible)
         self.status_icon.set_from_icon_name(icon_name)
-        for css_class in styles.values():
-            if css_class:
-                self.status_icon.remove_css_class(css_class)
+        self.set_subtitle(subtitle)
+        if hasattr(self.status_icon, 'used_css_class'):
+            self.status_icon.remove_css_class(self.used_css_class)
         if style:
+            self.status_icon.used_css_class = style
             self.status_icon.add_css_class(style)
+
