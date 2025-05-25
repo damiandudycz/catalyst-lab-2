@@ -565,12 +565,14 @@ class ToolsetInstallation:
             installer_name = filename_without_extension
         return installer_name
 
-    def start(self):
+    def start(self, parent: ServerCall | None):
         try:
             def stall_server_call_completion_handler(result: ServerResponse):
                 if self.status == ToolsetInstallationStage.INSTALL:
                     self.cancel()
-            self.stall_server_call = stall_server._async_raw(completion_handler=stall_server_call_completion_handler)
+            # Note - stall_server_call is additional, there is also parent created when installation is started.
+            # This is to keep root access active even a bit longer, to cleanup later.
+            self.stall_server_call = stall_server._async_raw(parent=parent, completion_handler=stall_server_call_completion_handler)
             self.status = ToolsetInstallationStage.INSTALL
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             ToolsetInstallation.started_installations.append(self)

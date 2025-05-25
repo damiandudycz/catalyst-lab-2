@@ -474,7 +474,7 @@ class Job:
 
         except Exception as e:
             print("[Server]: ERROR: " + f"Unexpected error in connection handler: {e}")
-            job.conn.close()
+            self.conn.close()
 
     def handle_command_request(self, pid: int, payload: str):
         try:

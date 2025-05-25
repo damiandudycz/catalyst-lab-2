@@ -240,16 +240,21 @@ class RootHelperClient:
         else:
             return False
 
-    def authorize_and_run(self, callback: Callable[[bool, ServerCall | None], None] | None = None):
+    def authorize_and_run(self, create_parent: bool = True, callback: Callable[[bool, ServerCall | None], None] | None = None):
         def background_task():
             ensure_server_ready_result = self.ensure_server_ready(allow_auto_start=True)
-            wait_for_children_call = stall_server._async_raw() if ensure_server_ready_result else None
+            wait_for_children_call_ready = threading.Event()
+            wait_for_children_call = stall_server._async_raw(handler=lambda _: wait_for_children_call_ready.set()) if ensure_server_ready_result and create_parent else None
+            if wait_for_children_call is None:
+                wait_for_children_call_ready.set()
 
             # Schedule `complete` on a new thread *immediately*
             def complete():
+                # TODO: Wait for first response from wait_for_children_call, to make sure it is fully initialized
                 if callback:
                     callback(ensure_server_ready_result, wait_for_children_call)
                 if wait_for_children_call:
+                    wait_for_children_call_ready.wait()
                     wait_for_children_call.close_when_ready()
 
             # Run immediately in background — Timer is unnecessary here
@@ -464,6 +469,7 @@ class RootHelperClient:
 
         # Prevent calling if parent is already terminated
         if parent is not None and parent.terminated:
+            print(f"CANT START {func_name}, parent terminated")
             server_response = ServerResponse(code=ServerResponseStatusCode.JOB_WAS_TERMINATED, response="Parent call is already terminated")
             if asynchronous:
                 # Create ServerCall with instant failure
@@ -539,6 +545,7 @@ class ServerCall:
     children: list[ServerCall] = field(default_factory=list)
     children_lock: threading.Lock = field(default_factory=threading.Lock)
     _close_when_ready: bool = False
+    started = threading.Event() # TODO - set when server sends special event
 
     def __repr__(self):
         return f"ServerCall(request={self.request.function_name!r})"
@@ -564,6 +571,7 @@ class ServerCall:
             return
         if any(c.thread is not None and c.thread.is_alive() for c in self.children):
             return
+        print("CANCEL NOW +++++++++++++++++++++++++++")
         self.cancel()
 
     def cancel(self):
@@ -580,7 +588,10 @@ class ServerCall:
                 if child.thread:
                     child.thread.join()
             if self.thread:
+                print("++++++++++++++ SEND CANCEL")
                 self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
+            else:
+                print("++++++++++++++ NO THREAD YET")
         threading.Thread(target=worker, daemon=True).start()
 
     def output_append(self, line: str):
@@ -623,4 +634,5 @@ def stall_server():
     def handle_sigterm(signum, frame):
         event.set()
     signal.signal(signal.SIGTERM, handle_sigterm)
+    print("READY", flush=True) # Send READY signal to caller.
     event.wait()

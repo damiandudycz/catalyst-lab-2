@@ -132,7 +132,7 @@ class ToolsetCreateView(Gtk.Box):
         self._set_current_stage(self.installation_in_progress.status)
         self.progress_bar.set_fraction(self.installation_in_progress.progress)
         self.bind_installation_events(self.installation_in_progress)
-        self.installation_in_progress.start()
+        self.installation_in_progress.start(parent=parent)
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
