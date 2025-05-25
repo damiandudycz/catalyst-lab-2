@@ -228,7 +228,7 @@ class RootHelperClient:
                     break
         return False
 
-    def ensure_server_ready(self, allow_auto_start=True) -> bool:
+    def ensure_server_ready(self, allow_auto_start=False) -> bool:
         """Ensure the root helper server is running and the socket is"""
         """available. If allowed automatically start the server (This should"""
         """be used only by handshake request)."""
@@ -240,14 +240,22 @@ class RootHelperClient:
         else:
             return False
 
-    def authorize_and_run(self, callback: Callable[[bool], None] | None = None):
-        def background_task(callback: Callable[[bool], None] | None = None):
+    def authorize_and_run(self, callback: Callable[[bool, ServerCall | None], None] | None = None):
+        def background_task():
             ensure_server_ready_result = self.ensure_server_ready(allow_auto_start=True)
-            def complete(ensure_server_ready_result: bool):
+            wait_for_children_call = stall_server._async_raw() if ensure_server_ready_result else None
+
+            # Schedule `complete` on a new thread *immediately*
+            def complete():
                 if callback:
-                    callback(ensure_server_ready_result)
-            threading.Timer(0, complete, args=(ensure_server_ready_result,)).start() # Used to return to main thread from background task thread.
-        threading.Thread(target=background_task, args=(callback,), daemon=True).start()
+                    callback(ensure_server_ready_result, wait_for_children_call)
+                if wait_for_children_call:
+                    wait_for_children_call.close_when_ready()
+
+            # Run immediately in background — Timer is unnecessary here
+            threading.Thread(target=complete, daemon=True).start()
+
+        threading.Thread(target=background_task, daemon=True).start()
 
     # --------------------------------------------------------------------------
     # Handling requests to server / root functions:
@@ -530,6 +538,7 @@ class ServerCall:
     event_bus: EventBus[ServerCallEvents] = field(default_factory=lambda: EventBus[ServerCallEvents]())
     children: list[ServerCall] = field(default_factory=list)
     children_lock: threading.Lock = field(default_factory=threading.Lock)
+    _close_when_ready: bool = False
 
     def __repr__(self):
         return f"ServerCall(request={self.request.function_name!r})"
@@ -542,6 +551,21 @@ class ServerCall:
     def add_child(self, child: ServerCall):
         with self.children_lock:
             self.children.append(child)
+            def wait_for_child_completed():
+                if child.thread:
+                    #child.thread.join()
+                    self._complete_if_children_finished()
+                else:
+                    self._complete_if_children_finished()
+            threading.Thread(target=wait_for_child_completed, daemon=True).start()
+
+    def _complete_if_children_finished(self):
+        if not self._close_when_ready:
+            return
+        if any(c.thread is not None and c.thread.is_alive() for c in self.children):
+            return
+        print("&&&&& Ready to close")
+        self.cancel()
 
     def cancel(self):
         """Sends CANCEL_CALL <ID> to server. Can be used only with async calls that already started."""
@@ -573,6 +597,12 @@ class ServerCall:
         self.terminated = True
         self.event_bus.emit(ServerCallEvents.CALL_WILL_TERMINATE)
 
+    def close_when_ready(self):
+        print("&&&&& Mark to close when ready")
+        # Marks as ready to cancel when all registered children are done
+        self._close_when_ready = True
+        self._complete_if_children_finished()
+
 # ------------------------------------------------------------------------------
 # Helper functions and types.
 # ------------------------------------------------------------------------------
@@ -593,6 +623,8 @@ ServerCallError.SERVER_NOT_RESPONDING = ServerCallError(1, "The server is not re
 def stall_server():
     event = Event()
     def handle_sigterm(signum, frame):
+        print("--- --- Stop stall_server")
         event.set()
+    # TODO: This signal is not received, maybe its another signal
     signal.signal(signal.SIGTERM, handle_sigterm)
     event.wait()

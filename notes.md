@@ -42,4 +42,5 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [x] For pipes decoding/encoding use simpler format <PipeID>:<Message>
 - [ ] Allow receiving calls longer than 4096
 - [x] Job.process doesn't seem to be initiated. Need to check
+- [ ] CANCEL_JOB sends a term signal, but stall server process doesn't react to it. Other processes might have similar issue, need to check that
 

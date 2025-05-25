@@ -536,6 +536,7 @@ class Job:
                     if not self.mark_terminated:
                         self.respond(response=result)
                 except Exception as e:
+                    print(e)
                     if not self.mark_terminated:
                         self.respond(code=ServerResponseStatusCode.COMMAND_EXECUTION_FAILED, response=str(e))
         except ValueError:
@@ -589,35 +590,47 @@ class Job:
                         self.conn.close()
                         self.server.remove_job(self)
 
-class OutputCapture:
+class PipeWriter:
+    def __init__(self, queue, pipe_id: int):
+        self.buffer = ""
+        self.queue = queue
+        self.pipe_id = pipe_id
+    def write(self, message):
+        self.buffer += message
+        while "\n" in self.buffer:
+            line, self.buffer = self.buffer.split("\n", 1)
+            self.queue.put((self.pipe_id, line))
+    def flush(self):
+        if self.buffer:
+            self.queue.put((self.pipe_id, self.buffer))
+            self.buffer = ""
 
+class OutputCapture:
     @staticmethod
     def run_function_with_streaming_output(job: Job, func, args, kwargs) -> Any | None:
-        read_fd, write_fd = os.pipe()
         result_queue = multiprocessing.Queue()
-
-        job.process = multiprocessing.Process(target=OutputCapture._run_and_capture_streams, args=(func, args, kwargs, write_fd, result_queue))
-        job.process.start()
-        os.close(write_fd)
-
-        def stream_reader(job: Job):
-            with os.fdopen(read_fd, 'r') as pipe:
-                for line in pipe:
-                    try:
-                        pipe_id_str, message = line.rstrip("\n").split(":", 1)
-                        pipe_id = int(pipe_id_str)
-                        job.respond(pipe=pipe_id, response=message)
-                    except ValueError as e:
-                        print(f"[Server]: Error parsing line '{line}': {e}")
-
-        reader_thread = threading.Thread(target=stream_reader, args=(job,))
+        output_queue = multiprocessing.Queue()
+        job.process = multiprocessing.Process(
+            target=OutputCapture._run_and_capture_streams,
+            args=(func, args, kwargs, output_queue, result_queue)
+        )
+        # Reader thread to stream output live
+        def output_reader():
+            while True:
+                item = output_queue.get()
+                if item is None:
+                    break # End-of-stream signal
+                pipe_id, message = item
+                job.respond(pipe=pipe_id, response=message)
+        reader_thread = threading.Thread(target=output_reader)
         reader_thread.start()
 
+        # Wait for the child to finish
+        job.process.start()
         job.process.join()
+        output_queue.put(None)
         reader_thread.join()
 
-        # Safe to use .empty() here because proc and reader_thread have been joined,
-        # ensuring no further writes to the result_queue will occur.
         if not result_queue.empty():
             result = result_queue.get()
             if isinstance(result, Exception):
@@ -627,37 +640,28 @@ class OutputCapture:
             return None
 
     @staticmethod
-    def _run_and_capture_streams(func, args, kwargs, write_fd, result_queue):
-        # Create two pipes for capturing stdout and stderr separately
-        # Never call this method directly, it needs to be spawned as multiprocessing.Process through _run_function_with_streaming_output.
+    def _run_and_capture_streams(func, args, kwargs, output_queue, result_queue):
+        # Create pipes for stdout and stderr
         stdout_r, stdout_w = os.pipe()
         stderr_r, stderr_w = os.pipe()
-
-        # Duplicate write ends over original stdout/stderr
-        os.dup2(stdout_w, StreamPipe.STDOUT.value)
-        os.dup2(stderr_w, StreamPipe.STDERR.value)
+        # Redirect low-level file descriptors
+        os.dup2(stdout_w, StreamPipe.STDOUT.value)  # stdout
+        os.dup2(stderr_w, StreamPipe.STDERR.value)  # stderr
         os.close(stdout_w)
         os.close(stderr_w)
-        sys.stdout = open(StreamPipe.STDOUT.value, 'w', buffering=1, encoding='utf-8', errors='replace')
-        sys.stderr = open(StreamPipe.STDERR.value, 'w', buffering=1, encoding='utf-8', errors='replace')
-
-        def forward_stream(read_fd, pipe_id):
-            with os.fdopen(read_fd, 'r') as reader, os.fdopen(write_fd, 'w', buffering=1) as writer:
-                for line in reader:
-                    line_cleaned = line.rstrip("\n")
-                    if line_cleaned:
-                        payload = f"{pipe_id}:{line_cleaned}"
-                        writer.write(payload + "\n")
-                        writer.flush()
-
-        # Start background threads to forward raw output as JSON
-        threading.Thread(target=forward_stream, args=(stdout_r, StreamPipe.STDOUT.value), daemon=True).start()
-        threading.Thread(target=forward_stream, args=(stderr_r, StreamPipe.STDERR.value), daemon=True).start()
-
+        def forward_pipe(pipe_fd, pipe_id):
+            with os.fdopen(pipe_fd, 'r', encoding='utf-8', errors='replace') as pipe:
+                for line in pipe:
+                    output_queue.put((pipe_id, line.rstrip('\n')))
+        # Start threads to forward output from pipes to queue
+        threading.Thread(target=forward_pipe, args=(stdout_r, StreamPipe.STDOUT), daemon=True).start()
+        threading.Thread(target=forward_pipe, args=(stderr_r, StreamPipe.STDERR), daemon=True).start()
         try:
             result = func(*args, **kwargs)
+            output_queue.put(None)
             result_queue.put(result)
         except Exception as e:
+            output_queue.put(None)
             result_queue.put(e)
 
 class WatchDog:
