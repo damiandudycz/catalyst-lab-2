@@ -240,12 +240,13 @@ class RootHelperClient:
         else:
             return False
 
-    def authorize_and_run(self, callback: Callable[[bool], None]):
-        def background_task(callback: Callable[[bool], None]):
+    def authorize_and_run(self, callback: Callable[[bool], None] | None = None):
+        def background_task(callback: Callable[[bool], None] | None = None):
             ensure_server_ready_result = self.ensure_server_ready(allow_auto_start=True)
             def complete(ensure_server_ready_result: bool):
-                callback(ensure_server_ready_result)
-            threading.Timer(0, complete).start() # Used to return to main thread from background task thread.
+                if callback:
+                    callback(ensure_server_ready_result)
+            threading.Timer(0, complete, args=(ensure_server_ready_result,)).start() # Used to return to main thread from background task thread.
         threading.Thread(target=background_task, args=(callback,), daemon=True).start()
 
     # --------------------------------------------------------------------------
