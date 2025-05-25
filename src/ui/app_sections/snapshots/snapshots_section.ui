@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+
+  <!-- Libraries -->
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
+  <template class="SnapshotsSection" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="spacing">24</property>
+    <property name="margin-start">24</property>
+    <property name="margin-end">24</property>
+    <property name="margin-top">24</property>
+    <property name="margin-bottom">24</property>
+
+    <child>
+      <object class="GtkBox" id="actions_section">
+        <property name="orientation">vertical</property>
+        <property name="halign">center</property>
+        <property name="width-request">350</property>
+        <property name="spacing">20</property>
+
+        <child>
+          <object class="GtkLabel">
+            <property name="label">Host environment:</property>
+            <property name="halign">start</property>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkListBox">
+            <property name="selection-mode">none</property>
+            <style>
+              <class name="boxed-list"/>
+            </style>
+
+            <!-- Rows buttons -->
+
+            <child>
+              <object class="AdwActionRow" id="toolset_system">
+                <property name="title">Host system environment</property>
+                <property name="subtitle">Use toolset directly from gentoo host</property>
+                <property name="icon-name">start-here</property>
+                <!-- <property name="activatable">True</property> -->
+                <!-- <property name="sensitive">False</property> -->
+                <child type="suffix">
+                  <object class="GtkCheckButton" id="toolset_system_checkbox">
+                    <property name="valign">center</property>
+                    <signal name="toggled" handler="toolset_system_checkbox_toggled"/>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <child>
+              <object class="AdwButtonRow" id="toolset_system_validate_button">
+                <property name="title">Validate</property>
+                <property name="start-icon-name">emoji-nature-symbolic</property>
+                <property name="activatable">True</property>
+                <property name="visible">False</property>
+                <style>
+                  <class name="suggested-action"/>
+                </style>
+                <signal name="activated" handler="on_validate_system_toolset_pressed"/>
+              </object>
+            </child>
+
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkSeparator"/>
+        </child>
+
+        <child>
+          <object class="GtkLabel">
+            <property name="label">External environments:</property>
+            <property name="halign">start</property>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkListBox" id="external_toolsets_container">
+            <property name="selection-mode">none</property>
+            <style>
+              <class name="boxed-list"/>
+            </style>
+
+            <child>
+              <object class="AdwButtonRow" id="toolset_add_button">
+                <property name="title">Add environment</property>
+                <property name="start-icon-name">list-add-symbolic</property>
+                <property name="activatable">True</property>
+                <signal name="activated" handler="on_add_toolset_activated"/>
+                <style>
+                  <class name="suggested-action"/>
+                </style>
+              </object>
+            </child>
+
+          </object>
+        </child>
+
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkSeparator"/>
+    </child>
+
+    <child>
+      <object class="GtkLabel">
+        <property name="label">Toolset environments are essentially Gentoo-based systems equipped with the necessary tools and configurations for building new Gentoo stage files. These environments can either be the host system itself (if running Gentoo) or isolated external environments packaged in a .squashfs file.</property>
+        <property name="halign">center</property>
+        <property name="wrap">True</property>
+        <property name="justify">fill</property>
+        <attributes>
+          <attribute name="foreground" value="grey"/>
+        </attributes>
+      </object>
+    </child>
+
+  </template>
+</interface>
+

@@ -13,7 +13,7 @@ from .settings import *
 from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_server import RootHelperServer, StreamPipe, StreamPipeEvent, WatchDog
-from .root_function import ROOT_FUNCTION_REGISTRY
+from .root_function import ROOT_FUNCTION_REGISTRY, root_function
 
 class RootHelperClient:
 
@@ -240,12 +240,13 @@ class RootHelperClient:
         else:
             return False
 
-    def authorize_and_run(self, callback: Callable[[bool], None] | None = None):
-        def background_task():
-            result = self.ensure_server_ready(allow_auto_start=True)
-            if callback:
-                threading.Timer(0, lambda: callback(result)).start()
-        threading.Thread(target=background_task, daemon=True).start()
+    def authorize_and_run(self, callback: Callable[[bool], None]):
+        def background_task(callback: Callable[[bool], None]):
+            ensure_server_ready_result = self.ensure_server_ready(allow_auto_start=True)
+            def complete(ensure_server_ready_result: bool):
+                callback(ensure_server_ready_result)
+            threading.Timer(0, complete).start() # Used to return to main thread from background task thread.
+        threading.Thread(target=background_task, args=(callback,), daemon=True).start()
 
     # --------------------------------------------------------------------------
     # Handling requests to server / root functions:
@@ -586,3 +587,11 @@ class ServerCallError(Exception):
         return f"Server error (code={self.error_code}): {self.message}"
 # Define error codes and their corresponding messages as class variables
 ServerCallError.SERVER_NOT_RESPONDING = ServerCallError(1, "The server is not responding.")
+
+@root_function
+def stall_server():
+    event = Event()
+    def handle_sigterm(signum, frame):
+        event.set()
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    event.wait()

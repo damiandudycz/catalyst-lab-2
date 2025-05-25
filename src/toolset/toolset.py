@@ -1,5 +1,6 @@
 from __future__ import annotations
-import os, uuid, shutil, tempfile, threading, stat, time, subprocess, requests, tarfile, re
+import os, uuid, shutil, tempfile, threading, stat, time, subprocess, requests
+import tarfile, re, random, string
 from gi.repository import Gtk, GLib, Adw
 from typing import final, ClassVar, Dict, Any
 from dataclasses import dataclass, field
@@ -16,16 +17,9 @@ from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture, Emulation
 from .event_bus import EventBus
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
+from .root_helper_client import stall_server
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
-
-@root_function
-def stall_server():
-    event = Event()
-    def handle_sigterm(signum, frame):
-        event.set()
-    signal.signal(signal.SIGTERM, handle_sigterm)
-    event.wait()
 
 class ToolsetEvents(Enum):
     SPAWNED_CHANGED = auto()
@@ -175,9 +169,10 @@ class Toolset(Serializable):
                     bind.host_path = os.path.join(resolved_toolset_root, bind.toolset_path.lstrip("/"))
 
             bind_options = []
+            work_dir: str | None = None
             try:
                 OverlayPaths = namedtuple("OverlayPaths", ["upper", "work"])
-                work_dir = Path(create_temp_workdir(prefix="gentoo_toolset_spawn_"))
+                work_dir = create_temp_workdir(prefix="gentoo_toolset_spawn_")
 
                 # Prepare work dirs:
                 fake_root = os.path.join(work_dir, "fake_root")
@@ -276,7 +271,8 @@ class Toolset(Serializable):
             except Exception as e:
                 error = e
                 try:
-                    delete_temp_workdir(path=str(work_dir))
+                    if work_dir:
+                        delete_temp_workdir(path=work_dir)
                 except Exception as e2:
                     error = ExceptionGroup("Multiple errors spawning environment", [error, e2])
                 raise error
@@ -300,7 +296,7 @@ class Toolset(Serializable):
                 if self.squashfs_binding_dir and self.squashfs_file: # Only umount if both are set, because if only squashfs_binding_dir is, it means it's beining configured for the first time.
                     umount_squashfs(mount_point=self.squashfs_binding_dir)
                 if self.work_dir:
-                    delete_temp_workdir(path=str(self.work_dir))
+                    delete_temp_workdir(path=self.work_dir)
             except Exception as e:
                 print(f"Error deleting toolset work_dir: {e}")
                 raise e
@@ -341,7 +337,7 @@ class Toolset(Serializable):
                     # Wraps completion block to set in_use flag additionally after it's done
                     completion_handler=lambda x: on_complete(completion_handler, x),
                     parent=parent,
-                    work_dir=str(self.work_dir),
+                    work_dir=self.work_dir,
                     fake_root=fake_root,
                     bind_options=self.bind_options,
                     command_to_run=command
