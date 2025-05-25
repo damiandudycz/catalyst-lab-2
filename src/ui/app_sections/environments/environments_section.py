@@ -7,7 +7,7 @@ from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage, ToolsetApplication
 from .hotfix_patching import HotFix
 from .root_function import root_function
-from .root_helper_client import RootHelperClient, ServerCall
+from .root_helper_client import RootHelperClient, ServerCall, stall_server
 from .root_helper_server import ServerCommand
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
@@ -89,8 +89,8 @@ class EnvironmentsSection(Gtk.Box):
             try:
                 if not sender.toolset.spawned:
                     sender.toolset.spawn()
-                    sender.toolset.analyze(parent_call=parent)
-                    #sender.toolset.run_command(command="emerge --sync")
+                    sender.toolset.analyze(parent=parent)
+                    sender.toolset.run_command(command="emerge --sync", parent=parent)
                 else:
                     sender.toolset.unspawn()
             except Exception as e:

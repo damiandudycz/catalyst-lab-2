@@ -553,7 +553,7 @@ class ServerCall:
             self.children.append(child)
             def wait_for_child_completed():
                 if child.thread:
-                    #child.thread.join()
+                    child.thread.join()
                     self._complete_if_children_finished()
                 else:
                     self._complete_if_children_finished()
@@ -564,7 +564,6 @@ class ServerCall:
             return
         if any(c.thread is not None and c.thread.is_alive() for c in self.children):
             return
-        print("&&&&& Ready to close")
         self.cancel()
 
     def cancel(self):
@@ -598,7 +597,6 @@ class ServerCall:
         self.event_bus.emit(ServerCallEvents.CALL_WILL_TERMINATE)
 
     def close_when_ready(self):
-        print("&&&&& Mark to close when ready")
         # Marks as ready to cancel when all registered children are done
         self._close_when_ready = True
         self._complete_if_children_finished()
@@ -621,10 +619,8 @@ ServerCallError.SERVER_NOT_RESPONDING = ServerCallError(1, "The server is not re
 
 @root_function
 def stall_server():
-    event = Event()
+    event = threading.Event()
     def handle_sigterm(signum, frame):
-        print("--- --- Stop stall_server")
         event.set()
-    # TODO: This signal is not received, maybe its another signal
     signal.signal(signal.SIGTERM, handle_sigterm)
     event.wait()

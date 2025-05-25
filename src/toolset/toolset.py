@@ -354,28 +354,28 @@ class Toolset(Serializable):
     def get_installed_app_version(self, app: ToolsetApplication) -> str | None:
         return self.apps.get(app.package, None)
 
-    def analyze(self, parent_call: ServerCall | None = None) -> bool:
+    def analyze(self, parent: ServerCall | None = None) -> bool:
         """Performs various sanity checks on toolset and stores gathered results."""
         """Returns true if all checks succeeded, even if version is not found."""
         checks_succeded = True
         for app in ToolsetApplication.ALL:
-            if parent_call is not None and parent_call.terminated:
+            if parent is not None and parent.terminated:
                 checks_succeded = False
                 break
             try:
-                self._perform_app_installed_version_check(app=app, parent_call=parent_call)
+                self._perform_app_installed_version_check(app=app, parent=parent)
             except Exception as e:
                 print(f"Error in installed version check: {e}")
                 checks_succeeded = False
             try:
-                self._perform_app_additional_checks(app=app, parent_call=parent_call)
+                self._perform_app_additional_checks(app=app, parent=parent)
             except Exception as e:
                 print(f"Error in additional checks: {e}")
                 checks_succeeded = False
         Repository.TOOLSETS.save() # Make sure changes are saved in repository.
         return checks_succeded
 
-    def _perform_app_installed_version_check(self, app: ToolsetApplication, parent_call: ServerCall | None = None):
+    def _perform_app_installed_version_check(self, app: ToolsetApplication, parent: ServerCall | None = None):
         """Checks the version of package installed in toolset."""
         """Stores the value in toolset metadata."""
         """If app is not found, stores none for this app in toolset metadata."""
@@ -406,7 +406,7 @@ class Toolset(Serializable):
                 f"match=$(ls -d /var/db/pkg/{app.package}-* 2>/dev/null | head -n1); "
                 f"if [[ -n \"$match\" ]]; then basename \"$match\" | sed -E \"s/^$(basename \"{app.package}\")-//\"; fi"
             ),
-            parent=parent_call,
+            parent=parent,
             handler=output_handler,
             completion_handler=completion_handler
         )
@@ -420,9 +420,9 @@ class Toolset(Serializable):
         else:
             self.apps.pop(app.package, None)
 
-    def _perform_app_additional_checks(self, app: ToolsetApplication, parent_call: ServerCall | None = None):
+    def _perform_app_additional_checks(self, app: ToolsetApplication, parent: ServerCall | None = None):
         if app.toolset_additional_analysis:
-            app.toolset_additional_analysis(app=app, toolset=self, parent_call=parent_call)
+            app.toolset_additional_analysis(app=app, toolset=self, parent=parent)
 
 @dataclass
 class BindMount:
@@ -710,7 +710,7 @@ ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
             ),
         ),
 )
-def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: Toolset, parent_call: ServerCall | None = None):
+def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: Toolset, parent: ServerCall | None = None):
     bin_directory = Path(toolset.toolset_root()) / "bin"
     qemu_systems = Emulation.get_all_qemu_systems()
     found_qemu_binaries = []
@@ -1037,7 +1037,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            analysis_result = self.installer.tmp_toolset.analyze(parent_call=self.installer.stall_server_call)
+            analysis_result = self.installer.tmp_toolset.analyze(parent=self.installer.stall_server_call)
             self.installer.tmp_toolset.unspawn()
             self.complete(ToolsetInstallationStepState.COMPLETED if analysis_result else ToolsetInstallationStepState.FAILED)
         except Exception as e:

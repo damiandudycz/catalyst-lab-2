@@ -111,7 +111,7 @@ class ToolsetCreateView(Gtk.Box):
     def on_allow_binpkgs_toggled(self, checkbox):
         self.allow_binpkgs = checkbox.get_active()
 
-    def _start_installation(self, authorized: bool):
+    def _start_installation(self, authorized: bool, parent: ServerCall | None):
         if not authorized:
             return
         apps_selection = [
