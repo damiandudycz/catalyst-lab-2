@@ -1,0 +1,185 @@
+from __future__ import annotations
+import threading
+from gi.repository import GLib
+from typing import final
+from enum import Enum, auto
+from abc import ABC, abstractmethod
+from .event_bus import EventBus
+from .root_helper_client import AuthorizationKeeper
+
+# ------------------------------------------------------------------------------
+# Process/Stage state:
+# ------------------------------------------------------------------------------
+
+@final
+class MultiStageProcessState(Enum):
+    """Current state of installation."""
+    SETUP = auto()       # Process not started yet.
+    IN_PROGRESS = auto() # In progress.
+    COMPLETED = auto()   # Completed sucessfully.
+    FAILED = auto()      # Failed at any of steps.
+
+@final
+class MultiStageProcessStageState(Enum):
+    """Stage of single stage step."""
+    SCHEDULED = auto()   # Step scheduled for execution.
+    IN_PROGRESS = auto() # Step started and is in progress.
+    COMPLETED = auto()   # Step completed successfully.
+    FAILED = auto()      # Step failed.
+
+# ------------------------------------------------------------------------------
+# Process/Stage events:
+# ------------------------------------------------------------------------------
+
+@final
+class MultiStageProcessEvent(Enum):
+    """Events produced by MultiStageProcess."""
+    # Instance events:
+    STATE_CHANGED = auto()
+    PROGRESS_CHANGED = auto()
+    # Class events:
+    STARTED_PROCESSES_CHANGED = auto()
+
+@final
+class MultiStageProcessStageEvent(Enum):
+    """Events produced by single steps."""
+    STATE_CHANGED = auto()
+    PROGRESS_CHANGED = auto()
+
+# ------------------------------------------------------------------------------
+# MultiStageProcess base class:
+# ------------------------------------------------------------------------------
+
+class MultiStageProcess(ABC):
+    """Abstract class for managing processes made of multiple stages."""
+    """For example toolset installation, snapshot creation, etc."""
+
+    started_processes: list[MultiStageProcess] = [] # List of processes that were started. Processes remain there even after success/failure until cleared.
+    event_bus = EventBus[MultiStageProcessEvent]() # For class events.
+
+    def __init__(self):
+        """Call super().__init__() at the end of implementation."""
+        self.event_bus = EventBus[MultiStageProcessEvent]() # For instance events.
+        self.authorization_keeper: AuthorizationKeeper | None = None # Set in start().
+        self.status = ToolsetInstallationStage.SETUP # Changes to IN_PROGRESS in start().
+        self.progress: float = 0.0 # Calculated automatically from all stages.
+        self.stages: list[MultiStageProcessStage] = [] # Set in setup_stages.
+        self.setup_stages()
+
+    @abstractmethod
+    def setup_stages(self):
+        """Setup required stages based on information passed in init()."""
+        """Call super().setup_stages() at the end of implementation."""
+        for stage in self.stages:
+            stage.event_bus.subscribe(
+                MultiStageProcessStageEvent.PROGRESS_CHANGED,
+                self._update_progress
+            )
+
+    def start(self, authorization_keeper: AuthorizationKeeper | None = None):
+        try:
+            if authorization_keeper:
+                authorization_keeper.retain()
+            self.authorization_keeper = authorization_keeper
+            self.status = MultiStageProcessState.IN_PROGRESS
+            self.event_bus.emit(MultiStageProcessEvent.STATE_CHANGED, self.status)
+            MultiStageProcess.started_processes.append(self)
+            MultiStageProcess.event_bus.emit(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, MultiStageProcess.started_processes)
+            self._continue_process()
+        except Exception as e:
+            self.cancel()
+
+    def cancel(self):
+        self.status = MultiStageProcessState.FAILED if self.status == MultiStageProcessState.IN_PROGRESS else MultiStageProcessState.SETUP
+        self.event_bus.emit(MultiStageProcessEvent.STATE_CHANGED, self.status)
+        running_stage = next((stage for stage in self.stages if stage.state == MultiStageProcessStageState.IN_PROGRESS), None)
+        if running_stage:
+            running_stage.cancel()
+        self._cleanup()
+
+    def clean_from_started_processes(self):
+        if self.status == MultiStageProcessState.COMPLETED or self.status == MultiStageProcessState.FAILED or self.status == MultiStageProcessState.SETUP:
+            if self in MultiStageProcess.started_processes:
+                MultiStageProcess.started_processes.remove(self)
+                MultiStageProcess.event_bus.emit(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, MultiStageProcess.started_processes)
+
+    def _update_progress(self, stage_progress: float | None):
+        self.progress = sum(stage.progress or 0 for stage in self.stages) / len(self.stages)
+        self.event_bus.emit(MultiStageProcessEvent.PROGRESS_CHANGED, self.progress)
+
+    def _cleanup(self):
+        def worker():
+            for step in reversed(self.steps): # Cleanup in reverse order
+                step.cleanup()
+            if self.authorization_keeper:
+                self.authorization_keeper.release()
+                self.authorization_keeper = None
+        # Run cleaning on new thread, not to block main UI
+        threading.Thread(target=worker).start()
+
+    def _continue_process(self):
+        if self.status == MultiStageProcessState.COMPLETED or self.status == MultiStageProcessState.FAILED or self.status == MultiStageProcessState.SETUP:
+            return # Prevents displaying multiple failure messages in some cases.
+        next_stage = next((stage for stage in self.stages if stage.state == MultiStageProcessStageState.SCHEDULED), None)
+        failed_stage = next((stage for stage in self.stages if stage.state == MultiStageProcessStageState.FAILED), None)
+        if failed_stage:
+            self.status = MultiStageProcessState.FAILED
+            self.event_bus.emit(MultiStageProcessEvent.STATE_CHANGED, self.status)
+            self._cleanup()
+        elif next_stage:
+            next_step_thread = threading.Thread(target=next_stage.start)
+            next_step_thread.start()
+        else:
+            self.status = MultiStageProcessStageState.COMPLETED
+            self.event_bus.emit(MultiStageProcessEvent.STATE_CHANGED, self.status)
+            self._cleanup()
+            MultiStageProcess.started_processes.remove(self)
+            MultiStageProcess.event_bus.emit(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, MultiStageProcessEvent.started_processes)
+            # TODO: Perform some kind of completion handler
+            # Repository.TOOLSETS.value.append(self.final_toolset)
+
+# ------------------------------------------------------------------------------
+# MultiStageProcessStage base class:
+# ------------------------------------------------------------------------------
+
+class MultiStageProcessStage(ABC):
+    """Base class for MultiStageProcess stages."""
+    def __init__(self, name: str, description: str, multi_stage_process: MultiStageProcess):
+        self.state = MultiStageProcessStageState.SCHEDULED
+        self.name = name
+        self.description = description
+        self.multi_stage_process = multi_stage_process
+        self.progress: float | None = None
+        self.event_bus = EventBus[MultiStageProcessStageEvent]()
+        self._cancel_event = threading.Event()
+    @abstractmethod
+    def start(self):
+        self._cancel_event.clear()
+        self._update_state(MultiStageProcessStageState.IN_PROGRESS)
+    def cancel(self):
+        if self.state == MultiStageProcessStageState.IN_PROGRESS:
+            self.complete(MultiStageProcessStageState.FAILED)
+            self._cancel_event.set()
+    def cleanup(self) -> bool:
+        """Returns true if cleanup was needed and was started."""
+        if self.state == MultiStageProcessStageState.SCHEDULED:
+            return False # No cleaning needed if job didn't start.
+        self.cancel()
+        print(f"::: Clean {self.name}")
+        return True
+    def complete(self, state: MultiStageProcessStageState):
+        """Call this when step finishes."""
+        if self._cancel_event.is_set():
+            return
+        self._update_state(state=state)
+        if self.state == MultiStageProcessStageState.COMPLETED:
+           self._update_progress(1.0)
+        # Continue process
+        GLib.idle_add(self.multi_stage_process._continue_process)
+    def _update_state(self, state: MultiStageProcessStageState):
+        self.state = state
+        self.event_bus.emit(MultiStageProcessStageEvent.STATE_CHANGED, state)
+    def _update_progress(self, progress: float | None):
+        self.progress = progress
+        self.event_bus.emit(MultiStageProcessStageEvent.PROGRESS_CHANGED, progress)
+

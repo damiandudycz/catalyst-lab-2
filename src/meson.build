@@ -40,6 +40,7 @@ catalystlab_sources = [
   'global_objects/repository.py',
   'global_objects/repositories.py',
   'global_objects/helper_functions.py',
+  'global_objects/multistage_process.py',
   'root_helper/root_function.py',
   'root_helper/root_helper_client.py',
   'root_helper/root_helper_server.py',

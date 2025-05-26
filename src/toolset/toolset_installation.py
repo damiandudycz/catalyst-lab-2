@@ -16,6 +16,12 @@ from .repository import Repository
 from .toolset_application import ToolsetApplication
 from .helper_functions import create_temp_workdir, delete_temp_workdir, create_squashfs, extract
 
+from .multistage_process import (
+    MultiStageProcess, MultiStageProcessStage,
+    MultiStageProcessState, MultiStageProcessStageState,
+    MultiStageProcessEvent, MultiStageProcessStageEvent,
+)
+
 # ------------------------------------------------------------------------------
 # Toolset installation.
 # ------------------------------------------------------------------------------
