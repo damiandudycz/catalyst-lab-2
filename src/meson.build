@@ -47,6 +47,7 @@ catalystlab_sources = [
   'toolset/toolset.py',
   'toolset/toolset_application.py',
   'toolset/toolset_installation.py',
+  'toolset/toolset_env_builder.py',
   'snapshot_manager/snapshot_manager.py',
   'ui/app_sections/about/about_section.py',
   'ui/app_sections/bugs/bugs_section.py',
@@ -65,6 +66,7 @@ catalystlab_sources = [
   'ui/components/root_access_button.py',
   'ui/components/status_indicator.py',
   'ui/toolset_create/toolset_create_view.py',
+  'ui/snapshot_create/snapshot_create_view.py',
   'ui/root_command_output/root_command_output_view.py'
 ]
 

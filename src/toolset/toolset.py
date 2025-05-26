@@ -171,7 +171,7 @@ class Toolset(Serializable):
                     bind.host_path = os.path.join(resolved_toolset_root, bind.toolset_path.lstrip("/"))
                 # Resolve host_path.
                 if bind.host_path:
-                    bind.host_path = os.path.realpath(os.path.expanduser(bind.host_path))
+                    bind.host_path = os.path.expanduser(bind.host_path)
 
             bind_options = []
             work_dir: str | None = None

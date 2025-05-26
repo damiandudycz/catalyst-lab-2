@@ -288,7 +288,7 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        if self.installer.tmp_stage_file:
+        if hasattr(self.installer, 'tmp_stage_file'):
             try:
                 self.installer.tmp_stage_file.close()
                 os.remove(self.installer.tmp_stage_file.name)
@@ -488,6 +488,7 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
                 proc.wait()
         self.installer.squashfs_process = None
 
+@root_function
 def insert_portage_config(config_dir: str, config_entries: list[str], app_name: str, toolset_root: str):
     portage_dir = os.path.join(toolset_root, "etc", "portage", config_dir)
     os.makedirs(portage_dir, exist_ok=True)

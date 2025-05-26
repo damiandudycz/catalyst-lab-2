@@ -8,43 +8,35 @@ from enum import Enum, auto
 from abc import ABC, abstractmethod
 import os, re, time
 from datetime import datetime
-from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture
 from .event_bus import EventBus
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
-from .toolset_installation import (
-    ToolsetInstallation,
-    ToolsetInstallationStage,
-    ToolsetInstallationEvent,
-    ToolsetInstallationStep,
-    ToolsetInstallationStepState,
-    ToolsetInstallationStepEvent
-)
-from .toolset_application import (
-    ToolsetApplication,
-    ToolsetApplicationVersion,
-    ToolsetApplicationSelection
-)
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_create/toolset_create_view.ui')
-class ToolsetCreateView(Gtk.Box):
-    __gtype_name__ = "ToolsetCreateView"
+from .toolset import Toolset
+from .repository import Repository
+
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot_create/snapshot_create_view.ui')
+class SnapshotCreateView(Gtk.Box):
+    __gtype_name__ = "SnapshotCreateView"
 
     # Main views:
     setup_view = Gtk.Template.Child()
-    install_view = Gtk.Template.Child()
+    fetch_view = Gtk.Template.Child()
     # Setup view elements:
     carousel = Gtk.Template.Child()
     welcome_page = Gtk.Template.Child()
-    configuration_page = Gtk.Template.Child()
-    tools_page = Gtk.Template.Child()
-    stages_list = Gtk.Template.Child()
+    toolset_page = Gtk.Template.Child()
+    config_page = Gtk.Template.Child()
+    toolsets_list = Gtk.Template.Child()
+
     tools_list = Gtk.Template.Child()
     allow_binpkgs_checkbox = Gtk.Template.Child()
+
     back_button = Gtk.Template.Child()
     next_button = Gtk.Template.Child()
-    # Install view elements:
+    # Fetch view elements:
     installation_steps_list = Gtk.Template.Child()
+
     cancel_button = Gtk.Template.Child()
     finish_button = Gtk.Template.Child()
     progress_bar = Gtk.Template.Child()
@@ -53,22 +45,22 @@ class ToolsetCreateView(Gtk.Box):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
-        self.selected_stage: ParseResult | None = None
+        self.selected_toolset: Toolset | None = None
+
         self.architecture = Architecture.HOST
         self.allow_binpkgs = True
+
         self.carousel.connect('page-changed', self.on_page_changed)
-        self.tools_selection: Dict[ToolsetApplication, bool] = {app: not app.auto_select for app in ToolsetApplication.ALL}
-        self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
-        self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile]] = {app: [] for app in ToolsetApplication.ALL}
-        self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
-        self._load_applications_rows()
-        self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else ToolsetInstallationStage.SETUP)
-        self.progress_bar.set_fraction(self.installation_in_progress.progress if self.installation_in_progress else 0)
-        if installation_in_progress and installation_in_progress.status != ToolsetInstallationStage.SETUP:
-            self._update_installation_steps(steps=installation_in_progress.steps)
-            self.bind_installation_events(self.installation_in_progress)
-        else:
-            ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
+
+#        self.tools_selection: Dict[ToolsetApplication, bool] = {app: not app.auto_select for app in ToolsetApplication.ALL}
+#        self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
+#        self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile]] = {app: [] for app in ToolsetApplication.ALL}
+#        self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
+#        self._load_applications_rows()
+#        self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else ToolsetInstallationStage.SETUP)
+#        self.progress_bar.set_fraction(self.installation_in_progress.progress if self.installation_in_progress else 0)
+
+        self._update_toolsets_result(Repository.TOOLSETS.value)
 
     def bind_installation_events(self, installation_in_progress: ToolsetInstallation):
         installation_in_progress.event_bus.subscribe(
@@ -88,7 +80,7 @@ class ToolsetCreateView(Gtk.Box):
     def setup_back_next_buttons(self):
         is_first_page = self.current_page == 0
         is_last_page = self.current_page == 2
-        is_stage_selected = self.selected_stage is not None
+        is_stage_selected = self.selected_toolset is not None
         self.back_button.set_sensitive(not is_first_page)
         self.back_button.set_opacity(0.0 if is_first_page else 1.0)
         self.next_button.set_sensitive(not is_first_page and is_stage_selected)
@@ -126,7 +118,7 @@ class ToolsetCreateView(Gtk.Box):
             for app, _ in self.tools_selection.items()
         ]
         self.installation_in_progress = ToolsetInstallation(
-            stage_url=self.selected_stage,
+            stage_url=self.selected_toolset,
             allow_binpkgs=self.allow_binpkgs,
             apps_selection=apps_selection
         )
@@ -138,7 +130,7 @@ class ToolsetCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        self.carousel.scroll_to(self.configuration_page, True)
+        self.carousel.scroll_to(self.toolset_page, True)
 
     @Gtk.Template.Callback()
     def on_cancel_pressed(self, _):
@@ -152,55 +144,56 @@ class ToolsetCreateView(Gtk.Box):
             self.content_navigation_view.pop()
         self.installation_in_progress.clean_from_started_installations()
 
-    def _update_stages_result(self, result: list[ParseResult] | Exception):
-        self.selected_stage = None
-        if hasattr(self, "_stage_rows"):
-            for row in self._stage_rows:
-                self.stages_list.remove(row)
+    def _update_toolsets_result(self, result: list[Toolset]):
+        self.selected_toolset = None
+        if hasattr(self, "_toolset_rows"):
+            for row in self._toolset_rows:
+                self.toolsets_list.remove(row)
         # Refresh list of results
-        if isinstance(result, Exception):
-            error_label = Gtk.Label(label=f"Error: {str(result)}")
+        if not result:
+            error_label = Gtk.Label(label=f"No toolsets available")
             error_label.set_wrap(True)
             error_label.set_halign(Gtk.Align.START)
-            self.stages_list.add(error_label)
-            self._stage_rows = [error_label]
+            self.toolsets_list.add(error_label)
+            self._toolset_rows = [error_label]
         else:
-            if result:
-                # Place recommended first.
-                sorted_stages = sorted(result, key=lambda stage: not ToolsetCreateView._is_recommended_stage(
-                    os.path.basename(stage.geturl()), self.architecture
-                ))
-                self.selected_stage = sorted_stages[0]
-            self._stage_rows = []
-            stages_check_buttons_group = []
-            for stage in sorted_stages:
-                filename = os.path.basename(stage.geturl())
-                row = Adw.ActionRow(title=filename)
+            # Place newest first.
+            sorted_toolsets = result
+#            sorted_toolsets = sorted(result, key=lambda stage: not SnapshotCreateView._is_recommended_stage(
+#                os.path.basename(stage.geturl()), self.architecture
+#            ))
+
+            self.selected_toolset = sorted_toolsets[0]
+            self._toolset_rows = []
+            toolsets_check_buttons_group = []
+            for toolset in sorted_toolsets:
+                toolset_name = toolset.name
+                row = Adw.ActionRow(title=toolset_name)
                 check_button = Gtk.CheckButton()
-                check_button.set_active(stage == self.selected_stage)
-                if stages_check_buttons_group:
-                    check_button.set_group(stages_check_buttons_group[0])
-                if ToolsetCreateView._is_recommended_stage(filename, self.architecture):
-                    # Mark first entry as recommended
-                    label = Gtk.Label(label="Recommended")
-                    label.add_css_class("dim-label")
-                    label.add_css_class("caption")
-                    row.add_suffix(label)
-                check_button.connect("toggled", self._on_stage_selected, stage)
-                stages_check_buttons_group.append(check_button)
+                check_button.set_active(toolset == self.selected_toolset)
+                if toolsets_check_buttons_group:
+                    check_button.set_group(toolsets_check_buttons_group[0])
+#                if SnapshotCreateView._is_recommended_stage(toolset_name, self.architecture):
+#                    # Mark first entry as recommended
+#                    label = Gtk.Label(label="Recommended")
+#                    label.add_css_class("dim-label")
+#                    label.add_css_class("caption")
+#                    row.add_suffix(label)
+                check_button.connect("toggled", self._on_stage_selected, toolset)
+                toolsets_check_buttons_group.append(check_button)
                 row.add_prefix(check_button)
                 row.set_activatable_widget(check_button)
-                self.stages_list.add(row)
-                self._stage_rows.append(row)
+                self.toolsets_list.add(row)
+                self._toolset_rows.append(row)
 
-    def _on_stage_selected(self, button: Gtk.CheckButton, stage: ParseResult):
+    def _on_stage_selected(self, button: Gtk.CheckButton, stage: Toolset):
         """Callback for when a row's checkbox is toggled."""
         if button.get_active():
-            self.selected_stage = stage
+            self.selected_toolset = stage
         else:
             # Deselect if unchecked
-            if self.selected_stage == stage:
-                self.selected_stage = None
+            if self.selected_toolset == stage:
+                self.selected_toolset = None
         self.setup_back_next_buttons()
 
     def _on_tool_selected(self, button: Gtk.CheckButton, app: ToolsetApplication, row: Adw.ExpanderRow):
@@ -351,7 +344,7 @@ class ToolsetCreateView(Gtk.Box):
         self.current_stage = stage
         # Setup views visibility:
         self.setup_view.set_visible(stage == ToolsetInstallationStage.SETUP)
-        self.install_view.set_visible(stage != ToolsetInstallationStage.SETUP)
+        self.fetch_view.set_visible(stage != ToolsetInstallationStage.SETUP)
         self.cancel_button.set_visible(stage == ToolsetInstallationStage.INSTALL)
         self.finish_button.set_visible(stage != ToolsetInstallationStage.INSTALL)
         # Add label with summary for completion states:
@@ -378,7 +371,7 @@ class ToolsetCreateView(Gtk.Box):
             for row in self._installation_rows:
                 self.installation_steps_list.remove(row)
         self._installation_rows = []
-        tools_check_buttons_group = []
+        toolsets_check_buttons_group = []
         running_stage_row = None
         for step in steps:
             row = ToolsetInstallationStepRow(step=step, owner=self)

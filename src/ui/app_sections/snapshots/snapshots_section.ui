@@ -15,7 +15,7 @@
     <property name="margin-bottom">24</property>
 
     <child>
-      <object class="GtkBox" id="actions_section">
+      <object class="GtkBox">
         <property name="orientation">vertical</property>
         <property name="halign">center</property>
         <property name="width-request">350</property>
@@ -23,76 +23,24 @@
 
         <child>
           <object class="GtkLabel">
-            <property name="label">Host environment:</property>
+            <property name="label">Available snapshots:</property>
             <property name="halign">start</property>
           </object>
         </child>
 
         <child>
-          <object class="GtkListBox">
-            <property name="selection-mode">none</property>
-            <style>
-              <class name="boxed-list"/>
-            </style>
-
-            <!-- Rows buttons -->
-
-            <child>
-              <object class="AdwActionRow" id="toolset_system">
-                <property name="title">Host system environment</property>
-                <property name="subtitle">Use toolset directly from gentoo host</property>
-                <property name="icon-name">start-here</property>
-                <!-- <property name="activatable">True</property> -->
-                <!-- <property name="sensitive">False</property> -->
-                <child type="suffix">
-                  <object class="GtkCheckButton" id="toolset_system_checkbox">
-                    <property name="valign">center</property>
-                    <signal name="toggled" handler="toolset_system_checkbox_toggled"/>
-                  </object>
-                </child>
-              </object>
-            </child>
-
-            <child>
-              <object class="AdwButtonRow" id="toolset_system_validate_button">
-                <property name="title">Validate</property>
-                <property name="start-icon-name">emoji-nature-symbolic</property>
-                <property name="activatable">True</property>
-                <property name="visible">False</property>
-                <style>
-                  <class name="suggested-action"/>
-                </style>
-                <signal name="activated" handler="on_validate_system_toolset_pressed"/>
-              </object>
-            </child>
-
-          </object>
-        </child>
-
-        <child>
-          <object class="GtkSeparator"/>
-        </child>
-
-        <child>
-          <object class="GtkLabel">
-            <property name="label">External environments:</property>
-            <property name="halign">start</property>
-          </object>
-        </child>
-
-        <child>
-          <object class="GtkListBox" id="external_toolsets_container">
+          <object class="GtkListBox" id="snapshots_container">
             <property name="selection-mode">none</property>
             <style>
               <class name="boxed-list"/>
             </style>
 
             <child>
-              <object class="AdwButtonRow" id="toolset_add_button">
-                <property name="title">Add environment</property>
+              <object class="AdwButtonRow">
+                <property name="title">Create snapshot</property>
                 <property name="start-icon-name">list-add-symbolic</property>
                 <property name="activatable">True</property>
-                <signal name="activated" handler="on_add_toolset_activated"/>
+                <signal name="activated" handler="on_add_snapshot_activated"/>
                 <style>
                   <class name="suggested-action"/>
                 </style>
@@ -111,7 +59,7 @@
 
     <child>
       <object class="GtkLabel">
-        <property name="label">Toolset environments are essentially Gentoo-based systems equipped with the necessary tools and configurations for building new Gentoo stage files. These environments can either be the host system itself (if running Gentoo) or isolated external environments packaged in a .squashfs file.</property>
+        <property name="label">Catalyst snapshots are compressed archives that contain a snapshot of the Gentoo Portage tree and associated metadata at a specific point in time. These snapshots are used by Catalyst to ensure consistent and reproducible builds of Gentoo stage files. By referencing a fixed snapshot, Catalyst can build stages with a known set of packages and dependencies, independent of changes in the live Portage tree.</property>
         <property name="halign">center</property>
         <property name="wrap">True</property>
         <property name="justify">fill</property>
