@@ -111,7 +111,7 @@ class ToolsetCreateView(Gtk.Box):
     def on_allow_binpkgs_toggled(self, checkbox):
         self.allow_binpkgs = checkbox.get_active()
 
-    def _start_installation(self, authorized: bool, parent: ServerCall | None):
+    def _start_installation(self, authorized: bool):
         if not authorized:
             return
         apps_selection = [
@@ -132,7 +132,7 @@ class ToolsetCreateView(Gtk.Box):
         self._set_current_stage(self.installation_in_progress.status)
         self.progress_bar.set_fraction(self.installation_in_progress.progress)
         self.bind_installation_events(self.installation_in_progress)
-        self.installation_in_progress.start(parent=parent)
+        self.installation_in_progress.start()
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):

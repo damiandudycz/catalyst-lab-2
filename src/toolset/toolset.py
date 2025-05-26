@@ -17,7 +17,6 @@ from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture, Emulation
 from .event_bus import EventBus
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
-from .root_helper_client import stall_server
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
 
@@ -314,7 +313,7 @@ class Toolset(Serializable):
     # --------------------------------------------------------------------------
     # Calling commands:
 
-    def run_command(self, command: str, parent: ServerCall | None = None, handler: callable | None = None, completion_handler: callable | None = None) -> ServerCall:
+    def run_command(self, command: str, handler: callable | None = None, completion_handler: callable | None = None) -> ServerCall:
         # TODO: Add required parameters checks, like store_changes matches spawned env, required bindings are set correctly etc.
         with self.access_lock:
             if not self.spawned:
@@ -336,7 +335,6 @@ class Toolset(Serializable):
                     handler=handler,
                     # Wraps completion block to set in_use flag additionally after it's done
                     completion_handler=lambda x: on_complete(completion_handler, x),
-                    parent=parent,
                     work_dir=self.work_dir,
                     fake_root=fake_root,
                     bind_options=self.bind_options,
@@ -354,28 +352,25 @@ class Toolset(Serializable):
     def get_installed_app_version(self, app: ToolsetApplication) -> str | None:
         return self.apps.get(app.package, None)
 
-    def analyze(self, parent: ServerCall | None = None) -> bool:
+    def analyze(self) -> bool:
         """Performs various sanity checks on toolset and stores gathered results."""
         """Returns true if all checks succeeded, even if version is not found."""
         checks_succeded = True
         for app in ToolsetApplication.ALL:
-            if parent is not None and parent.terminated:
-                checks_succeded = False
-                break
             try:
-                self._perform_app_installed_version_check(app=app, parent=parent)
+                self._perform_app_installed_version_check(app=app)
             except Exception as e:
                 print(f"Error in installed version check: {e}")
                 checks_succeeded = False
             try:
-                self._perform_app_additional_checks(app=app, parent=parent)
+                self._perform_app_additional_checks(app=app)
             except Exception as e:
                 print(f"Error in additional checks: {e}")
                 checks_succeeded = False
         Repository.TOOLSETS.save() # Make sure changes are saved in repository.
         return checks_succeded
 
-    def _perform_app_installed_version_check(self, app: ToolsetApplication, parent: ServerCall | None = None):
+    def _perform_app_installed_version_check(self, app: ToolsetApplication):
         """Checks the version of package installed in toolset."""
         """Stores the value in toolset metadata."""
         """If app is not found, stores none for this app in toolset metadata."""
@@ -406,7 +401,6 @@ class Toolset(Serializable):
                 f"match=$(ls -d /var/db/pkg/{app.package}-* 2>/dev/null | head -n1); "
                 f"if [[ -n \"$match\" ]]; then basename \"$match\" | sed -E \"s/^$(basename \"{app.package}\")-//\"; fi"
             ),
-            parent=parent,
             handler=output_handler,
             completion_handler=completion_handler
         )
@@ -420,9 +414,9 @@ class Toolset(Serializable):
         else:
             self.apps.pop(app.package, None)
 
-    def _perform_app_additional_checks(self, app: ToolsetApplication, parent: ServerCall | None = None):
+    def _perform_app_additional_checks(self, app: ToolsetApplication):
         if app.toolset_additional_analysis:
-            app.toolset_additional_analysis(app=app, toolset=self, parent=parent)
+            app.toolset_additional_analysis(app=app, toolset=self)
 
 @dataclass
 class BindMount:
@@ -503,7 +497,6 @@ class ToolsetInstallation:
         self.steps: list[ToolsetInstallationStep] = []
         self.event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
         self.status = ToolsetInstallationStage.SETUP
-        self.stall_server_call = None
         self.progress: float = 0.0
         self._setup_steps()
 
@@ -565,14 +558,8 @@ class ToolsetInstallation:
             installer_name = filename_without_extension
         return installer_name
 
-    def start(self, parent: ServerCall | None):
+    def start(self):
         try:
-            def stall_server_call_completion_handler(result: ServerResponse):
-                if self.status == ToolsetInstallationStage.INSTALL:
-                    self.cancel()
-            # Note - stall_server_call is additional, there is also parent created when installation is started.
-            # This is to keep root access active even a bit longer, to cleanup later.
-            self.stall_server_call = stall_server._async_raw(parent=parent, completion_handler=stall_server_call_completion_handler)
             self.status = ToolsetInstallationStage.INSTALL
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             ToolsetInstallation.started_installations.append(self)
@@ -599,9 +586,6 @@ class ToolsetInstallation:
         def worker():
             for step in reversed(self.steps): # Cleanup in reverse order
                 step.cleanup()
-            # Stop stalling root server after cleaning is done
-            if self.stall_server_call:
-                self.stall_server_call.cancel()
         # Run cleaning on new thread, not to block main UI
         threading.Thread(target=worker).start()
 
@@ -614,8 +598,6 @@ class ToolsetInstallation:
             self.status = ToolsetInstallationStage.FAILED
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             self._cleanup()
-            if self.stall_server_call:
-                self.stall_server_call.cancel()
         elif next_step:
             next_step_thread = threading.Thread(target=next_step.start)
             next_step_thread.start()
@@ -712,7 +694,7 @@ ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
             ),
         ),
 )
-def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: Toolset, parent: ServerCall | None = None):
+def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: Toolset):
     bin_directory = Path(toolset.toolset_root()) / "bin"
     qemu_systems = Emulation.get_all_qemu_systems()
     found_qemu_binaries = []
@@ -848,7 +830,6 @@ class ToolsetInstallationStep(ABC):
                     self._update_progress(progress)
             self.server_call = self.installer.tmp_toolset.run_command(
                 command=command,
-                parent=self.installer.stall_server_call,
                 handler=output_handler if progress_handler is not None else None,
                 completion_handler=completion_handler
             )
@@ -923,7 +904,6 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
                     except ValueError:
                         pass
             self.server_call = extract._async_raw(
-                parent=self.installer.stall_server_call,
                 handler=output_handler,
                 completion_handler=completion_handler,
                 tarball=self.installer.tmp_stage_file.name,
@@ -1039,7 +1019,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            analysis_result = self.installer.tmp_toolset.analyze(parent=self.installer.stall_server_call)
+            analysis_result = self.installer.tmp_toolset.analyze()
             self.installer.tmp_toolset.unspawn()
             self.complete(ToolsetInstallationStepState.COMPLETED if analysis_result else ToolsetInstallationStepState.FAILED)
         except Exception as e:

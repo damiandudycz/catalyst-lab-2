@@ -115,7 +115,7 @@ class RootAccessButton(Gtk.Overlay):
         if RootHelperClient.shared().is_server_process_running or RootHelperClient.shared().running_actions:
             self.popover.show()
         else:
-            RootHelperClient.shared().authorize_and_run(create_parent=False)
+            RootHelperClient.shared().authorize_and_run()
 
     def root_access_changed(self, enabled: bool):
         """Handle changes to root access state."""
@@ -150,7 +150,7 @@ class RootAccessButton(Gtk.Overlay):
 
     def enable_root_access(self, sender):
         """Enable root access when the button is clicked."""
-        RootHelperClient.shared().authorize_and_run(create_parent=False)
+        RootHelperClient.shared().authorize_and_run()
         self.popover.hide()
 
     def add_request_to_list(self, call: ServerCall):

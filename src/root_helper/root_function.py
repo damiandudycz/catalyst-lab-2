@@ -23,7 +23,7 @@ def root_function(func):
             *args,
             **kwargs
         )
-    def _async(parent: ServerCall | None = None, handler: Callable[[str],None] | None = None, completion_handler: callable | None = None, *args, **kwargs):
+    def _async(handler: Callable[[str],None] | None = None, completion_handler: callable | None = None, *args, **kwargs):
         from .root_helper_client import RootHelperClient
         return RootHelperClient.shared().call_root_function(
             func.__name__,
@@ -31,7 +31,6 @@ def root_function(func):
             handler=handler,
             asynchronous=True,
             completion_handler=completion_handler,
-            parent=parent,
             **kwargs
         )
     def _raw(*args, completion_handler: callable | None = None, **kwargs):
@@ -43,7 +42,7 @@ def root_function(func):
             completion_handler=completion_handler,
             **kwargs
         )
-    def _async_raw(parent: ServerCall | None = None, handler: Callable[[str],None] | None = None, completion_handler: callable | None = None, *args, **kwargs):
+    def _async_raw(handler: Callable[[str],None] | None = None, completion_handler: callable | None = None, *args, **kwargs):
         from .root_helper_client import RootHelperClient
         return RootHelperClient.shared().call_root_function(
             func.__name__,
@@ -52,7 +51,6 @@ def root_function(func):
             asynchronous=True,
             raw=True,
             completion_handler=completion_handler,
-            parent=parent,
             **kwargs
         )
     # Attach variants

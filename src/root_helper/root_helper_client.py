@@ -132,7 +132,7 @@ class RootHelperClient:
                     if exit_call:
                         self.set_request_status(exit_call, False)
                     self.clean_unfinished_jobs()
-                self.send_request(ServerCommand.EXIT, allow_auto_start=False, asynchronous=True, completion_handler=complete_exit, token=token)
+                self.send_request(ServerCommand.EXIT, asynchronous=True, completion_handler=complete_exit, token=token)
         except Exception as e:
             print("[Server process]: Warning: Failed to send EXIT command. Some process might be left working orphined.")
             self.clean_unfinished_jobs()
@@ -152,7 +152,7 @@ class RootHelperClient:
 
     def ping_server(self):
         try:
-            self.send_request(ServerCommand.PING, allow_auto_start=False)
+            self.send_request(ServerCommand.PING)
         finally:
             pass # Server disconnection is handled in send_request.
 
@@ -215,7 +215,7 @@ class RootHelperClient:
             if not self.is_server_process_running:
                 break
             try:
-                response = self.send_request(ServerCommand.HANDSHAKE, allow_auto_start=False, token=token)
+                response = self.send_request(ServerCommand.HANDSHAKE, token=token)
                 if RootHelperClient.use_server_watchdog:
                     self.server_watchdog.start()
                 return response.code == ServerResponseStatusCode.OK
@@ -240,26 +240,11 @@ class RootHelperClient:
         else:
             return False
 
-    def authorize_and_run(self, create_parent: bool = True, callback: Callable[[bool, ServerCall | None], None] | None = None):
+    def authorize_and_run(self, callback: Callable[[bool], None] | None = None):
         def background_task():
             ensure_server_ready_result = self.ensure_server_ready(allow_auto_start=True)
-            wait_for_children_call_ready = threading.Event()
-            wait_for_children_call = stall_server._async_raw(handler=lambda _: wait_for_children_call_ready.set()) if ensure_server_ready_result and create_parent else None
-            if wait_for_children_call is None:
-                wait_for_children_call_ready.set()
-
-            # Schedule `complete` on a new thread *immediately*
-            def complete():
-                # TODO: Wait for first response from wait_for_children_call, to make sure it is fully initialized
-                if callback:
-                    callback(ensure_server_ready_result, wait_for_children_call)
-                if wait_for_children_call:
-                    wait_for_children_call_ready.wait()
-                    wait_for_children_call.close_when_ready()
-
             # Run immediately in background — Timer is unnecessary here
-            threading.Thread(target=complete, daemon=True).start()
-
+            threading.Thread(target=callback, args=(ensure_server_ready_result,), daemon=True).start()
         threading.Thread(target=background_task, daemon=True).start()
 
     # --------------------------------------------------------------------------
@@ -269,7 +254,6 @@ class RootHelperClient:
         self,
         request: ServerCommand | ServerFunction,
         command_value: str | None = None,
-        allow_auto_start: bool = True,
         handler: Callable[[str],None] | None = None,
         asynchronous: bool = False,
         raw: bool = False,
@@ -277,13 +261,13 @@ class RootHelperClient:
         token: str | None = None
     ) -> ServerResponse | ServerCall: # For async always returns ServerCall or throws.
         """Send a command to the root helper server."""
-        if request != ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start):
+        if request != ServerCommand.EXIT and not self.ensure_server_ready():
             print("Server not responding")
             if request != ServerCommand.HANDSHAKE and self.is_server_process_running:
                 print("[Server process] Server communication broke.")
                 self.stop_root_helper(instant=True) # This should never happen.
             raise ServerCallError.SERVER_NOT_RESPONDING
-        if request == ServerCommand.EXIT and not self.ensure_server_ready(allow_auto_start=False):
+        if request == ServerCommand.EXIT and not self.ensure_server_ready():
             print("Server not responding")
             raise ServerCallError.SERVER_NOT_RESPONDING
 
@@ -415,12 +399,6 @@ class RootHelperClient:
                     except Exception as e:
                         print(f"[Server process]: Warning: Exception while sending ACK: {e}")
 
-                # Wait for any child threads to finish
-                with call.children_lock:
-                    for child in call.children:
-                        if child.thread:
-                            child.thread.join()
-
                 print(f"<<< [{request.function_name} {server_response.code.name}] {server_response.response}")
                 if completion_handler:
                     result = server_response if raw else server_response.response
@@ -461,34 +439,10 @@ class RootHelperClient:
         asynchronous: bool = False,
         raw: bool = False,
         completion_handler: Callable[[ServerResponse | Any],None] | None = None,
-        parent: ServerCall | None = None,
         **kwargs
     ) -> Any | ServerResponse | ServerCall:
         """Calls function registered in ROOT_FUNCTION_REGISTRY with @root_function by its name on the server."""
         function = ServerFunction(func_name, *args, **kwargs)
-
-        # Prevent calling if parent is already terminated
-        if parent is not None and parent.terminated:
-            print(f"CANT START {func_name}, parent terminated")
-            server_response = ServerResponse(code=ServerResponseStatusCode.JOB_WAS_TERMINATED, response="Parent call is already terminated")
-            if asynchronous:
-                # Create ServerCall with instant failure
-                def noop():
-                    pass
-                empty_thread = threading.Thread(target=noop)
-                call = ServerCall(request=function, client=self, thread=empty_thread)
-                empty_thread.start()
-                def complete():
-                    call.mark_terminated()
-                    result = server_response if raw else server_response.response
-                    if completion_handler:
-                        completion_handler(result)
-                threading.Timer(0.01, complete).start() # Terminate after it was returned
-                return call
-            elif raw:
-                return server_response
-            else:
-                raise RuntimeError(f"Root function error: {result.response}")
 
         result = self.send_request(
             function,
@@ -497,8 +451,6 @@ class RootHelperClient:
             raw=raw,
             completion_handler=completion_handler
         )
-        if parent is not None and asynchronous:
-            parent.add_child(result)
         if asynchronous or raw: # Returns ServerCall for async or whole structure directly for sync_raw
             return result
         if result.code == ServerResponseStatusCode.OK:
@@ -537,15 +489,11 @@ class ServerCall:
     request: ServerCommand | ServerFunction
     client: RootHelperClient
     thread: threading.Thread | None = None
-    call_id: uuid.UUID = field(default_factory=uuid.uuid4)
+    call_id = field(default_factory=uuid.uuid4)
     terminated: bool = False # Mark as terminated. Might still be terminating.
-    output: list[str] = field(default_factory=list) # Contains output lines from stdout and stderr
-    output_lock: threading.Lock = field(default_factory=threading.Lock)
-    event_bus: EventBus[ServerCallEvents] = field(default_factory=lambda: EventBus[ServerCallEvents]())
-    children: list[ServerCall] = field(default_factory=list)
-    children_lock: threading.Lock = field(default_factory=threading.Lock)
-    _close_when_ready: bool = False
-    started = threading.Event() # TODO - set when server sends special event
+    output = field(default_factory=list) # Contains output lines from stdout and stderr
+    output_lock = field(default_factory=threading.Lock)
+    event_bus = field(default_factory=lambda: EventBus[ServerCallEvents]())
 
     def __repr__(self):
         return f"ServerCall(request={self.request.function_name!r})"
@@ -555,43 +503,14 @@ class ServerCall:
         """Only ServerFunctions are cancellable"""
         return isinstance(self.request, ServerFunction)
 
-    def add_child(self, child: ServerCall):
-        with self.children_lock:
-            self.children.append(child)
-            def wait_for_child_completed():
-                if child.thread:
-                    child.thread.join()
-                    self._complete_if_children_finished()
-                else:
-                    self._complete_if_children_finished()
-            threading.Thread(target=wait_for_child_completed, daemon=True).start()
-
-    def _complete_if_children_finished(self):
-        if not self._close_when_ready:
-            return
-        if any(c.thread is not None and c.thread.is_alive() for c in self.children):
-            return
-        print("CANCEL NOW +++++++++++++++++++++++++++")
-        self.cancel()
-
     def cancel(self):
         """Sends CANCEL_CALL <ID> to server. Can be used only with async calls that already started."""
         def worker():
             if not self.is_cancellable:
                 print("[Server process]: Warning: Tried to cancel a call that is not cancellable")
                 return
-            for child in self.children:
-                if not child.thread.is_alive():
-                    continue
-                print(f"First cancel child: {child.request.function_name}")
-                child.cancel()
-                if child.thread:
-                    child.thread.join()
             if self.thread:
-                print("++++++++++++++ SEND CANCEL")
-                self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), allow_auto_start=False, asynchronous=True)
-            else:
-                print("++++++++++++++ NO THREAD YET")
+                self.client.send_request(ServerCommand.CANCEL_CALL, command_value=str(self.call_id), asynchronous=True)
         threading.Thread(target=worker, daemon=True).start()
 
     def output_append(self, line: str):
@@ -606,11 +525,6 @@ class ServerCall:
     def mark_terminated(self):
         self.terminated = True
         self.event_bus.emit(ServerCallEvents.CALL_WILL_TERMINATE)
-
-    def close_when_ready(self):
-        # Marks as ready to cancel when all registered children are done
-        self._close_when_ready = True
-        self._complete_if_children_finished()
 
 # ------------------------------------------------------------------------------
 # Helper functions and types.
@@ -628,11 +542,3 @@ class ServerCallError(Exception):
 # Define error codes and their corresponding messages as class variables
 ServerCallError.SERVER_NOT_RESPONDING = ServerCallError(1, "The server is not responding.")
 
-@root_function
-def stall_server():
-    event = threading.Event()
-    def handle_sigterm(signum, frame):
-        event.set()
-    signal.signal(signal.SIGTERM, handle_sigterm)
-    print("READY", flush=True) # Send READY signal to caller.
-    event.wait()
