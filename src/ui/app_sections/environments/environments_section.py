@@ -156,7 +156,6 @@ class ToolsetRow(Adw.ActionRow):
             self.set_subtitle(", ".join(app_strings))
         else:
             self.set_subtitle("")
-        self.toolset = toolset
         self.set_activatable(True)
         self._setup_status_indicator()
         # events

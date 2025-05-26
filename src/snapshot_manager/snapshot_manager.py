@@ -26,17 +26,16 @@ class Snapshot(Serializable):
 class SnapshotManager:
     _instance = None
 
+    # Note: To get spanshots list use Repository.SNAPSHOTS.value
+
     @classmethod
     def shared(cls):
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
-    def __init__(self):
-        self.snapshots = Repository.SNAPSHOTS.value
-        self.refresh_snapshots()
-
     def refresh_snapshots(self):
+        snapshots = Repository.SNAPSHOTS.value
         # Detect missing snapshots and add them to repository without date
         snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
         # --- Step 1: Scan directory for existing .sqfs files ---
@@ -47,7 +46,7 @@ class SnapshotManager:
             if f.endswith(".sqfs") and os.path.isfile(os.path.join(snapshots_location, f))
         }
         # --- Step 2: Check for new snapshots not in repository ---
-        existing_filenames = {snapshot.filename for snapshot in self.snapshots}
+        existing_filenames = {snapshot.filename for snapshot in snapshots}
         missing_files = found_filenames - existing_filenames
         for filename in missing_files:
             full_path = os.path.join(snapshots_location, filename)
@@ -55,7 +54,7 @@ class SnapshotManager:
             creation_time = datetime.fromtimestamp(stat_info.st_ctime)
             self.add_snapshot(Snapshot(filename=filename, date=creation_time))
         # --- Step 3: Remove records for deleted snapshot files ---
-        deleted_snapshots = [snapshot for snapshot in self.snapshots if snapshot.filename not in found_filenames]
+        deleted_snapshots = [snapshot for snapshot in snapshots if snapshot.filename not in found_filenames]
         for snapshot in deleted_snapshots:
             self.remove_snapshot(snapshot)
 
@@ -65,11 +64,9 @@ class SnapshotManager:
             s for s in Repository.SNAPSHOTS.value if s.filename != snapshot.filename
         ]
         Repository.SNAPSHOTS.value.append(snapshot)
-        self.snapshots = Repository.SNAPSHOTS.value
 
     def remove_snapshot(self, snapshot: Snapshot):
         Repository.SNAPSHOTS.value.remove(snapshot)
-        self.snapshots = Repository.SNAPSHOTS.value
 
     def required_bindings(self) -> [BindMount]:
         return [
@@ -81,6 +78,7 @@ class SnapshotManager:
             )
         ]
 
+    # TODO: Return SnapshotInstallation object
     def generate_new_snapshot(self, toolset: Toolset, spawn_toolset_if_needed: bool = True):
         if not toolset.spawned and not spawn_toolset_if_needed:
             raise RuntimeError("Toolset is not spawned")
