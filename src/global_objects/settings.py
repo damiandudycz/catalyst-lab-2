@@ -12,29 +12,33 @@ from .repository import Serializable, Repository
 class SettingsEvents(Enum):
     KEEP_ROOT_UNLOCKED_CHANGED = auto()
     TOOLSETS_LOCATION_CHANGED = auto()
+    SNAPSHOTS_LOCATION_CHANGED = auto()
 
 @final
 class Settings(Serializable):
     """Global application settings."""
 
-    def __init__(self, keep_root_unlocked: bool = True, toolsets_location: str = "~/CatalystLab/Toolsets"):
+    def __init__(self, keep_root_unlocked: bool = True, toolsets_location: str = "~/CatalystLab/Toolsets", snapshots_location: str = "~/CatalystLab/Snapshots"):
         self._keep_root_unlocked = keep_root_unlocked
         self._toolsets_location = toolsets_location
-        self.event_bus: EventBus[SettingsEvents] = EventBus[SettingsEvents]()
+        self._snapshots_location = snapshots_location
+        self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
     def init_from(cls, data: dict) -> Settings:
         try:
             keep_root_unlocked = data["keep_root_unlocked"]
             toolsets_location = data["toolsets_location"]
-            return cls(keep_root_unlocked=keep_root_unlocked, toolsets_location=toolsets_location)
+            snapshots_location = data["snapshots_location"]
+            return cls(keep_root_unlocked=keep_root_unlocked, toolsets_location=toolsets_location, snapshots_location=snapshots_location)
         except:
             return cls()
 
     def serialize(self) -> dict:
         return {
             "keep_root_unlocked": self.keep_root_unlocked,
-            "toolsets_location": self.toolsets_location
+            "toolsets_location": self.toolsets_location,
+            "snapshots_location": self.snapshots_location
         }
 
     # --------------------------------------------------------------------------
@@ -61,5 +65,18 @@ class Settings(Serializable):
         if self._toolsets_location != value:
             self._toolsets_location = value
             self.event_bus.emit(SettingsEvents.TOOLSETS_LOCATION_CHANGED, value)
+            Repository.SETTINGS.value = self # Triggers save()
+
+    # --------------------------------------------------------------------------
+    # Accessors for snapshots location:
+
+    @property
+    def snapshots_location(self) -> bool:
+        return self._snapshots_location
+    @snapshots_location.setter
+    def snapshots_location(self, value: bool):
+        if self._snapshots_location != value:
+            self._snapshots_location = value
+            self.event_bus.emit(SettingsEvents.SNAPSHOTS_LOCATION_CHANGED, value)
             Repository.SETTINGS.value = self # Triggers save()
 

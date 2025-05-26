@@ -169,6 +169,9 @@ class Toolset(Serializable):
                     raise ValueError(f"BindMount for mount_path '{bind.mount_path}' has both host_path and toolset_path set. Only one is allowed.")
                 if bind.toolset_path:
                     bind.host_path = os.path.join(resolved_toolset_root, bind.toolset_path.lstrip("/"))
+                # Resolve host_path.
+                if bind.host_path:
+                    bind.host_path = os.path.realpath(os.path.expanduser(bind.host_path))
 
             bind_options = []
             work_dir: str | None = None
@@ -331,7 +334,10 @@ class Toolset(Serializable):
                     self.in_use = False
                     self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
                 if completion_handler:
-                    completion_handler(result)
+                    try:
+                        completion_handler(result)
+                    except Exception as e:
+                        print(f"Completion handler raised exception: {e}")
             try:
                 fake_root = os.path.join(self.work_dir, "fake_root")
                 return _start_toolset_command._async_raw(

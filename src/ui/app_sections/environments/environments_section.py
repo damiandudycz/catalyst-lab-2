@@ -85,19 +85,8 @@ class EnvironmentsSection(Gtk.Box):
             self._external_toolset_rows.append(installation_row)
 
     def on_external_toolset_row_pressed(self, sender):
-        def worker(authorization_keeper: AuthorizationKeeper):
-            if not authorization_keeper:
-                return
-            try:
-                if not sender.toolset.spawned:
-                    sender.toolset.spawn()
-                    sender.toolset.analyze()
-                    sender.toolset.run_command(command="emerge --info")
-                else:
-                    sender.toolset.unspawn()
-            except Exception as e:
-                print(e)
-        RootHelperClient.shared().authorize_and_run(callback=worker)
+        from .snapshot_manager import SnapshotManager
+        SnapshotManager.shared().generate_new_snapshot(sender.toolset)
 
     def on_installation_row_pressed(self, sender):
         installation = getattr(sender, "installation", None)
@@ -163,10 +152,6 @@ class ToolsetRow(Adw.ActionRow):
             version = toolset.get_installed_app_version(app)
             if version is not None:
                 app_strings.append(f"{app.name}: {version}")
-        qemu_metadata: dict[str, Any] = toolset.metadata.get(ToolsetApplication.QEMU.package, {})
-        qemu_interpreters_metadata: list[str] = qemu_metadata.get("interpreters", [])
-        if qemu_interpreters_metadata:
-            app_strings.append(f"Interpreters: {len(qemu_interpreters_metadata)}")
         if app_strings:
             self.set_subtitle(", ".join(app_strings))
         else:
