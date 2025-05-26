@@ -11,4 +11,4 @@ class AppEvents(Enum):
     PRESENT_VIEW = auto() # Present as dialog over app window.
     PRESENT_SECTION = auto()
 
-app_event_bus: EventBus[AppEvents] = EventBus[AppEvents]()
+app_event_bus = EventBus[AppEvents]()

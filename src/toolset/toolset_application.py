@@ -1,0 +1,148 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Callable, Tuple, ClassVar
+from enum import Enum, auto
+from pathlib import Path
+from collections import namedtuple
+from .architecture import Emulation
+from .repository import Repository
+from .root_helper_client import ServerCall
+
+# ------------------------------------------------------------------------------
+# Toolset applications.
+
+@dataclass(frozen=True)
+class ToolsetApplication:
+    """Additional tools installed in toolsets, like Catalyst, Qemu."""
+    ALL: ClassVar[list[ToolsetApplication]] = []
+    name: str
+    description: str
+    package: str
+    is_recommended: bool = False
+    is_highly_recommended: bool = False
+    versions: Tuple[Version, ...] = field(default_factory=tuple)
+    dependencies: Tuple[ToolsetApplication, ...] = field(default_factory=tuple)
+    auto_select: bool = False # Automatically select / deselect for apps that depends on this one.
+    toolset_additional_analysis: Callable[[ToolsetApplication,Toolset,ServerCall|None],None] | None = None # Additional analysis for toolset
+    def __post_init__(self):
+        # Automatically add new instances to ToolsetApplication.ALL
+        ToolsetApplication.ALL.append(self)
+
+ToolsetApplicationSelection = namedtuple("ToolsetApplicationSelection", ["app", "version", "selected", "patches"])
+
+@dataclass(frozen=True)
+class PortageConfig:
+     # eq: { "packages.use": ["Entry1", "Entry2"], "package.accept_keywords": ["Entry1", "Entry2"] }
+    directory: str
+    entries: Tuple[str, ...] = field(default_factory=tuple)
+@dataclass(frozen=True)
+class ToolsetApplicationVersion:
+    name: str
+    config: PortageConfig = field(default_factory=PortageConfig)
+
+ToolsetApplication.CATALYST = ToolsetApplication(
+    name="Catalyst", description="Required to build Gentoo stages",
+    package="dev-util/catalyst",
+    is_recommended=True, is_highly_recommended=True,
+    versions=(
+        ToolsetApplicationVersion(
+            name="Stable",
+            config=(
+                PortageConfig(directory="package.accept_keywords", entries=("dev-util/catalyst",)),
+                PortageConfig(
+                    directory="package.use",
+                    entries=(
+                        ">=sys-apps/util-linux-2.40.4 python",
+                        ">=sys-boot/grub-2.12-r6 grub_platforms_efi-64",
+                        ">=sys-boot/grub-2.12-r6 grub_platforms_efi-32",
+                    )
+                ),
+            )
+        ),
+        ToolsetApplicationVersion(
+            name="Experimental",
+            config=(
+                PortageConfig(directory="package.accept_keywords", entries=("dev-util/catalyst **",)),
+                PortageConfig(
+                    directory="package.use",
+                    entries=(
+                        ">=sys-apps/util-linux-2.40.4 python",
+                        ">=sys-boot/grub-2.12-r6 grub_platforms_efi-64",
+                        ">=sys-boot/grub-2.12-r6 grub_platforms_efi-32",
+                    )
+                ),
+            )
+        ),
+    )
+)
+ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
+    name="Linux headers", description="Needed for qemu/cmake",
+    package="sys-kernel/linux-headers",
+    auto_select=True,
+    versions=(
+            ToolsetApplicationVersion(
+                name="Stable",
+                config=None
+            ),
+        ),
+)
+def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: 'Toolset'):
+    from .toolset import Toolset
+    bin_directory = Path(toolset.toolset_root()) / "bin"
+    qemu_systems = Emulation.get_all_qemu_systems()
+    found_qemu_binaries = []
+    for qemu_binary in qemu_systems:
+        binary_path = bin_directory / qemu_binary
+        if binary_path.is_file():
+            found_qemu_binaries.append(qemu_binary)
+    toolset.metadata[app.package] = {
+        "interpreters": found_qemu_binaries
+    }
+
+ToolsetApplication.QEMU = ToolsetApplication(
+    name="Qemu", description="Allows building stages for different architectures",
+    package="app-emulation/qemu",
+    is_recommended=True,
+    versions=(
+        ToolsetApplicationVersion(
+            name="Stable",
+            config=(
+                PortageConfig(
+                    directory="package.use",
+                    entries=(
+                        "app-emulation/qemu static-user",
+                        "dev-libs/glib static-libs",
+                        "sys-libs/zlib static-libs",
+                        "sys-apps/attr static-libs",
+                        "dev-libs/libpcre2 static-libs",
+                        "sys-libs/libcap static-libs",
+                        "*/* QEMU_SOFTMMU_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                        "*/* QEMU_USER_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                    )
+                ),
+            )
+        ),
+        ToolsetApplicationVersion(
+            name="Experimental",
+            config=(
+                PortageConfig(directory="package.accept_keywords", entries=("app-emulation/qemu **",)),
+                PortageConfig(
+                    directory="package.use",
+                    entries=(
+                        "app-emulation/qemu static-user",
+                        "dev-libs/glib static-libs",
+                        "sys-libs/zlib static-libs",
+                        "sys-apps/attr static-libs",
+                        "dev-libs/libpcre2 static-libs",
+                        "sys-libs/libcap static-libs",
+                        "*/* QEMU_SOFTMMU_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                        "*/* QEMU_USER_TARGETS: aarch64 aarch64_be alpha arm armeb hexagon hppa i386 loongarch64 m68k microblaze microblazeel mips mips64 mips64el mipsel mipsn32 mipsn32el or1k ppc ppc64 ppc64le riscv32 riscv64 s390x sh4 sh4eb sparc sparc32plus sparc64 x86_64 xtensa xtensaeb",
+                    )
+                ),
+            )
+        ),
+    ),
+    dependencies=(ToolsetApplication.LINUX_HEADERS,),
+    toolset_additional_analysis=toolset_additional_analysis_qemu
+)
+

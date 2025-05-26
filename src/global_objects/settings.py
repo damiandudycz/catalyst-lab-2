@@ -63,4 +63,3 @@ class Settings(Serializable):
             self.event_bus.emit(SettingsEvents.TOOLSETS_LOCATION_CHANGED, value)
             Repository.SETTINGS.value = self # Triggers save()
 
-Repository.SETTINGS = Repository(cls=Settings, default_factory=Settings)

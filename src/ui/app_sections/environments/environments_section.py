@@ -4,7 +4,9 @@ from .app_section import AppSection, app_section
 from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset, ToolsetEvents
 from .toolset_env_builder import ToolsetEnvBuilder
-from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage, ToolsetApplication
+from .toolset import Toolset
+from .toolset_installation import ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage
+from .toolset_application import ToolsetApplication
 from .hotfix_patching import HotFix
 from .root_function import root_function
 from .root_helper_client import RootHelperClient, ServerCall, AuthorizationKeeper

@@ -12,16 +12,18 @@ from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture
 from .event_bus import EventBus
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
-from .toolset import (
+from .toolset_installation import (
     ToolsetInstallation,
     ToolsetInstallationStage,
     ToolsetInstallationEvent,
-    ToolsetApplication,
-    ToolsetApplicationVersion,
-    ToolsetApplicationSelection,
     ToolsetInstallationStep,
     ToolsetInstallationStepState,
     ToolsetInstallationStepEvent
+)
+from .toolset_application import (
+    ToolsetApplication,
+    ToolsetApplicationVersion,
+    ToolsetApplicationSelection
 )
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_create/toolset_create_view.ui')
