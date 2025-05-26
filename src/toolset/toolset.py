@@ -17,6 +17,7 @@ from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture, Emulation
 from .event_bus import EventBus
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
+from .root_helper_client import AuthorizationKeeper
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
 
@@ -498,6 +499,7 @@ class ToolsetInstallation:
         self.event_bus: EventBus[ToolsetInstallationEvent] = EventBus[ToolsetInstallationEvent]()
         self.status = ToolsetInstallationStage.SETUP
         self.progress: float = 0.0
+        self.authorization_keeper: AuthorizationKeeper | None = None
         self._setup_steps()
 
     def process_selected_apps(self):
@@ -558,8 +560,10 @@ class ToolsetInstallation:
             installer_name = filename_without_extension
         return installer_name
 
-    def start(self):
+    def start(self, authorization_keeper: AuthorizationKeeper):
         try:
+            authorization_keeper.retain()
+            self.authorization_keeper = authorization_keeper
             self.status = ToolsetInstallationStage.INSTALL
             self.event_bus.emit(ToolsetInstallationEvent.STATE_CHANGED, self.status)
             ToolsetInstallation.started_installations.append(self)
@@ -586,6 +590,8 @@ class ToolsetInstallation:
         def worker():
             for step in reversed(self.steps): # Cleanup in reverse order
                 step.cleanup()
+            self.authorization_keeper.release()
+            self.authorization_keeper = None
         # Run cleaning on new thread, not to block main UI
         threading.Thread(target=worker).start()
 

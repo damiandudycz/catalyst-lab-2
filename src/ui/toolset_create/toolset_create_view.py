@@ -11,7 +11,7 @@ from datetime import datetime
 from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture
 from .event_bus import EventBus
-from .root_helper_client import RootHelperClient
+from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .toolset import (
     ToolsetInstallation,
     ToolsetInstallationStage,
@@ -111,8 +111,8 @@ class ToolsetCreateView(Gtk.Box):
     def on_allow_binpkgs_toggled(self, checkbox):
         self.allow_binpkgs = checkbox.get_active()
 
-    def _start_installation(self, authorized: bool):
-        if not authorized:
+    def _start_installation(self, authorization_keeper: AuthorizationKeeper):
+        if not authorization_keeper:
             return
         apps_selection = [
             ToolsetApplicationSelection(
@@ -132,7 +132,7 @@ class ToolsetCreateView(Gtk.Box):
         self._set_current_stage(self.installation_in_progress.status)
         self.progress_bar.set_fraction(self.installation_in_progress.progress)
         self.bind_installation_events(self.installation_in_progress)
-        self.installation_in_progress.start()
+        self.installation_in_progress.start(authorization_keeper=authorization_keeper)
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):

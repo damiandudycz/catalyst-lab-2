@@ -7,7 +7,7 @@ from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset import Toolset, ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage, ToolsetApplication
 from .hotfix_patching import HotFix
 from .root_function import root_function
-from .root_helper_client import RootHelperClient, ServerCall
+from .root_helper_client import RootHelperClient, ServerCall, AuthorizationKeeper
 from .root_helper_server import ServerCommand
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
@@ -83,14 +83,14 @@ class EnvironmentsSection(Gtk.Box):
             self._external_toolset_rows.append(installation_row)
 
     def on_external_toolset_row_pressed(self, sender):
-        def worker(authorized: bool):
-            if not authorized:
+        def worker(authorization_keeper: AuthorizationKeeper):
+            if not authorization_keeper:
                 return
             try:
                 if not sender.toolset.spawned:
                     sender.toolset.spawn()
                     sender.toolset.analyze()
-                    sender.toolset.run_command(command="emerge --sync")
+                    sender.toolset.run_command(command="emerge --info")
                 else:
                     sender.toolset.unspawn()
             except Exception as e:

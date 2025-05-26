@@ -24,12 +24,13 @@ class RootHelperClient:
     # Lifecycle:
 
     def __init__(self):
-        self.event_bus: EventBus[RootHelperClientEvents] = EventBus[RootHelperClientEvents]()
+        self.event_bus = EventBus[RootHelperClientEvents]()
         self.socket_path = RootHelperServer.get_socket_path(os.getuid())
         self.main_process = None
         self.running_actions: list[ServerCall] = []
         self.token = None
         self.keep_unlocked = Repository.SETTINGS.value.keep_root_unlocked
+        self.authorization_keepers: list[AuthorizationKeeper] = []
         self.server_watchdog = WatchDog(lambda: self.ping_server())
         self.set_request_status_lock = threading.RLock()
         Repository.SETTINGS.value.event_bus.subscribe(
@@ -240,11 +241,39 @@ class RootHelperClient:
         else:
             return False
 
-    def authorize_and_run(self, callback: Callable[[bool], None] | None = None):
+    def keep_authorization(self, name: str) -> AuthorizationKeeper:
+        """Register AuthorizationKeeper to keep the root access from automatically disabling after command finishes."""
+        """If server is not currently authorized, throws an error."""
+        if not self.ensure_server_ready():
+            raise RuntimeError("Failed to keep authorization. Server not authorized")
+        keeper = AuthorizationKeeper(name=name)
+        self.authorization_keepers.append(keeper)
+        keeper.event_bus.subscribe(
+            AuthorizationKeeperEvent.RETAIN_COUNTER_REACHED_0,
+            self.authorization_keeper_released
+        )
+        return keeper
+
+    def authorization_keeper_released(self, authorization_keeper: AuthorizationKeeper):
+        self.authorization_keepers.remove(authorization_keeper)
+        if not self.authorization_keepers and not authorization_keeper.ignore_released:
+            if not self.running_actions and not self.keep_unlocked and self.server_handshake_established() and self.is_server_process_running:
+                self.stop_root_helper()
+
+    def authorize_and_run(self, name: str = "", callback: Callable[[AuthorizationKeeper | None], None] | None = None):
         def background_task():
             ensure_server_ready_result = self.ensure_server_ready(allow_auto_start=True)
             # Run immediately in background — Timer is unnecessary here
-            threading.Thread(target=callback, args=(ensure_server_ready_result,), daemon=True).start()
+            def complete():
+                if ensure_server_ready_result:
+                    keeper = self.keep_authorization(name=name)
+                    if callback:
+                        callback(keeper)
+                    keeper.release()
+                else:
+                    if callback:
+                        callback(None)
+            threading.Thread(target=complete, daemon=True).start()
         threading.Thread(target=background_task, daemon=True).start()
 
     # --------------------------------------------------------------------------
@@ -466,7 +495,7 @@ class RootHelperClient:
             else:
                 self.running_actions.remove(call)
                 self.event_bus.emit(RootHelperClientEvents.ROOT_REQUEST_STATUS, self, call, False)
-            if not self.running_actions and not self.keep_unlocked and self.server_handshake_established() and self.is_server_process_running:
+            if not self.running_actions and not self.keep_unlocked and not self.authorization_keepers and self.server_handshake_established() and self.is_server_process_running:
                 self.stop_root_helper()
 
     def keep_root_unlocked_changed(self, value: bool):
@@ -489,11 +518,11 @@ class ServerCall:
     request: ServerCommand | ServerFunction
     client: RootHelperClient
     thread: threading.Thread | None = None
-    call_id = field(default_factory=uuid.uuid4)
+    call_id: uuid.uuid = field(default_factory=uuid.uuid4)
     terminated: bool = False # Mark as terminated. Might still be terminating.
-    output = field(default_factory=list) # Contains output lines from stdout and stderr
-    output_lock = field(default_factory=threading.Lock)
-    event_bus = field(default_factory=lambda: EventBus[ServerCallEvents]())
+    output: list[str] = field(default_factory=list) # Contains output lines from stdout and stderr
+    output_lock: threading.Lock = field(default_factory=threading.Lock)
+    event_bus: EventBus[ServerCallEvents] = field(default_factory=EventBus[ServerCallEvents])
 
     def __repr__(self):
         return f"ServerCall(request={self.request.function_name!r})"
@@ -541,4 +570,29 @@ class ServerCallError(Exception):
         return f"Server error (code={self.error_code}): {self.message}"
 # Define error codes and their corresponding messages as class variables
 ServerCallError.SERVER_NOT_RESPONDING = ServerCallError(1, "The server is not responding.")
+
+class AuthorizationKeeperEvent(Enum):
+    RETAIN_COUNTER_REACHED_0 = auto()
+
+@dataclass
+class AuthorizationKeeper:
+    name: str
+    retain_counter: int = 1
+    event_bus: EventBus[AuthorizationKeeperEvent] = field(default_factory=EventBus[AuthorizationKeeperEvent])
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    ignore_released = False # Used only to maintain authorization after manually clicking on lock button
+
+    def retain(self):
+        with self.lock:
+            if self.retain_counter == 0:
+                raise RuntimeError("AuthorizationKeeper already reached 0")
+            self.retain_counter += 1
+
+    def release(self):
+        with self.lock:
+            if self.retain_counter == 0:
+                raise RuntimeError("AuthorizationKeeper already reached 0")
+            self.retain_counter -= 1
+            if self.retain_counter == 0:
+                self.event_bus.emit(AuthorizationKeeperEvent.RETAIN_COUNTER_REACHED_0, self)
 
