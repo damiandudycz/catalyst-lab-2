@@ -11,7 +11,7 @@
     <!-- ListBox for the entries -->
     <child>
       <object class="GtkScrolledWindow">
-        <property name="hscrollbar-policy">never</property>
+        <property name="hscrollbar-policy">automatic</property>
         <property name="vscrollbar-policy">automatic</property>
         <property name="hexpand">True</property>
         <property name="vexpand">True</property>
