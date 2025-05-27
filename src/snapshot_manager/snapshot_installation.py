@@ -11,6 +11,7 @@ from .root_function import root_function
 from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from datetime import datetime
+from .helper_functions import mount_squashfs, umount_squashfs
 
 # ------------------------------------------------------------------------------
 # Installation process.
@@ -32,6 +33,7 @@ class SnapshotInstallation(MultiStageProcess):
         if self.file:
             self.stages.append(SnapshotInstallationStepCopyFile(file=self.file, custom_filename=self.custom_filename, multistage_process=self))
         self.stages.append(SnapshotInstallationStepSetupPermissions(multistage_process=self))
+        self.stages.append(SnapshotInstallationStepAnalyze(multistage_process=self))
         super().setup_stages()
 
     def complete_process(self, success: bool):
@@ -221,6 +223,45 @@ class SnapshotInstallationStepSetupPermissions(SnapshotInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
+        # Remove file if installation failed
+        if self.multistage_process.status == MultiStageProcessState.FAILED and self.multistage_process.snapshot:
+            snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+            snapshot_real_path = os.path.join(snapshots_location, self.multistage_process.snapshot.filename)
+            delete_file(file_path=snapshot_real_path, root_dir=snapshots_location)
+        return True
+
+class SnapshotInstallationStepAnalyze(SnapshotInstallationStep):
+    def __init__(self, multistage_process: MultiStageProcess):
+        super().__init__(name="Analyze snapshots", description="Read metadata from snapshot", multistage_process=multistage_process)
+    def start(self):
+        super().start()
+        try:
+            if self.multistage_process.snapshot is None:
+                raise RuntimeError("Unknown spanshot")
+            snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+            snapshot_real_path = os.path.join(snapshots_location, self.multistage_process.snapshot.filename)
+            # Mount snapshot and read timestamp from it.
+            self.multistage_process.squashfs_mount_path = mount_squashfs(squashfs_path=snapshot_real_path)
+            snapshot_metadata_path = os.path.join(self.multistage_process.squashfs_mount_path, 'metadata')
+            snapshot_metadata_timestamp_path = os.path.join(snapshot_metadata_path, 'timestamp.chk')
+            if not os.path.isfile(snapshot_metadata_timestamp_path):
+                raise RuntimeError("Timestamp metadata not found")
+            def read_timestamp_from_file(snapshot_metadata_timestamp_path):
+                with open(snapshot_metadata_timestamp_path, 'r', encoding='utf-8') as file:
+                    timestamp_str = file.read().strip()
+                timestamp = datetime.strptime(timestamp_str, "%a, %d %b %Y %H:%M:%S %z")
+                return timestamp
+            self.multistage_process.snapshot.date = read_timestamp_from_file(snapshot_metadata_timestamp_path=snapshot_metadata_timestamp_path)
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            print(f"Error during snapshot generation: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
+        # Umount snapshot
+        if hasattr(self.multistage_process, 'squashfs_mount_path'):
+            umount_squashfs(self.multistage_process.squashfs_mount_path)
         return True
 
 # ------------------------------------------------------------------------------
