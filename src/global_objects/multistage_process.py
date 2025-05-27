@@ -58,8 +58,9 @@ class MultiStageProcess(ABC):
     started_processes: list[MultiStageProcess] = [] # List of processes that were started. Processes remain there even after success/failure until cleared.
     event_bus = EventBus[MultiStageProcessEvent]() # For class events.
 
-    def __init__(self):
+    def __init__(self, title: str):
         """Call super().__init__() at the end of implementation."""
+        self.title = title
         self.event_bus = EventBus[MultiStageProcessEvent]() # For instance events.
         self.authorization_keeper: AuthorizationKeeper | None = None # Set in start().
         self.status = MultiStageProcessState.SETUP # Changes to IN_PROGRESS in start().

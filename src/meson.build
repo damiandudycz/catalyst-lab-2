@@ -50,6 +50,7 @@ catalystlab_sources = [
   'toolset/toolset_installation.py',
   'toolset/toolset_env_builder.py',
   'snapshot_manager/snapshot_manager.py',
+  'ui/multistage_process_execution_view/multistage_process_execution_view.py',
   'ui/app_sections/about/about_section.py',
   'ui/app_sections/bugs/bugs_section.py',
   'ui/app_sections/builds/builds_section.py',

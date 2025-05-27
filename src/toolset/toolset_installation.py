@@ -33,7 +33,7 @@ class ToolsetInstallation(MultiStageProcess):
         self.allow_binpkgs = allow_binpkgs
         self.apps_selection = apps_selection
         self._process_selected_apps()
-        super().__init__()
+        super().__init__(title="Toolset installation")
 
     def setup_stages(self):
         self.stages.append(ToolsetInstallationStepDownload(url=self.stage_url, multistage_process=self))
