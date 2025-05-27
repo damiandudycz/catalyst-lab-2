@@ -144,35 +144,40 @@ class SnapshotCreateView(Gtk.Box):
             for row in self._toolset_rows:
                 self.toolsets_list.remove(row)
         # Refresh list of results
-        if not result:
-            error_label = Gtk.Label(label=f"No toolsets available")
+
+       # TODO: Place newest first.
+        sorted_toolsets = result
+        self.selected_toolset = next(
+            (toolset for toolset in sorted_toolsets
+             if toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None),
+            None
+        )
+        if not self.selected_toolset:
+            error_label = Gtk.Label(label=f"You need to create a toolset with Catalyst installed. Go to Environments section to create such toolset.")
             error_label.set_wrap(True)
-            error_label.set_halign(Gtk.Align.START)
+            error_label.set_halign(Gtk.Align.CENTER)
+            error_label.set_margin_top(12)
+            error_label.set_margin_bottom(12)
+            error_label.set_margin_start(24)
+            error_label.set_margin_end(24)
+            error_label.add_css_class("dimmed")
             self.toolsets_list.add(error_label)
             self._toolset_rows = [error_label]
-        else:
-            # TODO: Place newest first.
-            sorted_toolsets = result
-            self.selected_toolset = next(
-                (toolset for toolset in sorted_toolsets
-                 if toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None),
-                None
-            )
-            self._toolset_rows = []
-            toolsets_check_buttons_group = []
-            for toolset in sorted_toolsets:
-                row = ToolsetRow(toolset=toolset)
-                check_button = Gtk.CheckButton()
-                check_button.set_active(toolset == self.selected_toolset)
-                if toolsets_check_buttons_group:
-                    check_button.set_group(toolsets_check_buttons_group[0])
-                check_button.connect("toggled", self._on_toolset_selected, toolset)
-                toolsets_check_buttons_group.append(check_button)
-                row.add_prefix(check_button)
-                row.set_activatable_widget(check_button)
-                row.set_sensitive(toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None)
-                self.toolsets_list.add(row)
-                self._toolset_rows.append(row)
+        self._toolset_rows = []
+        toolsets_check_buttons_group = []
+        for toolset in sorted_toolsets:
+            row = ToolsetRow(toolset=toolset)
+            check_button = Gtk.CheckButton()
+            check_button.set_active(toolset == self.selected_toolset)
+            if toolsets_check_buttons_group:
+                check_button.set_group(toolsets_check_buttons_group[0])
+            check_button.connect("toggled", self._on_toolset_selected, toolset)
+            toolsets_check_buttons_group.append(check_button)
+            row.add_prefix(check_button)
+            row.set_activatable_widget(check_button)
+            row.set_sensitive(toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None)
+            self.toolsets_list.add(row)
+            self._toolset_rows.append(row)
 
     def _on_toolset_selected(self, button: Gtk.CheckButton, toolset: Toolset):
         """Callback for when a row's checkbox is toggled."""

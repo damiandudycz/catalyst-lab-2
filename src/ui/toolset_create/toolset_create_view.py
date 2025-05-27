@@ -125,7 +125,12 @@ class ToolsetCreateView(Gtk.Box):
         if isinstance(result, Exception):
             error_label = Gtk.Label(label=f"Error: {str(result)}")
             error_label.set_wrap(True)
-            error_label.set_halign(Gtk.Align.START)
+            error_label.set_halign(Gtk.Align.CENTER)
+            error_label.set_margin_top(12)
+            error_label.set_margin_bottom(12)
+            error_label.set_margin_start(24)
+            error_label.set_margin_end(24)
+            error_label.add_css_class("dimmed")
             self.stages_list.add(error_label)
             self._stage_rows = [error_label]
         else:
