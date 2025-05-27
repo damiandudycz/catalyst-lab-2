@@ -28,17 +28,21 @@ class SnapshotCreateView(Gtk.Box):
     # Setup view elements:
     carousel = Gtk.Template.Child()
     welcome_page = Gtk.Template.Child()
-    toolset_page = Gtk.Template.Child()
+    source_page = Gtk.Template.Child()
     config_page = Gtk.Template.Child()
     toolsets_list = Gtk.Template.Child()
+    config_toolset_view = Gtk.Template.Child()
+    config_file_view = Gtk.Template.Child()
+    snapshot_name_row = Gtk.Template.Child()
     back_button = Gtk.Template.Child()
     next_button = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: SnapshotInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
+        self.selected_file: GLocalFile | None = None
+        self.selected_toolset: Toolset | None = None
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
-        self.selected_toolset: Toolset | None = None
         self.carousel.connect('page-changed', self.on_page_changed)
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
         self.fetch_view.set_multistage_process(self.installation_in_progress)
@@ -51,13 +55,51 @@ class SnapshotCreateView(Gtk.Box):
 
     def setup_back_next_buttons(self):
         is_first_page = self.current_page == 0
+        is_second_page = self.current_page == 0
         is_last_page = self.current_page == 2
         is_stage_selected = self.selected_toolset is not None
+        is_file_selected = self.selected_file is not None
+        if_source_selected = is_stage_selected or is_file_selected
         self.back_button.set_sensitive(not is_first_page)
         self.back_button.set_opacity(0.0 if is_first_page else 1.0)
-        self.next_button.set_sensitive(not is_first_page and is_stage_selected)
-        self.next_button.set_opacity(0.0 if is_first_page or not is_stage_selected else 1.0)
-        self.next_button.set_label("Create toolset" if is_last_page else "Next")
+        self.next_button.set_sensitive(if_source_selected and is_last_page)
+        self.next_button.set_opacity(0.0 if not is_last_page else 1.0)
+        self.next_button.set_label("Save toolset" if is_file_selected else "Create snapshot")
+
+    @Gtk.Template.Callback()
+    def on_fetch_with_catalyst_pressed(self, _):
+        self.selected_file = None
+        self.config_toolset_view.set_visible(True)
+        self.config_file_view.set_visible(False)
+        self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page + 1), True)
+
+    @Gtk.Template.Callback()
+    def on_select_file_pressed(self, _):
+        def on_file_open_response(file_dialog, result):
+            try:
+                self.selected_file = file_dialog.open_finish(result)
+                file_name = self.selected_file.get_basename()
+                file_name_without_ext = file_name.rsplit('.', 1)[0]
+                self.snapshot_name_row.set_text(file_name_without_ext)
+                self.config_toolset_view.set_visible(False)
+                self.config_file_view.set_visible(True)
+                self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page + 1), True)
+            except GLib.Error as e:
+                print("File open canceled or failed:", e)
+        def create_file_filter():
+            file_filter = Gtk.FileFilter()
+            file_filter.set_name("Squashfs files (*.sqfs)")
+            file_filter.add_pattern("*.sqfs")
+            return file_filter
+        def create_filter_list():
+            store = Gio.ListStore.new(Gtk.FileFilter)
+            store.append(create_file_filter())
+            return store
+        file_dialog = Gtk.FileDialog.new()
+        file_dialog.set_title("Select a .sqfs file")
+        filters = create_filter_list()
+        file_dialog.set_filters(filters)
+        file_dialog.open(self._window, None, on_file_open_response)
 
     @Gtk.Template.Callback()
     def on_back_pressed(self, _):
@@ -77,7 +119,9 @@ class SnapshotCreateView(Gtk.Box):
         if not authorization_keeper:
             return
         self.installation_in_progress = SnapshotInstallation(
-            toolset=self.selected_toolset
+            toolset=self.selected_toolset if self.selected_file is None else None,
+            file=self.selected_file,
+            custom_filename=self.snapshot_name_row.get_text() + ".sqfs"
         )
         self.installation_in_progress.start(authorization_keeper=authorization_keeper)
         self.fetch_view.set_multistage_process(self.installation_in_progress)
@@ -85,7 +129,7 @@ class SnapshotCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        self.carousel.scroll_to(self.toolset_page, True)
+        self.carousel.scroll_to(self.source_page, True)
 
     @Gtk.Template.Callback()
     def on_finish_pressed(self, _):

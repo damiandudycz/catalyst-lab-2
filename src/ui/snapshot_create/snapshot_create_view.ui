@@ -90,16 +90,16 @@
               </object>
             </child>
 
-            <!-- Page 2: Toolsets screen -->
+            <!-- Page 2: Source screen -->
             <child>
-              <object class="GtkBox" id="toolset_page">
+              <object class="GtkBox" id="source_page">
                 <property name="orientation">vertical</property>
                 <property name="spacing">12</property>
                 <property name="vexpand">True</property>
                 <property name="hexpand">True</property>
                 <child>
                   <object class="GtkLabel">
-                    <property name="label">Select Toolset</property>
+                    <property name="label">Select source</property>
                     <property name="halign">start</property>
                     <property name="margin-start">24</property>
                     <property name="margin-end">24</property>
@@ -109,80 +109,148 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkScrolledWindow">
-                    <property name="hscrollbar-policy">never</property>
-                    <property name="vscrollbar-policy">automatic</property>
-                    <property name="hexpand">True</property>
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">24</property>
+                    <property name="valign">center</property>
                     <property name="vexpand">True</property>
-                    <child>
-                      <object class="AdwPreferencesGroup" id="toolsets_list">
-                        <property name="margin-start">24</property>
-                        <property name="margin-end">24</property>
-                        <property name="margin-top">4</property>
-                        <property name="margin-bottom">4</property>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
-
-            <!-- Page 3: Snapshot configuration screen -->
-            <child>
-              <object class="GtkBox" id="config_page">
-                <property name="orientation">vertical</property>
-                <property name="spacing">12</property>
-                <property name="vexpand">True</property>
-                <property name="hexpand">True</property>
-                <child>
-                  <object class="GtkLabel">
-                    <property name="label">Select tools to install</property>
-                    <property name="halign">start</property>
+                    <property name="hexpand">True</property>
                     <property name="margin-start">24</property>
                     <property name="margin-end">24</property>
-                    <style>
-                      <class name="title-2"/>
-                    </style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkScrolledWindow">
-                    <property name="hscrollbar-policy">never</property>
-                    <property name="vscrollbar-policy">automatic</property>
-                    <property name="hexpand">True</property>
-                    <property name="vexpand">True</property>
                     <child>
                       <object class="GtkBox">
-                        <property name="margin-start">24</property>
-                        <property name="margin-end">24</property>
-                        <property name="margin-top">4</property>
-                        <property name="margin-bottom">4</property>
                         <property name="orientation">vertical</property>
-                        <property name="spacing">12</property>
+                        <property name="halign">center</property>
+                        <property name="width-request">300</property>
+                        <property name="spacing">20</property>
                         <child>
-                          <object class="AdwPreferencesGroup" id="tools_list">
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkLabel">
-                            <property name="label">Options</property>
-                            <property name="halign">start</property>
+                          <object class="GtkListBox">
+                            <property name="selection-mode">none</property>
                             <style>
-                              <class name="title-4"/>
+                              <class name="boxed-list"/>
                             </style>
+                            <child>
+                              <object class="AdwButtonRow">
+                                <property name="title">Fetch with Catalyst</property>
+                                <property name="start-icon-name">video-frame-svgrepo-com-symbolic</property>
+                                <property name="activatable">True</property>
+                                <signal name="activated" handler="on_fetch_with_catalyst_pressed"/>
+                                <style>
+                                  <class name="suggested-action"/>
+                                </style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="AdwButtonRow">
+                                <property name="title">Select .sqfs file</property>
+                                <property name="start-icon-name">copy-svgrepo-com-symbolic</property>
+                                <property name="activatable">True</property>
+                                <signal name="activated" handler="on_select_file_pressed"/>
+                              </object>
+                            </child>
                           </object>
                         </child>
-                        <child>
-                          <object class="AdwPreferencesGroup">
-
-                          </object>
-                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Use Catalyst to get the newest available snapshop or select a .sqfs file containing Portage snapshot.</property>
+                        <property name="halign">center</property>
+                        <property name="wrap">True</property>
+                        <property name="justify">fill</property>
+                        <attributes>
+                          <attribute name="foreground" value="grey"/>
+                        </attributes>
                       </object>
                     </child>
                   </object>
                 </child>
               </object>
             </child>
+
+            <!-- Page 3: Config screen -->
+            <child>
+              <object class="GtkBox" id="config_page">
+                <child>
+                  <object class="GtkBox" id="config_toolset_view">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">12</property>
+                    <property name="vexpand">True</property>
+                    <property name="hexpand">True</property>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Select Toolset</property>
+                        <property name="halign">start</property>
+                        <property name="margin-start">24</property>
+                        <property name="margin-end">24</property>
+                        <style>
+                          <class name="title-2"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkScrolledWindow">
+                        <property name="hscrollbar-policy">never</property>
+                        <property name="vscrollbar-policy">automatic</property>
+                        <property name="hexpand">True</property>
+                        <property name="vexpand">True</property>
+                        <child>
+                          <object class="AdwPreferencesGroup" id="toolsets_list">
+                            <property name="margin-start">24</property>
+                            <property name="margin-end">24</property>
+                            <property name="margin-top">4</property>
+                            <property name="margin-bottom">4</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="config_file_view">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">12</property>
+                    <property name="vexpand">True</property>
+                    <property name="hexpand">True</property>
+                    <property name="visible">False</property>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Sqfs snapshot details</property>
+                        <property name="halign">start</property>
+                        <property name="margin-start">24</property>
+                        <property name="margin-end">24</property>
+                        <style>
+                          <class name="title-2"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkScrolledWindow">
+                        <property name="hscrollbar-policy">never</property>
+                        <property name="vscrollbar-policy">automatic</property>
+                        <property name="hexpand">True</property>
+                        <property name="vexpand">True</property>
+                        <child>
+                          <object class="AdwPreferencesGroup">
+                            <property name="margin-start">24</property>
+                            <property name="margin-end">24</property>
+                            <property name="margin-top">4</property>
+                            <property name="margin-bottom">4</property>
+                            <child>
+                              <object class="AdwEntryRow" id="snapshot_name_row">
+                                <property name="title">Snapshot name</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+
+              </object>
+            </child>
+
           </object>
         </child>
 

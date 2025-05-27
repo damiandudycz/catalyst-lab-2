@@ -80,12 +80,7 @@ class SnapshotRow(Adw.ActionRow):
 
     @classmethod
     def extract_snapshot_id(cls, filename: str) -> str:
-        if '-' in filename and '.' in filename:
-            dash_index = filename.find('-') + 1
-            dot_index = filename.find('.', dash_index)
-            if dot_index > dash_index:
-                return filename[dash_index:dot_index]
-        return filename
+        return filename.rsplit('.', 1)[0]
 
     def __init__(self, snapshot: Snapshot):
         super().__init__(
@@ -94,34 +89,7 @@ class SnapshotRow(Adw.ActionRow):
             icon_name="video-frame-svgrepo-com-symbolic"
         )
         self.snapshot = snapshot
-        # Status indicator
-#        self.status_indicator = StatusIndicator()
-#        self.status_indicator.set_margin_start(6)
-#        self.status_indicator.set_margin_end(6)
-#        self.add_suffix(self.status_indicator)
-        # Make subtitle from installed app versions
-#        app_strings: [str] = []
-#        for app in ToolsetApplication.ALL:
-#            if app.auto_select:
-#                continue
-#            version = toolset.get_installed_app_version(app)
-#            if version is not None:
-#                app_strings.append(f"{app.name}: {version}")
-#        if app_strings:
-#            self.set_subtitle(", ".join(app_strings))
-#        else:
-#            self.set_subtitle("")
         self.set_activatable(True)
-#        self._setup_status_indicator()
-        # events
-#        toolset.event_bus.subscribe(
-#            ToolsetEvents.SPAWNED_CHANGED,
-#            self._setup_status_indicator
-#        )
-#        toolset.event_bus.subscribe(
-#            ToolsetEvents.IN_USE_CHANGED,
-#            self._setup_status_indicator
-#        )
 
 class SnapshotInstallationRow(Adw.ActionRow):
 

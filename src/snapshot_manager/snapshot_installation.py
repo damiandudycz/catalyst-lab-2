@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, threading
+import os, threading, shutil
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
     MultiStageProcessState, MultiStageProcessStageState,
@@ -18,13 +18,19 @@ from datetime import datetime
 
 class SnapshotInstallation(MultiStageProcess):
     """Handles the full snapshot generation lifecycle."""
-    def __init__(self, toolset: Toolset):
+    def __init__(self, toolset: Toolset | None, file: GLocalFile | None, custom_filename: str | None):
+        """Use either file or toolset, not both."""
         self.toolset = toolset
+        self.file = file
+        self.custom_filename = custom_filename # Works only with file
         super().__init__(title="Generating Portage snapshot")
 
     def setup_stages(self):
-        self.stages.append(SnapshotInstallationStepPrepareToolset(toolset=self.toolset, multistage_process=self))
-        self.stages.append(SnapshotInstallationStepGenerateSnapshot(multistage_process=self))
+        if self.toolset:
+            self.stages.append(SnapshotInstallationStepPrepareToolset(toolset=self.toolset, multistage_process=self))
+            self.stages.append(SnapshotInstallationStepGenerateSnapshot(multistage_process=self))
+        if self.file:
+            self.stages.append(SnapshotInstallationStepCopyFile(file=self.file, custom_filename=self.custom_filename, multistage_process=self))
         self.stages.append(SnapshotInstallationStepSetupPermissions(multistage_process=self))
         super().setup_stages()
 
@@ -133,6 +139,41 @@ class SnapshotInstallationStepPrepareToolset(SnapshotInstallationStep):
                 create_if_missing=True
             )
         ]
+
+class SnapshotInstallationStepCopyFile(SnapshotInstallationStep):
+    def __init__(self, file: GLocalFile, custom_filename: str | None, multistage_process: MultiStageProcess):
+        super().__init__(name="Copy snapshot file", description="Copies snapshot file to repository location", multistage_process=multistage_process)
+        self.file = file
+        self.custom_filename = custom_filename
+    def start(self):
+        super().start()
+        try:
+            def sanitize_filename_linux(name: str) -> str:
+                return name.replace('/', '_').replace('\0', '_')
+            filename = sanitize_filename_linux(self.custom_filename or self.file.get_basename())
+            snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+            snapshot_copy_path = os.path.join(snapshots_location, filename)
+            source_path = self.file.get_path()
+            creation_timestamp = os.stat(source_path).st_ctime
+            creation_date = datetime.fromtimestamp(creation_timestamp)
+            if os.path.exists(snapshot_copy_path):
+                raise ValueError("Snapshot with the same filename exists")
+            total_size = os.path.getsize(source_path)
+            copied_size = 0
+            buffer_size = 1024 * 1024  # 1 MB
+            with open(source_path, 'rb') as src, open(snapshot_copy_path, 'wb') as dst:
+                while True:
+                    buf = src.read(buffer_size)
+                    if not buf:
+                        break
+                    dst.write(buf)
+                    copied_size += len(buf)
+                    self._update_progress(progress=copied_size / total_size)
+            self.multistage_process.snapshot = Snapshot(filename=filename, date=creation_date)
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            print(f"Error during toolset copying: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
 
 class SnapshotInstallationStepGenerateSnapshot(SnapshotInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
