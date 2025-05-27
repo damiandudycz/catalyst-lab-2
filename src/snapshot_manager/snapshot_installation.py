@@ -29,9 +29,11 @@ class SnapshotInstallation(MultiStageProcess):
         super().setup_stages()
 
     def complete_process(self, success: bool):
-        return
         if success:
             SnapshotManager.shared().add_snapshot(self.snapshot)
+
+    def name(self) -> str:
+        return "Fetching snapshot"
 
 # ------------------------------------------------------------------------------
 # Installation process steps.

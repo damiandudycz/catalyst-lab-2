@@ -41,13 +41,13 @@ class EnvironmentsSection(Gtk.Box):
         self._load_external_toolsets()
         # Subscribe to relevant events
         Repository.TOOLSETS.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.toolsets_updated)
-        ToolsetInstallation.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.toolsets_installations_updated)
+        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.toolsets_installations_updated)
 
     def toolsets_updated(self, _):
         self._load_system_toolset()
         self._load_external_toolsets()
 
-    def toolsets_installations_updated(self, process_class: type[MultiStageProcess] = ToolsetInstallation, started_processes: list[MultiStageProcess] = MultiStageProcess.get_started_processes_by_class(ToolsetInstallation)):
+    def toolsets_installations_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
         if issubclass(process_class, ToolsetInstallation):
             self._load_external_toolsets(started_processes=started_processes)
 
@@ -61,7 +61,9 @@ class EnvironmentsSection(Gtk.Box):
             self._set_toolset_system_checkbox_active(False)
             self.toolset_system_validate_button.set_visible(False)
 
-    def _load_external_toolsets(self, started_processes: list[ToolsetInstallation] = ToolsetInstallation.started_processes):
+    def _load_external_toolsets(self, started_processes: list[MultiStageProcess] | None = None):
+        if started_processes is None:
+            started_processes = MultiStageProcess.get_started_processes_by_class(ToolsetInstallation)
         # Remove previously added toolset rows
         if hasattr(self, "_external_toolset_rows"):
             for row in self._external_toolset_rows:

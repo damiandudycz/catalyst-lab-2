@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from .root_function import root_function
 from .runtime_env import RuntimeEnv
 from .architecture import Architecture, Emulation
-from .event_bus import EventBus
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_client import AuthorizationKeeper
 from .hotfix_patching import apply_patch_and_store_for_isolated_system
