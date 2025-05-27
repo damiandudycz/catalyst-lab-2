@@ -315,5 +315,4 @@ class ToolsetCreateView(Gtk.Box):
         # Setup views visibility:
         self.setup_view.set_visible(stage == MultiStageProcessState.SETUP)
         self.install_view.set_visible(stage != MultiStageProcessState.SETUP)
-        self.install_view._set_current_stage(stage=stage)
 

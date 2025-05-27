@@ -37,6 +37,7 @@ class MultistageProcessExecutionView(Gtk.Box):
             self.title_label.set_label(multistage_process.title)
             self.progress_bar.set_fraction(multistage_process.progress)
             self._update_installation_steps(steps=multistage_process.stages)
+            self._set_current_stage(multistage_process.status)
             self.bind_installation_events(multistage_process)
 
     def bind_installation_events(self, multistage_process: MultiStageProcess):

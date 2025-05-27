@@ -126,7 +126,7 @@ class ToolsetInstallationStep(MultiStageProcessStage):
             self.server_call = None
             return return_value
         except Exception as e:
-            print(f"Error synchronizing portage: {e}")
+            print(f"Error running toolset command: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
             return False
 
