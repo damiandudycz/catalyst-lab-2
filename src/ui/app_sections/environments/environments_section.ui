@@ -26,7 +26,7 @@
               <object class="GtkBox" id="actions_section">
                 <property name="orientation">vertical</property>
                 <property name="halign">center</property>
-                <property name="width-request">350</property>
+                <property name="width-request">400</property>
                 <property name="spacing">20</property>
 
                 <child>

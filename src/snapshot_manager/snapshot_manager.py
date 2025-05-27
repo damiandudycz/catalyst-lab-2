@@ -51,6 +51,7 @@ class SnapshotManager:
         for filename in missing_files:
             full_path = os.path.join(snapshots_location, filename)
             stat_info = os.stat(full_path)
+            # TODO: Load date from squashfs instead
             creation_time = datetime.fromtimestamp(stat_info.st_ctime)
             self.add_snapshot(Snapshot(filename=filename, date=creation_time))
         # --- Step 3: Remove records for deleted snapshot files ---
