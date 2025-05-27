@@ -3,6 +3,7 @@ import subprocess
 
 # ------------------------------------------------------------------------------
 # Global helper functions:
+# ------------------------------------------------------------------------------
 
 @root_function
 def create_temp_workdir(prefix: str) -> str:

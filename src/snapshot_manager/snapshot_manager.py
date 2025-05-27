@@ -60,9 +60,7 @@ class SnapshotManager:
 
     def add_snapshot(self, snapshot: Snapshot):
         # Remove existing snapshot with the same filename
-        Repository.SNAPSHOTS.value = [
-            s for s in Repository.SNAPSHOTS.value if s.filename != snapshot.filename
-        ]
+        Repository.SNAPSHOTS.value = [s for s in Repository.SNAPSHOTS.value if s.filename != snapshot.filename]
         Repository.SNAPSHOTS.value.append(snapshot)
 
     def remove_snapshot(self, snapshot: Snapshot):

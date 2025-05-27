@@ -1,30 +1,28 @@
 from __future__ import annotations
+import os, re, time
 from gi.repository import Gtk, GLib, Gio
 from gi.repository import Adw
 from urllib.parse import ParseResult
 from dataclasses import dataclass
 from typing import ClassVar
 from enum import Enum, auto
-from abc import ABC, abstractmethod
-import os, re, time
 from datetime import datetime
 from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture
 from .event_bus import EventBus
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
-from .toolset_installation import (
-    ToolsetInstallation,
-    ToolsetInstallationStage,
-    ToolsetInstallationEvent,
-    ToolsetInstallationStep,
-    ToolsetInstallationStepState,
-    ToolsetInstallationStepEvent
+from .multistage_process import (
+    # Process
+    MultiStageProcess,
+    MultiStageProcessState,
+    MultiStageProcessEvent,
+    # Stages
+    MultiStageProcessStage,
+    MultiStageProcessStageState,
+    MultiStageProcessStageEvent
 )
-from .toolset_application import (
-    ToolsetApplication,
-    ToolsetApplicationVersion,
-    ToolsetApplicationSelection
-)
+from .toolset_installation import ToolsetInstallation
+from .toolset_application import ToolsetApplication, ToolsetApplicationVersion, ToolsetApplicationSelection
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_create/toolset_create_view.ui')
 class ToolsetCreateView(Gtk.Box):
@@ -62,20 +60,20 @@ class ToolsetCreateView(Gtk.Box):
         self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile]] = {app: [] for app in ToolsetApplication.ALL}
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
-        self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else ToolsetInstallationStage.SETUP)
+        self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
         self.progress_bar.set_fraction(self.installation_in_progress.progress if self.installation_in_progress else 0)
-        if installation_in_progress and installation_in_progress.status != ToolsetInstallationStage.SETUP:
-            self._update_installation_steps(steps=installation_in_progress.steps)
+        if installation_in_progress and installation_in_progress.status != MultiStageProcessState.SETUP:
+            self._update_installation_steps(steps=installation_in_progress.stages)
             self.bind_installation_events(self.installation_in_progress)
         else:
             ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
 
     def bind_installation_events(self, installation_in_progress: ToolsetInstallation):
         installation_in_progress.event_bus.subscribe(
-            ToolsetInstallationEvent.STATE_CHANGED, self._set_current_stage
+            MultiStageProcessEvent.STATE_CHANGED, self._set_current_stage
         )
         installation_in_progress.event_bus.subscribe(
-            ToolsetInstallationEvent.PROGRESS_CHANGED, self._update_progress
+            MultiStageProcessEvent.PROGRESS_CHANGED, self._update_progress
         )
 
     def _update_progress(self, progress):
@@ -130,7 +128,7 @@ class ToolsetCreateView(Gtk.Box):
             allow_binpkgs=self.allow_binpkgs,
             apps_selection=apps_selection
         )
-        self._update_installation_steps(self.installation_in_progress.steps)
+        self._update_installation_steps(self.installation_in_progress.stages)
         self._set_current_stage(self.installation_in_progress.status)
         self.progress_bar.set_fraction(self.installation_in_progress.progress)
         self.bind_installation_events(self.installation_in_progress)
@@ -150,7 +148,7 @@ class ToolsetCreateView(Gtk.Box):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
             self.content_navigation_view.pop()
-        self.installation_in_progress.clean_from_started_installations()
+        self.installation_in_progress.clean_from_started_processes()
 
     def _update_stages_result(self, result: list[ParseResult] | Exception):
         self.selected_stage = None
@@ -347,13 +345,13 @@ class ToolsetCreateView(Gtk.Box):
                 row.set_expanded(False)
             self.tools_rows[app].check_button.set_sensitive(is_sensitive)
 
-    def _set_current_stage(self, stage: ToolsetInstallationStage):
+    def _set_current_stage(self, stage: MultiStageProcessState):
         self.current_stage = stage
         # Setup views visibility:
-        self.setup_view.set_visible(stage == ToolsetInstallationStage.SETUP)
-        self.install_view.set_visible(stage != ToolsetInstallationStage.SETUP)
-        self.cancel_button.set_visible(stage == ToolsetInstallationStage.INSTALL)
-        self.finish_button.set_visible(stage != ToolsetInstallationStage.INSTALL)
+        self.setup_view.set_visible(stage == MultiStageProcessState.SETUP)
+        self.install_view.set_visible(stage != MultiStageProcessState.SETUP)
+        self.cancel_button.set_visible(stage == MultiStageProcessState.IN_PROGRESS)
+        self.finish_button.set_visible(stage != MultiStageProcessState.IN_PROGRESS)
         # Add label with summary for completion states:
         def display_status(text: str, style: str | None):
             label = Gtk.Label(label=text)
@@ -368,12 +366,12 @@ class ToolsetCreateView(Gtk.Box):
             self._scroll_to_installation_steps_bottom()
 
         match stage:
-            case ToolsetInstallationStage.COMPLETED:
+            case MultiStageProcessState.COMPLETED:
                 display_status(text="Installation completed successfully.", style="success")
-            case ToolsetInstallationStage.FAILED:
+            case MultiStageProcessState.FAILED:
                 display_status(text="Installation failed.", style="error")
 
-    def _update_installation_steps(self, steps: list[ToolsetInstallationStep]):
+    def _update_installation_steps(self, steps: list[MultiStageProcessStage]):
         if hasattr(self, "_installation_rows"):
             for row in self._installation_rows:
                 self.installation_steps_list.remove(row)
@@ -381,15 +379,15 @@ class ToolsetCreateView(Gtk.Box):
         tools_check_buttons_group = []
         running_stage_row = None
         for step in steps:
-            row = ToolsetInstallationStepRow(step=step, owner=self)
+            row = MultiStageProcessStageRow(step=step, owner=self)
             self.installation_steps_list.add(row)
             self._installation_rows.append(row)
-            if step.state == ToolsetInstallationStepState.IN_PROGRESS:
+            if step.state == MultiStageProcessStageState.IN_PROGRESS:
                 running_stage_row = row
         if running_stage_row:
             GLib.idle_add(self._scroll_to_installation_step_row, running_stage_row)
 
-    def _scroll_to_installation_step_row(self, row: ToolsetInstallationStepRow):
+    def _scroll_to_installation_step_row(self, row: MultiStageProcessStageRow):
         def _scroll(widget):
             scrolled_window = self.installation_steps_list.get_ancestor(Gtk.ScrolledWindow)
             vadjustment = scrolled_window.get_vadjustment()
@@ -410,9 +408,9 @@ class ToolsetCreateView(Gtk.Box):
             vadjustment.set_value(bottom)
         GLib.timeout_add(100, _scroll)
 
-class ToolsetInstallationStepRow(Adw.ActionRow):
+class MultiStageProcessStageRow(Adw.ActionRow):
 
-    def __init__(self, step: ToolsetInstallationStep, owner: ToolsetCreateView):
+    def __init__(self, step: MultiStageProcessStage, owner: ToolsetCreateView):
         super().__init__(title=step.name, subtitle=step.description)
         self.step = step
         self.owner = owner
@@ -421,47 +419,47 @@ class ToolsetInstallationStepRow(Adw.ActionRow):
         self.progress_label.add_css_class("caption")
         self._update_status_label()
         self.add_suffix(self.progress_label)
-        self.set_sensitive(step.state != ToolsetInstallationStepState.SCHEDULED)
+        self.set_sensitive(step.state != MultiStageProcessStageState.SCHEDULED)
         self._set_status_icon(state=step.state)
         step.event_bus.subscribe(
-            ToolsetInstallationStepEvent.STATE_CHANGED,
+            MultiStageProcessStageEvent.STATE_CHANGED,
             self._step_state_changed
         )
         step.event_bus.subscribe(
-            ToolsetInstallationStepEvent.PROGRESS_CHANGED,
+            MultiStageProcessStageEvent.PROGRESS_CHANGED,
             self._step_progress_changed
         )
 
     def _step_progress_changed(self, progress: float | None):
         self._update_status_label()
 
-    def _step_state_changed(self, state: ToolsetInstallationStepState):
-        self.set_sensitive(state != ToolsetInstallationStepState.SCHEDULED)
+    def _step_state_changed(self, state: MultiStageProcessStageState):
+        self.set_sensitive(state != MultiStageProcessStageState.SCHEDULED)
         self._set_status_icon(state=state)
         self.owner._scroll_to_installation_step_row(self)
         self._update_status_label()
 
     def _update_status_label(self):
         self.progress_label.set_label(
-            "" if self.step.state == ToolsetInstallationStepState.SCHEDULED else ("..." if self.step.progress is None else f"{int(self.step.progress * 100)}%")
+            "" if self.step.state == MultiStageProcessStageState.SCHEDULED else ("..." if self.step.progress is None else f"{int(self.step.progress * 100)}%")
         )
 
-    def _set_status_icon(self, state: ToolsetInstallationStepState):
+    def _set_status_icon(self, state: MultiStageProcessStageState):
         if not hasattr(self, "status_icon"):
             self.status_icon = Gtk.Image()
             self.status_icon.set_pixel_size(24)
             self.add_prefix(self.status_icon)
         icon_name = {
-            ToolsetInstallationStepState.SCHEDULED: "square-alt-arrow-right-svgrepo-com-symbolic",
-            ToolsetInstallationStepState.IN_PROGRESS: "menu-dots-square-svgrepo-com-symbolic",
-            ToolsetInstallationStepState.FAILED: "error-box-svgrepo-com-symbolic",
-            ToolsetInstallationStepState.COMPLETED: "check-square-svgrepo-com-symbolic"
+            MultiStageProcessStageState.SCHEDULED: "square-alt-arrow-right-svgrepo-com-symbolic",
+            MultiStageProcessStageState.IN_PROGRESS: "menu-dots-square-svgrepo-com-symbolic",
+            MultiStageProcessStageState.FAILED: "error-box-svgrepo-com-symbolic",
+            MultiStageProcessStageState.COMPLETED: "check-square-svgrepo-com-symbolic"
         }.get(state)
         styles = {
-            ToolsetInstallationStepState.SCHEDULED: "dimmed",
-            ToolsetInstallationStepState.IN_PROGRESS: "",
-            ToolsetInstallationStepState.FAILED: "error",
-            ToolsetInstallationStepState.COMPLETED: "success"
+            MultiStageProcessStageState.SCHEDULED: "dimmed",
+            MultiStageProcessStageState.IN_PROGRESS: "",
+            MultiStageProcessStageState.FAILED: "error",
+            MultiStageProcessStageState.COMPLETED: "success"
         }
         style = styles.get(state)
         self.status_icon.set_from_icon_name(icon_name)

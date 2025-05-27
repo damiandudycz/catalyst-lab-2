@@ -5,7 +5,8 @@ from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset, ToolsetEvents
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset import Toolset
-from .toolset_installation import ToolsetInstallation, ToolsetInstallationEvent, ToolsetInstallationStage
+from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
+from .toolset_installation import ToolsetInstallation
 from .toolset_application import ToolsetApplication
 from .hotfix_patching import HotFix
 from .root_function import root_function
@@ -40,14 +41,15 @@ class EnvironmentsSection(Gtk.Box):
         self._load_external_toolsets()
         # Subscribe to relevant events
         Repository.TOOLSETS.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.toolsets_updated)
-        ToolsetInstallation.event_bus.subscribe(ToolsetInstallationEvent.STARTED_INSTALLATIONS_CHANGED, self.toolsets_installations_updated)
+        ToolsetInstallation.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.toolsets_installations_updated)
 
     def toolsets_updated(self, _):
         self._load_system_toolset()
         self._load_external_toolsets()
 
-    def toolsets_installations_updated(self, started_installations: list[ToolsetInstallation] = ToolsetInstallation.started_installations):
-        self._load_external_toolsets(started_installations=started_installations)
+    def toolsets_installations_updated(self, process_class: type[MultiStageProcess] = ToolsetInstallation, started_processes: list[MultiStageProcess] = MultiStageProcess.get_started_processes_by_class(ToolsetInstallation)):
+        if issubclass(process_class, ToolsetInstallation):
+            self._load_external_toolsets(started_processes=started_processes)
 
     def _load_system_toolset(self):
         if ToolsetEnv.SYSTEM.is_allowed_in_current_host():
@@ -59,7 +61,7 @@ class EnvironmentsSection(Gtk.Box):
             self._set_toolset_system_checkbox_active(False)
             self.toolset_system_validate_button.set_visible(False)
 
-    def _load_external_toolsets(self, started_installations: list[ToolsetInstallation] = ToolsetInstallation.started_installations):
+    def _load_external_toolsets(self, started_processes: list[ToolsetInstallation] = ToolsetInstallation.started_processes):
         # Remove previously added toolset rows
         if hasattr(self, "_external_toolset_rows"):
             for row in self._external_toolset_rows:
@@ -78,7 +80,7 @@ class EnvironmentsSection(Gtk.Box):
             self.external_toolsets_container.insert(toolset_row, 0)
             self._external_toolset_rows.append(toolset_row)
 
-        for installation in started_installations:
+        for installation in started_processes:
             installation_row = ToolsetInstallationRow(installation=installation)
             installation_row.connect("activated", self.on_installation_row_pressed)
             self.external_toolsets_container.insert(installation_row, 0)
@@ -193,29 +195,29 @@ class ToolsetInstallationRow(Adw.ActionRow):
         self._set_status(status=installation.status)
         self._set_progress_label(installation.progress)
         installation.event_bus.subscribe(
-            ToolsetInstallationEvent.STATE_CHANGED,
+            MultiStageProcessEvent.STATE_CHANGED,
             self._set_status
         )
         installation.event_bus.subscribe(
-            ToolsetInstallationEvent.PROGRESS_CHANGED,
+            MultiStageProcessEvent.PROGRESS_CHANGED,
             self._set_progress_label
         )
 
     def _set_progress_label(self, progress):
         self.progress_label.set_label(f"{int(progress * 100)}%")
 
-    def _set_status(self, status: ToolsetInstallationStage):
+    def _set_status(self, status: MultiStageProcessState):
         if not hasattr(self, "status_icon"):
             self.status_icon = Gtk.Image()
             self.status_icon.set_pixel_size(24)
             self.add_suffix(self.status_icon)
         status_props = {
-            ToolsetInstallationStage.SETUP: (False, "", "", "Preparing installation"),
-            ToolsetInstallationStage.INSTALL: (False, "", "", "Installation in progress"),
-            ToolsetInstallationStage.FAILED: (True, "error-box-svgrepo-com-symbolic", "error", "Installation failed"),
-            ToolsetInstallationStage.COMPLETED: (True, "check-square-svgrepo-com-symbolic", "success", "Installation completed"),
+            MultiStageProcessState.SETUP: (False, "", "", "Preparing installation"),
+            MultiStageProcessState.IN_PROGRESS: (False, "", "", "Installation in progress"),
+            MultiStageProcessState.FAILED: (True, "error-box-svgrepo-com-symbolic", "error", "Installation failed"),
+            MultiStageProcessState.COMPLETED: (True, "check-square-svgrepo-com-symbolic", "success", "Installation completed"),
         }
-        visible, icon_name, style, subtitle = status_props.get(status, (False, "", ""))
+        visible, icon_name, style, subtitle = status_props[status]
         self.progress_label.set_visible(not visible)
         self.status_icon.set_visible(visible)
         self.status_icon.set_from_icon_name(icon_name)
