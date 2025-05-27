@@ -7,65 +7,78 @@
 
   <!-- Template -->
   <template class="SnapshotsSection" parent="GtkBox">
-    <property name="orientation">vertical</property>
-    <property name="spacing">24</property>
-    <property name="margin-start">24</property>
-    <property name="margin-end">24</property>
-    <property name="margin-top">24</property>
-    <property name="margin-bottom">24</property>
-
     <child>
-      <object class="GtkBox">
-        <property name="orientation">vertical</property>
-        <property name="halign">center</property>
-        <property name="width-request">350</property>
-        <property name="spacing">20</property>
-
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">never</property>
+        <property name="vscrollbar-policy">automatic</property>
+        <property name="hexpand">True</property>
+        <property name="vexpand">True</property>
         <child>
-          <object class="GtkLabel">
-            <property name="label">Available snapshots:</property>
-            <property name="halign">start</property>
-          </object>
-        </child>
-
-        <child>
-          <object class="GtkListBox" id="snapshots_container">
-            <property name="selection-mode">none</property>
-            <style>
-              <class name="boxed-list"/>
-            </style>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">24</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="margin-top">24</property>
+            <property name="margin-bottom">24</property>
 
             <child>
-              <object class="AdwButtonRow">
-                <property name="title">Add snapshot</property>
-                <property name="start-icon-name">list-add-symbolic</property>
-                <property name="activatable">True</property>
-                <signal name="activated" handler="on_add_snapshot_activated"/>
-                <style>
-                  <class name="suggested-action"/>
-                </style>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="halign">center</property>
+                <property name="width-request">350</property>
+                <property name="spacing">20</property>
+
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label">Available snapshots:</property>
+                    <property name="halign">start</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkListBox" id="snapshots_container">
+                    <property name="selection-mode">none</property>
+                    <style>
+                      <class name="boxed-list"/>
+                    </style>
+
+                    <child>
+                      <object class="AdwButtonRow">
+                        <property name="title">Add snapshot</property>
+                        <property name="start-icon-name">list-add-symbolic</property>
+                        <property name="activatable">True</property>
+                        <signal name="activated" handler="on_add_snapshot_activated"/>
+                        <style>
+                          <class name="suggested-action"/>
+                        </style>
+                      </object>
+                    </child>
+
+                  </object>
+                </child>
+
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkSeparator"/>
+            </child>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Catalyst snapshots are compressed archives that contain a snapshot of the Gentoo Portage tree and associated metadata at a specific point in time. These snapshots are used by Catalyst to ensure consistent and reproducible builds of Gentoo stage files. By referencing a fixed snapshot, Catalyst can build stages with a known set of packages and dependencies, independent of changes in the live Portage tree.</property>
+                <property name="halign">center</property>
+                <property name="wrap">True</property>
+                <property name="justify">fill</property>
+                <attributes>
+                  <attribute name="foreground" value="grey"/>
+                </attributes>
               </object>
             </child>
 
           </object>
         </child>
-
-      </object>
-    </child>
-
-    <child>
-      <object class="GtkSeparator"/>
-    </child>
-
-    <child>
-      <object class="GtkLabel">
-        <property name="label">Catalyst snapshots are compressed archives that contain a snapshot of the Gentoo Portage tree and associated metadata at a specific point in time. These snapshots are used by Catalyst to ensure consistent and reproducible builds of Gentoo stage files. By referencing a fixed snapshot, Catalyst can build stages with a known set of packages and dependencies, independent of changes in the live Portage tree.</property>
-        <property name="halign">center</property>
-        <property name="wrap">True</property>
-        <property name="justify">fill</property>
-        <attributes>
-          <attribute name="foreground" value="grey"/>
-        </attributes>
       </object>
     </child>
 

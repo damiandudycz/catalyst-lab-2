@@ -221,6 +221,8 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
         try:
             toolset_name = self.multistage_process.name()
             self.multistage_process.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_binding_dir=self.multistage_process.tmp_stage_extract_dir)
+            if not self.multistage_process.tmp_toolset.reserve():
+                raise RuntimeError("Failed to reserve toolset")
             self.multistage_process.tmp_toolset.spawn(store_changes=True)
             commands = [
                 "env-update && source /etc/profile",
@@ -241,8 +243,10 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        if getattr(self.multistage_process, 'tmp_toolset', None) is not None and self.multistage_process.tmp_toolset.spawned:
-            self.multistage_process.tmp_toolset.unspawn()
+        if getattr(self.multistage_process, 'tmp_toolset', None):
+            if self.multistage_process.tmp_toolset.spawned:
+                self.multistage_process.tmp_toolset.unspawn()
+            self.multistage_process.tmp_toolset.release()
             return True
         return False
 

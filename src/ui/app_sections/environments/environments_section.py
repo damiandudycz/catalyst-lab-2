@@ -135,6 +135,8 @@ class EnvironmentsSection(Gtk.Box):
         if not system_toolset:
             raise RuntimeError("System host env not available")
         if not system_toolset.spawned:
+            if not system_toolset.reserve():
+                raise RuntimeError("Failed to reserve toolset")
             system_toolset.spawn()
         system_toolset.analyze()
 
@@ -171,10 +173,16 @@ class ToolsetRow(Adw.ActionRow):
             ToolsetEvents.IN_USE_CHANGED,
             self._setup_status_indicator
         )
+        toolset.event_bus.subscribe(
+            ToolsetEvents.IS_RESERVED_CHANGED,
+            self._setup_status_indicator
+        )
 
     def _setup_status_indicator(self, data: Any | None = None):
         self.status_indicator.set_blinking(self.toolset.in_use)
-        if self.toolset.spawned and self.toolset.store_changes:
+        if self.toolset.is_reserved:
+            self.status_indicator.set_state(StatusIndicatorState.ENABLED_UNSAFE)
+        elif self.toolset.spawned and self.toolset.store_changes:
             self.status_indicator.set_state(StatusIndicatorState.ENABLED_UNSAFE)
         elif self.toolset.spawned:
             self.status_indicator.set_state(StatusIndicatorState.ENABLED)

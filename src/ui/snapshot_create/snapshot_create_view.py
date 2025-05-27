@@ -12,7 +12,7 @@ from .architecture import Architecture
 from .event_bus import EventBus
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .multistage_process import MultiStageProcessState
-from .toolset import Toolset
+from .toolset import Toolset, ToolsetEvents
 from .repository import Repository
 from .environments_section import ToolsetRow
 from .toolset_application import ToolsetApplication
@@ -47,13 +47,13 @@ class SnapshotCreateView(Gtk.Box):
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
         self.fetch_view.set_multistage_process(self.installation_in_progress)
         if installation_in_progress is None or installation_in_progress.status == MultiStageProcessState.SETUP:
-            self._update_toolsets_result(Repository.TOOLSETS.value)
+            self._fill_toolsets_rows(Repository.TOOLSETS.value)
 
     def on_page_changed(self, carousel, pspec):
         self.current_page = int(carousel.get_position())
         self.setup_back_next_buttons()
 
-    def setup_back_next_buttons(self):
+    def setup_back_next_buttons(self, _ = None):
         is_first_page = self.current_page == 0
         is_second_page = self.current_page == 0
         is_last_page = self.current_page == 2
@@ -62,9 +62,11 @@ class SnapshotCreateView(Gtk.Box):
         if_source_selected = is_stage_selected or is_file_selected
         self.back_button.set_sensitive(not is_first_page)
         self.back_button.set_opacity(0.0 if is_first_page else 1.0)
-        self.next_button.set_sensitive(if_source_selected and is_last_page)
+        self.next_button.set_sensitive(if_source_selected and is_last_page and (is_file_selected or not self.selected_toolset.is_reserved))
         self.next_button.set_opacity(0.0 if not is_last_page else 1.0)
         self.next_button.set_label("Save toolset" if is_file_selected else "Create snapshot")
+        if hasattr(self, 'reserved_label'):
+            self.reserved_label.set_visible(self.selected_toolset and self.selected_toolset.is_reserved and not self.selected_file)
 
     @Gtk.Template.Callback()
     def on_fetch_with_catalyst_pressed(self, _):
@@ -138,21 +140,26 @@ class SnapshotCreateView(Gtk.Box):
         elif hasattr(self, "content_navigation_view"):
             self.content_navigation_view.pop()
 
-    def _update_toolsets_result(self, result: list[Toolset]):
+    def _fill_toolsets_rows(self, result: list[Toolset]):
         self.selected_toolset = None
-        if hasattr(self, "_toolset_rows"):
-            for row in self._toolset_rows:
-                self.toolsets_list.remove(row)
-        # Refresh list of results
-
-       # TODO: Place newest first.
+        # TODO: Place newest first.
         sorted_toolsets = result
+        valid_toolsets = [
+            toolset for toolset in sorted_toolsets
+            if toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None
+        ]
+        # Monitor valid toolsets for is_reserved changes
+        for toolset in valid_toolsets:
+            print(f"Monitor {toolset}")
+            toolset.event_bus.subscribe(
+                ToolsetEvents.IS_RESERVED_CHANGED,
+                self.setup_back_next_buttons
+            )
         self.selected_toolset = next(
-            (toolset for toolset in sorted_toolsets
-             if toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None),
-            None
+            (toolset for toolset in valid_toolsets if not toolset.is_reserved),
+            valid_toolsets[0] if valid_toolsets else None
         )
-        if not self.selected_toolset:
+        if not valid_toolsets:
             error_label = Gtk.Label(label=f"You need to create a toolset with Catalyst installed. Go to Environments section to create such toolset.")
             error_label.set_wrap(True)
             error_label.set_halign(Gtk.Align.CENTER)
@@ -162,8 +169,16 @@ class SnapshotCreateView(Gtk.Box):
             error_label.set_margin_end(24)
             error_label.add_css_class("dimmed")
             self.toolsets_list.add(error_label)
-            self._toolset_rows = [error_label]
-        self._toolset_rows = []
+        self.reserved_label = Gtk.Label(label="This toolset is currently in use.")
+        self.reserved_label.set_wrap(True)
+        self.reserved_label.set_halign(Gtk.Align.CENTER)
+        self.reserved_label.set_margin_top(12)
+        self.reserved_label.set_margin_bottom(12)
+        self.reserved_label.set_margin_start(24)
+        self.reserved_label.set_margin_end(24)
+        self.reserved_label.add_css_class("dimmed")
+        self.reserved_label.set_visible(self.selected_toolset and self.selected_toolset.is_reserved and not self.selected_file)
+        self.toolsets_list.add(self.reserved_label)
         toolsets_check_buttons_group = []
         for toolset in sorted_toolsets:
             row = ToolsetRow(toolset=toolset)
@@ -177,7 +192,6 @@ class SnapshotCreateView(Gtk.Box):
             row.set_activatable_widget(check_button)
             row.set_sensitive(toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None)
             self.toolsets_list.add(row)
-            self._toolset_rows.append(row)
 
     def _on_toolset_selected(self, button: Gtk.CheckButton, toolset: Toolset):
         """Callback for when a row's checkbox is toggled."""

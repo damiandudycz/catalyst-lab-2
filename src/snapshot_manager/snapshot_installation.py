@@ -92,6 +92,7 @@ class SnapshotInstallationStepPrepareToolset(SnapshotInstallationStep):
         super().__init__(name="Prepare toolset", description="Spawns toolset with required bindings", multistage_process=multistage_process)
         self.toolset = toolset
         self.unspawn = False
+        self.release = False
     def start(self):
         super().start()
         try:
@@ -114,6 +115,9 @@ class SnapshotInstallationStepPrepareToolset(SnapshotInstallationStep):
                         print(f"Missing required binding: {required}")
                         return False
                 return True
+            if not self.toolset.reserve():
+                raise RuntimeError("Failed to reserve toolset")
+            self.release = True
             if self.toolset.spawned and not toolset_has_required_binding():
                 # Toolset needs to be respawned to get correct bindings
                 self.toolset.unspawn()
@@ -131,6 +135,8 @@ class SnapshotInstallationStepPrepareToolset(SnapshotInstallationStep):
             return False
         if self.unspawn:
             self.toolset.unspawn()
+        if self.release:
+            self.toolset.release()
         return True
     def required_bindings(self) -> [BindMount]:
         return [

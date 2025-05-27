@@ -26,6 +26,7 @@ from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_sq
 class ToolsetEvents(Enum):
     SPAWNED_CHANGED = auto()
     IN_USE_CHANGED = auto()
+    IS_RESERVED_CHANGED = auto()
 
 @final
 class Toolset(Serializable):
@@ -51,6 +52,7 @@ class Toolset(Serializable):
         self.access_lock = threading.Lock()
         self.spawned = False # Spawned means that directories in /tmp are prepared to be used with bwrap.
         self.in_use = False # Is any bwrap instance currently running on this toolset.
+        self.is_reserved = False # Reserved for later usage by some object
         # Current spawn settings:
         self.store_changes: bool = False
         self.bind_options: list[str] | None = None # Binding options prepared in current spawn for bwrap command.
@@ -118,6 +120,8 @@ class Toolset(Serializable):
     def spawn(self, store_changes: bool = False, hot_fixes: list[HotFix] | None = None, additional_bindings: list[BindMount] | None = None):
         """Prepare /tmp folders for bwrap calls."""
         with self.access_lock:
+            if not self.is_reserved:
+                raise RuntimeError(f"Please reserve before calling commands.")
             if self.spawned:
                 raise RuntimeError(f"Toolset {self} already spawned.")
 
@@ -293,6 +297,8 @@ class Toolset(Serializable):
     def unspawn(self):
         """Clear tmp folders."""
         with self.access_lock:
+            if not self.is_reserved:
+                raise RuntimeError(f"Please reserve before calling commands.")
             if not self.spawned:
                 raise RuntimeError(f"Toolset {self} is not spawned.")
             if self.in_use:
@@ -316,12 +322,35 @@ class Toolset(Serializable):
                 self.spawned = False
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
 
+
+    # --------------------------------------------------------------------------
+    # Reserving:
+
+    def reserve(self) -> bool:
+        with self.access_lock:
+            if self.is_reserved:
+                return False
+            else:
+                self.is_reserved = True
+                self.event_bus.emit(ToolsetEvents.IS_RESERVED_CHANGED, self.is_reserved)
+                return True
+
+    def release(self) -> bool:
+        with self.access_lock:
+            if not self.is_reserved:
+                return False
+            self.is_reserved = False
+            self.event_bus.emit(ToolsetEvents.IS_RESERVED_CHANGED, self.is_reserved)
+            return True
+
     # --------------------------------------------------------------------------
     # Calling commands:
 
     def run_command(self, command: str, handler: callable | None = None, completion_handler: callable | None = None) -> ServerCall:
         # TODO: Add required parameters checks, like store_changes matches spawned env, required bindings are set correctly etc.
         with self.access_lock:
+            if not self.is_reserved:
+                raise RuntimeError(f"Please reserve before calling commands.")
             if not self.spawned:
                 raise RuntimeError(f"Toolset {self} is not spawned.")
             if self.in_use:
