@@ -142,11 +142,10 @@ class SnapshotCreateView(Gtk.Box):
 
     def _fill_toolsets_rows(self, result: list[Toolset]):
         self.selected_toolset = None
-        # TODO: Place newest first.
-        sorted_toolsets = result
+        sorted_toolsets = sorted(result, key=lambda toolset: toolset.metadata.get("date_updated", 0), reverse=True)
         valid_toolsets = [
             toolset for toolset in sorted_toolsets
-            if toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None
+            if toolset.get_app_install(ToolsetApplication.CATALYST) is not None
         ]
         # Monitor valid toolsets for is_reserved changes
         for toolset in valid_toolsets:
@@ -190,7 +189,7 @@ class SnapshotCreateView(Gtk.Box):
             toolsets_check_buttons_group.append(check_button)
             row.add_prefix(check_button)
             row.set_activatable_widget(check_button)
-            row.set_sensitive(toolset.get_installed_app_version(ToolsetApplication.CATALYST) is not None)
+            row.set_sensitive(toolset.get_app_install(ToolsetApplication.CATALYST) is not None)
             self.toolsets_list.add(row)
 
     def _on_toolset_selected(self, button: Gtk.CheckButton, toolset: Toolset):

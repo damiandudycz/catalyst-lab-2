@@ -20,7 +20,7 @@ from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_client import AuthorizationKeeper
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
-from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
+from .toolset_application import ToolsetApplication, ToolsetApplicationSelection, ToolsetApplicationInstall
 from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs
 
 class ToolsetEvents(Enum):
@@ -387,8 +387,18 @@ class Toolset(Serializable):
     # --------------------------------------------------------------------------
     # Managing installed apps:
 
-    def get_installed_app_version(self, app: ToolsetApplication) -> str | None:
-        return self.metadata.get(app.package, {}).get("version")
+    def get_app_install(self, app: ToolsetApplication) -> ToolsetApplicationInstall | None:
+        app_metadata = self.metadata.get(app.package, {})
+        if not app_metadata:
+            return None
+        patched = app_metadata.get('patched', False)
+        version = app_metadata.get('version')
+        version_id = app_metadata.get('version_id')
+        if not version_id or not version:
+            return None
+        version_id_uuid = uuid.UUID(version_id)
+        version_variant = next((version for version in app.versions if version.id == version_id_uuid), None)
+        return ToolsetApplicationInstall(version=version, variant=version_variant, patched=patched)
 
     def analyze(self) -> bool:
         print(f"Analyze {self.toolset_root()}")

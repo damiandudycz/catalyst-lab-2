@@ -79,14 +79,9 @@ class ToolsetDetailsView(Gtk.Box):
                 self.applications_group.remove(row)
         self._apps_rows = []
         for app in ToolsetApplication.ALL:
-            app_metadata = self.toolset.metadata.get(app.package)
-            if app_metadata:
-                patched = app_metadata.get('patched', False)
-                version = app_metadata.get('version')
-                version_id = app_metadata.get('version_id')
-                version_id_uuid = uuid.UUID(version_id)
-                version_variant = next((version for version in app.versions if version.id == version_id_uuid), None)
-                subtitle = f"{version_variant.name}: {version}, Patched" if patched else f"{version_variant.name}: {version}"
+            app_install = self.toolset.get_app_install(app=app)
+            if app_install:
+                subtitle = f"{app_install.variant.name}: {app_install.version}, Patched" if app_install.patched else f"{app_install.variant.name}: {app_install.version}"
                 app_row = Adw.ActionRow(title=app.name, subtitle=subtitle)
                 self.applications_group.add(app_row)
                 self._apps_rows.append(app_row)

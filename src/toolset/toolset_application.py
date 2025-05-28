@@ -30,6 +30,7 @@ class ToolsetApplication:
         ToolsetApplication.ALL.append(self)
 
 ToolsetApplicationSelection = namedtuple("ToolsetApplicationSelection", ["app", "version", "selected", "patches"])
+ToolsetApplicationInstall = namedtuple("ToolsetApplicationInstall", ["version", "variant", "patched"])
 
 @dataclass(frozen=True)
 class PortageConfig:

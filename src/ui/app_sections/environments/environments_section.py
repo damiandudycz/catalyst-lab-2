@@ -94,9 +94,9 @@ class EnvironmentsSection(Gtk.Box):
             self._external_toolset_rows.append(installation_row)
 
     def on_external_toolset_row_pressed(self, sender):
-        #self.content_navigation_view.push_view(ToolsetDetailsView(toolset=sender.toolset), title="Toolset details")
+        self.content_navigation_view.push_view(ToolsetDetailsView(toolset=sender.toolset), title="Toolset details")
         #app_event_bus.emit(AppEvents.PUSH_VIEW, ToolsetDetailsView(toolset=sender.toolset), "Toolset details")
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetDetailsView(toolset=sender.toolset), "Toolset details", 640, 480)
+        #app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetDetailsView(toolset=sender.toolset), "Toolset details", 640, 480)
 
     def on_installation_row_pressed(self, sender):
         installation = getattr(sender, "installation", None)
@@ -161,9 +161,9 @@ class ToolsetRow(Adw.ActionRow):
         for app in ToolsetApplication.ALL:
             if app.auto_select:
                 continue
-            version = toolset.get_installed_app_version(app)
-            if version is not None:
-                app_strings.append(f"{app.name}: {version}")
+            app_install = toolset.get_app_install(app=app)
+            if app_install:
+                app_strings.append(f"{app.name}: {app_install.version}")
         if app_strings:
             self.set_subtitle(", ".join(app_strings))
         else:
