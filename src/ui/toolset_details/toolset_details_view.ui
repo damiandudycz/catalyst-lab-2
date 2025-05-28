@@ -27,10 +27,90 @@
               <object class="AdwPreferencesGroup">
                 <!-- <property name="description">Toolset name</property> -->
                 <property name="title">Basic information</property>
-                <property name="separate-rows">True</property>
+                <!-- <property name="separate-rows">True</property> -->
                 <child>
                   <object class="AdwEntryRow" id="toolset_name_row">
                     <property name="title">Toolset name</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="toolset_date_created_row">
+                    <property name="title">Date created</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="toolset_date_updated_row">
+                    <property name="title">Date updated</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="toolset_source_row">
+                    <property name="title">Source</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="status_file_row">
+                    <property name="title">File</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="status_size_row">
+                    <property name="title">Size</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="status_group">
+                <child>
+                  <object class="AdwActionRow" id="status_state_row">
+                    <property name="title">Status</property>
+                    <!-- Put status labels here -->
+                    <child>
+                      <object class="GtkBox">
+                        <property name="valign">center</property>
+                        <property name="spacing">8</property>
+                        <child>
+                          <object class="GtkLabel" id="tag_free">
+                            <property name="label">Free</property>
+                            <style>
+                              <class name="tag-label"/>
+                              <class name="caption-heading"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="tag_spawned">
+                            <property name="label">Mounted</property>
+                            <style>
+                              <class name="tag-label"/>
+                              <class name="caption-heading"/>
+                              <class name="accent"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="tag_in_use">
+                            <property name="label">In use</property>
+                            <style>
+                              <class name="tag-label"/>
+                              <class name="caption-heading"/>
+                              <class name="accent"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="tag_is_reserved">
+                            <property name="label">Reserved</property>
+                            <style>
+                              <class name="tag-label"/>
+                              <class name="caption-heading"/>
+                              <class name="accent"/>
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>
@@ -45,17 +125,28 @@
                     <property name="hexpand">True</property>
                     <property name="homogeneous">True</property>
                     <child>
-                      <object class="GtkButton">
+                      <object class="GtkButton" id="action_button_spawn">
                         <child>
                           <object class="AdwButtonContent">
-                            <property name="label">Spawn</property>
+                            <property name="label">Mount</property>
+                            <property name="icon-name">user-trash-symbolic</property>
+                          </object>
+                        </child>
+                        <signal name="clicked" handler="action_button_spawn_clicked"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="action_button_unspawn">
+                        <child>
+                          <object class="AdwButtonContent">
+                            <property name="label">Unmount</property>
                             <property name="icon-name">user-trash-symbolic</property>
                           </object>
                         </child>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkButton">
+                      <object class="GtkButton" id="action_button_chroot">
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Chroot</property>
@@ -65,7 +156,7 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkButton">
+                      <object class="GtkButton" id="action_button_update">
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Update</property>
@@ -75,7 +166,7 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkButton">
+                      <object class="GtkButton" id="action_button_delete">
                         <style>
                           <class name="destructive-action"/>
                         </style>
@@ -87,23 +178,6 @@
                         </child>
                       </object>
                     </child>
-                  </object>
-                </child>
-              </object>
-            </child>
-            <child>
-              <object class="AdwPreferencesGroup" id="status_group">
-                <property name="title">Status</property>
-                <child>
-                  <object class="AdwActionRow" id="status_file_row">
-                    <property name="title">File</property>
-                    <property name="subtitle">/home/aaa/asasas</property>
-                  </object>
-                </child>
-                <child>
-                  <object class="AdwActionRow" id="status_size_row">
-                    <property name="title">Size</property>
-                    <property name="subtitle">100MB</property>
                   </object>
                 </child>
               </object>

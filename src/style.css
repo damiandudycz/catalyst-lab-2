@@ -1,3 +1,36 @@
 .transparent-bg {
     background-color: rgba(0, 0, 0, 0);
 }
+.tag-label {
+  border: 1px solid;
+  border-radius: 9999px;
+  padding: 2px 10px;
+  background-color: @sidebar_bg_color;
+  border-color: @sidebar_color;
+  color: @sidebar_fg_color;
+}
+.tag-label.success {
+  background-color: @success_bg_color;
+  border-color: @success_color;
+  color: @success_fg_color;
+}
+.tag-label.warning {
+  background-color: @warning_bg_color;
+  border-color: @warning_color;
+  color: @warning_fg_color;
+}
+.tag-label.error {
+  background-color: @error_bg_color;
+  border-color: @error_color;
+  color: @error_fg_color;
+}
+.tag-label.accent {
+  background-color: @accent_bg_color;
+  border-color: @accent_color;
+  color: @accent_fg_color;
+}
+.tag-label.destructive {
+  background-color: @destructive_bg_color;
+  border-color: @destructive_color;
+  color: @destructive_fg_color;
+}
