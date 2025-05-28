@@ -79,12 +79,16 @@ class ToolsetDetailsView(Gtk.Box):
                 self.applications_group.remove(row)
         self._apps_rows = []
         for app in ToolsetApplication.ALL:
+            if app.auto_select:
+                continue
             app_install = self.toolset.get_app_install(app=app)
             if app_install:
                 subtitle = f"{app_install.variant.name}: {app_install.version}, Patched" if app_install.patched else f"{app_install.variant.name}: {app_install.version}"
-                app_row = Adw.ActionRow(title=app.name, subtitle=subtitle)
-                self.applications_group.add(app_row)
-                self._apps_rows.append(app_row)
+            else:
+                subtitle = "Not installed"
+            app_row = Adw.ActionRow(title=app.name, subtitle=subtitle)
+            self.applications_group.add(app_row)
+            self._apps_rows.append(app_row)
 
     def setup_status(self, _ = None):
         self.tag_free.set_visible(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
