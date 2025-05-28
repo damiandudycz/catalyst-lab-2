@@ -327,7 +327,7 @@ class RootHelperClient:
                 used_token = token if token is not None else self.token
                 conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 conn.connect(self.socket_path)
-                conn.sendall(f"{used_token} {call.call_id} {request_type} {message}".encode())
+                conn.sendall(f"{used_token} {call.call_id} {request_type} {message} {used_token}".encode())
 
                 current_message_type: StreamPipe | None = None
                 current_chars_left: int | None = None

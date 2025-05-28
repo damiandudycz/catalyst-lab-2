@@ -451,8 +451,19 @@ class Job:
                 return
 
             # Receive request data:
-            # TODO: Get much more data in chunks if needed
-            data = self.conn.recv(4096).decode().strip()
+            def recv_until_token(conn, session_token):
+                terminator = f" {session_token}".encode()
+                buffer = b""
+                while True:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        raise ConnectionError("Connection closed unexpectedly.")
+                    buffer += chunk
+                    if buffer.endswith(terminator):
+                        break
+                message = buffer[:-len(terminator)].decode().strip()
+                return message
+            data = recv_until_token(self.conn, session_token)
             if not data.startswith(session_token):
                 self.respond(code=ServerResponseStatusCode.AUTHORIZATION_WRONG_TOKEN)
                 return
@@ -704,4 +715,5 @@ class WatchDog:
                 self._thread.join()
             self._started = False
             self._thread = None
+
 
