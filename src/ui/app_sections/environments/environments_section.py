@@ -5,6 +5,7 @@ from .runtime_env import RuntimeEnv
 from .toolset import ToolsetEnv, Toolset, ToolsetEvents
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset import Toolset
+from .toolset_details_view import ToolsetDetailsView
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
 from .toolset_installation import ToolsetInstallation
 from .toolset_application import ToolsetApplication
@@ -79,6 +80,10 @@ class EnvironmentsSection(Gtk.Box):
         for toolset in external_toolsets:
             toolset_row = ToolsetRow(toolset=toolset)
             toolset_row.connect("activated", self.on_external_toolset_row_pressed)
+            toolset_row.set_activatable(True)
+            icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
+            icon.add_css_class("dimmed")
+            toolset_row.add_suffix(icon)
             self.external_toolsets_container.insert(toolset_row, 0)
             self._external_toolset_rows.append(toolset_row)
 
@@ -89,8 +94,8 @@ class EnvironmentsSection(Gtk.Box):
             self._external_toolset_rows.append(installation_row)
 
     def on_external_toolset_row_pressed(self, sender):
-        from .snapshot_manager import SnapshotManager
-        SnapshotManager.shared().generate_new_snapshot(sender.toolset)
+        self.content_navigation_view.push_view(ToolsetDetailsView(toolset=sender.toolset), title="Toolset details")
+        #app_event_bus.emit(AppEvents.PUSH_VIEW, ToolsetDetailsView(toolset=sender.toolset), "Toolset details")
 
     def on_installation_row_pressed(self, sender):
         installation = getattr(sender, "installation", None)

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+
+  <!-- Libraries -->
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
+  <template class="ToolsetDetailsView" parent="GtkBox">
+
+    <!-- Toolset details view -->
+    <child>
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">automatic</property>
+        <property name="vscrollbar-policy">automatic</property>
+        <property name="hexpand">True</property>
+        <property name="vexpand">True</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">24</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="margin-top">24</property>
+            <property name="margin-bottom">24</property>
+            <child>
+              <object class="AdwPreferencesGroup">
+                <!-- <property name="description">Toolset name</property> -->
+                <property name="title">Basic information</property>
+                <property name="separate-rows">True</property>
+                <child>
+                  <object class="AdwEntryRow" id="toolset_name_row">
+                    <property name="title">Toolset name</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="actions_group">
+                <property name="title">Actions</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">horizontal</property>
+                    <property name="spacing">6</property>
+                    <property name="hexpand">True</property>
+                    <property name="homogeneous">True</property>
+                    <child>
+                      <object class="GtkButton">
+                        <child>
+                          <object class="AdwButtonContent">
+                            <property name="label">Spawn</property>
+                            <property name="icon-name">user-trash-symbolic</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton">
+                        <child>
+                          <object class="AdwButtonContent">
+                            <property name="label">Chroot</property>
+                            <property name="icon-name">user-trash-symbolic</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton">
+                        <child>
+                          <object class="AdwButtonContent">
+                            <property name="label">Update</property>
+                            <property name="icon-name">user-trash-symbolic</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton">
+                        <style>
+                          <class name="destructive-action"/>
+                        </style>
+                        <child>
+                          <object class="AdwButtonContent">
+                            <property name="label">Delete</property>
+                            <property name="icon-name">user-trash-symbolic</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="status_group">
+                <property name="title">Status</property>
+                <child>
+                  <object class="AdwActionRow" id="status_file_row">
+                    <property name="title">File</property>
+                    <property name="subtitle">/home/aaa/asasas</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="status_size_row">
+                    <property name="title">Size</property>
+                    <property name="subtitle">100MB</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="applications_group">
+                <property name="title">Applications</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+
+  </template>
+</interface>
+

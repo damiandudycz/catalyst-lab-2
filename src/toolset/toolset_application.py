@@ -7,6 +7,7 @@ from collections import namedtuple
 from .architecture import Emulation
 from .repository import Repository
 from .root_helper_client import ServerCall
+import uuid
 
 # ------------------------------------------------------------------------------
 # Toolset applications.
@@ -38,6 +39,7 @@ class PortageConfig:
 @dataclass(frozen=True)
 class ToolsetApplicationVersion:
     name: str
+    id: uuid.uuid
     config: PortageConfig = field(default_factory=PortageConfig)
 
 ToolsetApplication.CATALYST = ToolsetApplication(
@@ -47,6 +49,7 @@ ToolsetApplication.CATALYST = ToolsetApplication(
     versions=(
         ToolsetApplicationVersion(
             name="Stable",
+            id=uuid.UUID("068688a1-1b31-43ea-b8ef-70c2857ea903"),
             config=(
                 PortageConfig(directory="package.accept_keywords", entries=("dev-util/catalyst",)),
                 PortageConfig(
@@ -61,6 +64,7 @@ ToolsetApplication.CATALYST = ToolsetApplication(
         ),
         ToolsetApplicationVersion(
             name="Experimental",
+            id=uuid.UUID("24e05851-c210-4f80-9bec-fb306ce32ba1"),
             config=(
                 PortageConfig(directory="package.accept_keywords", entries=("dev-util/catalyst **",)),
                 PortageConfig(
@@ -82,6 +86,7 @@ ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
     versions=(
             ToolsetApplicationVersion(
                 name="Stable",
+                id=uuid.UUID("e5ef8be1-e11b-42c4-a824-fde690b42f46"),
                 config=None
             ),
         ),
@@ -95,9 +100,7 @@ def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: 'Toolset'
         binary_path = bin_directory / qemu_binary
         if binary_path.is_file():
             found_qemu_binaries.append(qemu_binary)
-    toolset.metadata[app.package] = {
-        "interpreters": found_qemu_binaries
-    }
+    toolset.metadata.setdefault(app.package, {})["interpreters"] = found_qemu_binaries
 
 ToolsetApplication.QEMU = ToolsetApplication(
     name="Qemu", description="Allows building stages for different architectures",
@@ -106,6 +109,7 @@ ToolsetApplication.QEMU = ToolsetApplication(
     versions=(
         ToolsetApplicationVersion(
             name="Stable",
+            id=uuid.UUID("bed67bf2-1ca7-4b06-9ca3-d4b1f2533102"),
             config=(
                 PortageConfig(
                     directory="package.use",
@@ -124,6 +128,7 @@ ToolsetApplication.QEMU = ToolsetApplication(
         ),
         ToolsetApplicationVersion(
             name="Experimental",
+            id=uuid.UUID("4f73b683-baeb-4e81-ba50-f4e6c019a60a"),
             config=(
                 PortageConfig(directory="package.accept_keywords", entries=("app-emulation/qemu **",)),
                 PortageConfig(

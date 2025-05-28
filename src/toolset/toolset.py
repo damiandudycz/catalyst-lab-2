@@ -33,11 +33,10 @@ class Toolset(Serializable):
     """Class containing details of the Toolset instances."""
     """Only metadata, no functionalities."""
     """Functionalities are handled by ToolsetContainer."""
-    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, apps: dict[str, str] = {}, metadata: dict[str, Any] = {}, squashfs_binding_dir: str | None = None, **kwargs):
+    def __init__(self, env: ToolsetEnv, uuid: UUID, name: str, metadata: dict[str, Any] = {}, squashfs_binding_dir: str | None = None, **kwargs):
         self.uuid = uuid
         self.env = env
         self.name = name
-        self.apps = apps
         self.metadata = metadata
         self.squashfs_binding_dir = squashfs_binding_dir # Directory used as toolset_root, mounted when settin up or spawning.
         match env:
@@ -67,7 +66,6 @@ class Toolset(Serializable):
             uuid_value = uuid.UUID(data["uuid"])
             env = ToolsetEnv[data["env"]]
             name = str(data["name"])
-            apps = data.get("apps", {})
             metadata = data.get("metadata", {})
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
@@ -80,14 +78,13 @@ class Toolset(Serializable):
                 if not isinstance(squashfs_file, str):
                     raise ValueError("Missing or invalid 'squashfs_file' for EXTERNAL environment")
                 kwargs["squashfs_file"] = squashfs_file
-        return cls(env, uuid_value, name, apps, metadata, None, **kwargs)
+        return cls(env, uuid_value, name, metadata, None, **kwargs)
 
     def serialize(self) -> dict:
         data = {
             "uuid": str(self.uuid),
             "env": self.env.name,
             "name": self.name,
-            "apps": self.apps,
             "metadata": self.metadata
         }
         if self.env == ToolsetEnv.EXTERNAL:
@@ -322,7 +319,6 @@ class Toolset(Serializable):
                 self.spawned = False
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
 
-
     # --------------------------------------------------------------------------
     # Reserving:
 
@@ -388,7 +384,7 @@ class Toolset(Serializable):
     # Managing installed apps:
 
     def get_installed_app_version(self, app: ToolsetApplication) -> str | None:
-        return self.apps.get(app.package, None)
+        return self.metadata.get(app.package, {}).get("version")
 
     def analyze(self) -> bool:
         """Performs various sanity checks on toolset and stores gathered results."""
@@ -444,13 +440,16 @@ class Toolset(Serializable):
         )
         server_call.thread.join()
         done_event.wait()
+
         if version_response_status != ServerResponseStatusCode.OK:
-            self.apps.pop(app.package, None)
+            if app.package in self.metadata:
+                self.metadata[app.package].pop("version", None)
             raise RuntimeError(f"Failed to get package version. App: {app.package}, Code: {version_response_status.name}")
         if version_value is not None:
-            self.apps[app.package] = version_value
+            self.metadata.setdefault(app.package, {})["version"] = version_value
         else:
-            self.apps.pop(app.package, None)
+            if app.package in self.metadata:
+                self.metadata[app.package].pop("version", None)
 
     def _perform_app_additional_checks(self, app: ToolsetApplication):
         if app.toolset_additional_analysis:

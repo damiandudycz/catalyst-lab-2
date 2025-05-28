@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, uuid, shutil, tempfile, threading, re, random, string, requests
+import os, uuid, shutil, tempfile, threading, re, random, string, requests, time
 from gi.repository import GLib
 from typing import final, Callable
 from pathlib import Path
@@ -221,6 +221,10 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
         try:
             toolset_name = self.multistage_process.name()
             self.multistage_process.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_binding_dir=self.multistage_process.tmp_stage_extract_dir)
+            now = int(time.time())
+            self.multistage_process.tmp_toolset.metadata['date_created'] = now
+            self.multistage_process.tmp_toolset.metadata['date_updated'] = now
+            self.multistage_process.tmp_toolset.metadata['source'] = self.multistage_process.stage_url.geturl()
             if not self.multistage_process.tmp_toolset.reserve():
                 raise RuntimeError("Failed to reserve toolset")
             self.multistage_process.tmp_toolset.spawn(store_changes=True)
@@ -292,6 +296,8 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
                     if self._cancel_event.is_set():
                         return
                     insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app_selection.app.name, toolset_root=self.multistage_process.tmp_toolset.toolset_root())
+            # Store selected version id in toolset metadata
+            self.multistage_process.tmp_toolset.metadata[self.app_selection.app.package] = { "version_id" : str(self.app_selection.version.id) }
             for patch_file in self.app_selection.patches:
                 file_input_stream = patch_file.read()
                 file_info = file_input_stream.query_info("standard::size", None)
