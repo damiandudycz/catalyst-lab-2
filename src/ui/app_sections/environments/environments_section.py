@@ -94,8 +94,9 @@ class EnvironmentsSection(Gtk.Box):
             self._external_toolset_rows.append(installation_row)
 
     def on_external_toolset_row_pressed(self, sender):
-        self.content_navigation_view.push_view(ToolsetDetailsView(toolset=sender.toolset), title="Toolset details")
+        #self.content_navigation_view.push_view(ToolsetDetailsView(toolset=sender.toolset), title="Toolset details")
         #app_event_bus.emit(AppEvents.PUSH_VIEW, ToolsetDetailsView(toolset=sender.toolset), "Toolset details")
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetDetailsView(toolset=sender.toolset), "Toolset details", 640, 480)
 
     def on_installation_row_pressed(self, sender):
         installation = getattr(sender, "installation", None)

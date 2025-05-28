@@ -114,7 +114,6 @@ class ToolsetCreateView(Gtk.Box):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
             self.content_navigation_view.pop()
-        self.installation_in_progress.clean_from_started_processes()
 
     def _update_stages_result(self, result: list[ParseResult] | Exception):
         self.selected_stage = None

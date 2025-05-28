@@ -31,6 +31,8 @@
                 <child>
                   <object class="AdwEntryRow" id="toolset_name_row">
                     <property name="title">Toolset name</property>
+                    <property name="show-apply-button">True</property>
+                    <signal name="apply" handler="on_toolset_name_activate" swapped="no"/>
                   </object>
                 </child>
                 <child>
@@ -113,6 +115,11 @@
                     </child>
                   </object>
                 </child>
+                <child>
+                 <object class="AdwExpanderRow" id="status_bindings_row">
+                    <property name="title">Bindings</property>
+                  </object>
+                </child>
               </object>
             </child>
             <child>
@@ -129,7 +136,7 @@
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Mount</property>
-                            <property name="icon-name">user-trash-symbolic</property>
+                            <property name="icon-name">archive-down-minimlistic-svgrepo-com</property>
                           </object>
                         </child>
                         <signal name="clicked" handler="action_button_spawn_clicked"/>
@@ -140,7 +147,7 @@
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Unmount</property>
-                            <property name="icon-name">user-trash-symbolic</property>
+                            <property name="icon-name">archive-up-minimlistic-svgrepo-com</property>
                           </object>
                         </child>
                         <signal name="clicked" handler="action_button_unspawn_clicked"/>
@@ -151,9 +158,10 @@
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Chroot</property>
-                            <property name="icon-name">user-trash-symbolic</property>
+                            <property name="icon-name">cursor-square-svgrepo-com</property>
                           </object>
                         </child>
+                        <signal name="clicked" handler="action_button_chroot_clicked"/>
                       </object>
                     </child>
                     <child>
@@ -161,9 +169,10 @@
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Update</property>
-                            <property name="icon-name">user-trash-symbolic</property>
+                            <property name="icon-name">clock-circle-svgrepo-com-symbolic</property>
                           </object>
                         </child>
+                        <signal name="clicked" handler="action_button_update_clicked"/>
                       </object>
                     </child>
                     <child>
@@ -174,9 +183,10 @@
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Delete</property>
-                            <property name="icon-name">user-trash-symbolic</property>
+                            <property name="icon-name">trash-bin-trash-svgrepo-com</property>
                           </object>
                         </child>
+                        <signal name="clicked" handler="action_button_delete_clicked"/>
                       </object>
                     </child>
                   </object>

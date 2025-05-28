@@ -55,6 +55,7 @@ class Toolset(Serializable):
         # Current spawn settings:
         self.store_changes: bool = False
         self.bind_options: list[str] | None = None # Binding options prepared in current spawn for bwrap command.
+        self.current_bindings: list[BindMount] | None = None
         self.additional_bindings: list[BindMount] | None = None
         self.hot_fixes: list[HotFix] | None = None
         self.work_dir: str | None = None
@@ -225,7 +226,7 @@ class Toolset(Serializable):
                     return overlay_mount_path
 
                 # Bind files and directories specified in bindings inside fake_root:
-                for binding in bindings:
+                for binding in bindings[:]:
                     resolved_host_path = ( # Used to check if exists through current runtime env (works with flatpak env)
                         None if binding.host_path is None else
                         runtime_env.resolve_path_for_host_access(binding.host_path) if binding.resolve_host_path else binding.host_path
@@ -239,6 +240,7 @@ class Toolset(Serializable):
                         # Skip not existing bindings with host_path set:
                         else:
                             print(f"Path {resolved_host_path} not found. Skipping binding.")
+                            bindings.remove(binding)
                             continue # or raise an error if that's preferred
 
                     # Empty writable dirs:
@@ -285,6 +287,7 @@ class Toolset(Serializable):
 
             self.work_dir = work_dir
             self.hot_fixes = hot_fixes
+            self.current_bindings = bindings
             self.additional_bindings = additional_bindings
             self.store_changes = store_changes
             self.bind_options = bind_options
@@ -313,6 +316,7 @@ class Toolset(Serializable):
                 self.squashfs_binding_dir = None
                 self.work_dir = None
                 self.hot_fixes = None
+                self.current_bindings = None
                 self.additional_bindings = None
                 self.store_changes = False
                 self.bind_options = None
@@ -410,17 +414,21 @@ class Toolset(Serializable):
         package_root = Path(self.toolset_root()) / "var" / "db" / "pkg"
         if not package_root.is_dir():
             self.metadata.setdefault(app.package, {}).pop("version", None)
+            self.metadata.setdefault(app.package, {})["patched"] = False
             return
         try:
             category, pkg_name = app.package.split("/", 1)
         except ValueError:
             self.metadata.setdefault(app.package, {}).pop("version", None)
+            self.metadata.setdefault(app.package, {})["patched"] = False
             return
+        # Version check
         category_path = package_root / category
         if not category_path.is_dir():
+            print(f"Category path not found: {category_path}")
             self.metadata.setdefault(app.package, {}).pop("version", None)
+            self.metadata.setdefault(app.package, {})["patched"] = False
             return
-        # Regex pattern to extract version from directory name
         package_regex = re.compile(
             rf"^{re.escape(pkg_name)}-(\d+(?:\.\d+)*(_(?:alpha|beta|pre|rc|p)\d*)?(-r\d+)?)$"
         )
@@ -431,10 +439,19 @@ class Toolset(Serializable):
                 if match:
                     version_value = match.group(1)
                     break
+        # Patch check
+        patch_dir = Path(self.toolset_root()) / "etc" / "portage" / "patches" / category / pkg_name
+        patched = False
+        if patch_dir.is_dir():
+            for patch_file in patch_dir.rglob("*.patch"):
+                if patch_file.is_file():
+                    patched = True
+                    break
         if version_value:
             self.metadata.setdefault(app.package, {})["version"] = version_value
         else:
             self.metadata.setdefault(app.package, {}).pop("version", None)
+        self.metadata.setdefault(app.package, {})["patched"] = patched
 
     def _perform_app_additional_checks(self, app: ToolsetApplication):
         if app.toolset_additional_analysis:
