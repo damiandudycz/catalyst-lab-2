@@ -294,7 +294,7 @@ class ToolsetCreateView(Gtk.Box):
         file_dialog.set_title("Select a .patch file")
         filters = create_filter_list()
         file_dialog.set_filters(filters)
-        file_dialog.open(self._window, None, on_file_open_response)
+        file_dialog.open(getattr(self, '_window', None) or self.get_root(), None, on_file_open_response)
 
     def _update_dependencies(self):
         for app, row in self.tools_rows.items():

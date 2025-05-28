@@ -101,7 +101,7 @@ class SnapshotCreateView(Gtk.Box):
         file_dialog.set_title("Select a .sqfs file")
         filters = create_filter_list()
         file_dialog.set_filters(filters)
-        file_dialog.open(self._window, None, on_file_open_response)
+        file_dialog.open(getattr(self, '_window', None) or self.get_root(), None, on_file_open_response)
 
     @Gtk.Template.Callback()
     def on_back_pressed(self, _):
