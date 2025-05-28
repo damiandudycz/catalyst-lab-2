@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, uuid, shutil, tempfile, threading, stat, time, subprocess, requests
+import os, uuid, shutil, tempfile, threading, stat, time, subprocess, requests, re
 import tarfile, re, random, string
 from gi.repository import Gtk, GLib, Adw
 from typing import final, ClassVar, Dict, Any
@@ -387,10 +387,12 @@ class Toolset(Serializable):
         return self.metadata.get(app.package, {}).get("version")
 
     def analyze(self) -> bool:
+        print(f"Analyze {self.toolset_root()}")
         """Performs various sanity checks on toolset and stores gathered results."""
         """Returns true if all checks succeeded, even if version is not found."""
         checks_succeded = True
         for app in ToolsetApplication.ALL:
+            print(f"App: {app.name}")
             try:
                 self._perform_app_installed_version_check(app=app)
             except Exception as e:
@@ -405,51 +407,34 @@ class Toolset(Serializable):
         return checks_succeded
 
     def _perform_app_installed_version_check(self, app: ToolsetApplication):
-        """Checks the version of package installed in toolset."""
-        """Stores the value in toolset metadata."""
-        """If app is not found, stores none for this app in toolset metadata."""
-        """If version check fails, throws an exception."""
-        version_value = None
-        version_response_status = ServerResponseStatusCode.OK
-        done_event = threading.Event()
-        def completion_handler(response: ServerResponse):
-            nonlocal version_response_status
-            version_response_status = response.code
-            done_event.set()
-        def output_handler(output_line: str):
-            nonlocal version_value
-            def is_valid_package_version(version: str) -> bool:
-                gentoo_version_regex = re.compile(
-                    r"""^
-                    \d+(\.\d+)*                  # version number: 1, 1.2, 1.2.3, etc.
-                    (_(alpha|beta|pre|rc|p)\d*)? # optional suffix: _alpha, _beta2, _p20230520, etc.
-                    (-r\d+)?                     # optional revision: -r1
-                    $""",
-                    re.VERBOSE
-                )
-                return bool(gentoo_version_regex.match(version))
-            if output_line and is_valid_package_version(output_line):
-                version_value = output_line
-        server_call = self.run_command(
-            command=(
-                f"match=$(ls -d /var/db/pkg/{app.package}-* 2>/dev/null | head -n1); "
-                f"if [[ -n \"$match\" ]]; then basename \"$match\" | sed -E \"s/^$(basename \"{app.package}\")-//\"; fi"
-            ),
-            handler=output_handler,
-            completion_handler=completion_handler
+        package_root = Path(self.toolset_root()) / "var" / "db" / "pkg"
+        if not package_root.is_dir():
+            self.metadata.setdefault(app.package, {}).pop("version", None)
+            return
+        try:
+            category, pkg_name = app.package.split("/", 1)
+        except ValueError:
+            self.metadata.setdefault(app.package, {}).pop("version", None)
+            return
+        category_path = package_root / category
+        if not category_path.is_dir():
+            self.metadata.setdefault(app.package, {}).pop("version", None)
+            return
+        # Regex pattern to extract version from directory name
+        package_regex = re.compile(
+            rf"^{re.escape(pkg_name)}-(\d+(?:\.\d+)*(_(?:alpha|beta|pre|rc|p)\d*)?(-r\d+)?)$"
         )
-        server_call.thread.join()
-        done_event.wait()
-
-        if version_response_status != ServerResponseStatusCode.OK:
-            if app.package in self.metadata:
-                self.metadata[app.package].pop("version", None)
-            raise RuntimeError(f"Failed to get package version. App: {app.package}, Code: {version_response_status.name}")
-        if version_value is not None:
+        version_value = None
+        for entry in category_path.iterdir():
+            if entry.is_dir():
+                match = package_regex.match(entry.name)
+                if match:
+                    version_value = match.group(1)
+                    break
+        if version_value:
             self.metadata.setdefault(app.package, {})["version"] = version_value
         else:
-            if app.package in self.metadata:
-                self.metadata[app.package].pop("version", None)
+            self.metadata.setdefault(app.package, {}).pop("version", None)
 
     def _perform_app_additional_checks(self, app: ToolsetApplication):
         if app.toolset_additional_analysis:

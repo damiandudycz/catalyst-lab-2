@@ -143,6 +143,7 @@
                             <property name="icon-name">user-trash-symbolic</property>
                           </object>
                         </child>
+                        <signal name="clicked" handler="action_button_unspawn_clicked"/>
                       </object>
                     </child>
                     <child>

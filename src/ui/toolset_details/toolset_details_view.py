@@ -94,3 +94,10 @@ class ToolsetDetailsView(Gtk.Box):
                 self.toolset.spawn()
                 self.toolset.release()
         RootHelperClient.shared().authorize_and_run(callback=spawn)
+
+    @Gtk.Template.Callback()
+    def action_button_unspawn_clicked(self, sender):
+        self.toolset.reserve()
+        self.toolset.analyze()
+        self.toolset.release()
+
