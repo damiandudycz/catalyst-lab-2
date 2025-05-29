@@ -92,6 +92,16 @@
                           </object>
                         </child>
                         <child>
+                          <object class="GtkLabel" id="tag_store_changes">
+                            <property name="label">Writable</property>
+                            <style>
+                              <class name="tag-label"/>
+                              <class name="caption-heading"/>
+                              <class name="warning"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
                           <object class="GtkLabel" id="tag_in_use">
                             <property name="label">In use</property>
                             <style>

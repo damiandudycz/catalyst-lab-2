@@ -23,6 +23,7 @@ class ToolsetDetailsView(Gtk.Box):
     status_state_row = Gtk.Template.Child()
     status_bindings_row = Gtk.Template.Child()
     tag_free = Gtk.Template.Child()
+    tag_store_changes = Gtk.Template.Child()
     tag_spawned = Gtk.Template.Child()
     tag_in_use = Gtk.Template.Child()
     tag_is_reserved = Gtk.Template.Child()
@@ -92,6 +93,7 @@ class ToolsetDetailsView(Gtk.Box):
 
     def setup_status(self, _ = None):
         self.tag_free.set_visible(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
+        self.tag_store_changes.set_visible(self.toolset.spawned and self.toolset.store_changes)
         self.tag_is_reserved.set_visible(self.toolset.is_reserved)
         self.tag_in_use.set_visible(self.toolset.in_use)
         self.tag_spawned.set_visible(self.toolset.spawned)
@@ -113,7 +115,8 @@ class ToolsetDetailsView(Gtk.Box):
         if self.toolset.current_bindings:
             for binding in self.toolset.current_bindings:
                 row = Adw.ActionRow(title=binding.mount_path)
-                source_str = f"(Toolset){binding.toolset_path}" if binding.toolset_path else f"(Host){binding.host_path}" if binding.host_path else "(Temp)"
+                access_str = "RW" if binding.store_changes else "RO"
+                source_str = f"(Toolset){binding.toolset_path} ({access_str})" if binding.toolset_path else f"(Host){binding.host_path} ({access_str})" if binding.host_path else "(Temp)"
                 source_label = Gtk.Label(label=source_str)
                 source_label.get_style_context().add_class("dimmed")
                 row.add_suffix(source_label)

@@ -15,16 +15,17 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [x] Instead of manually registering AppSections, create a decorator that will take all section details and register a class.
 - [ ] In builds store logs - catalyst log, and links to detected bugs
 - [ ] In bugs allow linking to bugzilla issues
-- [ ] bwrap: Unknown option --overlay-src in Fedora
+- [x] bwrap: Unknown option --overlay-src in Fedora
 - [ ] Create system checks for host required components - bwrap (including capabilities / version), pkexec etc
 
 ### Toolsets.
 - [x] Block environment calls on single env to one command at a time.
 - [x] Create a class for spawning toolset env mountings. This class can keep the spawn mounted and accept next commands to execute. This way we don’t need to spawn new toolset mountings for every call. This class can contain code to spawn, clean, call commands and more. This could also be done in Toolset class itself.
 - [ ] Make it possible to save toolset env calls in files and load by name. These files can contain both - command to execute and Binding configurations. Also add escaping to passed commands, so that we can still use things like “, ‘ in these commands with bwrap calls.
-- [ ] Mark as not used after server call is terminated / fails
+- [x] Mark as not used after server call is terminated / fails
 - [ ] Add view with output from all steps combined.
-- [ ] SquashFS support - pack new toolset into squashfs, load on demand from squashfs
+- [x] SquashFS support - pack new toolset into squashfs, load on demand from squashfs
+- [ ] Combine hidden dependencies with first emerge that needs them. Make sure the dependency is always installed first. Dont show dependency in the installer view as step.
 
 ### RootHelperClient.
 - [x] Add structure that collects multiple root calls and keeps root opened while it’s not marked as finished. New calls should be possible to add to these groups live and executed one by one. This can be added to root_function decorator so that it can accept a group to add call to or create and return new one if not provided, but these decorators still need to also return ServerCall itself. These groups should accept also normal functions as user, to create long flow for some larger task.
@@ -40,7 +41,7 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] Add timeout for decoding and send decoded as event
 - [ ] Combine handlers into one that also adds Pipe argument
 - [x] For pipes decoding/encoding use simpler format <PipeID>:<Message>
-- [ ] Allow receiving calls longer than 4096
+- [x] Allow receiving calls longer than 4096
 - [x] Job.process doesn't seem to be initiated. Need to check
-- [ ] CANCEL_JOB sends a term signal, but stall server process doesn't react to it. Other processes might have similar issue, need to check that
+- [x] CANCEL_JOB sends a term signal, but stall server process doesn't react to it. Other processes might have similar issue, need to check that
 

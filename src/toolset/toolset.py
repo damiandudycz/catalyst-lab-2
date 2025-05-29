@@ -306,6 +306,9 @@ class Toolset(Serializable):
             try:
                 if self.squashfs_binding_dir and self.squashfs_file: # Only umount if both are set, because if only squashfs_binding_dir is, it means it's beining configured for the first time.
                     umount_squashfs(mount_point=self.squashfs_binding_dir)
+                if self.store_changes and self.squashfs_file:
+                    # TODO:
+                    print("Needs to write changes back to squashfs")
                 if self.work_dir:
                     delete_temp_workdir(path=self.work_dir)
             except Exception as e:
