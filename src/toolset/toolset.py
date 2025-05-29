@@ -126,8 +126,10 @@ class Toolset(Serializable):
             # Prepare /tmp directories and bind_options
             runtime_env = RuntimeEnv.current()
 
-            if self.squashfs_file and store_changes:
-                raise RuntimeError("Mounting SquashFS toolsets is currently not supported.")
+            # TODO: When mounting sqfs as RW, we need to create another overlay fs or extract it first.
+            # Also remember to clean both in unspawn
+            #if self.squashfs_file and store_changes:
+            #    raise RuntimeError("Mounting SquashFS toolsets is currently not supported.")
 
             # Create squashfs mounting if needed.
             if self.squashfs_file:

@@ -21,10 +21,11 @@ class ToolsetUpdate(MultiStageProcess):
     """Handles the toolset update lifecycle. Also supports changing app selection, versions and patches."""
     def __init__(self, toolset: Toolset):
         self.toolset = toolset
-        self._process_selected_apps()
+#        self._process_selected_apps()
         super().__init__(title="Toolset update")
 
     def setup_stages(self):
+        self.stages.append(ToolsetUpdateStepPrepareToolset(toolset=self.toolset, multistage_process=self))
         #self.stages.append(ToolsetInstallationStepDownload(url=self.stage_url, multistage_process=self))
         #self.stages.append(ToolsetInstallationStepVerify(multistage_process=self))
         #self.stages.append(ToolsetInstallationStepCompress(multistage_process=self))
@@ -114,6 +115,48 @@ class ToolsetUpdateStep(MultiStageProcessStage):
             return False
 
 # Steps implementations:
+
+class ToolsetUpdateStepPrepareToolset(ToolsetUpdateStep):
+    def __init__(self, toolset: Toolset, multistage_process: MultiStageProcess):
+        super().__init__(name="Prepare toolset", description="Spawns toolset with write access", multistage_process=multistage_process)
+        self.toolset = toolset
+        self.unspawn = False
+        self.release = False
+    def start(self):
+        super().start()
+        try:
+            if self.toolset.in_use:
+                raise RuntimeError("Toolset is currently in use")
+            def toolset_has_required_binding() -> bool:
+                if not self.toolset.spawned:
+                    return False
+                if self.toolset.additional_bindings:
+                    # There should be no additional bindings set
+                    return False
+                return True
+            if not self.toolset.reserve():
+                raise RuntimeError("Failed to reserve toolset")
+            self.release = True
+            if self.toolset.spawned and (not toolset_has_required_binding() or not self.toolset.store_changes):
+                # Toolset needs to be respawned to get correct bindings and write access
+                self.toolset.unspawn()
+            if not self.toolset.spawned:
+                self.toolset.spawn(store_changes=True)
+                self.unspawn = True
+            else:
+                self.unspawn = False
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            print(f"Error during toolset preparation: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
+#        if self.unspawn:
+#            self.toolset.unspawn()
+        if self.release:
+            self.toolset.release()
+        return True
 
 class ToolsetUpdateStepUpdatePortage(ToolsetUpdateStep):
     def __init__(self, multistage_process: MultiStageProcess):

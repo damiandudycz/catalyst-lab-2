@@ -8,6 +8,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .repository import Repository
+from .toolset_update import ToolsetUpdate
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_details/toolset_details_view.ui')
 class ToolsetDetailsView(Gtk.Box):
@@ -150,7 +151,13 @@ class ToolsetDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_update_clicked(self, sender):
-        pass
+        def update(authorization_keeper: AuthorizationKeeper):
+            if authorization_keeper:
+                #self.toolset.reserve()
+                #self.toolset.unspawn()
+                ToolsetUpdate(toolset=self.toolset).start(authorization_keeper=authorization_keeper)
+                #self.toolset.release()
+        RootHelperClient.shared().authorize_and_run(callback=update)
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
