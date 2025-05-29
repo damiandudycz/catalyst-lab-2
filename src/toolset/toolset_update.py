@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, threading, shutil
+import os, threading, shutil, re, time
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
     MultiStageProcessState, MultiStageProcessStageState,
@@ -11,7 +11,7 @@ from .root_function import root_function
 from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from datetime import datetime
-from .helper_functions import mount_squashfs, umount_squashfs
+from .helper_functions import mount_squashfs, umount_squashfs, create_squashfs
 
 # ------------------------------------------------------------------------------
 # Toolset update.
@@ -24,16 +24,26 @@ class ToolsetUpdate(MultiStageProcess):
 #        self._process_selected_apps()
         super().__init__(title="Toolset update")
 
+    def start(self, authorization_keeper: AuthorizationKeeper | None = None):
+        if not self.toolset.reserve():
+            raise RuntimeError("Failed to reserve toolset")
+        super().start(authorization_keeper=authorization_keeper)
+
     def setup_stages(self):
         self.stages.append(ToolsetUpdateStepPrepareToolset(toolset=self.toolset, multistage_process=self))
-        #self.stages.append(ToolsetInstallationStepDownload(url=self.stage_url, multistage_process=self))
-        #self.stages.append(ToolsetInstallationStepVerify(multistage_process=self))
-        #self.stages.append(ToolsetInstallationStepCompress(multistage_process=self))
+        self.stages.append(ToolsetUpdateStepRefreshEnv(toolset=self.toolset, multistage_process=self))
+        self.stages.append(ToolsetUpdateStepUpdatePortage(toolset=self.toolset, multistage_process=self))
+        self.stages.append(ToolsetUpdateStepUpdatePackages(toolset=self.toolset, multistage_process=self))
+        self.stages.append(ToolsetUpdateStepVerify(toolset=self.toolset, multistage_process=self))
+        self.stages.append(ToolsetUpdateStepStepCompress(toolset=self.toolset, multistage_process=self))
         super().setup_stages()
 
     def complete_process(self, success: bool):
+        print(f"___ Completed: {success}")
         if success:
+            self.toolset.metadata['date_updated'] = int(time.time())
             Repository.TOOLSETS.save()
+        self.toolset.release()
 
     def _process_selected_apps(self):
         """Manage auto_select dependencies."""
@@ -58,25 +68,13 @@ class ToolsetUpdate(MultiStageProcess):
             process_app_selection(app_selection=app_selection)
         self.apps_selection = sorted_entries
 
-    def name(self) -> str:
-        file_path = Path(self.stage_url.path)
-        suffixes = file_path.suffixes
-        filename_without_extension = file_path.stem
-        for suffix in suffixes:
-            filename_without_extension = filename_without_extension.rstrip(suffix)
-        parts = filename_without_extension.split("-")
-        if len(parts) > 2:
-            middle_parts = parts[1:-1]
-            installer_name = " ".join(middle_parts)
-        else:
-            installer_name = filename_without_extension
-        return installer_name
-
 # ------------------------------------------------------------------------------
 # Update process steps.
 # ------------------------------------------------------------------------------
 
 class ToolsetUpdateStep(MultiStageProcessStage):
+    """Base step for toolset update steps. Contains additional code for calling toolset commands."""
+    """Stages that use run_command_in_toolset must have self.toolset available."""
     def start(self):
         self.server_call = None
         super().start()
@@ -100,7 +98,7 @@ class ToolsetUpdateStep(MultiStageProcessStage):
                 progress = progress_handler(output_line)
                 if progress is not None:
                     self._update_progress(progress)
-            self.server_call = self.multistage_process.tmp_toolset.run_command(
+            self.server_call = self.toolset.run_command(
                 command=command,
                 handler=output_handler if progress_handler is not None else None,
                 completion_handler=completion_handler
@@ -121,7 +119,6 @@ class ToolsetUpdateStepPrepareToolset(ToolsetUpdateStep):
         super().__init__(name="Prepare toolset", description="Spawns toolset with write access", multistage_process=multistage_process)
         self.toolset = toolset
         self.unspawn = False
-        self.release = False
     def start(self):
         super().start()
         try:
@@ -134,9 +131,6 @@ class ToolsetUpdateStepPrepareToolset(ToolsetUpdateStep):
                     # There should be no additional bindings set
                     return False
                 return True
-            if not self.toolset.reserve():
-                raise RuntimeError("Failed to reserve toolset")
-            self.release = True
             if self.toolset.spawned and (not toolset_has_required_binding() or not self.toolset.store_changes):
                 # Toolset needs to be respawned to get correct bindings and write access
                 self.toolset.unspawn()
@@ -152,15 +146,38 @@ class ToolsetUpdateStepPrepareToolset(ToolsetUpdateStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-#        if self.unspawn:
-#            self.toolset.unspawn()
-        if self.release:
-            self.toolset.release()
+        if self.unspawn:
+            self.toolset.unspawn(rebuild_squashfs_if_needed=False) # New squashFS is build as another step in update process.
         return True
 
+class ToolsetUpdateStepRefreshEnv(ToolsetUpdateStep):
+    def __init__(self, toolset: Toolset, multistage_process: MultiStageProcess):
+        super().__init__(name="Refresh environment", description="Refreshes binpkg signing keys", multistage_process=multistage_process)
+        self.toolset = toolset
+    def start(self):
+        super().start()
+        try:
+            # Prepare environment
+            commands = [
+                "env-update && source /etc/profile",
+                "getuto"
+            ]
+            for i, command in enumerate(commands):
+                if self._cancel_event.is_set():
+                    return
+                result = self.run_command_in_toolset(command=command)
+                self._update_progress(i / len(commands))
+                if not result:
+                    raise RuntimeError(f"Command {command} failed")
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            print(f"Error during keys refresh: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
+
 class ToolsetUpdateStepUpdatePortage(ToolsetUpdateStep):
-    def __init__(self, multistage_process: MultiStageProcess):
+    def __init__(self, toolset: Toolset, multistage_process: MultiStageProcess):
         super().__init__(name="Synchronize portage", description="Synchronizes portage tree", multistage_process=multistage_process)
+        self.toolset = toolset
     def start(self):
         super().start()
         try:
@@ -182,10 +199,10 @@ class ToolsetUpdateStepUpdatePortage(ToolsetUpdateStep):
             print(f"Error synchronizing Portage: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
-class ToolsetUpdateStepInstallApp(ToolsetUpdateStep):
-    def __init__(self, app_selection: ToolsetApplicationSelection, multistage_process: MultiStageProcess):
-        super().__init__(name=f"Install {app_selection.app.name}", description=f"Emerges {app_selection.app.package} package", multistage_process=multistage_process)
-        self.app_selection = app_selection
+class ToolsetUpdateStepUpdatePackages(ToolsetUpdateStep):
+    def __init__(self, toolset: Toolset, multistage_process: MultiStageProcess):
+        super().__init__(name="Update packages", description="Updates installed packages", multistage_process=multistage_process)
+        self.toolset = toolset
     def start(self):
         super().start()
         try:
@@ -195,64 +212,44 @@ class ToolsetUpdateStepInstallApp(ToolsetUpdateStep):
                 if match:
                     n, m = map(int, match.groups())
                     return n / m
-            if self.app_selection.version.config:
-                for config in self.app_selection.version.config:
-                    if self._cancel_event.is_set():
-                        return
-                    insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app_selection.app.name, toolset_root=self.multistage_process.tmp_toolset.toolset_root())
-            # Store selected version id in toolset metadata
-            self.multistage_process.tmp_toolset.metadata[self.app_selection.app.package] = { "version_id" : str(self.app_selection.version.id) }
-            for patch_file in self.app_selection.patches:
-                file_input_stream = patch_file.read()
-                file_info = file_input_stream.query_info("standard::size", None)
-                file_size = file_info.get_size()
-                patch_content = file_input_stream.read_bytes(file_size, None).get_data().decode()
-                insert_portage_patch(patch_content=patch_content, patch_filename=patch_file.get_basename(), app_package=self.app_selection.app.package, toolset_root=self.multistage_process.tmp_toolset.toolset_root())
-            flags = "--getbinpkg --deep --update --changed-use" if self.multistage_process.allow_binpkgs else "--deep --update --changed-use"
-            result = self.run_command_in_toolset(command=f"emerge {flags} {self.app_selection.app.package}", progress_handler=progress_handler)
+            allow_binpkgs = self.toolset.metadata.get('allow_binpkgs', False)
+            flags = "--getbinpkg --changed-use --update --deep --with-bdeps=y" if allow_binpkgs else "--changed-use --update --deep --with-bdeps=y"
+            result = self.run_command_in_toolset(command=f"emerge {flags} @system @world @live-rebuild", progress_handler=progress_handler)
             self.complete(MultiStageProcessStageState.COMPLETED if result else MultiStageProcessStageState.FAILED)
         except Exception as e:
-            print(f"Error during app installation: {e}")
+            print(f"Error updating packages: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
-class ToolsetUpdateStepStepVerify(ToolsetUpdateStep):
-    def __init__(self, multistage_process: MultiStageProcess):
+class ToolsetUpdateStepVerify(ToolsetUpdateStep):
+    def __init__(self, toolset: Toolset, multistage_process: MultiStageProcess):
         super().__init__(name="Analyze toolset", description="Collects information about toolset", multistage_process=multistage_process)
+        self.toolset = toolset
     def start(self):
         super().start()
         try:
-            analysis_result = self.multistage_process.tmp_toolset.analyze()
-            self.multistage_process.tmp_toolset.unspawn()
+            analysis_result = self.toolset.analyze()
             self.complete(MultiStageProcessStageState.COMPLETED if analysis_result else MultiStageProcessStageState.FAILED)
         except Exception as e:
             print(f"Error during toolset verification: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
 class ToolsetUpdateStepStepCompress(ToolsetUpdateStep):
-    def __init__(self, multistage_process: MultiStageProcess):
+    def __init__(self, toolset: Toolset, multistage_process: MultiStageProcess):
         super().__init__(name="Compress", description="Compresses toolset into .squashfs file", multistage_process=multistage_process)
+        self.toolset = toolset
     def start(self):
         super().start()
         try:
-            self.multistage_process.tmp_toolset_squashfs_dir = create_temp_workdir(prefix="gentoo_toolset_squashfs_")
-            self.multistage_process.tmp_toolset_squashfs_file = os.path.join(self.multistage_process.tmp_toolset_squashfs_dir, "toolset.squashfs")
-            self.multistage_process.squashfs_process = create_squashfs(source_directory=self.multistage_process.tmp_stage_extract_dir, output_file=self.multistage_process.tmp_toolset_squashfs_file)
-            for line in self.multistage_process.squashfs_process.stdout:
+            toolset_tmp_squashfs_path = self.toolset.squashfs_file + "_tmp"
+            self.squashfs_process = create_squashfs(source_directory=self.toolset.toolset_root(), output_file=toolset_tmp_squashfs_path)
+            for line in self.squashfs_process.stdout:
                 line = line.strip()
                 if line.isdigit():
                     percent = int(line)
                     self._update_progress(percent / 100.0)
-            self.multistage_process.squashfs_process.wait()
-            self.multistage_process.squashfs_process = None
-            def sanitize_filename_linux(name: str) -> str:
-                return name.replace('/', '_').replace('\0', '_')
-            random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
-            file_name = f"{sanitize_filename_linux(self.multistage_process.name())}_{random_id}.squashfs"
-            file_path = os.path.join(os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.toolsets_location)), file_name)
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            shutil.move(self.multistage_process.tmp_toolset_squashfs_file, file_path)
-            self.multistage_process.final_toolset = self.multistage_process.tmp_toolset
-            self.multistage_process.final_toolset.squashfs_file = file_path
+            self.squashfs_process.wait()
+            self.squashfs_process = None
+            shutil.move(toolset_tmp_squashfs_path, self.toolset.squashfs_file)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during toolset compression: {e}")
@@ -260,18 +257,14 @@ class ToolsetUpdateStepStepCompress(ToolsetUpdateStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        if self.state != MultiStageProcessStageState.COMPLETED and self.multistage_process.tmp_toolset_squashfs_file and os.path.isfile(self.multistage_process.tmp_toolset_squashfs_file):
-            os.remove(self.multistage_process.tmp_toolset_squashfs_file)
-        if self.multistage_process.tmp_toolset_squashfs_dir:
-            delete_temp_workdir(path=self.multistage_process.tmp_toolset_squashfs_dir)
     def cancel(self):
         super().cancel()
-        proc = self.multistage_process.squashfs_process
+        proc = self.squashfs_process
         if proc and proc.poll() is None:
             proc.terminate()
             proc.wait(timeout=3)
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
-        self.multistage_process.squashfs_process = None
+        self.squashfs_process = None
 

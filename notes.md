@@ -26,6 +26,9 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] Add view with output from all steps combined.
 - [x] SquashFS support - pack new toolset into squashfs, load on demand from squashfs
 - [ ] Combine hidden dependencies with first emerge that needs them. Make sure the dependency is always installed first. Dont show dependency in the installer view as step.
+- [ ] Consider scanning and displaying all installed apps from world file
+- [ ] Pass toolset to steps instead of reaching to process (In installer, updater, etc)
+- [ ] After installation, created squashfs doesn't contain changes applied, like installed apps. Probably due to some bwrap mappings.
 
 ### RootHelperClient.
 - [x] Add structure that collects multiple root calls and keeps root opened while it’s not marked as finished. New calls should be possible to add to these groups live and executed one by one. This can be added to root_function decorator so that it can accept a group to add call to or create and return new one if not provided, but these decorators still need to also return ServerCall itself. These groups should accept also normal functions as user, to create long flow for some larger task.
@@ -45,3 +48,8 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [x] Job.process doesn't seem to be initiated. Need to check
 - [x] CANCEL_JOB sends a term signal, but stall server process doesn't react to it. Other processes might have similar issue, need to check that
 
+## App requirements
+ - BWrap >= 0.11
+ - pkexec
+ - overlayfs (kernel)
+ - squashfs-tools

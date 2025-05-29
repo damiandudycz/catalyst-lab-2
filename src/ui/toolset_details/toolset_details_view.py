@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .repository import Repository
 from .toolset_update import ToolsetUpdate
+from .multistage_process_execution_view import MultistageProcessExecutionView
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_details/toolset_details_view.ui')
 class ToolsetDetailsView(Gtk.Box):
@@ -46,6 +47,7 @@ class ToolsetDetailsView(Gtk.Box):
         toolset.event_bus.subscribe(ToolsetEvents.SPAWNED_CHANGED, self.load_bindings)
         toolset.event_bus.subscribe(ToolsetEvents.SPAWNED_CHANGED, self.setup_status)
         toolset.event_bus.subscribe(ToolsetEvents.IN_USE_CHANGED, self.setup_status)
+        toolset.event_bus.subscribe(ToolsetEvents.IS_RESERVED_CHANGED, self.setup_toolset_details)
         toolset.event_bus.subscribe(ToolsetEvents.IS_RESERVED_CHANGED, self.setup_status)
         self.connect("map", self.on_map)
 
@@ -60,7 +62,7 @@ class ToolsetDetailsView(Gtk.Box):
         # Disables toolset_name_row auto focus on start
         self.get_root().set_focus(None)
 
-    def setup_toolset_details(self):
+    def setup_toolset_details(self, _ = None):
         self.toolset_name_row.set_text(self.toolset.name)
         self.status_file_row.set_subtitle(self.toolset.squashfs_file)
         self.status_size_row.set_subtitle(get_file_size_string(self.toolset.squashfs_file) or "unknown")
@@ -131,18 +133,27 @@ class ToolsetDetailsView(Gtk.Box):
     def action_button_spawn_clicked(self, sender):
         def spawn(authorization_keeper: AuthorizationKeeper):
             if authorization_keeper:
-                self.toolset.reserve()
-                self.toolset.spawn()
-                self.toolset.release()
+                try:
+                    self.toolset.reserve()
+                    self.toolset.spawn()
+                    self.toolset.analyze()
+                except Exception as e:
+                    print(e)
+                finally:
+                    self.toolset.release()
         RootHelperClient.shared().authorize_and_run(callback=spawn)
 
     @Gtk.Template.Callback()
     def action_button_unspawn_clicked(self, sender):
         def unspawn(authorization_keeper: AuthorizationKeeper):
             if authorization_keeper:
-                self.toolset.reserve()
-                self.toolset.unspawn()
-                self.toolset.release()
+                try:
+                    self.toolset.reserve()
+                    self.toolset.unspawn()
+                except Exception as e:
+                    print(e)
+                finally:
+                    self.toolset.release()
         RootHelperClient.shared().authorize_and_run(callback=unspawn)
 
     @Gtk.Template.Callback()
@@ -153,10 +164,11 @@ class ToolsetDetailsView(Gtk.Box):
     def action_button_update_clicked(self, sender):
         def update(authorization_keeper: AuthorizationKeeper):
             if authorization_keeper:
-                #self.toolset.reserve()
-                #self.toolset.unspawn()
-                ToolsetUpdate(toolset=self.toolset).start(authorization_keeper=authorization_keeper)
-                #self.toolset.release()
+                update = ToolsetUpdate(toolset=self.toolset)
+                update.start(authorization_keeper=authorization_keeper)
+                update_view = MultistageProcessExecutionView()
+                update_view.set_multistage_process(multistage_process=update)
+                self.content_navigation_view.push_view(update_view, title="Updating toolset")
         RootHelperClient.shared().authorize_and_run(callback=update)
 
     @Gtk.Template.Callback()

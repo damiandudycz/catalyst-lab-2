@@ -21,7 +21,7 @@ from .root_helper_client import AuthorizationKeeper
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection, ToolsetApplicationInstall
-from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs
+from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs, create_squashfs
 
 class ToolsetEvents(Enum):
     SPAWNED_CHANGED = auto()
@@ -38,7 +38,8 @@ class Toolset(Serializable):
         self.env = env
         self.name = name
         self.metadata = metadata
-        self.squashfs_binding_dir = squashfs_binding_dir # Directory used as toolset_root, mounted when settin up or spawning.
+        self.squashfs_binding_dir = squashfs_binding_dir # Directory used as toolset_root, mounted when setting up or spawning.
+        self.squashfs_binding_dir_overlay = None # Only set if spawned RW from squashfs
         match env:
             case ToolsetEnv.SYSTEM:
                 pass
@@ -110,7 +111,7 @@ class Toolset(Serializable):
             case ToolsetEnv.SYSTEM:
                 return "/"
             case ToolsetEnv.EXTERNAL:
-                return self.squashfs_binding_dir
+                return os.path.join(self.squashfs_binding_dir_overlay, "merged") if self.squashfs_binding_dir_overlay else self.squashfs_binding_dir
 
     # --------------------------------------------------------------------------
     # Spawning cycle:
@@ -126,14 +127,10 @@ class Toolset(Serializable):
             # Prepare /tmp directories and bind_options
             runtime_env = RuntimeEnv.current()
 
-            # TODO: When mounting sqfs as RW, we need to create another overlay fs or extract it first.
-            # Also remember to clean both in unspawn
-            #if self.squashfs_file and store_changes:
-            #    raise RuntimeError("Mounting SquashFS toolsets is currently not supported.")
-
             # Create squashfs mounting if needed.
             if self.squashfs_file:
                 self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.squashfs_file)
+            self.squashfs_binding_dir_overlay = mount_overlayfs(source_dir=self.squashfs_binding_dir) if store_changes else None
 
             resolved_toolset_root = str(Path(self.toolset_root()).resolve())
             if resolved_toolset_root == "/" and store_changes:
@@ -296,7 +293,7 @@ class Toolset(Serializable):
             self.spawned = True
             self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
 
-    def unspawn(self):
+    def unspawn(self, rebuild_squashfs_if_needed: bool = True):
         """Clear tmp folders."""
         with self.access_lock:
             if not self.is_reserved:
@@ -306,11 +303,16 @@ class Toolset(Serializable):
             if self.in_use:
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             try:
-                if self.squashfs_binding_dir and self.squashfs_file: # Only umount if both are set, because if only squashfs_binding_dir is, it means it's beining configured for the first time.
+                if rebuild_squashfs_if_needed and self.store_changes and self.squashfs_file and self.squashfs_binding_dir_overlay:
+                    create_squashfs_process = create_squashfs(source_directory=self.toolset_root(), output_file=self.squashfs_file+"_tmp")
+                    create_squashfs_process.wait()
+                    if os.path.isfile(self.squashfs_file+"_tmp"):
+                        shutil.move(self.squashfs_file+"_tmp", self.squashfs_file)
+                if self.squashfs_binding_dir_overlay:
+                    unmount_overlayfs(tmp_dir=self.squashfs_binding_dir_overlay)
+                # Only umount if both are set. This is to make installation work correctly, where squashfs is first generated.
+                if self.squashfs_binding_dir and self.squashfs_file:
                     umount_squashfs(mount_point=self.squashfs_binding_dir)
-                if self.store_changes and self.squashfs_file:
-                    # TODO:
-                    print("Needs to write changes back to squashfs")
                 if self.work_dir:
                     delete_temp_workdir(path=self.work_dir)
             except Exception as e:
@@ -319,6 +321,7 @@ class Toolset(Serializable):
             finally:
                 # Reset spawned settings:
                 self.squashfs_binding_dir = None
+                self.squashfs_binding_dir_overlay = None
                 self.work_dir = None
                 self.hot_fixes = None
                 self.current_bindings = None
@@ -523,4 +526,32 @@ class ToolsetEnv(Enum):
                 return RuntimeEnv.is_running_in_gentoo_host()
             case ToolsetEnv.EXTERNAL:
                 return True
+
+@root_function
+def mount_overlayfs(source_dir: str) -> str:
+    import os, subprocess
+    tmp_dir = create_temp_workdir(prefix="gentoo_toolset_spawn_overlay_")
+
+    upperdir = os.path.join(tmp_dir, "upper")
+    workdir = os.path.join(tmp_dir, "work")
+    mountpoint = os.path.join(tmp_dir, "merged")
+    os.makedirs(upperdir, exist_ok=True)
+    os.makedirs(workdir, exist_ok=True)
+    os.makedirs(mountpoint, exist_ok=True)
+    # Construct and run the mount command
+    mount_cmd = [
+        'mount', '-t', 'overlay', 'overlay',
+        '-o', f'lowerdir={source_dir},upperdir={upperdir},workdir={workdir}',
+        mountpoint
+    ]
+    subprocess.run(mount_cmd, check=True)
+    print(f"OverlayFS mounted at: {mountpoint}")
+    return tmp_dir
+
+@root_function
+def unmount_overlayfs(tmp_dir: str):
+    import shutil, subprocess
+    mountpoint = os.path.join(tmp_dir, "merged")
+    subprocess.run(['umount', mountpoint], check=True)
+    shutil.rmtree(tmp_dir)
 

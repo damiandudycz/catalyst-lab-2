@@ -57,6 +57,7 @@ class MultistageProcessExecutionView(Gtk.Box):
         self.emit("finish_process")
         self.multistage_process.clean_from_started_processes()
 
+
     def _update_progress(self, progress):
         self.progress_bar.set_fraction(self.multistage_process.progress)
 

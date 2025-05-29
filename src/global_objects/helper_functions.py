@@ -76,6 +76,7 @@ def extract(tarball: str, directory: str):
             print(f"PROGRESS: {progress}", flush=True)
 
 def create_squashfs(source_directory: str, output_file: str) -> subprocess.Popen:
+    """Note: Runs as separate process, so need to wait for it to finish when called"""
     command = ['mksquashfs', source_directory, output_file, '-quiet', '-percentage']
     process = subprocess.Popen(
         command,
