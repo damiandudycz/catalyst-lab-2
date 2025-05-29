@@ -48,6 +48,7 @@ catalystlab_sources = [
   'toolset/toolset.py',
   'toolset/toolset_application.py',
   'toolset/toolset_installation.py',
+  'toolset/toolset_update.py',
   'toolset/toolset_env_builder.py',
   'snapshot_manager/snapshot_manager.py',
   'snapshot_manager/snapshot_installation.py',

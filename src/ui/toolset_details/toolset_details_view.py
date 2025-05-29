@@ -32,6 +32,7 @@ class ToolsetDetailsView(Gtk.Box):
     action_button_chroot = Gtk.Template.Child()
     action_button_update = Gtk.Template.Child()
     action_button_delete = Gtk.Template.Child()
+    applications_settings_allow_binpkgs_row = Gtk.Template.Child()
 
     def __init__(self, toolset: Toolset, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -65,6 +66,7 @@ class ToolsetDetailsView(Gtk.Box):
         source = self.toolset.metadata.get('source')
         timestamp_date_created = self.toolset.metadata.get('date_created')
         timestamp_date_updated = self.toolset.metadata.get('date_updated')
+        allow_binpkgs = self.toolset.metadata.get('allow_binpkgs', False)
         date_created = datetime.fromtimestamp(timestamp_date_created) if isinstance(timestamp_date_created, int) else None
         date_updated = datetime.fromtimestamp(timestamp_date_updated) if isinstance(timestamp_date_updated, int) else None
         source_url = urlparse(source).path if source else None
@@ -73,6 +75,7 @@ class ToolsetDetailsView(Gtk.Box):
         self.toolset_date_created_row.set_subtitle(date_created.strftime("%Y-%d-%m %H:%M") if date_created else "unknown")
         self.toolset_date_updated_row.set_subtitle(date_updated.strftime("%Y-%d-%m %H:%M") if date_created else "unknown")
         self.toolset_source_row.set_subtitle(filename or "unknown")
+        self.applications_settings_allow_binpkgs_row.set_subtitle("Yes" if allow_binpkgs else "No")
 
     def load_applications(self):
         if hasattr(self, "_apps_rows"):

@@ -1,54 +1,38 @@
 from __future__ import annotations
-import os, uuid, shutil, tempfile, threading, re, random, string, requests, time
-from gi.repository import GLib
-from typing import final, Callable
-from pathlib import Path
-from enum import Enum, auto
-from abc import ABC, abstractmethod
-from .root_function import root_function
-from .runtime_env import RuntimeEnv
-from .architecture import Architecture, Emulation
-from .root_helper_server import ServerResponse, ServerResponseStatusCode
-from .root_helper_client import AuthorizationKeeper
-from .hotfix_patching import apply_patch_and_store_for_isolated_system
-from .repository import Repository
-from .toolset_application import ToolsetApplication
-from .helper_functions import create_temp_workdir, delete_temp_workdir, create_squashfs, extract
-
+import os, threading, shutil
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
     MultiStageProcessState, MultiStageProcessStageState,
     MultiStageProcessEvent, MultiStageProcessStageEvent,
 )
+from .toolset import Toolset, BindMount
+from .snapshot_manager import SnapshotManager, Snapshot
+from .root_function import root_function
+from .repository import Repository
+from .root_helper_server import ServerResponse, ServerResponseStatusCode
+from datetime import datetime
+from .helper_functions import mount_squashfs, umount_squashfs
 
 # ------------------------------------------------------------------------------
-# Toolset installation.
+# Toolset update.
 # ------------------------------------------------------------------------------
 
-class ToolsetInstallation(MultiStageProcess):
-    """Handles the full toolset installation lifecycle."""
-    def __init__(self, stage_url: ParseResult, allow_binpkgs: bool, apps_selection: list[ToolsetApplicationSelection]):
-        self.stage_url = stage_url
-        self.allow_binpkgs = allow_binpkgs
-        self.apps_selection = apps_selection
+class ToolsetUpdate(MultiStageProcess):
+    """Handles the toolset update lifecycle. Also supports changing app selection, versions and patches."""
+    def __init__(self, toolset: Toolset):
+        self.toolset = toolset
         self._process_selected_apps()
-        super().__init__(title="Toolset installation")
+        super().__init__(title="Toolset update")
 
     def setup_stages(self):
-        self.stages.append(ToolsetInstallationStepDownload(url=self.stage_url, multistage_process=self))
-        self.stages.append(ToolsetInstallationStepExtract(multistage_process=self))
-        self.stages.append(ToolsetInstallationStepSpawn(multistage_process=self))
-        if self.apps_selection:
-            self.stages.append(ToolsetInstallationStepUpdatePortage(multistage_process=self))
-        for app_selection in self.apps_selection:
-            self.stages.append(ToolsetInstallationStepInstallApp(app_selection=app_selection, multistage_process=self))
-        self.stages.append(ToolsetInstallationStepVerify(multistage_process=self))
-        self.stages.append(ToolsetInstallationStepCompress(multistage_process=self))
+        #self.stages.append(ToolsetInstallationStepDownload(url=self.stage_url, multistage_process=self))
+        #self.stages.append(ToolsetInstallationStepVerify(multistage_process=self))
+        #self.stages.append(ToolsetInstallationStepCompress(multistage_process=self))
         super().setup_stages()
 
     def complete_process(self, success: bool):
         if success:
-            Repository.TOOLSETS.value.append(self.final_toolset)
+            Repository.TOOLSETS.save()
 
     def _process_selected_apps(self):
         """Manage auto_select dependencies."""
@@ -88,10 +72,10 @@ class ToolsetInstallation(MultiStageProcess):
         return installer_name
 
 # ------------------------------------------------------------------------------
-# Installation process steps.
+# Update process steps.
 # ------------------------------------------------------------------------------
 
-class ToolsetInstallationStep(MultiStageProcessStage):
+class ToolsetUpdateStep(MultiStageProcessStage):
     def start(self):
         self.server_call = None
         super().start()
@@ -131,131 +115,7 @@ class ToolsetInstallationStep(MultiStageProcessStage):
 
 # Steps implementations:
 
-class ToolsetInstallationStepDownload(ToolsetInstallationStep):
-    def __init__(self, url: ParseResult, multistage_process: MultiStageProcess):
-        super().__init__(name="Download stage tarball", description="Downloading Gentoo stage tarball", multistage_process=multistage_process)
-        self.url = url
-    def start(self):
-        super().start()
-        try:
-            response = requests.get(self.url.geturl(), stream=True, timeout=10)
-            response.raise_for_status()
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded = 0
-            chunk_size = 1024 * 1024 # 1MB chunks.
-            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-                self.multistage_process.tmp_stage_file = tmp_file
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if self._cancel_event.is_set():
-                        return
-                    if chunk:
-                        tmp_file.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size:
-                            progress = downloaded / total_size
-                            self._update_progress(progress)
-            self.complete(MultiStageProcessStageState.COMPLETED)
-        except Exception as e:
-            print(f"Error during download: {e}")
-            self.complete(MultiStageProcessStageState.FAILED)
-    def cleanup(self) -> bool:
-        if not super().cleanup():
-            return False
-        if hasattr(self.multistage_process, 'tmp_stage_file'):
-            try:
-                self.multistage_process.tmp_stage_file.close()
-                os.remove(self.multistage_process.tmp_stage_file.name)
-            except Exception as e:
-                print(f"Failed to delete temp file: {e}")
-        return True
-
-class ToolsetInstallationStepExtract(ToolsetInstallationStep):
-    def __init__(self, multistage_process: MultiStageProcess):
-        super().__init__(name="Extract stage tarball", description="Extracts Gentoo stage tarball to work directory", multistage_process=multistage_process)
-    def start(self):
-        super().start()
-        try:
-            self.multistage_process.tmp_stage_extract_dir = create_temp_workdir(prefix="gentoo_stage_extract_")
-            return_value = False
-            done_event = threading.Event()
-            def completion_handler(response: ServerResponse):
-                nonlocal return_value
-                return_value = response.code == ServerResponseStatusCode.OK
-                done_event.set()
-            def output_handler(output_line: str):
-                if output_line.startswith("PROGRESS: "):
-                    try:
-                        progress_str = output_line[len("PROGRESS: "):]
-                        progress_value = float(progress_str)
-                        self._update_progress(progress_value)
-                    except ValueError:
-                        pass
-            self.server_call = extract._async_raw(
-                handler=output_handler,
-                completion_handler=completion_handler,
-                tarball=self.multistage_process.tmp_stage_file.name,
-                directory=self.multistage_process.tmp_stage_extract_dir
-            )
-            self.server_call.thread.join()
-            done_event.wait()
-            if not self._cancel_event.is_set():
-                self.server_call = None
-                self.complete(MultiStageProcessStageState.COMPLETED if return_value else MultiStageProcessStageState.FAILED)
-        except Exception as e:
-            print(f"Error extracting stage tarball: {e}")
-            self.complete(MultiStageProcessStageState.FAILED)
-    def cleanup(self) -> bool:
-        if not super().cleanup():
-            return False
-        if hasattr(self.multistage_process, "tmp_stage_extract_dir") and self.multistage_process.tmp_stage_extract_dir:
-            delete_temp_workdir(self.multistage_process.tmp_stage_extract_dir)
-            return True
-        return False
-
-class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
-    def __init__(self, multistage_process: MultiStageProcess):
-        super().__init__(name="Create environment", description="Prepares Gentoo environment for work", multistage_process=multistage_process)
-    def start(self):
-        from .toolset import Toolset, ToolsetEnv
-        super().start()
-        try:
-            toolset_name = self.multistage_process.name()
-            self.multistage_process.tmp_toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_binding_dir=self.multistage_process.tmp_stage_extract_dir)
-            now = int(time.time())
-            self.multistage_process.tmp_toolset.metadata['date_created'] = now
-            self.multistage_process.tmp_toolset.metadata['date_updated'] = now
-            self.multistage_process.tmp_toolset.metadata['source'] = self.multistage_process.stage_url.geturl()
-            self.multistage_process.tmp_toolset.metadata['allow_binpkgs'] = self.multistage_process.allow_binpkgs
-            if not self.multistage_process.tmp_toolset.reserve():
-                raise RuntimeError("Failed to reserve toolset")
-            self.multistage_process.tmp_toolset.spawn(store_changes=True)
-            commands = [
-                "env-update && source /etc/profile",
-                "getuto"
-            ]
-            for i, command in enumerate(commands):
-                if self._cancel_event.is_set():
-                    return
-                result = self.run_command_in_toolset(command=command)
-                self._update_progress((i + 1) / len(commands))
-                if not result:
-                    self.complete(MultiStageProcessStageState.FAILED)
-                    return
-            self.complete(MultiStageProcessStageState.COMPLETED)
-        except Exception as e:
-            print(f"Error spawning temporary toolset: {e}")
-            self.complete(MultiStageProcessStageState.FAILED)
-    def cleanup(self) -> bool:
-        if not super().cleanup():
-            return False
-        if getattr(self.multistage_process, 'tmp_toolset', None):
-            if self.multistage_process.tmp_toolset.spawned:
-                self.multistage_process.tmp_toolset.unspawn()
-            self.multistage_process.tmp_toolset.release()
-            return True
-        return False
-
-class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
+class ToolsetUpdateStepUpdatePortage(ToolsetUpdateStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Synchronize portage", description="Synchronizes portage tree", multistage_process=multistage_process)
     def start(self):
@@ -279,7 +139,7 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
             print(f"Error synchronizing Portage: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
-class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
+class ToolsetUpdateStepInstallApp(ToolsetUpdateStep):
     def __init__(self, app_selection: ToolsetApplicationSelection, multistage_process: MultiStageProcess):
         super().__init__(name=f"Install {app_selection.app.name}", description=f"Emerges {app_selection.app.package} package", multistage_process=multistage_process)
         self.app_selection = app_selection
@@ -312,7 +172,7 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
             print(f"Error during app installation: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
-class ToolsetInstallationStepVerify(ToolsetInstallationStep):
+class ToolsetUpdateStepStepVerify(ToolsetUpdateStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Analyze toolset", description="Collects information about toolset", multistage_process=multistage_process)
     def start(self):
@@ -325,7 +185,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
             print(f"Error during toolset verification: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
-class ToolsetInstallationStepCompress(ToolsetInstallationStep):
+class ToolsetUpdateStepStepCompress(ToolsetUpdateStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Compress", description="Compresses toolset into .squashfs file", multistage_process=multistage_process)
     def start(self):
@@ -371,22 +231,4 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
                 proc.kill()
                 proc.wait()
         self.multistage_process.squashfs_process = None
-
-@root_function
-def insert_portage_config(config_dir: str, config_entries: list[str], app_name: str, toolset_root: str):
-    portage_dir = os.path.join(toolset_root, "etc", "portage", config_dir)
-    os.makedirs(portage_dir, exist_ok=True)
-    filename = app_name.replace("/", "_")
-    config_file_path = os.path.join(portage_dir, filename)
-    with open(config_file_path, "w") as f:
-        for line in config_entries:
-            f.write(line + "\n")
-
-@root_function
-def insert_portage_patch(patch_content: str, patch_filename: str, app_package: str, toolset_root: str):
-    portage_dir = os.path.join(toolset_root, "etc", "portage", "patches", app_package)
-    os.makedirs(portage_dir, exist_ok=True)
-    patch_file_path = os.path.join(portage_dir, patch_filename)
-    with open(patch_file_path, "w", encoding="utf-8") as f:
-        f.write(patch_content)
 

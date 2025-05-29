@@ -208,6 +208,15 @@
                 <property name="title">Applications</property>
               </object>
             </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="applications_settings_group">
+                <child>
+                  <object class="AdwActionRow" id="applications_settings_allow_binpkgs_row">
+                    <property name="title">Allow binary packages</property>
+                  </object>
+                </child>
+              </object>
+            </child>
           </object>
         </child>
       </object>
