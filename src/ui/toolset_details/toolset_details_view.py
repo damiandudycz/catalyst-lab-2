@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .repository import Repository
 from .toolset_update import ToolsetUpdate
-from .multistage_process import MultiStageProcess, MultiStageProcessEvent
+from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
 from .multistage_process_execution_view import MultistageProcessExecutionView
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_details/toolset_details_view.ui')
@@ -25,10 +25,12 @@ class ToolsetDetailsView(Gtk.Box):
     toolset_source_row = Gtk.Template.Child()
     status_state_row = Gtk.Template.Child()
     status_bindings_row = Gtk.Template.Child()
+    status_update_row = Gtk.Template.Child()
     tag_free = Gtk.Template.Child()
     tag_store_changes = Gtk.Template.Child()
     tag_spawned = Gtk.Template.Child()
     tag_in_use = Gtk.Template.Child()
+    tag_updating = Gtk.Template.Child()
     tag_is_reserved = Gtk.Template.Child()
     action_button_spawn = Gtk.Template.Child()
     action_button_unspawn = Gtk.Template.Child()
@@ -49,6 +51,7 @@ class ToolsetDetailsView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
 
         self.apps_changed = False
+        self.update_in_progress: ToolsetUpdate | None = None
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: False for app in ToolsetApplication.ALL}
         self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
         self.tools_selection_patches: Dict[ToolsetApplication, list[Gio.File | str]] = {app: [] for app in ToolsetApplication.ALL}
@@ -101,6 +104,7 @@ class ToolsetDetailsView(Gtk.Box):
         self.tag_is_reserved.set_visible(self.toolset.is_reserved)
         self.tag_in_use.set_visible(self.toolset.in_use)
         self.tag_spawned.set_visible(self.toolset.spawned)
+        self.tag_updating.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS)
         self.action_button_spawn.set_sensitive(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
         self.action_button_spawn.set_visible(not self.toolset.spawned)
         self.action_button_unspawn.set_sensitive(self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
@@ -109,6 +113,7 @@ class ToolsetDetailsView(Gtk.Box):
         self.action_button_update.set_sensitive(not self.toolset.in_use and not self.toolset.is_reserved)
         self.action_button_delete.set_sensitive(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
         self.status_bindings_row.set_visible(self.toolset.spawned)
+        self.status_update_row.set_visible(self.update_in_progress)
         self.applications_button_apply.set_sensitive(not self.toolset.in_use and not self.toolset.is_reserved and not self.update_in_progress)
         self.applications_actions_container.set_visible(self.apps_changed)
 
@@ -133,12 +138,29 @@ class ToolsetDetailsView(Gtk.Box):
     def load_update_state(self, started_processes: list[ToolsetUpdate] | None = None):
         if started_processes is None:
             started_processes = MultiStageProcess.get_started_processes_by_class(ToolsetUpdate)
-        self.update_in_progress = any(process.toolset == self.toolset for process in started_processes)
+        if self.update_in_progress is not None :
+            self.update_in_progress.event_bus.unsubscribe(MultiStageProcessEvent.STATE_CHANGED, self)
+        self.update_in_progress = next((process for process in started_processes if process.toolset == self.toolset), None)
+        if self.update_in_progress:
+            self.update_in_progress.event_bus.subscribe(
+                MultiStageProcessEvent.STATE_CHANGED,
+                self.toolsets_update_process_state_changed,
+                self
+            )
 
     def toolsets_updates_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
         if issubclass(process_class, ToolsetUpdate):
             self.load_update_state(started_processes=started_processes)
             self.setup_status()
+
+    def toolsets_update_process_state_changed(self, state: MultiStageProcessState):
+        self.setup_status()
+
+    @Gtk.Template.Callback()
+    def status_update_row_clicked(self, sender):
+        update_view = MultistageProcessExecutionView()
+        update_view.set_multistage_process(multistage_process=self.update_in_progress)
+        self.content_navigation_view.push_view(update_view, title="Updating toolset")
 
     # --------------------------------------------------------------------------
     # Changing toolset name:

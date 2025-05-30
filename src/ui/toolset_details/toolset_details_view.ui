@@ -112,6 +112,16 @@
                           </object>
                         </child>
                         <child>
+                          <object class="GtkLabel" id="tag_updating">
+                            <property name="label">Updating</property>
+                            <style>
+                              <class name="tag-label"/>
+                              <class name="caption-heading"/>
+                              <class name="accent"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
                           <object class="GtkLabel" id="tag_store_changes">
                             <property name="label">Writable</property>
                             <style>
@@ -121,6 +131,18 @@
                             </style>
                           </object>
                         </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="status_update_row">
+                    <property name="title">Update</property>
+                    <property name="activatable">True</property>
+                    <signal name="activated" handler="status_update_row_clicked"/>
+                    <child type="suffix">
+                      <object class="GtkImage">
+                        <property name="icon-name">go-next-symbolic</property>
                       </object>
                     </child>
                   </object>
@@ -239,7 +261,7 @@
                         <style>
                           <class name="suggested-action"/>
                         </style>
-                        <!-- <signal name="clicked" handler="applications_button_apply_clicked"/> -->
+                        <signal name="clicked" handler="applications_button_apply_clicked"/>
                       </object>
                     </child>
                   </object>

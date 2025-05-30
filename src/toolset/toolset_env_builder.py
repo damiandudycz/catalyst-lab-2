@@ -2,6 +2,7 @@ import requests
 from typing import Callable
 from urllib.parse import urlparse, urljoin, ParseResult
 from .architecture import Architecture
+from concurrent.futures import ThreadPoolExecutor
 
 class ToolsetEnvBuilder:
 
