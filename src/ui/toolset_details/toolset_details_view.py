@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .repository import Repository
 from .toolset_update import ToolsetUpdate
+from .multistage_process import MultiStageProcess, MultiStageProcessEvent
 from .multistage_process_execution_view import MultistageProcessExecutionView
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_details/toolset_details_view.ui')
@@ -50,11 +51,12 @@ class ToolsetDetailsView(Gtk.Box):
         self.apps_changed = False
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: False for app in ToolsetApplication.ALL}
         self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
-        self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile | str]] = {app: [] for app in ToolsetApplication.ALL}
+        self.tools_selection_patches: Dict[ToolsetApplication, list[Gio.File | str]] = {app: [] for app in ToolsetApplication.ALL}
 
         self.setup_toolset_details()
         self.load_initial_applications_selection()
         self.load_applications()
+        self.load_update_state()
         self.load_bindings()
         self.setup_status()
         self.connect("map", self.on_map)
@@ -64,10 +66,14 @@ class ToolsetDetailsView(Gtk.Box):
         toolset.event_bus.subscribe(ToolsetEvents.IN_USE_CHANGED, self.setup_status)
         toolset.event_bus.subscribe(ToolsetEvents.IS_RESERVED_CHANGED, self.setup_toolset_details)
         toolset.event_bus.subscribe(ToolsetEvents.IS_RESERVED_CHANGED, self.setup_status)
+        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.toolsets_updates_updated)
 
     def on_map(self, widget):
         # Disables toolset_name_row auto focus on start
         self.get_root().set_focus(None)
+
+    # --------------------------------------------------------------------------
+    # Main details:
 
     def setup_toolset_details(self, _ = None):
         """Displays main details of the toolset."""
@@ -103,7 +109,7 @@ class ToolsetDetailsView(Gtk.Box):
         self.action_button_update.set_sensitive(not self.toolset.in_use and not self.toolset.is_reserved)
         self.action_button_delete.set_sensitive(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
         self.status_bindings_row.set_visible(self.toolset.spawned)
-        self.applications_button_apply.set_sensitive(not self.toolset.in_use and not self.toolset.is_reserved)
+        self.applications_button_apply.set_sensitive(not self.toolset.in_use and not self.toolset.is_reserved and not self.update_in_progress)
         self.applications_actions_container.set_visible(self.apps_changed)
 
     def load_bindings(self, _ = None):
@@ -124,6 +130,16 @@ class ToolsetDetailsView(Gtk.Box):
                 self.status_bindings_row.add_row(row)
                 self._binding_rows.append(row)
 
+    def load_update_state(self, started_processes: list[ToolsetUpdate] | None = None):
+        if started_processes is None:
+            started_processes = MultiStageProcess.get_started_processes_by_class(ToolsetUpdate)
+        self.update_in_progress = any(process.toolset == self.toolset for process in started_processes)
+
+    def toolsets_updates_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
+        if issubclass(process_class, ToolsetUpdate):
+            self.load_update_state(started_processes=started_processes)
+            self.setup_status()
+
     # --------------------------------------------------------------------------
     # Changing toolset name:
 
@@ -138,17 +154,14 @@ class ToolsetDetailsView(Gtk.Box):
 
     def load_initial_applications_selection(self):
         """Load initial selection of apps details."""
-        self.apps_selection = dict[ToolsetApplication, ToolsetApplicationSelection]()
+        self.tools_selection.clear()
+        self.tools_selection_versions.clear()
+        self.tools_selection_patches.clear()
         for app in ToolsetApplication.ALL:
             app_install = self.toolset.get_app_install(app=app)
-            app_selection = ToolsetApplicationSelection(
-                app=app,
-                version=app_install.variant if app_install else app.versions[0],
-                selected=True if app_install else False,
-                patches=app_install.patches if app_install else []
-            )
-            self.apps_selection[app] = app_selection
-        print(self.apps_selection)
+            self.tools_selection[app] = app_install is not None
+            self.tools_selection_versions[app] = app_install.variant if app_install else app.versions[0]
+            self.tools_selection_patches[app] = app_install.patches[:] if app_install else []
 
     def load_applications(self):
         """Prepares applications rows."""
@@ -159,17 +172,16 @@ class ToolsetDetailsView(Gtk.Box):
         for app in ToolsetApplication.ALL:
             if app.auto_select:
                 continue
-            app_selection = self.apps_selection[app]
-            app_install = self.toolset.get_app_install(app=app)
-            if app_install:
+            if self.tools_selection[app]:
+                app_install = self.toolset.get_app_install(app=app)
                 subtitle = f"{app_install.variant.name}: {app_install.version}, Patched" if app_install.patches else f"{app_install.variant.name}: {app_install.version}"
             else:
                 subtitle = "Not installed"
             row = Adw.ExpanderRow(title=app.name, subtitle=subtitle)
-            row.set_enable_expansion(app_selection.selected)
+            row.set_enable_expansion(self.tools_selection[app])
 
             check_button = Gtk.CheckButton()
-            check_button.set_active(app_install)
+            check_button.set_active(self.tools_selection[app])
             check_button.connect("toggled", self._on_tool_selected, app, row)
             row.check_button = check_button
             row.add_prefix(check_button)
@@ -185,8 +197,7 @@ class ToolsetDetailsView(Gtk.Box):
                 toggle_group.add(toggle)
             def on_toggle_clicked(group, pspec, app, row):
                 index = group.get_active()
-            #    self.tools_selection_versions[app] = app.versions[index]
-            #    self._update_application_info_label(row=row, app=app)
+                self.tools_selection_versions[app] = app.versions[index]
                 self.apps_changed = True
                 self.setup_status()
             toggle_group.connect("notify::active", on_toggle_clicked, app, row)
@@ -206,23 +217,24 @@ class ToolsetDetailsView(Gtk.Box):
             wrapper.append(add_patch_button)
             versions_row.add_suffix(wrapper)
 
-            for patch_filename in app_selection.patches:
-                self.add_patch_file_row(app, row, patch_filename)
+            for patch_filename in self.tools_selection_patches[app]:
+                self._add_patch_file_row(app, row, patch_filename)
 
             self.applications_group.add(row)
             self._apps_rows.append(row)
 
-    def _add_patch_file_row(self, app, app_row, file):
-#        self.tools_selection_patches[app].append(file)
-        patch_row = Adw.ActionRow(title=file, subtitle="Patch file", icon_name="copy-svgrepo-com-symbolic")
-#        patch_row = Adw.ActionRow(title=file.get_basename(), subtitle="Patch file", icon_name="copy-svgrepo-com-symbolic")
+    def _add_patch_file_row(self, app, app_row, file: Gio.File | str):
+        if isinstance(file, Gio.File):
+            patch_row = Adw.ActionRow(title=file.get_basename(), subtitle="Patch file", icon_name="copy-svgrepo-com-symbolic")
+        else:
+            patch_row = Adw.ActionRow(title=file, subtitle="Patch file", icon_name="copy-svgrepo-com-symbolic")
         remove_button = Gtk.Button()
         remove_button_content = Adw.ButtonContent(label="Remove", icon_name="error-box-svgrepo-com-symbolic")
         remove_button.set_child(remove_button_content)
         remove_button.get_style_context().add_class("destructive-action")
         remove_button.get_style_context().add_class("flat")
         remove_button.get_style_context().add_class("caption")
-        remove_button.connect("clicked", self.delete_patch_pressed, app, app_row, patch_row)
+        remove_button.connect("clicked", self._delete_patch_pressed, app, app_row, patch_row)
         remove_button.file = file
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
         wrapper.append(remove_button)
@@ -231,16 +243,15 @@ class ToolsetDetailsView(Gtk.Box):
 
     def _on_tool_selected(self, button: Gtk.CheckButton, app: ToolsetApplication, row: Adw.ExpanderRow):
         """Application checkbox toggled."""
-        self.apps_selection[app].selected = button.get_active()
-        row.set_enable_expansion(self.apps_selection[app].selected)
+        self.tools_selection[app] = button.get_active()
+        row.set_enable_expansion(self.tools_selection[app])
         row.set_expanded(False)
         self.apps_changed = True
         self.setup_status()
 
     def _delete_patch_pressed(self, remove_button, app, app_row, patch_row):
-#        self.tools_selection_patches[app].remove(remove_button.file)
+        self.tools_selection_patches[app].remove(remove_button.file)
         app_row.remove(patch_row)
-#        self._update_application_info_label(row=app_row, app=app)
         self.apps_changed = True
         self.setup_status()
 
@@ -248,7 +259,7 @@ class ToolsetDetailsView(Gtk.Box):
         def on_file_open_response(file_dialog, result):
             try:
                 file = file_dialog.open_finish(result)
-#                self.tools_selection_patches[app].append(file)
+                self.tools_selection_patches[app].append(file)
                 patch_row = Adw.ActionRow(title=file.get_basename(), subtitle="Patch file", icon_name="copy-svgrepo-com-symbolic")
                 remove_button = Gtk.Button()
                 remove_button_content = Adw.ButtonContent(label="Remove", icon_name="error-box-svgrepo-com-symbolic")
@@ -262,7 +273,6 @@ class ToolsetDetailsView(Gtk.Box):
                 wrapper.append(remove_button)
                 patch_row.add_suffix(wrapper)
                 app_row.add_row(patch_row)
-#                self._update_application_info_label(row=app_row, app=app)
                 self.apps_changed = True
                 self.setup_status()
             except GLib.Error as e:
@@ -282,7 +292,40 @@ class ToolsetDetailsView(Gtk.Box):
         file_dialog.set_filters(filters)
         file_dialog.open(getattr(self, '_window', None) or self.get_root(), None, on_file_open_response)
 
+    @Gtk.Template.Callback()
+    def on_allow_binpkgs_toggled(self, checkbox):
+        self.toolset.metadata['allow_binpkgs'] = checkbox.get_active()
+        Repository.TOOLSETS.save()
+
+    @Gtk.Template.Callback()
+    def applications_button_cancel_clicked(self, sender):
+        self.load_initial_applications_selection()
+        self.load_applications()
+        self.apps_changed = False
+        self.setup_status()
+
+    @Gtk.Template.Callback()
+    def applications_button_apply_clicked(self, sender):
+        def update(authorization_keeper: AuthorizationKeeper):
+            if authorization_keeper:
+                apps_selection = [
+                    ToolsetApplicationSelection(
+                        app=app,
+                        version=self.tools_selection_versions[app],
+                        selected=self.tools_selection[app],
+                        patches=self.tools_selection_patches[app]
+                    )
+                    for app, _ in self.tools_selection.items()
+                ]
+                update = ToolsetUpdate(toolset=self.toolset, apps_selection=apps_selection)
+                update.start(authorization_keeper=authorization_keeper)
+                update_view = MultistageProcessExecutionView()
+                update_view.set_multistage_process(multistage_process=update)
+                self.content_navigation_view.push_view(update_view, title="Updating toolset")
+        RootHelperClient.shared().authorize_and_run(callback=update)
+
     # --------------------------------------------------------------------------
+    # Toolset actions:
 
     @Gtk.Template.Callback()
     def action_button_spawn_clicked(self, sender):
@@ -334,16 +377,4 @@ class ToolsetDetailsView(Gtk.Box):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
             self.content_navigation_view.pop()
-
-    @Gtk.Template.Callback()
-    def on_allow_binpkgs_toggled(self, checkbox):
-        self.toolset.metadata['allow_binpkgs'] = checkbox.get_active()
-        Repository.TOOLSETS.save()
-
-    @Gtk.Template.Callback()
-    def applications_button_cancel_clicked(self, sender):
-        self.load_initial_applications_selection()
-        self.load_applications()
-        self.apps_changed = False
-        self.setup_status()
 

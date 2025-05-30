@@ -462,8 +462,7 @@ class Toolset(Serializable):
         patch_files = []
         if patch_dir.is_dir():
             for patch_file in patch_dir.rglob("*.patch"):
-                if patch_file.is_file():
-                    patch_files.append(str(patch_file.name))
+                patch_files.append(str(patch_file.name))
         # Set version and patch metadata
         if version_value:
             self.metadata.setdefault(app.package, {})["version"] = version_value
