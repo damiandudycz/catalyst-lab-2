@@ -295,8 +295,6 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
                     if self._cancel_event.is_set():
                         return
                     insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app_selection.app.name, toolset_root=self.multistage_process.toolset.toolset_root())
-            # Store selected version id in toolset metadata
-            self.multistage_process.toolset.metadata[self.app_selection.app.package] = { "version_id" : str(self.app_selection.version.id) }
             for patch_file in self.app_selection.patches:
                 file_input_stream = patch_file.read()
                 file_info = file_input_stream.query_info("standard::size", None)
