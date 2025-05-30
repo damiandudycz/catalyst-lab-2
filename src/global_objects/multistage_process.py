@@ -91,9 +91,10 @@ class MultiStageProcess(ABC):
                 self.__class__,
                 MultiStageProcess.get_started_processes_by_class(self.__class__)
             )
-            self._continue_process()
         except Exception as e:
             self.cancel()
+        finally:
+            self._continue_process()
 
     def cancel(self):
         self.status = MultiStageProcessState.FAILED if self.status == MultiStageProcessState.IN_PROGRESS else MultiStageProcessState.SETUP
@@ -101,7 +102,12 @@ class MultiStageProcess(ABC):
         running_stage = next((stage for stage in self.stages if stage.state == MultiStageProcessStageState.IN_PROGRESS), None)
         if running_stage:
             running_stage.cancel()
-        self._cleanup()
+        try:
+            self._cleanup()
+        except Exception as e:
+            print(e)
+        finally:
+            self.complete_process(success=False)
 
     @abstractmethod
     def complete_process(self, success: bool):
@@ -122,14 +128,11 @@ class MultiStageProcess(ABC):
         self.event_bus.emit(MultiStageProcessEvent.PROGRESS_CHANGED, self.progress)
 
     def _cleanup(self):
-        def worker():
-            for stage in reversed(self.stages): # Cleanup in reverse order
-                stage.cleanup()
-            if self.authorization_keeper:
-                self.authorization_keeper.release()
-                self.authorization_keeper = None
-        # Run cleaning on new thread, not to block main UI
-        threading.Thread(target=worker).start()
+        for stage in reversed(self.stages): # Cleanup in reverse order
+            stage.cleanup()
+        if self.authorization_keeper:
+            self.authorization_keeper.release()
+            self.authorization_keeper = None
 
     def _continue_process(self):
         if self.status == MultiStageProcessState.COMPLETED or self.status == MultiStageProcessState.FAILED or self.status == MultiStageProcessState.SETUP:
@@ -139,22 +142,30 @@ class MultiStageProcess(ABC):
         if failed_stage:
             self.status = MultiStageProcessState.FAILED
             self.event_bus.emit(MultiStageProcessEvent.STATE_CHANGED, self.status)
-            self._cleanup()
-            self.complete_process(success=False)
+            try:
+                self._cleanup()
+            except Exception as e:
+                print(e)
+            finally:
+                self.complete_process(success=False)
         elif next_stage:
             next_step_thread = threading.Thread(target=next_stage.start)
             next_step_thread.start()
         else:
             self.status = MultiStageProcessState.COMPLETED
             self.event_bus.emit(MultiStageProcessEvent.STATE_CHANGED, self.status)
-            self._cleanup()
-            MultiStageProcess.started_processes.remove(self)
-            MultiStageProcess.event_bus.emit(
-                MultiStageProcessEvent.STARTED_PROCESSES_CHANGED,
-                self.__class__,
-                MultiStageProcess.get_started_processes_by_class(self.__class__)
-            )
-            self.complete_process(success=True)
+            try:
+                self._cleanup()
+            except Exception as e:
+                print(e)
+            finally:
+                MultiStageProcess.started_processes.remove(self)
+                MultiStageProcess.event_bus.emit(
+                    MultiStageProcessEvent.STARTED_PROCESSES_CHANGED,
+                    self.__class__,
+                    MultiStageProcess.get_started_processes_by_class(self.__class__)
+                )
+                self.complete_process(success=True)
 
     @classmethod
     def get_started_processes_by_class(cls, process_class: type[MultiStageProcess]) -> list[MultiStageProcess]:

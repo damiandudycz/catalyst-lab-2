@@ -315,10 +315,6 @@ class Toolset(Serializable):
                     umount_squashfs(mount_point=self.squashfs_binding_dir)
                 if self.work_dir:
                     delete_temp_workdir(path=self.work_dir)
-            except Exception as e:
-                print(f"Error deleting toolset work_dir: {e}")
-                raise e
-            finally:
                 # Reset spawned settings:
                 self.squashfs_binding_dir = None
                 self.squashfs_binding_dir_overlay = None
@@ -330,6 +326,9 @@ class Toolset(Serializable):
                 self.bind_options = None
                 self.spawned = False
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
+            except Exception as e:
+                print(f"Error deleting toolset work_dir: {e}")
+                raise e
 
     # --------------------------------------------------------------------------
     # Reserving:

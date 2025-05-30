@@ -19,9 +19,10 @@ from .helper_functions import mount_squashfs, umount_squashfs, create_squashfs
 
 class ToolsetUpdate(MultiStageProcess):
     """Handles the toolset update lifecycle. Also supports changing app selection, versions and patches."""
-    def __init__(self, toolset: Toolset):
+    def __init__(self, toolset: Toolset, apps_selection: list[ToolsetApplicationSelection] | None = None):
         self.toolset = toolset
-#        self._process_selected_apps()
+        self.apps_selection = apps_selection
+        self._process_selected_apps()
         super().__init__(title="Toolset update")
 
     def start(self, authorization_keeper: AuthorizationKeeper | None = None):
@@ -47,10 +48,11 @@ class ToolsetUpdate(MultiStageProcess):
 
     def _process_selected_apps(self):
         """Manage auto_select dependencies."""
+        if not self.apps_selection:
+            return
         app_selections_by_app = { app_selection.app: app_selection for app_selection in self.apps_selection }
         # Mark all dependencies as selected
         for app_selection in self.apps_selection:
-            print(f"{app_selection.app.name} : {app_selection.selected}")
             if app_selection.selected:
                 for dep in getattr(app_selection.app, "dependencies", []):
                     if dep in app_selections_by_app:

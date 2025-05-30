@@ -32,6 +32,8 @@ class ToolsetDetailsView(Gtk.Box):
     tag_in_use = Gtk.Template.Child()
     tag_updating = Gtk.Template.Child()
     tag_is_reserved = Gtk.Template.Child()
+    tag_update_succeded = Gtk.Template.Child()
+    tag_update_failed = Gtk.Template.Child()
     action_button_spawn = Gtk.Template.Child()
     action_button_unspawn = Gtk.Template.Child()
     action_button_chroot = Gtk.Template.Child()
@@ -105,6 +107,8 @@ class ToolsetDetailsView(Gtk.Box):
         self.tag_in_use.set_visible(self.toolset.in_use)
         self.tag_spawned.set_visible(self.toolset.spawned)
         self.tag_updating.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS)
+        self.tag_update_succeded.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.COMPLETED)
+        self.tag_update_failed.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.FAILED)
         self.action_button_spawn.set_sensitive(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
         self.action_button_spawn.set_visible(not self.toolset.spawned)
         self.action_button_unspawn.set_sensitive(self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
@@ -114,7 +118,17 @@ class ToolsetDetailsView(Gtk.Box):
         self.action_button_delete.set_sensitive(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
         self.status_bindings_row.set_visible(self.toolset.spawned)
         self.status_update_row.set_visible(self.update_in_progress)
-        self.applications_button_apply.set_sensitive(not self.toolset.in_use and not self.toolset.is_reserved and not self.update_in_progress)
+        self.status_update_row.set_subtitle(
+            "" if not self.update_in_progress else
+            "Update in progress" if self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS else
+            "Update completed" if self.update_in_progress.status == MultiStageProcessState.COMPLETED else
+            "Update failed" if self.update_in_progress.status == MultiStageProcessState.FAILED else
+            ""
+        )
+        self.applications_button_apply.set_sensitive(
+            not self.toolset.in_use and not self.toolset.is_reserved and
+            (not self.update_in_progress or self.update_in_progress.status == MultiStageProcessState.COMPLETED or self.update_in_progress.status == MultiStageProcessState.FAILED)
+        )
         self.applications_actions_container.set_visible(self.apps_changed)
 
     def load_bindings(self, _ = None):

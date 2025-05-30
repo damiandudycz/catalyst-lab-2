@@ -56,7 +56,6 @@ class ToolsetInstallation(MultiStageProcess):
         app_selections_by_app = { app_selection.app: app_selection for app_selection in self.apps_selection }
         # Mark all dependencies as selected
         for app_selection in self.apps_selection:
-            print(f"{app_selection.app.name} : {app_selection.selected}")
             if app_selection.selected:
                 for dep in getattr(app_selection.app, "dependencies", []):
                     if dep in app_selections_by_app:
