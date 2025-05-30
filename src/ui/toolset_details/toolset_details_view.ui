@@ -204,15 +204,61 @@
               </object>
             </child>
             <child>
-              <object class="AdwPreferencesGroup" id="applications_group">
-                <property name="title">Applications</property>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">8</property>
+                <child>
+                  <object class="AdwPreferencesGroup" id="applications_group">
+                    <property name="title">Applications</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="applications_actions_container">
+                    <property name="homogeneous">True</property>
+                    <property name="hexpand">True</property>
+                    <property name="spacing">8</property>
+                    <child>
+                      <object class="GtkButton" id="applications_button_cancel">
+                        <child>
+                          <object class="AdwButtonContent">
+                            <property name="label">Cancel changes</property>
+                            <property name="icon-name">archive-down-minimlistic-svgrepo-com</property>
+                          </object>
+                        </child>
+                        <signal name="clicked" handler="applications_button_cancel_clicked"/>
+                      </object>
+                      </child>
+                      <child>
+                      <object class="GtkButton" id="applications_button_apply">
+                        <child>
+                          <object class="AdwButtonContent">
+                            <property name="label">Apply changes</property>
+                            <property name="icon-name">archive-down-minimlistic-svgrepo-com</property>
+                          </object>
+                        </child>
+                        <style>
+                          <class name="suggested-action"/>
+                        </style>
+                        <!-- <signal name="clicked" handler="applications_button_apply_clicked"/> -->
+                      </object>
+                    </child>
+                  </object>
+                </child>
               </object>
             </child>
             <child>
               <object class="AdwPreferencesGroup" id="applications_settings_group">
                 <child>
-                  <object class="AdwActionRow" id="applications_settings_allow_binpkgs_row">
+                  <object class="AdwActionRow">
                     <property name="title">Allow binary packages</property>
+                    <property name="subtitle">Makes the installation quicker</property>
+                    <property name="activatable-widget">allow_binpkgs_checkbox</property>
+                    <child type="prefix">
+                      <object class="GtkCheckButton" id="allow_binpkgs_checkbox">
+                        <property name="valign">center</property>
+                        <signal name="toggled" handler="on_allow_binpkgs_toggled"/>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>

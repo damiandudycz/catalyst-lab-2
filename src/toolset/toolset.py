@@ -399,14 +399,14 @@ class Toolset(Serializable):
         app_metadata = self.metadata.get(app.package, {})
         if not app_metadata:
             return None
-        patched = app_metadata.get('patched', False)
+        patches = app_metadata.get('patches', [])
         version = app_metadata.get('version')
         version_id = app_metadata.get('version_id')
         if not version_id or not version:
             return None
         version_id_uuid = uuid.UUID(version_id)
         version_variant = next((version for version in app.versions if version.id == version_id_uuid), None)
-        return ToolsetApplicationInstall(version=version, variant=version_variant, patched=patched)
+        return ToolsetApplicationInstall(version=version, variant=version_variant, patches=patches)
 
     def analyze(self) -> bool:
         print(f"Analyze {self.toolset_root()}")
@@ -432,20 +432,20 @@ class Toolset(Serializable):
         package_root = Path(self.toolset_root()) / "var" / "db" / "pkg"
         if not package_root.is_dir():
             self.metadata.setdefault(app.package, {}).pop("version", None)
-            self.metadata.setdefault(app.package, {})["patched"] = False
+            self.metadata.setdefault(app.package, {}).pop("patches", None)
             return
         try:
             category, pkg_name = app.package.split("/", 1)
         except ValueError:
             self.metadata.setdefault(app.package, {}).pop("version", None)
-            self.metadata.setdefault(app.package, {})["patched"] = False
+            self.metadata.setdefault(app.package, {}).pop("patches", None)
             return
         # Version check
         category_path = package_root / category
         if not category_path.is_dir():
             print(f"Category path not found: {category_path}")
             self.metadata.setdefault(app.package, {}).pop("version", None)
-            self.metadata.setdefault(app.package, {})["patched"] = False
+            self.metadata.setdefault(app.package, {}).pop("patches", None)
             return
         package_regex = re.compile(
             rf"^{re.escape(pkg_name)}-(\d+(?:\.\d+)*(_(?:alpha|beta|pre|rc|p)\d*)?(-r\d+)?)$"
@@ -459,17 +459,17 @@ class Toolset(Serializable):
                     break
         # Patch check
         patch_dir = Path(self.toolset_root()) / "etc" / "portage" / "patches" / category / pkg_name
-        patched = False
+        patch_files = []
         if patch_dir.is_dir():
             for patch_file in patch_dir.rglob("*.patch"):
                 if patch_file.is_file():
-                    patched = True
-                    break
+                    patch_files.append(str(patch_file.name))
+        # Set version and patch metadata
         if version_value:
             self.metadata.setdefault(app.package, {})["version"] = version_value
         else:
             self.metadata.setdefault(app.package, {}).pop("version", None)
-        self.metadata.setdefault(app.package, {})["patched"] = patched
+        self.metadata.setdefault(app.package, {})["patches"] = patch_files
 
     def _perform_app_additional_checks(self, app: ToolsetApplication):
         if app.toolset_additional_analysis:

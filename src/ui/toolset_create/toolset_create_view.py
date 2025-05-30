@@ -229,10 +229,10 @@ class ToolsetCreateView(Gtk.Box):
             for version in app.versions:
                 toggle = Adw.Toggle(label=version.name)
                 toggle_group.add(toggle)
-            def on_toggle_clicked(group, pspec, app, app_row):
+            def on_toggle_clicked(group, pspec, app, row):
                 index = group.get_active()
                 self.tools_selection_versions[app] = app.versions[index]
-                self._update_application_info_label(row=app_row, app=app)
+                self._update_application_info_label(row=row, app=app)
             toggle_group.connect("notify::active", on_toggle_clicked, app, row)
 
             wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
