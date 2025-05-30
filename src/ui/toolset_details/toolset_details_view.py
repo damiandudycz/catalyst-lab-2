@@ -26,6 +26,7 @@ class ToolsetDetailsView(Gtk.Box):
     status_state_row = Gtk.Template.Child()
     status_bindings_row = Gtk.Template.Child()
     status_update_row = Gtk.Template.Child()
+    status_update_progress_label = Gtk.Template.Child()
     tag_free = Gtk.Template.Child()
     tag_store_changes = Gtk.Template.Child()
     tag_spawned = Gtk.Template.Child()
@@ -125,6 +126,7 @@ class ToolsetDetailsView(Gtk.Box):
             "Update failed" if self.update_in_progress.status == MultiStageProcessState.FAILED else
             ""
         )
+        self.status_update_progress_label.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS)
         self.applications_button_apply.set_sensitive(
             not self.toolset.in_use and not self.toolset.is_reserved and
             (not self.update_in_progress or self.update_in_progress.status == MultiStageProcessState.COMPLETED or self.update_in_progress.status == MultiStageProcessState.FAILED)
@@ -161,6 +163,12 @@ class ToolsetDetailsView(Gtk.Box):
                 self.toolsets_update_process_state_changed,
                 self
             )
+            self.status_update_progress_label.set_label(f"{int(self.update_in_progress.progress * 100)}%")
+            self.update_in_progress.event_bus.subscribe(
+                MultiStageProcessEvent.PROGRESS_CHANGED,
+                self.toolsets_update_process_progress_changed,
+                self
+            )
 
     def toolsets_updates_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
         if issubclass(process_class, ToolsetUpdate):
@@ -169,6 +177,9 @@ class ToolsetDetailsView(Gtk.Box):
 
     def toolsets_update_process_state_changed(self, state: MultiStageProcessState):
         self.setup_status()
+
+    def toolsets_update_process_progress_changed(self, progress: float):
+        self.status_update_progress_label.set_label(f"{int(progress * 100)}%")
 
     @Gtk.Template.Callback()
     def status_update_row_clicked(self, sender):
@@ -206,10 +217,10 @@ class ToolsetDetailsView(Gtk.Box):
                 self.applications_group.remove(row)
         self._apps_rows = []
         for app in ToolsetApplication.ALL:
+            app_install = self.toolset.get_app_install(app=app)
             if app.auto_select:
                 continue
             if self.tools_selection[app]:
-                app_install = self.toolset.get_app_install(app=app)
                 subtitle = f"{app_install.variant.name}: {app_install.version}, Patched" if app_install.patches else f"{app_install.variant.name}: {app_install.version}"
             else:
                 subtitle = "Not installed"
@@ -231,6 +242,11 @@ class ToolsetDetailsView(Gtk.Box):
             for version in app.versions:
                 toggle = Adw.Toggle(label=version.name)
                 toggle_group.add(toggle)
+            if app_install: # Activate selected app variant toggle
+                for i, version in enumerate(app.versions):
+                    if version == app_install.variant:
+                        toggle_group.set_active(i)
+                        break
             def on_toggle_clicked(group, pspec, app, row):
                 index = group.get_active()
                 self.tools_selection_versions[app] = app.versions[index]
@@ -353,12 +369,18 @@ class ToolsetDetailsView(Gtk.Box):
                     )
                     for app, _ in self.tools_selection.items()
                 ]
-                update = ToolsetUpdate(toolset=self.toolset, apps_selection=apps_selection)
-                update.start(authorization_keeper=authorization_keeper)
-                update_view = MultistageProcessExecutionView()
-                update_view.set_multistage_process(multistage_process=update)
-                self.content_navigation_view.push_view(update_view, title="Updating toolset")
+            self.start_update(authorization_keeper=authorization_keeper, apps_selection=apps_selection)
         RootHelperClient.shared().authorize_and_run(callback=update)
+
+    def start_update(self, authorization_keeper: AuthorizationKeeper, apps_selection: list[ToolsetApplicationSelection] | None = None):
+        update = ToolsetUpdate(toolset=self.toolset, apps_selection=apps_selection)
+        update.start(authorization_keeper=authorization_keeper)
+        self.show_update(update=update)
+
+    def show_update(self, update: ToolsetUpdate):
+        update_view = MultistageProcessExecutionView()
+        update_view.set_multistage_process(multistage_process=update)
+        self.content_navigation_view.push_view(update_view, title="Updating toolset")
 
     # --------------------------------------------------------------------------
     # Toolset actions:
@@ -398,11 +420,7 @@ class ToolsetDetailsView(Gtk.Box):
     def action_button_update_clicked(self, sender):
         def update(authorization_keeper: AuthorizationKeeper):
             if authorization_keeper:
-                update = ToolsetUpdate(toolset=self.toolset)
-                update.start(authorization_keeper=authorization_keeper)
-                update_view = MultistageProcessExecutionView()
-                update_view.set_multistage_process(multistage_process=update)
-                self.content_navigation_view.push_view(update_view, title="Updating toolset")
+                self.start_update(authorization_keeper=authorization_keeper)
         RootHelperClient.shared().authorize_and_run(callback=update)
 
     @Gtk.Template.Callback()

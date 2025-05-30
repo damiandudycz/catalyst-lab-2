@@ -145,6 +145,14 @@
                         <property name="valign">center</property>
                         <property name="spacing">8</property>
                         <child>
+                          <object class="GtkLabel" id="status_update_progress_label">
+                            <style>
+                              <class name="dimmed"/>
+                              <class name="caption"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
                           <object class="GtkLabel" id="tag_update_succeded">
                             <property name="label">Completed</property>
                             <style>
@@ -269,7 +277,7 @@
                       <object class="GtkButton" id="applications_button_cancel">
                         <child>
                           <object class="AdwButtonContent">
-                            <property name="label">Cancel changes</property>
+                            <property name="label">Discard changes</property>
                             <property name="icon-name">archive-down-minimlistic-svgrepo-com</property>
                           </object>
                         </child>

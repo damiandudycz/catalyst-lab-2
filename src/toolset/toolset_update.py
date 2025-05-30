@@ -69,6 +69,13 @@ class ToolsetUpdate(MultiStageProcess):
         for app_selection in self.apps_selection:
             process_app_selection(app_selection=app_selection)
         self.apps_selection = sorted_entries
+        #previous_app_install = self.toolset.get_app_install(app=app)
+        # If app was never installed before now, no need to track changes
+        # Save removed patches list
+        print(f"CURRENT PATCHES LIST: {}")
+        # Remove old patches from list
+        # Check if variant changed
+        # Decide if there are any changes
 
 # ------------------------------------------------------------------------------
 # Update process steps.
