@@ -49,7 +49,7 @@ class Toolset(Serializable):
                     raise ValueError("EXTERNAL requires a 'squashfs_file' or a 'squashfs_binding_dir'")
             case _:
                 raise ValueError(f"Unknown env: {env}")
-        self.access_lock = threading.Lock()
+        self.access_lock = threading.RLock()
         self.spawned = False # Spawned means that directories in /tmp are prepared to be used with bwrap.
         self.in_use = False # Is any bwrap instance currently running on this toolset.
         self.is_reserved = False # Reserved for later usage by some object
@@ -159,13 +159,20 @@ class Toolset(Serializable):
                 BindMount(mount_path="/tmp", create_if_missing=True),
                 BindMount(mount_path="/var/tmp", create_if_missing=True),
                 BindMount(mount_path="/var/cache", create_if_missing=True),
-                BindMount(mount_path="/var/db/repos", create_if_missing=True),
+                # Set portage owner
+                BindMount(mount_path="/var/tmp/portage", create_if_missing=True, owner="portage:portage"),
+                BindMount(mount_path="/var/cache/distfiles", create_if_missing=True, owner="portage:portage"),
+                BindMount(mount_path="/var/cache/binpkgs", create_if_missing=True, owner="portage:portage"),
+                # Uncomment if portage tree should not be kept in squashfs
+                #BindMount(mount_path="/var/db/repos", create_if_missing=True),
             ]
             # All bindings.
             bindings = ( _system_bindings + _config_bindings + _devices_bindings + _working_bindings + (additional_bindings or []) )
 
             # Map bindings using toolset_path to host_path.
             for bind in bindings:
+                if bind.owner and bind.host_path:
+                    raise ValueError(f"Can set owner of host binding: {bind.host_path}")
                 if bind.host_path and bind.toolset_path:
                     raise ValueError(f"BindMount for mount_path '{bind.mount_path}' has both host_path and toolset_path set. Only one is allowed.")
                 if bind.toolset_path:
@@ -291,7 +298,37 @@ class Toolset(Serializable):
             self.store_changes = store_changes
             self.bind_options = bind_options
             self.spawned = True
-            self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
+
+            # Set bindings owners if needed
+            try:
+                fake_root = os.path.join(self.work_dir, "fake_root")
+                test_result = _start_toolset_command._raw(
+                    work_dir=work_dir,
+                    fake_root=fake_root,
+                    bind_options=bind_options,
+                    command_to_run="echo Hello World"
+                )
+                if test_result.code != ServerResponseStatusCode.OK:
+                    raise RuntimeError("Toolset test failed")
+                chmod_commands = [
+                    f"chown -R {binding.owner} {binding.mount_path}"
+                    for binding in bindings
+                    if binding.owner is not None
+                ]
+                if chmod_commands:
+                    chmod_command = " && ".join(chmod_commands)
+                    chmod_result = _start_toolset_command._raw(
+                        work_dir=work_dir,
+                        fake_root=fake_root,
+                        bind_options=bind_options,
+                        command_to_run=chmod_command
+                    )
+                    if chmod_result.code != ServerResponseStatusCode.OK:
+                        raise RuntimeError("Toolset test failed")
+                self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
+            except Exception as e:
+                print(e)
+                self.unspawn(rebuild_squashfs_if_needed=False)
 
     def unspawn(self, rebuild_squashfs_if_needed: bool = True):
         """Clear tmp folders."""
@@ -401,11 +438,15 @@ class Toolset(Serializable):
         patches = app_metadata.get('patches', [])
         version = app_metadata.get('version')
         version_id = app_metadata.get('version_id')
-        if not version_id or not version:
+        if not version:
             return None
-        version_id_uuid = uuid.UUID(version_id)
-        version_variant = next((version for version in app.versions if version.id == version_id_uuid), None)
-        return ToolsetApplicationInstall(version=version, variant=version_variant, patches=patches)
+        if version_id:
+            version_id_uuid = uuid.UUID(version_id)
+            version_variant = next((version for version in app.versions if version.id == version_id_uuid), None)
+            return ToolsetApplicationInstall(version=version, variant=version_variant, patches=patches)
+        else:
+            version_variant = app.versions[0]
+            return ToolsetApplicationInstall(version=version, variant=version_variant, patches=patches)
 
     def analyze(self) -> bool:
         print(f"Analyze {self.toolset_root()}")
@@ -413,7 +454,6 @@ class Toolset(Serializable):
         """Returns true if all checks succeeded, even if version is not found."""
         checks_succeded = True
         for app in ToolsetApplication.ALL:
-            print(f"App: {app.name}")
             try:
                 self._perform_app_installed_version_check(app=app)
             except Exception as e:
@@ -481,6 +521,7 @@ class BindMount:
     store_changes: bool = False     # True if changes should be stored outside isolated env.
     resolve_host_path: bool = True  # Whether to resolve path through runtime_env.
     create_if_missing: bool = False # Creates directory if not found on host.
+    owner: str | None = None        # Sets owner of given file/dir. Works only with toolset_path or tmp bindings
 
 @root_function
 def _start_toolset_command(work_dir: str, fake_root: str, bind_options: list[str], command_to_run: str):

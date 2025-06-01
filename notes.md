@@ -29,6 +29,7 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] Consider scanning and displaying all installed apps from world file
 - [ ] Pass toolset to steps instead of reaching to process (In installer, updater, etc)
 - [ ] After installation, created squashfs doesn't contain changes applied, like installed apps. Probably due to some bwrap mappings.
+- [ ] In toolset update, metadata for packages is generated and stored in Verify step, but compress step might still fail, leaving wrong metadata
 
 ### RootHelperClient.
 - [x] Add structure that collects multiple root calls and keeps root opened while it’s not marked as finished. New calls should be possible to add to these groups live and executed one by one. This can be added to root_function decorator so that it can accept a group to add call to or create and return new one if not provided, but these decorators still need to also return ServerCall itself. These groups should accept also normal functions as user, to create long flow for some larger task.

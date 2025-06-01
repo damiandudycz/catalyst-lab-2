@@ -260,7 +260,7 @@
               </object>
             </child>
             <child>
-              <object class="GtkBox">
+              <object class="GtkBox" id="applications_container">
                 <property name="orientation">vertical</property>
                 <property name="spacing">8</property>
                 <child>

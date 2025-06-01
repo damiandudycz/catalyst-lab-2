@@ -310,9 +310,7 @@
 
     <!-- Fetch view -->
     <child>
-      <object class="MultistageProcessExecutionView" id="fetch_view">
-        <signal name="finish_process" handler="on_finish_pressed"/>
-      </object>
+      <object class="MultistageProcessExecutionView" id="fetch_view"/>
     </child>
 
   </template>

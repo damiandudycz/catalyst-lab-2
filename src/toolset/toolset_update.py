@@ -14,6 +14,7 @@ from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from datetime import datetime
 from .helper_functions import mount_squashfs, umount_squashfs, create_squashfs
 from gi.repository import GLib, Gio
+from .toolset_installation import insert_portage_config, insert_portage_patch
 
 # ------------------------------------------------------------------------------
 # Toolset update.
@@ -21,8 +22,10 @@ from gi.repository import GLib, Gio
 
 class ToolsetUpdate(MultiStageProcess):
     """Handles the toolset update lifecycle. Also supports changing app selection, versions and patches."""
-    def __init__(self, toolset: Toolset, apps_selection: list[ToolsetApplicationSelection] | None = None):
+    def __init__(self, toolset: Toolset, allow_binpkgs: bool, update_packages: bool = True, apps_selection: list[ToolsetApplicationSelection] | None = None):
         self.toolset = toolset
+        self.allow_binpkgs = allow_binpkgs
+        self.update_packages = update_packages
         self.apps_selection = apps_selection
         self._process_selected_apps()
         super().__init__(title="Toolset update")
@@ -35,14 +38,16 @@ class ToolsetUpdate(MultiStageProcess):
     def setup_stages(self):
         self.stages.append(ToolsetUpdateStepPrepareToolset(toolset=self.toolset, multistage_process=self))
         self.stages.append(ToolsetUpdateStepRefreshEnv(toolset=self.toolset, multistage_process=self))
-        self.stages.append(ToolsetUpdateStepUpdatePortage(toolset=self.toolset, multistage_process=self))
+        if self.update_packages:
+            self.stages.append(ToolsetUpdateStepUpdatePortage(toolset=self.toolset, multistage_process=self))
         if self.apps_to_remove:
             for app_to_remove in self.apps_to_remove:
                 self.stages.append(ToolsetUpdateStepUninstallApp(toolset=self.toolset, app=app_to_remove, multistage_process=self))
         if self.apps_selection:
             for app_selection in self.apps_selection:
+                self.stages.append(ToolsetUpdateStepInstallApp(toolset=self.toolset, app_selection=app_selection, multistage_process=self))
                 pass # Create task for modifying / adding entry
-        if not self.apps_selection:
+        if self.update_packages:
             self.stages.append(ToolsetUpdateStepUpdatePackages(toolset=self.toolset, multistage_process=self))
         self.stages.append(ToolsetUpdateStepVerify(toolset=self.toolset, multistage_process=self))
         self.stages.append(ToolsetUpdateStepStepCompress(toolset=self.toolset, multistage_process=self))
@@ -51,6 +56,10 @@ class ToolsetUpdate(MultiStageProcess):
     def complete_process(self, success: bool):
         print(f"___ Completed: {success}")
         if success:
+            # Update version_id of selected apps
+            if self.apps_selection:
+                for app_selection in self.apps_selection:
+                    self.toolset.metadata.setdefault(app_selection.app.package, {})["version_id"] = str(app_selection.version.id)
             self.toolset.metadata['date_updated'] = int(time.time())
             Repository.TOOLSETS.save()
         self.toolset.release()
@@ -58,6 +67,7 @@ class ToolsetUpdate(MultiStageProcess):
     def _process_selected_apps(self):
         """Manage auto_select dependencies."""
         if self.apps_selection is None:
+            self.apps_to_remove = None
             return
         app_selections_by_app = { app_selection.app: app_selection for app_selection in self.apps_selection }
         # Mark all dependencies as selected
@@ -94,8 +104,6 @@ class ToolsetUpdate(MultiStageProcess):
                 continue
             removed_patches_filenames = [patch for patch in previous_app_install.patches if patch not in new_app_install.patches]
             added_patches_files = [patch for patch in new_app_install.patches if isinstance(patch, Gio.File)]
-            print(f"New patches: {added_patches_files}")
-            print(f"Removed patches: {removed_patches_filenames}")
             variant_changed = new_app_install.version != previous_app_install.variant
             # Decide if there are any changes
             if removed_patches_filenames or added_patches_files or variant_changed:
@@ -260,6 +268,52 @@ class ToolsetUpdateStepUninstallApp(ToolsetUpdateStep):
             self.complete(MultiStageProcessStageState.COMPLETED if result else MultiStageProcessStageState.FAILED)
         except Exception as e:
             print(f"Error during app uninstallation: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
+
+class ToolsetUpdateStepInstallApp(ToolsetUpdateStep):
+    def __init__(self, toolset: Toolset, app_selection: ToolsetApplicationSelection, multistage_process: MultiStageProcess):
+        super().__init__(name=f"Install {app_selection.app.name}", description=f"Emerges {app_selection.app.package} package", multistage_process=multistage_process)
+        self.toolset = toolset
+        self.app_selection = app_selection
+    def start(self):
+        super().start()
+        try:
+            # Clean stuff from previous install
+            app_install = self.toolset.get_app_install(app=self.app_selection.app)
+            if app_install:
+                if app_install.variant.config:
+                    for config in app_install.variant.config:
+                        if self._cancel_event.is_set():
+                            return
+                        remove_portage_config(config_dir=config.directory, app_name=self.app_selection.app.name, toolset_root=self.toolset.toolset_root())
+                removed_patches_filenames = [patch for patch in app_install.patches if patch not in self.app_selection.patches]
+                for patch_file in removed_patches_filenames:
+                    if self._cancel_event.is_set():
+                        return
+                    remove_portage_patch(patch_filename=patch_file, app_package=self.app_selection.app.package, toolset_root=self.toolset.toolset_root())
+            def progress_handler(output_line: str) -> float or None:
+                pattern = r"^>>> Completed \((\d+) of (\d+)\)"
+                match = re.match(pattern, output_line)
+                if match:
+                    n, m = map(int, match.groups())
+                    return n / m
+            if self.app_selection.version.config:
+                for config in self.app_selection.version.config:
+                    if self._cancel_event.is_set():
+                        return
+                    insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app_selection.app.name, toolset_root=self.multistage_process.toolset.toolset_root())
+            added_patches_files = [patch for patch in self.app_selection.patches if isinstance(patch, Gio.File)]
+            for patch_file in added_patches_files:
+                file_input_stream = patch_file.read()
+                file_info = file_input_stream.query_info("standard::size", None)
+                file_size = file_info.get_size()
+                patch_content = file_input_stream.read_bytes(file_size, None).get_data().decode()
+                insert_portage_patch(patch_content=patch_content, patch_filename=patch_file.get_basename(), app_package=self.app_selection.app.package, toolset_root=self.multistage_process.toolset.toolset_root())
+            flags = "--getbinpkg --deep --update --changed-use --newuse" if self.multistage_process.allow_binpkgs else "--deep --update --changed-use --newuse"
+            result = self.run_command_in_toolset(command=f"emerge {flags} {self.app_selection.app.package} --reinstall-atoms={self.app_selection.app.package}", progress_handler=progress_handler)
+            self.complete(MultiStageProcessStageState.COMPLETED if result else MultiStageProcessStageState.FAILED)
+        except Exception as e:
+            print(f"Error during app installation: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
 class ToolsetUpdateStepUpdatePackages(ToolsetUpdateStep):

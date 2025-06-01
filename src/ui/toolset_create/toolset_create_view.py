@@ -50,6 +50,11 @@ class ToolsetCreateView(Gtk.Box):
         self.install_view.set_multistage_process(self.installation_in_progress)
         if installation_in_progress is None or installation_in_progress.status == MultiStageProcessState.SETUP:
             ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
+        self.connect("map", self.on_map)
+
+    def on_map(self, widget):
+        self.fetch_view.content_navigation_view = self.content_navigation_view
+        self.fetch_view._window = self._window
 
     def on_page_changed(self, carousel, pspec):
         self.current_page = int(carousel.get_position())
@@ -107,13 +112,6 @@ class ToolsetCreateView(Gtk.Box):
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
         self.carousel.scroll_to(self.configuration_page, True)
-
-    @Gtk.Template.Callback()
-    def on_finish_pressed(self, _):
-        if hasattr(self, "_window"):
-            self._window.close()
-        elif hasattr(self, "content_navigation_view"):
-            self.content_navigation_view.pop()
 
     def _update_stages_result(self, result: list[ParseResult] | Exception):
         self.selected_stage = None

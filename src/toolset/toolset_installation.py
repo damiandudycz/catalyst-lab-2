@@ -49,6 +49,9 @@ class ToolsetInstallation(MultiStageProcess):
 
     def complete_process(self, success: bool):
         if success:
+            # Update version_id of selected apps
+            for app_selection in self.apps_selection:
+                self.toolset.metadata.setdefault(app_selection.app.package, {})["version_id"] = str(app_selection.version.id)
             Repository.TOOLSETS.value.append(self.toolset)
 
     def _process_selected_apps(self):

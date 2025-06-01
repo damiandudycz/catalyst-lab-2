@@ -14,7 +14,6 @@ from .multistage_process import (
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/multistage_process_execution_view/multistage_process_execution_view.ui')
 class MultistageProcessExecutionView(Gtk.Box):
     __gtype_name__ = 'MultistageProcessExecutionView'
-    __gsignals__ = { "finish_process": (GObject.SIGNAL_RUN_FIRST, None, ()) }
 
     title_label = Gtk.Template.Child()
     process_steps_list = Gtk.Template.Child()
@@ -54,9 +53,11 @@ class MultistageProcessExecutionView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_finish_pressed(self, _):
-        self.emit("finish_process")
         self.multistage_process.clean_from_started_processes()
-
+        if hasattr(self, "_window"):
+            self._window.close()
+        elif hasattr(self, "content_navigation_view"):
+            self.content_navigation_view.pop()
 
     def _update_progress(self, progress):
         self.progress_bar.set_fraction(self.multistage_process.progress)

@@ -254,9 +254,7 @@
 
     <!-- Install view -->
     <child>
-      <object class="MultistageProcessExecutionView" id="install_view">
-        <signal name="finish_process" handler="on_finish_pressed"/>
-      </object>
+      <object class="MultistageProcessExecutionView" id="install_view"/>
     </child>
 
   </template>

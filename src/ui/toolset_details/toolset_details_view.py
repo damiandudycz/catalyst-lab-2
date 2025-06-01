@@ -41,6 +41,7 @@ class ToolsetDetailsView(Gtk.Box):
     action_button_update = Gtk.Template.Child()
     action_button_delete = Gtk.Template.Child()
     allow_binpkgs_checkbox = Gtk.Template.Child()
+    applications_container = Gtk.Template.Child()
     applications_actions_container = Gtk.Template.Child()
     applications_button_cancel = Gtk.Template.Child()
     applications_button_apply = Gtk.Template.Child()
@@ -60,8 +61,6 @@ class ToolsetDetailsView(Gtk.Box):
         self.tools_selection_patches: Dict[ToolsetApplication, list[Gio.File | str]] = {app: [] for app in ToolsetApplication.ALL}
 
         self.setup_toolset_details()
-        self.load_initial_applications_selection()
-        self.load_applications()
         self.load_update_state()
         self.load_bindings()
         self.setup_status()
@@ -81,7 +80,7 @@ class ToolsetDetailsView(Gtk.Box):
     # --------------------------------------------------------------------------
     # Main details:
 
-    def setup_toolset_details(self, _ = None):
+    def setup_toolset_details(self, event_data = None):
         """Displays main details of the toolset."""
         self.toolset_name_row.set_text(self.toolset.name)
         self.status_file_row.set_subtitle(self.toolset.squashfs_file)
@@ -99,37 +98,86 @@ class ToolsetDetailsView(Gtk.Box):
         self.toolset_date_updated_row.set_subtitle(date_updated.strftime("%Y-%d-%m %H:%M") if date_created else "unknown")
         self.toolset_source_row.set_subtitle(filename or "unknown")
         self.allow_binpkgs_checkbox.set_active(allow_binpkgs)
+        if event_data is None or not self.toolset.is_reserved:
+            self.load_initial_applications_selection()
+            self.load_applications()
 
     def setup_status(self, _ = None):
         """Updates controls visibility and sensitivity for current status."""
-        self.tag_free.set_visible(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
-        self.tag_store_changes.set_visible(self.toolset.spawned and self.toolset.store_changes)
+        self.tag_free.set_visible(
+            not self.toolset.spawned
+            and not self.toolset.in_use
+            and not self.toolset.is_reserved
+        )
+        self.tag_store_changes.set_visible(
+            self.toolset.spawned
+            and self.toolset.store_changes
+        )
         self.tag_is_reserved.set_visible(self.toolset.is_reserved)
         self.tag_in_use.set_visible(self.toolset.in_use)
         self.tag_spawned.set_visible(self.toolset.spawned)
-        self.tag_updating.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS)
-        self.tag_update_succeded.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.COMPLETED)
-        self.tag_update_failed.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.FAILED)
-        self.action_button_spawn.set_sensitive(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
+        self.tag_updating.set_visible(
+            self.update_in_progress
+            and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
+        )
+        self.tag_update_succeded.set_visible(
+            self.update_in_progress
+            and self.update_in_progress.status == MultiStageProcessState.COMPLETED
+        )
+        self.tag_update_failed.set_visible(
+            self.update_in_progress
+            and self.update_in_progress.status == MultiStageProcessState.FAILED
+        )
+        self.action_button_spawn.set_sensitive(
+            not self.toolset.spawned
+            and not self.toolset.in_use
+            and not self.toolset.is_reserved
+        )
         self.action_button_spawn.set_visible(not self.toolset.spawned)
-        self.action_button_unspawn.set_sensitive(self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
+        self.action_button_unspawn.set_sensitive(
+            self.toolset.spawned
+            and not self.toolset.in_use
+            and not self.toolset.is_reserved
+        )
         self.action_button_unspawn.set_visible(self.toolset.spawned)
-        self.action_button_chroot.set_sensitive(not self.toolset.in_use and not self.toolset.is_reserved)
-        self.action_button_update.set_sensitive(not self.toolset.in_use and not self.toolset.is_reserved)
-        self.action_button_delete.set_sensitive(not self.toolset.spawned and not self.toolset.in_use and not self.toolset.is_reserved)
+        self.action_button_chroot.set_sensitive(
+            not self.toolset.in_use
+            and not self.toolset.is_reserved
+        )
+        self.action_button_update.set_sensitive(
+            not self.toolset.in_use
+            and not self.toolset.is_reserved
+        )
+        self.action_button_delete.set_sensitive(
+            not self.toolset.spawned
+            and not self.toolset.in_use
+            and not self.toolset.is_reserved
+        )
         self.status_bindings_row.set_visible(self.toolset.spawned)
         self.status_update_row.set_visible(self.update_in_progress)
         self.status_update_row.set_subtitle(
-            "" if not self.update_in_progress else
-            "Update in progress" if self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS else
-            "Update completed" if self.update_in_progress.status == MultiStageProcessState.COMPLETED else
-            "Update failed" if self.update_in_progress.status == MultiStageProcessState.FAILED else
-            ""
+            "" if not self.update_in_progress
+            else "Update in progress" if self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
+            else "Update completed" if self.update_in_progress.status == MultiStageProcessState.COMPLETED
+            else "Update failed" if self.update_in_progress.status == MultiStageProcessState.FAILED
+            else ""
         )
-        self.status_update_progress_label.set_visible(self.update_in_progress and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS)
+        self.status_update_progress_label.set_visible(
+            self.update_in_progress
+            and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
+        )
+        self.applications_container.set_sensitive(
+            not self.update_in_progress
+            or self.update_in_progress.status == MultiStageProcessState.COMPLETED
+            or self.update_in_progress.status == MultiStageProcessState.FAILED
+        )
         self.applications_button_apply.set_sensitive(
-            not self.toolset.in_use and not self.toolset.is_reserved and
-            (not self.update_in_progress or self.update_in_progress.status == MultiStageProcessState.COMPLETED or self.update_in_progress.status == MultiStageProcessState.FAILED)
+            not self.toolset.in_use and not self.toolset.is_reserved
+            and (
+                not self.update_in_progress
+                or self.update_in_progress.status == MultiStageProcessState.COMPLETED
+                or self.update_in_progress.status == MultiStageProcessState.FAILED
+            )
         )
         self.applications_actions_container.set_visible(self.apps_changed)
 
@@ -201,6 +249,7 @@ class ToolsetDetailsView(Gtk.Box):
 
     def load_initial_applications_selection(self):
         """Load initial selection of apps details."""
+        self.apps_changed = False
         self.tools_selection.clear()
         self.tools_selection_versions.clear()
         self.tools_selection_patches.clear()
@@ -369,11 +418,14 @@ class ToolsetDetailsView(Gtk.Box):
                     )
                     for app, _ in self.tools_selection.items()
                 ]
-            self.start_update(authorization_keeper=authorization_keeper, apps_selection=apps_selection)
+            self.start_update(authorization_keeper=authorization_keeper, update_packages=False, apps_selection=apps_selection)
         RootHelperClient.shared().authorize_and_run(callback=update)
 
-    def start_update(self, authorization_keeper: AuthorizationKeeper, apps_selection: list[ToolsetApplicationSelection] | None = None):
-        update = ToolsetUpdate(toolset=self.toolset, apps_selection=apps_selection)
+    def start_update(self, authorization_keeper: AuthorizationKeeper, update_packages: bool = True, apps_selection: list[ToolsetApplicationSelection] | None = None):
+        if self.update_in_progress:
+            self.update_in_progress.clean_from_started_processes()
+        allow_binpkgs = self.toolset.metadata.get('allow_binpkgs', False)
+        update = ToolsetUpdate(toolset=self.toolset, allow_binpkgs=allow_binpkgs, update_packages=update_packages, apps_selection=apps_selection)
         update.start(authorization_keeper=authorization_keeper)
         self.show_update(update=update)
 
@@ -420,7 +472,7 @@ class ToolsetDetailsView(Gtk.Box):
     def action_button_update_clicked(self, sender):
         def update(authorization_keeper: AuthorizationKeeper):
             if authorization_keeper:
-                self.start_update(authorization_keeper=authorization_keeper)
+                self.start_update(authorization_keeper=authorization_keeper, update_packages=True)
         RootHelperClient.shared().authorize_and_run(callback=update)
 
     @Gtk.Template.Callback()
