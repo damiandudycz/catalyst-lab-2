@@ -161,7 +161,6 @@ class ToolsetUpdateStepPrepareToolset(ToolsetUpdateStep):
     def __init__(self, toolset: Toolset, multistage_process: MultiStageProcess):
         super().__init__(name="Prepare toolset", description="Spawns toolset with write access", multistage_process=multistage_process)
         self.toolset = toolset
-        self.unspawn = False
     def start(self):
         super().start()
         try:
@@ -179,9 +178,6 @@ class ToolsetUpdateStepPrepareToolset(ToolsetUpdateStep):
                 self.toolset.unspawn()
             if not self.toolset.spawned:
                 self.toolset.spawn(store_changes=True)
-                self.unspawn = True
-            else:
-                self.unspawn = False
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during toolset preparation: {e}")
@@ -189,8 +185,7 @@ class ToolsetUpdateStepPrepareToolset(ToolsetUpdateStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        if self.unspawn:
-            self.toolset.unspawn(rebuild_squashfs_if_needed=False) # New squashFS is build as another step in update process.
+        self.toolset.unspawn(rebuild_squashfs_if_needed=False) # New squashFS is build as another step in update process.
         return True
 
 class ToolsetUpdateStepRefreshEnv(ToolsetUpdateStep):

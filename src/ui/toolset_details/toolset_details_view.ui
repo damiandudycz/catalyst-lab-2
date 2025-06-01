@@ -42,7 +42,7 @@
                 </child>
                 <child>
                   <object class="AdwActionRow" id="toolset_date_updated_row">
-                    <property name="title">Date updated</property>
+                    <property name="title">Date changed</property>
                   </object>
                 </child>
                 <child>
@@ -198,36 +198,27 @@
                     <property name="hexpand">True</property>
                     <property name="homogeneous">True</property>
                     <child>
-                      <object class="GtkButton" id="action_button_spawn">
-                        <child>
+                      <object class="AdwSplitButton" id="action_button_spawn">
+                        <property name="child">
                           <object class="AdwButtonContent">
-                            <property name="label">Mount</property>
                             <property name="icon-name">archive-down-minimlistic-svgrepo-com</property>
+                            <property name="label">Mount</property>
                           </object>
-                        </child>
+                        </property>
+                        <property name="menu-model">mount_menu</property>
                         <signal name="clicked" handler="action_button_spawn_clicked"/>
                       </object>
                     </child>
                     <child>
-                      <object class="GtkButton" id="action_button_unspawn">
-                        <child>
+                      <object class="AdwSplitButton" id="action_button_unspawn">
+                        <property name="child">
                           <object class="AdwButtonContent">
-                            <property name="label">Unmount</property>
                             <property name="icon-name">archive-up-minimlistic-svgrepo-com</property>
+                            <property name="label">Unmount</property>
                           </object>
-                        </child>
+                        </property>
+                        <property name="menu-model">unmount_menu</property>
                         <signal name="clicked" handler="action_button_unspawn_clicked"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkButton" id="action_button_chroot">
-                        <child>
-                          <object class="AdwButtonContent">
-                            <property name="label">Chroot</property>
-                            <property name="icon-name">cursor-square-svgrepo-com</property>
-                          </object>
-                        </child>
-                        <signal name="clicked" handler="action_button_chroot_clicked"/>
                       </object>
                     </child>
                     <child>
@@ -323,7 +314,30 @@
         </child>
       </object>
     </child>
-
+    <menu id="mount_menu">
+      <section>
+        <item>
+          <attribute name="label">Read only</attribute>
+          <attribute name="action">mount.mount_read_only</attribute>
+        </item>
+        <item>
+          <attribute name="label">Read and write</attribute>
+          <attribute name="action">mount.mount_read_write</attribute>
+        </item>
+      </section>
+    </menu>
+    <menu id="unmount_menu">
+      <section>
+        <item>
+          <attribute name="label">Save changes</attribute>
+          <attribute name="action">unmount.unmount_save</attribute>
+        </item>
+        <item>
+          <attribute name="label">Discard changes</attribute>
+          <attribute name="action">unmount.unmount_discard</attribute>
+        </item>
+      </section>
+    </menu>
   </template>
 </interface>
 

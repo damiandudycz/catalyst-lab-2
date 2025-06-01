@@ -37,7 +37,6 @@ class ToolsetDetailsView(Gtk.Box):
     tag_update_failed = Gtk.Template.Child()
     action_button_spawn = Gtk.Template.Child()
     action_button_unspawn = Gtk.Template.Child()
-    action_button_chroot = Gtk.Template.Child()
     action_button_update = Gtk.Template.Child()
     action_button_delete = Gtk.Template.Child()
     allow_binpkgs_checkbox = Gtk.Template.Child()
@@ -59,6 +58,16 @@ class ToolsetDetailsView(Gtk.Box):
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: False for app in ToolsetApplication.ALL}
         self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
         self.tools_selection_patches: Dict[ToolsetApplication, list[Gio.File | str]] = {app: [] for app in ToolsetApplication.ALL}
+
+        self._mount_action_group = Gio.SimpleActionGroup()
+        self._add_mount_action("mount_read_only", self.mount_read_only)
+        self._add_mount_action("mount_read_write", self.mount_read_write)
+        self.insert_action_group("mount", self._mount_action_group)
+
+        self._unmount_action_group = Gio.SimpleActionGroup()
+        self.unmount_save_action = self._add_unmount_action("unmount_save", self.unmount_save)
+        self._add_unmount_action("unmount_discard", self.unmount_discard)
+        self.insert_action_group("unmount", self._unmount_action_group)
 
         self.setup_toolset_details()
         self.load_update_state()
@@ -140,14 +149,7 @@ class ToolsetDetailsView(Gtk.Box):
             and not self.toolset.is_reserved
         )
         self.action_button_unspawn.set_visible(self.toolset.spawned)
-        self.action_button_chroot.set_sensitive(
-            not self.toolset.in_use
-            and not self.toolset.is_reserved
-        )
-        self.action_button_update.set_sensitive(
-            not self.toolset.in_use
-            and not self.toolset.is_reserved
-        )
+        self.action_button_update.set_sensitive(not self.toolset.spawned)
         self.action_button_delete.set_sensitive(
             not self.toolset.spawned
             and not self.toolset.in_use
@@ -166,11 +168,7 @@ class ToolsetDetailsView(Gtk.Box):
             self.update_in_progress
             and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
         )
-        self.applications_container.set_sensitive(
-            not self.update_in_progress
-            or self.update_in_progress.status == MultiStageProcessState.COMPLETED
-            or self.update_in_progress.status == MultiStageProcessState.FAILED
-        )
+        self.applications_container.set_sensitive(not self.toolset.spawned)
         self.applications_button_apply.set_sensitive(
             not self.toolset.in_use and not self.toolset.is_reserved
             and (
@@ -180,6 +178,7 @@ class ToolsetDetailsView(Gtk.Box):
             )
         )
         self.applications_actions_container.set_visible(self.apps_changed)
+        self.unmount_save_action.set_enabled(self.toolset.store_changes)
 
     def load_bindings(self, _ = None):
         """Loads toolset bindings rows."""
@@ -439,34 +438,11 @@ class ToolsetDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_spawn_clicked(self, sender):
-        def spawn(authorization_keeper: AuthorizationKeeper):
-            if authorization_keeper:
-                try:
-                    self.toolset.reserve()
-                    self.toolset.spawn()
-                    self.toolset.analyze()
-                except Exception as e:
-                    print(e)
-                finally:
-                    self.toolset.release()
-        RootHelperClient.shared().authorize_and_run(callback=spawn)
+        self.spawn(store_changes=False)
 
     @Gtk.Template.Callback()
     def action_button_unspawn_clicked(self, sender):
-        def unspawn(authorization_keeper: AuthorizationKeeper):
-            if authorization_keeper:
-                try:
-                    self.toolset.reserve()
-                    self.toolset.unspawn()
-                except Exception as e:
-                    print(e)
-                finally:
-                    self.toolset.release()
-        RootHelperClient.shared().authorize_and_run(callback=unspawn)
-
-    @Gtk.Template.Callback()
-    def action_button_chroot_clicked(self, sender):
-        pass
+        self.unspawn(store_changes=True)
 
     @Gtk.Template.Callback()
     def action_button_update_clicked(self, sender):
@@ -484,3 +460,51 @@ class ToolsetDetailsView(Gtk.Box):
         elif hasattr(self, "content_navigation_view"):
             self.content_navigation_view.pop()
 
+    def _add_mount_action(self, name, callback) -> Gio.SimpleAction:
+        action = Gio.SimpleAction.new(name, None)
+        action.connect("activate", callback)
+        self._mount_action_group.add_action(action)
+        return action
+
+    def _add_unmount_action(self, name, callback) -> Gio.SimpleAction:
+        action = Gio.SimpleAction.new(name, None)
+        action.connect("activate", callback)
+        self._unmount_action_group.add_action(action)
+        return action
+
+    def mount_read_only(self, action, param):
+        self.spawn(store_changes=False)
+
+    def mount_read_write(self, action, param):
+        self.spawn(store_changes=True)
+
+    def unmount_save(self, action, param):
+        self.unspawn(store_changes=True)
+
+    def unmount_discard(self, action, param):
+        self.unspawn(store_changes=False)
+
+    def spawn(self, store_changes: bool):
+        def spawn(authorization_keeper: AuthorizationKeeper):
+            if authorization_keeper:
+                try:
+                    self.toolset.reserve()
+                    self.toolset.spawn(store_changes=store_changes)
+                    self.toolset.analyze()
+                except Exception as e:
+                    print(e)
+                finally:
+                    self.toolset.release()
+        RootHelperClient.shared().authorize_and_run(callback=spawn)
+
+    def unspawn(self, store_changes: bool):
+        def unspawn(authorization_keeper: AuthorizationKeeper):
+            if authorization_keeper:
+                try:
+                    self.toolset.reserve()
+                    self.toolset.unspawn(rebuild_squashfs_if_needed=store_changes)
+                except Exception as e:
+                    print(e)
+                finally:
+                    self.toolset.release()
+        RootHelperClient.shared().authorize_and_run(callback=unspawn)
