@@ -201,7 +201,7 @@
                       <object class="AdwSplitButton" id="action_button_spawn">
                         <property name="child">
                           <object class="AdwButtonContent">
-                            <property name="icon-name">archive-down-minimlistic-svgrepo-com</property>
+                            <property name="icon-name">archive-down-minimlistic-svgrepo-com-symbolic</property>
                             <property name="label">Mount</property>
                           </object>
                         </property>
@@ -213,7 +213,7 @@
                       <object class="AdwSplitButton" id="action_button_unspawn">
                         <property name="child">
                           <object class="AdwButtonContent">
-                            <property name="icon-name">archive-up-minimlistic-svgrepo-com</property>
+                            <property name="icon-name">archive-up-minimlistic-svgrepo-com-symbolic</property>
                             <property name="label">Unmount</property>
                           </object>
                         </property>
@@ -240,7 +240,7 @@
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Delete</property>
-                            <property name="icon-name">trash-bin-trash-svgrepo-com</property>
+                            <property name="icon-name">trash-bin-trash-svgrepo-com-symbolic</property>
                           </object>
                         </child>
                         <signal name="clicked" handler="action_button_delete_clicked"/>
@@ -269,7 +269,7 @@
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Discard changes</property>
-                            <property name="icon-name">archive-down-minimlistic-svgrepo-com</property>
+                            <property name="icon-name">archive-down-minimlistic-svgrepo-com-symbolic</property>
                           </object>
                         </child>
                         <signal name="clicked" handler="applications_button_cancel_clicked"/>
@@ -280,7 +280,7 @@
                         <child>
                           <object class="AdwButtonContent">
                             <property name="label">Apply changes</property>
-                            <property name="icon-name">archive-down-minimlistic-svgrepo-com</property>
+                            <property name="icon-name">archive-down-minimlistic-svgrepo-com-symbolic</property>
                           </object>
                         </child>
                         <style>

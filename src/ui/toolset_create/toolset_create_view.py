@@ -53,8 +53,8 @@ class ToolsetCreateView(Gtk.Box):
         self.connect("map", self.on_map)
 
     def on_map(self, widget):
-        self.fetch_view.content_navigation_view = self.content_navigation_view
-        self.fetch_view._window = self._window
+        self.install_view.content_navigation_view = self.content_navigation_view
+        self.install_view._window = self._window
 
     def on_page_changed(self, carousel, pspec):
         self.current_page = int(carousel.get_position())
