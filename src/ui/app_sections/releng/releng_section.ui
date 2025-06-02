@@ -7,26 +7,78 @@
 
   <!-- Template -->
   <template class="RelengSection" parent="GtkBox">
-    <property name="orientation">vertical</property>
-    <property name="spacing">24</property>
-    <property name="margin-start">24</property>
-    <property name="margin-end">24</property>
-    <property name="margin-top">24</property>
-    <property name="margin-bottom">24</property>
-
     <child>
-      <object class="GtkSeparator"/>
-    </child>
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">automatic</property>
+        <property name="vscrollbar-policy">automatic</property>
+        <property name="hexpand">True</property>
+        <property name="vexpand">True</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">24</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="margin-top">24</property>
+            <property name="margin-bottom">24</property>
 
-    <child>
-      <object class="GtkLabel">
-        <property name="label">Releng provides the configuration, specifications, and official snapshot references used to generate Gentoo stage tarballs and installation media. It maintains the stage1, stage2, and stage3 spec files and ensures builds follow consistent standards across architectures. Catalyst users rely on Releng's configurations to produce reproducible and validated builds that align with official Gentoo release practices.</property>
-        <property name="halign">center</property>
-        <property name="wrap">True</property>
-        <property name="justify">fill</property>
-        <attributes>
-          <attribute name="foreground" value="grey"/>
-        </attributes>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="halign">center</property>
+                <property name="width-request">400</property>
+                <property name="spacing">20</property>
+
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label">Available releng directories:</property>
+                    <property name="halign">start</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkListBox" id="releng_container">
+                    <property name="selection-mode">none</property>
+                    <style>
+                      <class name="boxed-list"/>
+                    </style>
+
+                    <child>
+                      <object class="AdwButtonRow">
+                        <property name="title">Add releng directory</property>
+                        <property name="start-icon-name">list-add-symbolic</property>
+                        <property name="activatable">True</property>
+                        <signal name="activated" handler="on_add_releng_activated"/>
+                        <style>
+                          <class name="suggested-action"/>
+                        </style>
+                      </object>
+                    </child>
+
+                  </object>
+                </child>
+
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkSeparator"/>
+            </child>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Releng provides the configuration, specifications, and official snapshot references used to generate Gentoo stage tarballs and installation media. It maintains the stage1, stage2, and stage3 spec files and ensures builds follow consistent standards across architectures. Catalyst users rely on Releng's configurations to produce reproducible and validated builds that align with official Gentoo release practices.</property>
+                <property name="halign">center</property>
+                <property name="wrap">True</property>
+                <property name="justify">fill</property>
+                <attributes>
+                  <attribute name="foreground" value="grey"/>
+                </attributes>
+              </object>
+            </child>
+
+          </object>
+        </child>
       </object>
     </child>
 

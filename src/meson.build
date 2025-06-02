@@ -50,6 +50,7 @@ catalystlab_sources = [
   'toolset/toolset_installation.py',
   'toolset/toolset_update.py',
   'toolset/toolset_env_builder.py',
+  'releng/releng_directory.py',
   'snapshot_manager/snapshot_manager.py',
   'snapshot_manager/snapshot_installation.py',
   'ui/multistage_process_execution_view/multistage_process_execution_view.py',
@@ -72,6 +73,7 @@ catalystlab_sources = [
   'ui/components/status_indicator.py',
   'ui/toolset_create/toolset_create_view.py',
   'ui/snapshot_create/snapshot_create_view.py',
+  'ui/releng_create/releng_create_view.py',
   'ui/root_command_output/root_command_output_view.py'
 ]
 

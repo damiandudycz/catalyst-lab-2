@@ -12,6 +12,7 @@
     <file preprocess="xml-stripblanks">ui/root_command_output/root_command_output_view.ui</file>
     <file preprocess="xml-stripblanks">ui/toolset_create/toolset_create_view.ui</file>
     <file preprocess="xml-stripblanks">ui/snapshot_create/snapshot_create_view.ui</file>
+    <file preprocess="xml-stripblanks">ui/releng_create/releng_create_view.ui</file>
     <file preprocess="xml-stripblanks">ui/multistage_process_execution_view/multistage_process_execution_view.ui</file>
     <file preprocess="xml-stripblanks">ui/toolset_details/toolset_details_view.ui</file>
     <file preprocess="xml-stripblanks">gtk/help-overlay.ui</file>
