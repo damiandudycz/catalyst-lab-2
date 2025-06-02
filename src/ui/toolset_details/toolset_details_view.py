@@ -40,6 +40,7 @@ class ToolsetDetailsView(Gtk.Box):
     action_button_update = Gtk.Template.Child()
     action_button_delete = Gtk.Template.Child()
     allow_binpkgs_checkbox = Gtk.Template.Child()
+    applications_settings_group = Gtk.Template.Child()
     applications_container = Gtk.Template.Child()
     applications_actions_container = Gtk.Template.Child()
     applications_button_cancel = Gtk.Template.Child()
@@ -169,6 +170,7 @@ class ToolsetDetailsView(Gtk.Box):
             and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
         )
         self.applications_container.set_sensitive(not self.toolset.spawned)
+        self.applications_settings_group.set_sensitive(not self.toolset.spawned)
         self.applications_button_apply.set_sensitive(
             not self.toolset.in_use and not self.toolset.is_reserved
             and (

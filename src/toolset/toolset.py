@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, uuid, shutil, tempfile, threading, stat, time, subprocess, requests, re
-import tarfile, re, random, string
+import tarfile, re, random, string, copy
 from gi.repository import Gtk, GLib, Adw
 from typing import final, ClassVar, Dict, Any
 from dataclasses import dataclass, field
@@ -448,43 +448,44 @@ class Toolset(Serializable):
             version_variant = app.versions[0]
             return ToolsetApplicationInstall(version=version, variant=version_variant, patches=patches)
 
-    def analyze(self) -> bool:
-        print(f"Analyze {self.toolset_root()}")
+    def analyze(self, save: bool = False) -> dict[str, Any] | None:
         """Performs various sanity checks on toolset and stores gathered results."""
         """Returns true if all checks succeeded, even if version is not found."""
+        metadata_copy = copy.deepcopy(self.metadata) if self.metadata else {}
         checks_succeded = True
         for app in ToolsetApplication.ALL:
             try:
-                self._perform_app_installed_version_check(app=app)
+                self._perform_app_installed_version_check(app=app, metadata=metadata_copy)
             except Exception as e:
                 print(f"Error in installed version check: {e}")
                 checks_succeeded = False
             try:
-                self._perform_app_additional_checks(app=app)
+                self._perform_app_additional_checks(app=app, metadata=metadata_copy)
             except Exception as e:
                 print(f"Error in additional checks: {e}")
                 checks_succeeded = False
-        Repository.TOOLSETS.save() # Make sure changes are saved in repository.
-        return checks_succeded
+        if checks_succeded and save:
+            self.toolset.metadata = metadata_copy
+            Repository.TOOLSETS.save() # Make sure changes are saved in repository.
+        return metadata_copy if checks_succeded else None
 
-    def _perform_app_installed_version_check(self, app: ToolsetApplication):
+    def _perform_app_installed_version_check(self, app: ToolsetApplication, metadata: dict[str, Any]):
         package_root = Path(self.toolset_root()) / "var" / "db" / "pkg"
         if not package_root.is_dir():
-            self.metadata.setdefault(app.package, {}).pop("version", None)
-            self.metadata.setdefault(app.package, {}).pop("patches", None)
+            metadata.setdefault(app.package, {}).pop("version", None)
+            metadata.setdefault(app.package, {}).pop("patches", None)
             return
         try:
             category, pkg_name = app.package.split("/", 1)
         except ValueError:
-            self.metadata.setdefault(app.package, {}).pop("version", None)
-            self.metadata.setdefault(app.package, {}).pop("patches", None)
+            metadata.setdefault(app.package, {}).pop("version", None)
+            metadata.setdefault(app.package, {}).pop("patches", None)
             return
         # Version check
         category_path = package_root / category
         if not category_path.is_dir():
-            print(f"Category path not found: {category_path}")
-            self.metadata.setdefault(app.package, {}).pop("version", None)
-            self.metadata.setdefault(app.package, {}).pop("patches", None)
+            metadata.setdefault(app.package, {}).pop("version", None)
+            metadata.setdefault(app.package, {}).pop("patches", None)
             return
         package_regex = re.compile(
             rf"^{re.escape(pkg_name)}-(\d+(?:\.\d+)*(_(?:alpha|beta|pre|rc|p)\d*)?(-r\d+)?)$"
@@ -504,14 +505,14 @@ class Toolset(Serializable):
                 patch_files.append(str(patch_file.name))
         # Set version and patch metadata
         if version_value:
-            self.metadata.setdefault(app.package, {})["version"] = version_value
+            metadata.setdefault(app.package, {})["version"] = version_value
         else:
-            self.metadata.setdefault(app.package, {}).pop("version", None)
-        self.metadata.setdefault(app.package, {})["patches"] = patch_files
+            metadata.setdefault(app.package, {}).pop("version", None)
+        metadata.setdefault(app.package, {})["patches"] = patch_files
 
-    def _perform_app_additional_checks(self, app: ToolsetApplication):
+    def _perform_app_additional_checks(self, app: ToolsetApplication, metadata: dict[str, Any]):
         if app.toolset_additional_analysis:
-            app.toolset_additional_analysis(app=app, toolset=self)
+            app.toolset_additional_analysis(app=app, toolset=self, metadata=metadata)
 
 @dataclass
 class BindMount:

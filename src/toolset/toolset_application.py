@@ -92,7 +92,7 @@ ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
             ),
         ),
 )
-def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: 'Toolset'):
+def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: 'Toolset', metadata: dict[str, Any]):
     from .toolset import Toolset
     bin_directory = Path(toolset.toolset_root()) / "bin"
     qemu_systems = Emulation.get_all_qemu_systems()
@@ -101,7 +101,7 @@ def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: 'Toolset'
         binary_path = bin_directory / qemu_binary
         if binary_path.is_file():
             found_qemu_binaries.append(qemu_binary)
-    toolset.metadata.setdefault(app.package, {})["interpreters"] = found_qemu_binaries
+    metadata.setdefault(app.package, {})["interpreters"] = found_qemu_binaries
 
 ToolsetApplication.QEMU = ToolsetApplication(
     name="Qemu", description="Allows building stages for different architectures",

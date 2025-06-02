@@ -54,13 +54,13 @@ class ToolsetUpdate(MultiStageProcess):
         super().setup_stages()
 
     def complete_process(self, success: bool):
-        print(f"___ Completed: {success}")
         if success:
             # Update version_id of selected apps
             if self.apps_selection:
                 for app_selection in self.apps_selection:
-                    self.toolset.metadata.setdefault(app_selection.app.package, {})["version_id"] = str(app_selection.version.id)
-            self.toolset.metadata['date_updated'] = int(time.time())
+                    self.analysis_result.setdefault(app_selection.app.package, {})["version_id"] = str(app_selection.version.id)
+            self.analysis_result['date_updated'] = int(time.time())
+            self.toolset.metadata = self.analysis_result
             Repository.TOOLSETS.save()
         self.toolset.release()
 
@@ -340,6 +340,7 @@ class ToolsetUpdateStepVerify(ToolsetUpdateStep):
         super().start()
         try:
             analysis_result = self.toolset.analyze()
+            self.multistage_process.analysis_result = analysis_result
             self.complete(MultiStageProcessStageState.COMPLETED if analysis_result else MultiStageProcessStageState.FAILED)
         except Exception as e:
             print(f"Error during toolset verification: {e}")
