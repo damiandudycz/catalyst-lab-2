@@ -19,7 +19,7 @@ from .helper_functions import mount_squashfs, umount_squashfs
 
 class SnapshotInstallation(MultiStageProcess):
     """Handles the full snapshot generation lifecycle."""
-    def __init__(self, toolset: Toolset | None, file: GLocalFile | None, custom_filename: str | None):
+    def __init__(self, toolset: Toolset | None = None, file: GLocalFile | None = None, custom_filename: str | None = None):
         """Use either file or toolset, not both."""
         self.toolset = toolset
         self.file = file

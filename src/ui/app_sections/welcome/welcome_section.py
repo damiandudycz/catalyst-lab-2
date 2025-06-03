@@ -33,7 +33,7 @@ class WelcomeSection(Gtk.Box):
         Repository.TOOLSETS.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.setup_sections_visibility)
 
     def setup_sections_visibility(self, _ = None):
-        initial_setup_done = Repository.TOOLSETS.value
+        initial_setup_done = True#Repository.TOOLSETS.value
         self.setup_environments_section.set_visible(not initial_setup_done)
         self.suggested_actions_section.set_visible(initial_setup_done)
 

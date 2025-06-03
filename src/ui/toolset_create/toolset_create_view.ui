@@ -92,99 +92,57 @@
 
             <!-- Page 2: Stages screen -->
             <child>
-              <object class="GtkBox" id="configuration_page">
-                <property name="orientation">vertical</property>
-                <property name="spacing">12</property>
-                <property name="vexpand">True</property>
+              <object class="GtkScrolledWindow" id="configuration_page">
+                <property name="hscrollbar-policy">never</property>
+                <property name="vscrollbar-policy">automatic</property>
                 <property name="hexpand">True</property>
+                <property name="vexpand">True</property>
                 <child>
-                  <object class="GtkLabel">
-                    <property name="label">Select Gentoo image</property>
-                    <property name="halign">start</property>
+                  <object class="AdwPreferencesGroup" id="stages_list">
                     <property name="margin-start">24</property>
                     <property name="margin-end">24</property>
-                    <style>
-                      <class name="title-2"/>
-                    </style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkScrolledWindow">
-                    <property name="hscrollbar-policy">never</property>
-                    <property name="vscrollbar-policy">automatic</property>
-                    <property name="hexpand">True</property>
-                    <property name="vexpand">True</property>
-                    <child>
-                      <object class="AdwPreferencesGroup" id="stages_list">
-                        <property name="margin-start">24</property>
-                        <property name="margin-end">24</property>
-                        <property name="margin-top">4</property>
-                        <property name="margin-bottom">4</property>
-                      </object>
-                    </child>
-                  </object>
+                    <property name="margin-top">4</property>
+                    <property name="margin-bottom">4</property>
+                    <property name="title">Select Gentoo image</property>
+                    <property name="description">Select stage3 file to use as a base for the toolset.</property>                      </object>
                 </child>
               </object>
             </child>
 
             <!-- Page 3: Tools screen -->
             <child>
-              <object class="GtkBox" id="tools_page">
-                <property name="orientation">vertical</property>
-                <property name="spacing">12</property>
-                <property name="vexpand">True</property>
+              <object class="GtkScrolledWindow" id="tools_page">
+                <property name="hscrollbar-policy">never</property>
+                <property name="vscrollbar-policy">automatic</property>
                 <property name="hexpand">True</property>
+                <property name="vexpand">True</property>
                 <child>
-                  <object class="GtkLabel">
-                    <property name="label">Select tools to install</property>
-                    <property name="halign">start</property>
+                  <object class="GtkBox">
                     <property name="margin-start">24</property>
                     <property name="margin-end">24</property>
-                    <style>
-                      <class name="title-2"/>
-                    </style>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkScrolledWindow">
-                    <property name="hscrollbar-policy">never</property>
-                    <property name="vscrollbar-policy">automatic</property>
-                    <property name="hexpand">True</property>
-                    <property name="vexpand">True</property>
+                    <property name="margin-top">4</property>
+                    <property name="margin-bottom">4</property>
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">12</property>
                     <child>
-                      <object class="GtkBox">
-                        <property name="margin-start">24</property>
-                        <property name="margin-end">24</property>
-                        <property name="margin-top">4</property>
-                        <property name="margin-bottom">4</property>
-                        <property name="orientation">vertical</property>
-                        <property name="spacing">12</property>
+                      <object class="AdwPreferencesGroup" id="tools_list">
+                        <property name="title">Select tools to install</property>
+                        <!-- <property name="description"></property> -->
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPreferencesGroup">
+                        <property name="title">Options</property>
+                        <!-- <property name="description"></property> -->
                         <child>
-                          <object class="AdwPreferencesGroup" id="tools_list">
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkLabel">
-                            <property name="label">Options</property>
-                            <property name="halign">start</property>
-                            <style>
-                              <class name="title-4"/>
-                            </style>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwPreferencesGroup">
-                            <child>
-                              <object class="AdwActionRow">
-                                <property name="title">Allow binary packages</property>
-                                <property name="subtitle">Makes the installation quicker</property>
-                                <property name="activatable-widget">allow_binpkgs_checkbox</property>
-                                <child type="prefix">
-                                  <object class="GtkCheckButton" id="allow_binpkgs_checkbox">
-                                    <property name="valign">center</property>
-                                    <signal name="toggled" handler="on_allow_binpkgs_toggled"/>
-                                  </object>
-                                </child>
+                          <object class="AdwActionRow">
+                            <property name="title">Allow binary packages</property>
+                            <property name="subtitle">Makes the installation quicker</property>
+                            <property name="activatable-widget">allow_binpkgs_checkbox</property>
+                            <child type="prefix">
+                              <object class="GtkCheckButton" id="allow_binpkgs_checkbox">
+                                <property name="valign">center</property>
+                                <signal name="toggled" handler="on_allow_binpkgs_toggled"/>
                               </object>
                             </child>
                           </object>

@@ -3,6 +3,9 @@ from gi.repository import Adw
 from .app_section import app_section
 from .releng_create_view import RelengCreateView
 from .app_events import app_event_bus, AppEvents
+from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
+from .releng_installation import RelengInstallation
+from .repository import Repository, RepositoryEvent
 
 @app_section(title="Releng", icon="book-minimalistic-svgrepo-com-symbolic", order=4_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/releng/releng_section.ui')

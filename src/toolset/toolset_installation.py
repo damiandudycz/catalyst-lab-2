@@ -317,7 +317,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            analysis_result = self.multistage_process.toolset.analyze()
+            analysis_result = self.multistage_process.toolset.analyze(save=True)
             self.complete(MultiStageProcessStageState.COMPLETED if analysis_result else MultiStageProcessStageState.FAILED)
         except Exception as e:
             print(f"Error during toolset verification: {e}")

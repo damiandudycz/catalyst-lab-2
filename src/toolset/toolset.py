@@ -465,7 +465,7 @@ class Toolset(Serializable):
                 print(f"Error in additional checks: {e}")
                 checks_succeeded = False
         if checks_succeded and save:
-            self.toolset.metadata = metadata_copy
+            self.metadata = metadata_copy
             Repository.TOOLSETS.save() # Make sure changes are saved in repository.
         return metadata_copy if checks_succeded else None
 
