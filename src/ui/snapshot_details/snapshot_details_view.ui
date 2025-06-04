@@ -23,15 +23,50 @@
             <property name="margin-end">24</property>
             <property name="margin-top">24</property>
             <property name="margin-bottom">24</property>
-    <child>
-      <object class="GtkSearchEntry" id="search_entry">
-        <property name="hexpand">true</property>
-        <property name="placeholder-text">Search packages...</property>
-      </object>
-    </child>
+            <child>
+              <object class="GtkBox">
+                <property name="spacing">8</property>
+                <child>
+                  <object class="GtkSearchEntry" id="search_entry">
+                    <property name="hexpand">true</property>
+                    <property name="placeholder-text">Search packages...</property>
+                    <property name="sensitive">False</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton">
+                    <style>
+                      <class name="destructive-action"/>
+                    </style>
+                    <child>
+                      <object class="AdwButtonContent">
+                        <property name="label">Delete snapshot</property>
+                        <property name="icon-name">trash-bin-trash-svgrepo-com-symbolic</property>
+                      </object>
+                    </child>
+                    <signal name="clicked" handler="button_delete_clicked"/>
+                  </object>
+                </child>
+              </object>
+            </child>
             <child>
               <object class="AdwPreferencesGroup" id="packages_list">
                 <property name="title">Packages</property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwStatusPage" id="loading_page">
+                <property name="title">Loading snapshot…</property>
+                <property name="description">Please wait while the snapshot is being loaded.</property>
+                <property name="icon-name">system-run-symbolic</property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwStatusPage" id="no_results_page">
+                <property name="title">No results</property>
+                <property name="description">Try a different search term.</property>
+                <property name="icon-name">edit-find-symbolic</property>
+                <property name="visible">False</property>
               </object>
             </child>
           </object>

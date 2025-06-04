@@ -1,5 +1,7 @@
 from gi.repository import Gtk, Adw, Gio, GLib
 from .snapshot_manager import Snapshot
+from .repository import Repository
+import threading, os
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot_details/snapshot_details_view.ui')
 class SnapshotDetailsView(Gtk.Box):
@@ -7,12 +9,14 @@ class SnapshotDetailsView(Gtk.Box):
 
     packages_list = Gtk.Template.Child()
     search_entry = Gtk.Template.Child()
+    loading_page = Gtk.Template.Child()
+    no_results_page = Gtk.Template.Child()
 
     def __init__(self, snapshot: Snapshot, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.snapshot = snapshot
         self.content_navigation_view = content_navigation_view
-        self.load_packages()
+        threading.Thread(target=self.load_packages).start()
         self.search_entry.connect("search-changed", self.on_search_changed)
 
     def load_packages(self):
@@ -38,6 +42,8 @@ class SnapshotDetailsView(Gtk.Box):
             category_row.connect("notify::expanded", on_expanded)
         self.category_rows_filtered = self.category_rows
         self.display_rows()
+        self.search_entry.set_sensitive(True)
+        self.loading_page.set_visible(False)
 
     def on_search_changed(self, entry):
         # Clear current rows first:
@@ -89,4 +95,13 @@ class SnapshotDetailsView(Gtk.Box):
     def display_rows(self):
         for category_row in self.category_rows_filtered:
             self.packages_list.add(category_row)
+        self.no_results_page.set_visible(not self.category_rows_filtered)
 
+    @Gtk.Template.Callback()
+    def button_delete_clicked(self, sender):
+        os.remove(self.snapshot.file_path())
+        Repository.SNAPSHOTS.value.remove(self.snapshot)
+        if hasattr(self, "_window"):
+            self._window.close()
+        elif hasattr(self, "content_navigation_view"):
+            self.content_navigation_view.pop()
