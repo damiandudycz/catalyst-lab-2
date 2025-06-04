@@ -8,6 +8,7 @@ from .snapshot_manager import Snapshot
 from .repository import Repository, RepositoryEvent
 from .snapshot_installation import SnapshotInstallation
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
+from .snapshot_details_view import SnapshotDetailsView
 
 @app_section(title="Snapshots", icon="video-frame-svgrepo-com-symbolic", order=3_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/snapshots/snapshots_section.ui')
@@ -65,7 +66,7 @@ class SnapshotsSection(Gtk.Box):
             self._snapshot_rows.append(installation_row)
 
     def on_snapshot_row_pressed(self, sender):
-        pass
+        self.content_navigation_view.push_view(SnapshotDetailsView(snapshot=sender.snapshot) , title="Snapshot details")
 
     def on_installation_row_pressed(self, sender):
         installation = getattr(sender, "installation", None)

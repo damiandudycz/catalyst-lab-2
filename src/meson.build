@@ -70,6 +70,7 @@ catalystlab_sources = [
   'ui/main_window/main_window_side_menu.py',
   'ui/main_window/main_window_side_menu_button.py',
   'ui/toolset_details/toolset_details_view.py',
+  'ui/snapshot_details/snapshot_details_view.py',
   'ui/components/root_access_button.py',
   'ui/components/status_indicator.py',
   'ui/toolset_create/toolset_create_view.py',

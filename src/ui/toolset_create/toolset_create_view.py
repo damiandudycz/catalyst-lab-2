@@ -40,6 +40,7 @@ class ToolsetCreateView(Gtk.Box):
         self.selected_stage: ParseResult | None = None
         self.architecture = Architecture.HOST
         self.allow_binpkgs = True
+        self.current_page = 0
         self.carousel.connect('page-changed', self.on_page_changed)
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: not app.auto_select for app in ToolsetApplication.ALL}
         self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}

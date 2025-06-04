@@ -3,7 +3,8 @@
     "buildsystem": "simple",
     "build-commands": [
         "cd squashfs-tools && make",
-        "install -Dm755 squashfs-tools/mksquashfs /app/bin/mksquashfs"
+        "install -Dm755 squashfs-tools/mksquashfs /app/bin/mksquashfs",
+        "install -Dm755 squashfs-tools/unsquashfs /app/bin/unsquashfs"
     ],
     "sources": [
         {

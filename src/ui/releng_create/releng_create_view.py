@@ -19,6 +19,7 @@ class RelengCreateView(Gtk.Box):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
+        self.current_page = 0
         self.carousel.connect('page-changed', self.on_page_changed)
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
         self.install_view.set_multistage_process(self.installation_in_progress)
