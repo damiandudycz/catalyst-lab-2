@@ -1,5 +1,6 @@
 from gi.repository import Gtk, Adw, Gio, GLib
-from .snapshot_manager import Snapshot
+from .snapshot_manager import SnapshotManager
+from .snapshot import Snapshot
 from .repository import Repository
 import threading, os
 
@@ -99,8 +100,7 @@ class SnapshotDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def button_delete_clicked(self, sender):
-        os.remove(self.snapshot.file_path())
-        Repository.SNAPSHOTS.value.remove(self.snapshot)
+        SnapshotManager.shared.remove_snapshot(self.snapshot)
         if hasattr(self, "_window"):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):

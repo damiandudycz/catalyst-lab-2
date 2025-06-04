@@ -54,3 +54,4 @@ efficiently without requiring in-depth knowledge of the underlying components.
  - pkexec
  - overlayfs (kernel)
  - squashfs-tools
+ - git

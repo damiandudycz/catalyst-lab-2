@@ -4,7 +4,7 @@ from .app_section import app_section
 from .snapshot_manager import SnapshotManager
 from .app_events import app_event_bus, AppEvents
 from .snapshot_create_view import SnapshotCreateView
-from .snapshot_manager import Snapshot
+from .snapshot import Snapshot
 from .repository import Repository, RepositoryEvent
 from .snapshot_installation import SnapshotInstallation
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState

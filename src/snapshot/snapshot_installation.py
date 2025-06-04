@@ -6,7 +6,8 @@ from .multistage_process import (
     MultiStageProcessEvent, MultiStageProcessStageEvent,
 )
 from .toolset import Toolset, BindMount
-from .snapshot_manager import SnapshotManager, Snapshot
+from .snapshot_manager import SnapshotManager
+from .snapshot import Snapshot
 from .root_function import root_function
 from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
