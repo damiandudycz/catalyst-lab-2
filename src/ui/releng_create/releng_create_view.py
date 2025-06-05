@@ -1,6 +1,9 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio, Adw
 from .multistage_process import MultiStageProcessState
+from .releng_installation import RelengInstallation
+from .releng_directory import RelengDirectory
+import os
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_create/releng_create_view.ui')
 class RelengCreateView(Gtk.Box):
@@ -11,7 +14,9 @@ class RelengCreateView(Gtk.Box):
     install_view = Gtk.Template.Child()
     # Setup view elements:
     carousel = Gtk.Template.Child()
-
+    config_page = Gtk.Template.Child()
+    directory_name_row = Gtk.Template.Child()
+    name_used_label = Gtk.Template.Child()
     back_button = Gtk.Template.Child()
     next_button = Gtk.Template.Child()
 
@@ -23,8 +28,9 @@ class RelengCreateView(Gtk.Box):
         self.carousel.connect('page-changed', self.on_page_changed)
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
         self.install_view.set_multistage_process(self.installation_in_progress)
-        # ...
+        self.check_filename_is_free()
         self.connect("map", self.on_map)
+        self.directory_name_row.connect("changed", self.on_directory_name_changed)
 
     def on_map(self, widget):
         self.install_view.content_navigation_view = self.content_navigation_view
@@ -36,13 +42,18 @@ class RelengCreateView(Gtk.Box):
 
     def setup_back_next_buttons(self, _ = None):
         is_first_page = self.current_page == 0
-        is_second_page = self.current_page == 0
-        is_last_page = self.current_page == 2
+        is_last_page = self.current_page == 1
         self.back_button.set_sensitive(not is_first_page)
         self.back_button.set_opacity(0.0 if is_first_page else 1.0)
-        self.next_button.set_sensitive(True)
+        self.next_button.set_sensitive(self.filename_is_free)
         self.next_button.set_opacity(0.0 if not is_last_page else 1.0)
-        self.next_button.set_label("Create releng directory" if is_last_page else "Next")
+
+    def check_filename_is_free(self) -> bool:
+        directory_path = RelengDirectory.directory_path_for_name(self.directory_name_row.get_text())
+        self.filename_is_free = not os.path.exists(directory_path)
+        self.setup_back_next_buttons()
+        self.name_used_label.set_visible(not self.filename_is_free)
+        return self.filename_is_free
 
     @Gtk.Template.Callback()
     def on_back_pressed(self, _):
@@ -52,19 +63,34 @@ class RelengCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_next_pressed(self, _):
-        is_last_page = self.current_page == 2
+        is_last_page = self.current_page == 1
         if not is_last_page:
             self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page + 1), True)
-#        else:
-#            RootHelperClient.shared().authorize_and_run(callback=self._start_installation)
+        else:
+            self._start_installation(name=self.directory_name_row.get_text())
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        self.carousel.scroll_to(self.source_page, True)
-
+        self.carousel.scroll_to(self.config_page, True)
 
     def _set_current_stage(self, stage: MultiStageProcessState):
         # Setup views visibility:
         self.setup_view.set_visible(stage == MultiStageProcessState.SETUP)
         self.install_view.set_visible(stage != MultiStageProcessState.SETUP)
+
+    @Gtk.Template.Callback()
+    def on_directory_name_activate(self, sender):
+        self.check_filename_is_free()
+        self.get_root().set_focus(None)
+
+    def on_directory_name_changed(self, sender):
+        self.check_filename_is_free()
+
+    def _start_installation(self, name: str):
+        if not self.check_filename_is_free():
+            return
+        self.installation_in_progress = RelengInstallation(name=name)
+        self.installation_in_progress.start()
+        self.install_view.set_multistage_process(self.installation_in_progress)
+        self._set_current_stage(self.installation_in_progress.status)
 

@@ -9,6 +9,7 @@ from .main_window import CatalystlabWindow
 from .root_helper_client import RootHelperClient
 from .modules_scanner import scan_all_submodules
 from .snapshot_manager import SnapshotManager
+from .releng_manager import RelengManager
 
 class CatalystlabApplication(Adw.Application):
     """The main application singleton class."""
@@ -21,6 +22,7 @@ class CatalystlabApplication(Adw.Application):
         self.create_action('preferences', self.on_preferences_action)
         scan_all_submodules("catalystlab")
         SnapshotManager.shared().refresh_snapshots()
+        RelengManager.shared().refresh_releng_directories()
 
     def do_activate(self):
         """Called when the application is activated.

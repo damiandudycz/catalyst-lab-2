@@ -90,6 +90,51 @@
               </object>
             </child>
 
+            <!-- Page 2: Config screen -->
+            <child>
+              <object class="GtkScrolledWindow" id="config_page">
+                <property name="hscrollbar-policy">never</property>
+                <property name="vscrollbar-policy">automatic</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">True</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="margin-start">24</property>
+                    <property name="margin-end">24</property>
+                    <property name="margin-top">4</property>
+                    <property name="margin-bottom">4</property>
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">12</property>
+                    <child>
+                      <object class="AdwPreferencesGroup">
+                        <property name="title">Options</property>
+                        <child>
+                          <object class="AdwEntryRow" id="directory_name_row">
+                            <property name="title">Directory name</property>
+                            <property name="show-apply-button">True</property>
+                            <property name="text">Releng</property>
+                            <signal name="apply" handler="on_directory_name_activate" swapped="no"/>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="name_used_label">
+                            <property name="label">This Releng directory name is already used.</property>
+                            <property name="halign">center</property>
+                            <property name="wrap">True</property>
+                            <property name="justify">fill</property>
+                            <property name="margin-top">12</property>
+                            <style>
+                              <class name="error"/>
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+
           </object>
         </child>
 
@@ -131,7 +176,7 @@
                 <property name="halign">end</property>
                 <child>
                   <object class="GtkButton" id="next_button">
-                    <property name="label">Next</property>
+                    <property name="label">Create releng directory</property>
                     <property name="sensitive">False</property>
                     <property name="opacity">0.0</property>
                     <signal name="clicked" handler="on_next_pressed"/>

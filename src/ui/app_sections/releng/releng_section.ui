@@ -37,7 +37,7 @@
                 </child>
 
                 <child>
-                  <object class="GtkListBox" id="releng_container">
+                  <object class="GtkListBox" id="releng_directories_container">
                     <property name="selection-mode">none</property>
                     <style>
                       <class name="boxed-list"/>

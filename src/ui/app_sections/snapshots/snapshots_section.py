@@ -55,6 +55,10 @@ class SnapshotsSection(Gtk.Box):
 
         for snapshot in snapshots:
             snapshot_row = SnapshotRow(snapshot=snapshot)
+            snapshot_row.set_activatable(True)
+            icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
+            icon.add_css_class("dimmed")
+            snapshot_row.add_suffix(icon)
             snapshot_row.connect("activated", self.on_snapshot_row_pressed)
             self.snapshots_container.insert(snapshot_row, 0)
             self._snapshot_rows.append(snapshot_row)
@@ -90,7 +94,6 @@ class SnapshotRow(Adw.ActionRow):
             icon_name="video-frame-svgrepo-com-symbolic"
         )
         self.snapshot = snapshot
-        self.set_activatable(True)
 
 class SnapshotInstallationRow(Adw.ActionRow):
 

@@ -52,6 +52,7 @@ catalystlab_sources = [
   'toolset/toolset_env_builder.py',
   'releng/releng_directory.py',
   'releng/releng_installation.py',
+  'releng/releng_manager.py',
   'snapshot/snapshot.py',
   'snapshot/snapshot_manager.py',
   'snapshot/snapshot_installation.py',
