@@ -15,6 +15,7 @@ from .repository import Repository
 from .toolset_application import ToolsetApplication
 from .toolset import Toolset, ToolsetEnv
 from .helper_functions import create_temp_workdir, delete_temp_workdir, create_squashfs, extract
+from .toolset_manager import ToolsetManager
 
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
@@ -52,7 +53,7 @@ class ToolsetInstallation(MultiStageProcess):
             # Update version_id of selected apps
             for app_selection in self.apps_selection:
                 self.toolset.metadata.setdefault(app_selection.app.package, {})["version_id"] = str(app_selection.version.id)
-            Repository.TOOLSETS.value.append(self.toolset)
+            ToolsetManager.shared().add_toolset(self.toolset)
 
     def _process_selected_apps(self):
         """Manage auto_select dependencies."""

@@ -22,6 +22,7 @@ class RelengDetailsView(Gtk.Box):
     tag_updating = Gtk.Template.Child()
     tag_update_succeded = Gtk.Template.Child()
     tag_update_failed = Gtk.Template.Child()
+    tag_update_available = Gtk.Template.Child()
     action_button_save_changes = Gtk.Template.Child()
     action_button_update = Gtk.Template.Child()
     action_button_delete = Gtk.Template.Child()
@@ -82,6 +83,7 @@ class RelengDetailsView(Gtk.Box):
         """Updates controls visibility and sensitivity for current status."""
         self.tag_unknown.set_visible(self.releng_directory.status == RelengDirectoryStatus.UNKNOWN)
         self.tag_unchanged.set_visible(self.releng_directory.status == RelengDirectoryStatus.UNCHANGED)
+        self.tag_update_available.set_visible(self.releng_directory.has_remote_changes)
         self.tag_updating.set_visible(
             self.update_in_progress
             and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS

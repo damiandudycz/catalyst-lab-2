@@ -53,6 +53,7 @@ class SnapshotManager:
         Repository.SNAPSHOTS.value.append(snapshot)
 
     def remove_snapshot(self, snapshot: Snapshot):
-        os.remove(self.file_path())
+        if os.path.isfile(snapshot.file_path()):
+            os.remove(snapshot.file_path())
         Repository.SNAPSHOTS.value.remove(snapshot)
 

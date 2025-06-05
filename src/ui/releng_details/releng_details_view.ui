@@ -40,7 +40,7 @@
                 </child>
                 <child>
                   <object class="AdwActionRow" id="status_directory_date_updated_row">
-                    <property name="title">Last update</property>
+                    <property name="title">Last commit date</property>
                   </object>
                 </child>
                 <child>
@@ -72,6 +72,16 @@
                         <child>
                           <object class="GtkLabel" id="tag_unchanged">
                             <property name="label">Unchanged</property>
+                            <style>
+                              <class name="tag-label"/>
+                              <class name="caption-heading"/>
+                              <class name="accent"/>
+                            </style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="tag_update_available">
+                            <property name="label">Update available</property>
                             <style>
                               <class name="tag-label"/>
                               <class name="caption-heading"/>

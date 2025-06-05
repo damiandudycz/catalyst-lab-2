@@ -11,6 +11,7 @@ from .repository import Repository
 from .toolset_update import ToolsetUpdate
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
 from .multistage_process_execution_view import MultistageProcessExecutionView
+from .toolset_manager import ToolsetManager
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_details/toolset_details_view.ui')
 class ToolsetDetailsView(Gtk.Box):
@@ -452,8 +453,7 @@ class ToolsetDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
-        os.remove(self.toolset.squashfs_file)
-        Repository.TOOLSETS.value.remove(self.toolset)
+        ToolsetManager.shared().remove_toolset(toolset=self.toolset)
         if hasattr(self, "_window"):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
