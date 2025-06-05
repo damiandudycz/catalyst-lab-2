@@ -8,6 +8,7 @@ from .releng_installation import RelengInstallation
 from .repository import Repository, RepositoryEvent
 from .releng_directory import RelengDirectory, RelengDirectoryStatus, RelengDirectoryEvent
 from .status_indicator import StatusIndicator, StatusIndicatorState
+from .releng_details_view import RelengDetailsView
 from typing import Any
 from datetime import datetime
 
@@ -51,6 +52,9 @@ class RelengSection(Gtk.Box):
             releng_directory_row = RelengDirectoryRow(releng_directory=releng_directory)
             releng_directory_row.connect("activated", self.on_releng_directory_row_pressed)
             releng_directory_row.set_activatable(True)
+            icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
+            icon.add_css_class("dimmed")
+            releng_directory_row.add_suffix(icon)
             self.releng_directories_container.insert(releng_directory_row, 0)
             self._releng_rows.append(releng_directory_row)
 
@@ -68,7 +72,7 @@ class RelengSection(Gtk.Box):
             app_event_bus.emit(AppEvents.PRESENT_VIEW, RelengCreateView(), "New releng directory", 640, 480)
 
     def on_releng_directory_row_pressed(self, sender):
-        pass
+        self.content_navigation_view.push_view(RelengDetailsView(releng_directory=sender.releng_directory) , title="Releng directory details")
 
     def on_installation_row_pressed(self, sender):
         installation = getattr(sender, "installation", None)

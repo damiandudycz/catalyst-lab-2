@@ -63,9 +63,9 @@
               </object>
             </child>
             <child>
-              <object class="AdwPreferencesGroup" id="status_group">
+              <object class="AdwPreferencesGroup">
                 <child>
-                  <object class="AdwActionRow" id="status_state_row">
+                  <object class="AdwActionRow">
                     <property name="title">Status</property>
                     <!-- Put status labels here -->
                     <child>

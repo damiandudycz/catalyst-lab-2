@@ -9,6 +9,7 @@ from datetime import datetime
 
 class RelengDirectoryEvent(Enum):
     STATUS_CHANGED = auto()
+    LOGS_CHANGED = auto()
 
 class RelengDirectoryStatus(Enum):
     # Git status
@@ -24,6 +25,7 @@ class RelengDirectory(Serializable):
         self.status: RelengDirectoryStatus = RelengDirectoryStatus.UNKNOWN
         self.last_commit_date = last_commit_date
         self.branch_name = branch_name
+        self.logs: list[dict] = []
         self.event_bus = EventBus[RelengDirectoryEvent]()
 
     def serialize(self) -> dict:
@@ -92,6 +94,45 @@ class RelengDirectory(Serializable):
                 self.last_commit_date = None
                 self.branch_name = None
             self.event_bus.emit(RelengDirectoryEvent.STATUS_CHANGED, self.status)
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+    def update_logs(self):
+        def worker():
+            directory = self.directory_path()
+            self.logs = []
+            if not os.path.isdir(directory) or not os.path.isdir(os.path.join(directory, ".git")):
+                self.event_bus.emit(RelengDirectoryEvent.LOGS_CHANGED, self.logs)
+                return
+            try:
+                # Use a custom format to make parsing easier
+                log_format = "%H%x1f%an%x1f%aI%x1f%s"  # hash␟author␟ISO date␟subject
+                process = subprocess.Popen(
+                    ["git", "log", f"--format={log_format}"],
+                    cwd=directory,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True
+                )
+                stdout, _ = process.communicate()
+                for line in stdout.strip().splitlines():
+                    parts = line.strip().split('\x1f')
+                    if len(parts) == 4:
+                        commit_hash, author, date_str, message = parts
+                        try:
+                            date = datetime.fromisoformat(date_str)
+                        except ValueError:
+                            date = None
+                        self.logs.append({
+                            "hash": commit_hash,
+                            "author": author,
+                            "date": date,
+                            "message": message,
+                        })
+            except Exception as e:
+                print(f"LOG EXCEPTION: {e}")
+                self.logs = []
+            self.event_bus.emit(RelengDirectoryEvent.LOGS_CHANGED, self.logs)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
 

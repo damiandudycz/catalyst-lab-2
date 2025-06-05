@@ -23,7 +23,6 @@ class ToolsetDetailsView(Gtk.Box):
     toolset_date_created_row = Gtk.Template.Child()
     toolset_date_updated_row = Gtk.Template.Child()
     toolset_source_row = Gtk.Template.Child()
-    status_state_row = Gtk.Template.Child()
     status_bindings_row = Gtk.Template.Child()
     status_update_row = Gtk.Template.Child()
     status_update_progress_label = Gtk.Template.Child()
