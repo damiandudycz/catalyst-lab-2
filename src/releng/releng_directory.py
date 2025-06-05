@@ -5,6 +5,7 @@ from typing import final, ClassVar, Dict, Any
 from enum import Enum, auto
 from .event_bus import EventBus
 import os, threading, subprocess
+from datetime import datetime
 
 class RelengDirectoryEvent(Enum):
     STATUS_CHANGED = auto()
@@ -18,31 +19,41 @@ class RelengDirectoryStatus(Enum):
 @final
 class RelengDirectory(Serializable):
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, branch_name: str | None = None, last_commit_date: datetime | None = None):
         self.name = name
         self.status: RelengDirectoryStatus = RelengDirectoryStatus.UNKNOWN
+        self.last_commit_date = last_commit_date
+        self.branch_name = branch_name
         self.event_bus = EventBus[RelengDirectoryEvent]()
 
     def serialize(self) -> dict:
         return {
-            "name": self.name
+            "name": self.name,
+            "last_commit_date": self.last_commit_date.isoformat() if self.last_commit_date else None,
+            "branch_name": self.branch_name,
         }
     @classmethod
     def init_from(cls, data: dict) -> Self:
         return cls(
-            name=data["name"]
+            name=data["name"],
+            last_commit_date=(
+                datetime.fromisoformat(data["last_commit_date"])
+                if data.get("last_commit_date") else None
+            ),
+            branch_name=data.get("branch_name"),
         )
 
     def update_status(self):
         def worker():
             directory = self.directory_path()
-            print(f"Checking {directory}")
             if not os.path.isdir(directory) or not os.path.isdir(os.path.join(directory, ".git")):
-                print("No .git")
                 self.status = RelengDirectoryStatus.UNKNOWN
+                self.last_commit_date = None
+                self.branch_name = None
                 self.event_bus.emit(RelengDirectoryEvent.STATUS_CHANGED, self.status)
                 return
             try:
+                # Get git status porcelain
                 process = subprocess.Popen(
                     ["git", "status", "--porcelain"],
                     cwd=directory,
@@ -52,14 +63,34 @@ class RelengDirectory(Serializable):
                 )
                 stdout, _ = process.communicate()
                 if process.returncode != 0:
-                    print(f"Status: {process.returncode}")
                     self.status = RelengDirectoryStatus.UNKNOWN
                 else:
-                    print(f"OUT: {stdout}")
                     self.status = RelengDirectoryStatus.CHANGED if stdout.strip() else RelengDirectoryStatus.UNCHANGED
+                # Get last commit date (ISO 8601)
+                process_date = subprocess.Popen(
+                    ["git", "log", "-1", "--format=%cI"],
+                    cwd=directory,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True
+                )
+                last_commit_date, _ = process_date.communicate()
+                self.last_commit_date = datetime.fromisoformat(last_commit_date.strip())
+                # Get current branch name
+                process_branch = subprocess.Popen(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=directory,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True
+                )
+                branch_name, _ = process_branch.communicate()
+                self.branch_name = branch_name.strip() if process_branch.returncode == 0 else None
             except Exception as e:
                 print(f"EX: {e}")
                 self.status = RelengDirectoryStatus.UNKNOWN
+                self.last_commit_date = None
+                self.branch_name = None
             self.event_bus.emit(RelengDirectoryEvent.STATUS_CHANGED, self.status)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()

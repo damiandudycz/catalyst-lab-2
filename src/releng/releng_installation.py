@@ -61,7 +61,7 @@ class RelengInstallationStepClone(MultiStageProcessStage):
             process.wait()
             if process.returncode != 0:
                 raise subprocess.CalledProcessError(process.returncode, process.args)
-            self.releng_directory.status = RelengDirectoryStatus.UNCHANGED
+            self.releng_directory.update_status()
             self.multistage_process.releng_directory = self.releng_directory
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:

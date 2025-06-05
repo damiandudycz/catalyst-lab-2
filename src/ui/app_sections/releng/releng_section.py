@@ -9,6 +9,7 @@ from .repository import Repository, RepositoryEvent
 from .releng_directory import RelengDirectory, RelengDirectoryStatus, RelengDirectoryEvent
 from .status_indicator import StatusIndicator, StatusIndicatorState
 from typing import Any
+from datetime import datetime
 
 @app_section(title="Releng", icon="book-minimalistic-svgrepo-com-symbolic", order=4_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/releng/releng_section.ui')
@@ -104,14 +105,15 @@ class RelengDirectoryRow(Adw.ActionRow):
             self.status_indicator.set_state(StatusIndicatorState.ENABLED_UNSAFE)
         else:
             self.status_indicator.set_state(StatusIndicatorState.DISABLED)
+        self.update_subtitle()
+
+    def update_subtitle(self):
+        self.set_subtitle(f"{self.releng_directory.branch_name}, {self.releng_directory.last_commit_date.strftime('%Y-%d-%m %H:%M') if self.releng_directory.last_commit_date else 'Unknown date'}")
 
 class RelengInstallationRow(Adw.ActionRow):
 
     def __init__(self, installation: RelengInstallation):
-        super().__init__(
-            title=installation.name(),
-            icon_name="book-minimalistic-svgrepo-com-symbolic"
-        )
+        super().__init__(title=installation.name(), icon_name="book-minimalistic-svgrepo-com-symbolic")
         self.installation = installation
         self.set_activatable(True)
         self.progress_label = Gtk.Label()
