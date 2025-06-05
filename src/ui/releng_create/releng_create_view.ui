@@ -113,7 +113,8 @@
                             <property name="title">Directory name</property>
                             <property name="show-apply-button">True</property>
                             <property name="text">Releng</property>
-                            <signal name="apply" handler="on_directory_name_activate" swapped="no"/>
+                            <signal name="apply" handler="on_directory_name_activate"/>
+                            <signal name="changed" handler="on_directory_name_changed"/>
                           </object>
                         </child>
                         <child>

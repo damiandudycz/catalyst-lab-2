@@ -30,7 +30,17 @@
                   <object class="AdwEntryRow" id="directory_name_row">
                     <property name="title">Directory name</property>
                     <property name="show-apply-button">True</property>
-                    <!-- <signal name="apply" handler="on_directory_name_activate" swapped="no"/> -->
+                    <signal name="apply" handler="on_directory_name_activate"/>
+                    <signal name="changed" handler="on_directory_name_changed"/>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="name_used_row">
+                    <property name="title">This Releng directory name is already used.</property>
+                    <style>
+                      <class name="caption-heading"/>
+                      <class name="error"/>
+                    </style>
                   </object>
                 </child>
                 <child>

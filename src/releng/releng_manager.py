@@ -50,8 +50,18 @@ class RelengManager:
         Repository.RELENG.value.append(releng_directory)
 
     def remove_releng_directory(self, releng_directory: RelengDirectory):
-        print(f"RM: {releng_directory}")
         if os.path.isdir(releng_directory.directory_path()):
             shutil.rmtree(releng_directory.directory_path())
         Repository.RELENG.value.remove(releng_directory)
 
+    def is_name_available(self, name: str) -> bool:
+        directory_path = RelengDirectory.directory_path_for_name(name=name)
+        return not os.path.exists(directory_path)
+
+    def rename_releng_directory(self, releng_directory: RelengDirectory, name: str):
+        if not self.is_name_available(name=name):
+            raise RuntimeError(f"Releng directory name {name} is not available")
+        new_directory = RelengDirectory.directory_path_for_name(name=name)
+        shutil.move(releng_directory.directory_path(), new_directory)
+        releng_directory.name = name
+        Repository.RELENG.save()

@@ -3,6 +3,7 @@ from gi.repository import Gtk, GLib, Gio, Adw
 from .multistage_process import MultiStageProcessState
 from .releng_installation import RelengInstallation
 from .releng_directory import RelengDirectory
+from .releng_manager import RelengManager
 import os
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_create/releng_create_view.ui')
@@ -30,7 +31,6 @@ class RelengCreateView(Gtk.Box):
         self.install_view.set_multistage_process(self.installation_in_progress)
         self.check_filename_is_free()
         self.connect("map", self.on_map)
-        self.directory_name_row.connect("changed", self.on_directory_name_changed)
 
     def on_map(self, widget):
         self.install_view.content_navigation_view = self.content_navigation_view
@@ -49,8 +49,7 @@ class RelengCreateView(Gtk.Box):
         self.next_button.set_opacity(0.0 if not is_last_page else 1.0)
 
     def check_filename_is_free(self) -> bool:
-        directory_path = RelengDirectory.directory_path_for_name(self.directory_name_row.get_text())
-        self.filename_is_free = not os.path.exists(directory_path)
+        self.filename_is_free = RelengManager.shared().is_name_available(name=self.directory_name_row.get_text())
         self.setup_back_next_buttons()
         self.name_used_label.set_visible(not self.filename_is_free)
         return self.filename_is_free
@@ -83,6 +82,7 @@ class RelengCreateView(Gtk.Box):
         self.check_filename_is_free()
         self.get_root().set_focus(None)
 
+    @Gtk.Template.Callback()
     def on_directory_name_changed(self, sender):
         self.check_filename_is_free()
 

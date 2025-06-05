@@ -12,6 +12,7 @@ class RelengDetailsView(Gtk.Box):
     __gtype_name__ = "RelengDetailsView"
 
     directory_name_row = Gtk.Template.Child()
+    name_used_row = Gtk.Template.Child()
     status_directory_branch_name_row = Gtk.Template.Child()
     status_directory_date_updated_row = Gtk.Template.Child()
     status_directory_path_row = Gtk.Template.Child()
@@ -34,6 +35,10 @@ class RelengDetailsView(Gtk.Box):
         self.releng_directory = releng_directory
         self.update_in_progress: RelengUpdate | None = None
         self.content_navigation_view = content_navigation_view
+        self._changes_action_group = Gio.SimpleActionGroup()
+        self._add_changes_action("save_changes", self.save_changes)
+        self._add_changes_action("discard_changes", self.discard_changes)
+        self.insert_action_group("changes", self._changes_action_group)
         self.setup_releng_directory_details()
         self.setup_releng_directory_logs()
         self.load_update_state()
@@ -161,11 +166,47 @@ class RelengDetailsView(Gtk.Box):
         self.status_update_progress_label.set_label(f"{int(progress * 100)}%")
 
     @Gtk.Template.Callback()
+    def on_directory_name_activate(self, sender):
+        new_name = self.directory_name_row.get_text()
+        if new_name == self.releng_directory.name:
+            self.get_root().set_focus(None)
+            return
+        is_name_available = RelengManager.shared().is_name_available(name=new_name)
+        try:
+            if not is_name_available:
+                raise RuntimeError(f"Releng directory name {new_name} is not available")
+            RelengManager.shared().rename_releng_directory(releng_directory=self.releng_directory, name=new_name)
+            self.get_root().set_focus(None)
+            self.setup_releng_directory_details()
+        except Exception as e:
+            print(f"Error renaming releng directory: {e}")
+            self.directory_name_row.add_css_class("error")
+            self.directory_name_row.grab_focus()
+
+    @Gtk.Template.Callback()
+    def on_directory_name_changed(self, sender):
+        is_name_available = RelengManager.shared().is_name_available(name=self.directory_name_row.get_text()) or self.directory_name_row.get_text() == self.releng_directory.name
+        self.name_used_row.set_visible(not is_name_available)
+        self.directory_name_row.remove_css_class("error")
+
+    @Gtk.Template.Callback()
     def status_update_row_clicked(self, sender):
         self.show_update(update=self.update_in_progress)
 
     @Gtk.Template.Callback()
     def action_button_save_changes_clicked(self, sender):
+        pass
+
+    def _add_changes_action(self, name, callback) -> Gio.SimpleAction:
+        action = Gio.SimpleAction.new(name, None)
+        action.connect("activate", callback)
+        self._changes_action_group.add_action(action)
+        return action
+
+    def save_changes(self):
+        pass
+
+    def discard_changes(self):
         pass
 
     @Gtk.Template.Callback()
