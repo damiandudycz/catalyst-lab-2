@@ -15,7 +15,6 @@ from .multistage_process import (
 class MultistageProcessExecutionView(Gtk.Box):
     __gtype_name__ = 'MultistageProcessExecutionView'
 
-    title_label = Gtk.Template.Child()
     process_steps_list = Gtk.Template.Child()
     cancel_button = Gtk.Template.Child()
     finish_button = Gtk.Template.Child()
@@ -33,7 +32,7 @@ class MultistageProcessExecutionView(Gtk.Box):
             if multistage_process.status == MultiStageProcessState.SETUP:
                 raise("multistage_process needs to be started before connecting")
             self.multistage_process = multistage_process
-            self.title_label.set_label(multistage_process.title)
+            self.process_steps_list.set_title(title=multistage_process.title)
             self.progress_bar.set_fraction(multistage_process.progress)
             self._update_installation_steps(steps=multistage_process.stages)
             self._set_current_stage(multistage_process.status)

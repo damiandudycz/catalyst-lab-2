@@ -2,7 +2,10 @@ from gi.repository import Gtk, Adw, Gio, GLib
 from .releng_directory import RelengDirectory, RelengDirectoryEvent, RelengDirectoryStatus
 from .releng_manager import RelengManager
 from .repository import Repository
+from .releng_update import RelengUpdate
 import threading, os
+from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
+from .multistage_process_execution_view import MultistageProcessExecutionView
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_details/releng_details_view.ui')
 class RelengDetailsView(Gtk.Box):
@@ -16,23 +19,31 @@ class RelengDetailsView(Gtk.Box):
     tag_unknown = Gtk.Template.Child()
     tag_unchanged = Gtk.Template.Child()
     tag_changed = Gtk.Template.Child()
+    tag_updating = Gtk.Template.Child()
+    tag_update_succeded = Gtk.Template.Child()
+    tag_update_failed = Gtk.Template.Child()
     action_button_save_changes = Gtk.Template.Child()
     action_button_update = Gtk.Template.Child()
     action_button_delete = Gtk.Template.Child()
+    status_update_row = Gtk.Template.Child()
+    status_update_progress_label = Gtk.Template.Child()
 
     def __init__(self, releng_directory: RelengDirectory, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.releng_directory = releng_directory
+        self.update_in_progress: RelengUpdate | None = None
         self.content_navigation_view = content_navigation_view
         self.setup_releng_directory_details()
         self.setup_releng_directory_logs()
-        self.connect("map", self.on_map)
+        self.load_update_state()
         self.setup_status()
+        self.connect("map", self.on_map)
         releng_directory.event_bus.subscribe(RelengDirectoryEvent.STATUS_CHANGED, self.setup_releng_directory_details)
         releng_directory.event_bus.subscribe(RelengDirectoryEvent.LOGS_CHANGED, self.setup_releng_directory_logs)
+        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.releng_directories_updates_updated)
 
     def on_map(self, widget):
-        # Disables toolset_name_row auto focus on start
+        # Disables directory_name_row auto focus on start
         self.get_root().set_focus(None)
 
     def setup_releng_directory_details(self, event_data = None):
@@ -57,8 +68,6 @@ class RelengDetailsView(Gtk.Box):
         if self.releng_directory.logs:
             i = 1
             for log in self.releng_directory.logs:
-                print(log)
-                print("------------------")
                 message = log.get("message")
                 author = log.get("author")
                 date = log.get("date")
@@ -73,9 +82,85 @@ class RelengDetailsView(Gtk.Box):
         """Updates controls visibility and sensitivity for current status."""
         self.tag_unknown.set_visible(self.releng_directory.status == RelengDirectoryStatus.UNKNOWN)
         self.tag_unchanged.set_visible(self.releng_directory.status == RelengDirectoryStatus.UNCHANGED)
+        self.tag_updating.set_visible(
+            self.update_in_progress
+            and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
+        )
+        self.tag_update_succeded.set_visible(
+            self.update_in_progress
+            and self.update_in_progress.status == MultiStageProcessState.COMPLETED
+        )
+        self.tag_update_failed.set_visible(
+            self.update_in_progress
+            and self.update_in_progress.status == MultiStageProcessState.FAILED
+        )
+        self.status_update_row.set_visible(self.update_in_progress)
+        self.status_update_row.set_subtitle(
+            "" if not self.update_in_progress
+            else "Update in progress" if self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
+            else "Update completed" if self.update_in_progress.status == MultiStageProcessState.COMPLETED
+            else "Update failed" if self.update_in_progress.status == MultiStageProcessState.FAILED
+            else ""
+        )
+        if self.releng_directory.has_remote_changes:
+            self.action_button_update.get_style_context().add_class("suggested-action")
+        else:
+            self.action_button_update.get_style_context().remove_class("suggested-action")
+        self.status_update_progress_label.set_visible(
+            self.update_in_progress
+            and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
+        )
         self.tag_changed.set_visible(self.releng_directory.status == RelengDirectoryStatus.CHANGED)
-        self.action_button_save_changes.set_sensitive(self.releng_directory.status == RelengDirectoryStatus.CHANGED)
-        self.action_button_update.set_sensitive(self.releng_directory.status == RelengDirectoryStatus.UNCHANGED)
+        self.action_button_save_changes.set_sensitive(
+            self.releng_directory.status == RelengDirectoryStatus.CHANGED
+            and (
+                not self.update_in_progress
+                or self.update_in_progress.status == MultiStageProcessState.COMPLETED
+                or self.update_in_progress.status == MultiStageProcessState.FAILED
+            )
+        )
+        self.action_button_update.set_sensitive(
+            self.releng_directory.status == RelengDirectoryStatus.UNCHANGED
+            and (
+                not self.update_in_progress
+                or self.update_in_progress.status == MultiStageProcessState.COMPLETED
+                or self.update_in_progress.status == MultiStageProcessState.FAILED
+            )
+        )
+
+    def load_update_state(self, started_processes: list[RelengUpdate] | None = None):
+        if started_processes is None:
+            started_processes = MultiStageProcess.get_started_processes_by_class(RelengUpdate)
+        if self.update_in_progress is not None :
+            self.update_in_progress.event_bus.unsubscribe(MultiStageProcessEvent.STATE_CHANGED, self)
+        self.update_in_progress = next((process for process in started_processes if process.releng_directory == self.releng_directory), None)
+        if self.update_in_progress:
+            self.update_in_progress.event_bus.subscribe(
+                MultiStageProcessEvent.STATE_CHANGED,
+                self.releng_directories_update_process_state_changed,
+                self
+            )
+            self.status_update_progress_label.set_label(f"{int(self.update_in_progress.progress * 100)}%")
+            self.update_in_progress.event_bus.subscribe(
+                MultiStageProcessEvent.PROGRESS_CHANGED,
+                self.releng_directories_update_process_progress_changed,
+                self
+            )
+
+    def releng_directories_updates_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
+        if issubclass(process_class, RelengUpdate):
+            self.load_update_state(started_processes=started_processes)
+            self.setup_status()
+
+    def releng_directories_update_process_state_changed(self, state: MultiStageProcessState):
+        self.setup_status()
+
+    def releng_directories_update_process_progress_changed(self, progress: float):
+        self.status_update_progress_label.set_label(f"{int(progress * 100)}%")
+
+    @Gtk.Template.Callback()
+    def status_update_row_clicked(self, sender):
+        self.show_update(update=self.update_in_progress)
 
     @Gtk.Template.Callback()
     def action_button_save_changes_clicked(self, sender):
@@ -83,7 +168,7 @@ class RelengDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_update_clicked(self, sender):
-        pass
+        self.start_update()
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
@@ -93,3 +178,14 @@ class RelengDetailsView(Gtk.Box):
         elif hasattr(self, "content_navigation_view"):
             self.content_navigation_view.pop()
 
+    def start_update(self):
+        if self.update_in_progress:
+            self.update_in_progress.clean_from_started_processes()
+        update = RelengUpdate(releng_directory=self.releng_directory)
+        update.start()
+        self.show_update(update=update)
+
+    def show_update(self, update: RelengUpdate):
+        update_view = MultistageProcessExecutionView()
+        update_view.set_multistage_process(multistage_process=update)
+        self.content_navigation_view.push_view(update_view, title="Updating Releng")

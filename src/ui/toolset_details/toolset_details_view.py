@@ -231,9 +231,7 @@ class ToolsetDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def status_update_row_clicked(self, sender):
-        update_view = MultistageProcessExecutionView()
-        update_view.set_multistage_process(multistage_process=self.update_in_progress)
-        self.content_navigation_view.push_view(update_view, title="Updating toolset")
+        self.show_update(update=self.update_in_progress)
 
     # --------------------------------------------------------------------------
     # Changing toolset name:
@@ -509,3 +507,4 @@ class ToolsetDetailsView(Gtk.Box):
                 finally:
                     self.toolset.release()
         RootHelperClient.shared().authorize_and_run(callback=unspawn)
+

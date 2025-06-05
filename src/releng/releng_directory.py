@@ -20,11 +20,12 @@ class RelengDirectoryStatus(Enum):
 @final
 class RelengDirectory(Serializable):
 
-    def __init__(self, name: str, branch_name: str | None = None, last_commit_date: datetime | None = None):
+    def __init__(self, name: str, branch_name: str | None = None, last_commit_date: datetime | None = None, has_remote_changes: bool = False):
         self.name = name
         self.status: RelengDirectoryStatus = RelengDirectoryStatus.UNKNOWN
         self.last_commit_date = last_commit_date
         self.branch_name = branch_name
+        self.has_remote_changes = has_remote_changes
         self.logs: list[dict] = []
         self.event_bus = EventBus[RelengDirectoryEvent]()
 
@@ -33,6 +34,7 @@ class RelengDirectory(Serializable):
             "name": self.name,
             "last_commit_date": self.last_commit_date.isoformat() if self.last_commit_date else None,
             "branch_name": self.branch_name,
+            "has_remote_changes": self.has_remote_changes
         }
     @classmethod
     def init_from(cls, data: dict) -> Self:
@@ -43,9 +45,10 @@ class RelengDirectory(Serializable):
                 if data.get("last_commit_date") else None
             ),
             branch_name=data.get("branch_name"),
+            has_remote_changes=data.get("has_remote_changes")
         )
 
-    def update_status(self):
+    def update_status(self, wait: bool = False):
         def worker():
             directory = self.directory_path()
             if not os.path.isdir(directory) or not os.path.isdir(os.path.join(directory, ".git")):
@@ -88,6 +91,34 @@ class RelengDirectory(Serializable):
                 )
                 branch_name, _ = process_branch.communicate()
                 self.branch_name = branch_name.strip() if process_branch.returncode == 0 else None
+                # Check if there are remote changes
+                try:
+                    process_fetch = subprocess.Popen(
+                        ["git", "fetch"],
+                        cwd=directory,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    process_fetch.wait()
+                    if process_fetch.returncode != 0:
+                        raise RuntimeError("git fetch failed")
+                    process_diff = subprocess.Popen(
+                        ["git", "rev-list", "--count", "--left-only", "@{u}...HEAD"],
+                        cwd=directory,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    output, error = process_diff.communicate()
+                    if process_diff.returncode == 0:
+                        behind_count = int(output.strip())
+                        self.has_remote_changes = behind_count > 0
+                    else:
+                        print(f"Warning: Failed to compare with upstream: {error.strip()}")
+                        self.has_remote_changes = False
+                except Exception as e:
+                    print(f"Warning: Failed to check for updates: {e}")
+                    self.has_remote_changes = False
             except Exception as e:
                 print(f"EX: {e}")
                 self.status = RelengDirectoryStatus.UNKNOWN
@@ -96,8 +127,10 @@ class RelengDirectory(Serializable):
             self.event_bus.emit(RelengDirectoryEvent.STATUS_CHANGED, self.status)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
+        if wait:
+            thread.join()
 
-    def update_logs(self):
+    def update_logs(self, wait: bool = False):
         def worker():
             directory = self.directory_path()
             self.logs = []
@@ -135,6 +168,8 @@ class RelengDirectory(Serializable):
             self.event_bus.emit(RelengDirectoryEvent.LOGS_CHANGED, self.logs)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
+        if wait:
+            thread.join()
 
     @staticmethod
     def directory_path_for_name(name: str) -> str:

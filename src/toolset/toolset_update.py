@@ -7,7 +7,6 @@ from .multistage_process import (
 )
 from .toolset import Toolset, BindMount
 from .toolset_application import ToolsetApplication
-from .snapshot_manager import SnapshotManager, Snapshot
 from .root_function import root_function
 from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
