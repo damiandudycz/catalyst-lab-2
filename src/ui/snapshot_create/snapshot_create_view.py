@@ -14,9 +14,9 @@ from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .multistage_process import MultiStageProcessState
 from .toolset import Toolset, ToolsetEvents
 from .repository import Repository
-from .environments_section import ToolsetRow
 from .toolset_application import ToolsetApplication
 from .snapshot_installation import SnapshotInstallation
+from .repository_list_view import ItemRow
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot_create/snapshot_create_view.ui')
 class SnapshotCreateView(Gtk.Box):
@@ -161,7 +161,13 @@ class SnapshotCreateView(Gtk.Box):
         self.toolsets_list.add(self.reserved_label)
         toolsets_check_buttons_group = []
         for toolset in sorted_toolsets:
-            row = ToolsetRow(toolset=toolset)
+            row = ItemRow(
+                item=toolset,
+                item_title_property_name="name",
+                item_subtitle_property_name="short_details",
+                item_status_property_name="status_indicator_values",
+                item_icon="preferences-other-symbolic"
+            )
             check_button = Gtk.CheckButton()
             check_button.set_active(toolset == self.selected_toolset)
             if toolsets_check_buttons_group:

@@ -6,6 +6,7 @@ from .releng_update import RelengUpdate
 import threading, os
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
 from .multistage_process_execution_view import MultistageProcessExecutionView
+from .event_bus import SharedEvent
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_details/releng_details_view.ui')
 class RelengDetailsView(Gtk.Box):
@@ -44,7 +45,7 @@ class RelengDetailsView(Gtk.Box):
         self.load_update_state()
         self.setup_status()
         self.connect("map", self.on_map)
-        releng_directory.event_bus.subscribe(RelengDirectoryEvent.STATUS_CHANGED, self.setup_releng_directory_details)
+        releng_directory.event_bus.subscribe(SharedEvent.STATE_UPDATED, self.setup_releng_directory_details)
         releng_directory.event_bus.subscribe(RelengDirectoryEvent.LOGS_CHANGED, self.setup_releng_directory_logs)
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.releng_directories_updates_updated)
 
@@ -52,7 +53,9 @@ class RelengDetailsView(Gtk.Box):
         # Disables directory_name_row auto focus on start
         self.get_root().set_focus(None)
 
-    def setup_releng_directory_details(self, event_data = None):
+    def setup_releng_directory_details(self, object = None):
+        if object is not None and object != self.releng_directory:
+            return
         """Displays main details of the releng directory."""
         self.directory_name_row.set_text(self.releng_directory.name)
         last_commit_date = self.releng_directory.last_commit_date
@@ -60,7 +63,7 @@ class RelengDetailsView(Gtk.Box):
         self.status_directory_date_updated_row.set_subtitle(last_commit_date.strftime("%Y-%d-%m %H:%M") if last_commit_date else "unknown")
         self.status_directory_path_row.set_subtitle(self.releng_directory.directory_path())
         self.setup_status()
-        if event_data is None:
+        if object is None:
             self.releng_directory.update_status()
             self.releng_directory.update_logs()
 

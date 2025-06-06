@@ -81,7 +81,7 @@ class RelengDirectory(Serializable):
                 self.status = RelengDirectoryStatus.UNKNOWN
                 self.last_commit_date = None
                 self.branch_name = None
-                self.event_bus.emit(SharedEvent.STATE_UPDATED)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
                 return
             try:
                 # Get git status porcelain
@@ -150,7 +150,7 @@ class RelengDirectory(Serializable):
                 self.status = RelengDirectoryStatus.UNKNOWN
                 self.last_commit_date = None
                 self.branch_name = None
-            self.event_bus.emit(SharedEvent.STATE_UPDATED)
+            self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:

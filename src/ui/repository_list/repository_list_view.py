@@ -5,9 +5,20 @@ from .multistage_process import MultiStageProcess, MultiStageProcessEvent, Multi
 from .status_indicator import StatusIndicator
 from .event_bus import SharedEvent
 
+# Import additional classed so that it can be parsed in repository_list_view:
+from .toolset_installation import ToolsetInstallation
+from .snapshot_installation import SnapshotInstallation
+from .releng_installation import RelengInstallation
+
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/repository_list/repository_list_view.ui')
 class RepositoryListView(Gtk.Box):
     __gtype_name__ = "RepositoryListView"
+
+    __gsignals__ = {
+        "item-row-pressed": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,)),
+        "installation-row-pressed": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,)),
+        "add-new-item-pressed": (GObject.SignalFlags.RUN_FIRST, None, ())
+    }
 
     # View elements:
     title_label = Gtk.Template.Child()
@@ -57,6 +68,7 @@ class RepositoryListView(Gtk.Box):
                 item,
                 self.item_title_property_name,
                 self.item_subtitle_property_name,
+                self.item_status_property_name,
                 self.item_icon
             )
             item_row.set_activatable(True)
@@ -74,32 +86,25 @@ class RepositoryListView(Gtk.Box):
             self._item_rows.append(installation_row)
 
     def on_item_row_pressed(self, sender):
-        pass
-        #self.content_navigation_view.push_view(SnapshotDetailsView(snapshot=sender.snapshot) , title="Snapshot details")
+        self.emit("item-row-pressed", sender.item)
 
     def on_installation_row_pressed(self, sender):
-        pass
-        #installation = getattr(sender, "installation", None)
-        #if installation is None:
-        #    return
-        #if self.wizard_mode:
-        #    self.content_navigation_view.push_view(SnapshotCreateView(installation_in_progress=installation), title="New toolset")
-        #else:
-        #    app_event_bus.emit(AppEvents.PRESENT_VIEW, SnapshotCreateView(installation_in_progress=installation), "New toolset", 640, 480)
+        self.emit("installation-row-pressed", sender.installation)
 
     @Gtk.Template.Callback()
     def on_add_item_activated(self, sender):
-        pass
+        self.emit("add-new-item-pressed")
 
 class ItemRow(Adw.ActionRow):
 
-    def __init__(self, item, item_title_property_name, item_subtitle_property_name, item_icon):
+    def __init__(self, item, item_title_property_name, item_subtitle_property_name, item_status_property_name, item_icon):
         super().__init__(
             title=getattr(item, item_title_property_name, None),
             subtitle=getattr(item, item_subtitle_property_name, None),
             icon_name=item_icon
         )
         self.item = item
+        self.item_status_property_name = item_status_property_name
         self.item_subtitle_property_name = item_subtitle_property_name
         # Status indicator
         self.status_indicator = StatusIndicator()
@@ -114,15 +119,16 @@ class ItemRow(Adw.ActionRow):
                 self.state_updated
             )
 
-    def state_updated(self):
-        self.subtitle = getattr(self.item, self.item_subtitle_property_name, None)
-        self.setup_status_indicator()
+    def state_updated(self, object):
+        if object == self.item:
+            self.subtitle = getattr(self.item, self.item_subtitle_property_name, None)
+            self.setup_status_indicator()
 
     def setup_status_indicator(self):
-        if not hasattr(self.item, "status_indicator_values"):
+        if not hasattr(self.item, self.item_status_property_name):
             self.status_indicator.set_visible(False)
             return
-        status_indicator_values = self.item.status_indicator_values
+        status_indicator_values = getattr(self.item, self.item_status_property_name)
         self.status_indicator.set_visible(True)
         self.status_indicator.set_values(status_indicator_values)
 

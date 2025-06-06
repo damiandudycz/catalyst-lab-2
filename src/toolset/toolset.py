@@ -352,7 +352,7 @@ class Toolset(Serializable):
                     if chmod_result.code != ServerResponseStatusCode.OK:
                         raise RuntimeError("Toolset test failed")
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
-                self.event_bus.emit(SharedEvent.STATE_UPDATED)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
             except Exception as e:
                 print(e)
                 self.unspawn(rebuild_squashfs_if_needed=False)
@@ -390,7 +390,7 @@ class Toolset(Serializable):
                 self.bind_options = None
                 self.spawned = False
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
-                self.event_bus.emit(SharedEvent.STATE_UPDATED)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
             except Exception as e:
                 print(f"Error deleting toolset work_dir: {e}")
                 raise e
@@ -405,7 +405,7 @@ class Toolset(Serializable):
             else:
                 self.is_reserved = True
                 self.event_bus.emit(ToolsetEvents.IS_RESERVED_CHANGED, self.is_reserved)
-                self.event_bus.emit(SharedEvent.STATE_UPDATED)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
                 return True
 
     def release(self) -> bool:
@@ -414,7 +414,7 @@ class Toolset(Serializable):
                 return False
             self.is_reserved = False
             self.event_bus.emit(ToolsetEvents.IS_RESERVED_CHANGED, self.is_reserved)
-            self.event_bus.emit(SharedEvent.STATE_UPDATED)
+            self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
             return True
 
     # --------------------------------------------------------------------------
@@ -431,13 +431,13 @@ class Toolset(Serializable):
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             self.in_use = True
             self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
-            self.event_bus.emit(SharedEvent.STATE_UPDATED)
+            self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
             def on_complete(completion_handler: callable | None, result: ServerResponse):
                 with self.access_lock:
                     self.in_use = False
                     self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
-                    self.event_bus.emit(SharedEvent.STATE_UPDATED)
+                    self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
                 if completion_handler:
                     try:
                         completion_handler(result)
@@ -458,7 +458,7 @@ class Toolset(Serializable):
                 print(f"Failed to execute command: {e}")
                 self.in_use = False
                 self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
-                self.event_bus.emit(SharedEvent.STATE_UPDATED)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
                 raise e
 
     # --------------------------------------------------------------------------

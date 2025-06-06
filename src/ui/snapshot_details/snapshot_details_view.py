@@ -100,7 +100,7 @@ class SnapshotDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def button_delete_clicked(self, sender):
-        SnapshotManager.shared.remove_snapshot(self.snapshot)
+        SnapshotManager.shared().remove_snapshot(self.snapshot)
         if hasattr(self, "_window"):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
