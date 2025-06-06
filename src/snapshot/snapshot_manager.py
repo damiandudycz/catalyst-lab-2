@@ -1,7 +1,7 @@
+from typing import final, Self
 from dataclasses import dataclass, field
 from datetime import datetime
 from .repository import Serializable, Repository
-from typing import Self
 from .toolset import Toolset, BindMount
 from .root_helper_client import RootHelperClient, ServerResponse, ServerResponseStatusCode, AuthorizationKeeper
 from .root_function import root_function
@@ -11,6 +11,7 @@ import re
 from collections import defaultdict
 from .snapshot import Snapshot
 
+@final
 class SnapshotManager:
     _instance = None
 

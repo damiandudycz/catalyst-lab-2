@@ -1,11 +1,9 @@
+from typing import final
 from .git_installation import GitInstallation
 from .git_manager import GitManager
 from .releng_manager import RelengManager
 
-# ------------------------------------------------------------------------------
-# Releng installation.
-# ------------------------------------------------------------------------------
-
+@final
 class RelengInstallation(GitInstallation):
     """Handles the full releng directory installation lifecycle."""
 

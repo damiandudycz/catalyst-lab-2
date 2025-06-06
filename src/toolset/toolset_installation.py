@@ -27,6 +27,7 @@ from .multistage_process import (
 # Toolset installation.
 # ------------------------------------------------------------------------------
 
+@final
 class ToolsetInstallation(MultiStageProcess):
     """Handles the full toolset installation lifecycle."""
     def __init__(self, stage_url: ParseResult, allow_binpkgs: bool, apps_selection: list[ToolsetApplicationSelection]):
@@ -135,6 +136,7 @@ class ToolsetInstallationStep(MultiStageProcessStage):
 
 # Steps implementations:
 
+@final
 class ToolsetInstallationStepDownload(ToolsetInstallationStep):
     def __init__(self, url: ParseResult, multistage_process: MultiStageProcess):
         super().__init__(name="Download stage tarball", description="Downloading Gentoo stage tarball", multistage_process=multistage_process)
@@ -173,6 +175,7 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
                 print(f"Failed to delete temp file: {e}")
         return True
 
+@final
 class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Extract stage tarball", description="Extracts Gentoo stage tarball to work directory", multistage_process=multistage_process)
@@ -216,6 +219,7 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
             return True
         return False
 
+@final
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Create environment", description="Prepares Gentoo environment for work", multistage_process=multistage_process)
@@ -257,6 +261,7 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
             return True
         return False
 
+@final
 class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Synchronize portage", description="Synchronizes portage tree", multistage_process=multistage_process)
@@ -281,6 +286,7 @@ class ToolsetInstallationStepUpdatePortage(ToolsetInstallationStep):
             print(f"Error synchronizing Portage: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+@final
 class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
     def __init__(self, app_selection: ToolsetApplicationSelection, multistage_process: MultiStageProcess):
         super().__init__(name=f"Install {app_selection.app.name}", description=f"Emerges {app_selection.app.package} package", multistage_process=multistage_process)
@@ -312,6 +318,7 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
             print(f"Error during app installation: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+@final
 class ToolsetInstallationStepVerify(ToolsetInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Analyze toolset", description="Collects information about toolset", multistage_process=multistage_process)
@@ -324,6 +331,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
             print(f"Error during toolset verification: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+@final
 class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Compress", description="Compresses toolset into .squashfs file", multistage_process=multistage_process)

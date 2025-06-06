@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os, threading, shutil
+from typing import final
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
     MultiStageProcessState, MultiStageProcessStageState,
@@ -18,6 +19,7 @@ from .helper_functions import mount_squashfs, umount_squashfs
 # Installation process.
 # ------------------------------------------------------------------------------
 
+@final
 class SnapshotInstallation(MultiStageProcess):
     """Handles the full snapshot generation lifecycle."""
     def __init__(self, toolset: Toolset | None = None, file: GLocalFile | None = None, custom_filename: str | None = None):
@@ -88,6 +90,7 @@ class SnapshotInstallationStep(MultiStageProcessStage):
 
 # Steps implementations:
 
+@final
 class SnapshotInstallationStepPrepareToolset(SnapshotInstallationStep):
     def __init__(self, toolset: Toolset, multistage_process: MultiStageProcess):
         super().__init__(name="Prepare toolset", description="Spawns toolset with required bindings", multistage_process=multistage_process)
@@ -149,6 +152,7 @@ class SnapshotInstallationStepPrepareToolset(SnapshotInstallationStep):
             )
         ]
 
+@final
 class SnapshotInstallationStepCopyFile(SnapshotInstallationStep):
     def __init__(self, file: GLocalFile, custom_filename: str | None, multistage_process: MultiStageProcess):
         super().__init__(name="Copy snapshot file", description="Copies snapshot file to repository location", multistage_process=multistage_process)
@@ -184,6 +188,7 @@ class SnapshotInstallationStepCopyFile(SnapshotInstallationStep):
             print(f"Error during toolset copying: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+@final
 class SnapshotInstallationStepGenerateSnapshot(SnapshotInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Generate snapshot", description="Fetches latest portage snapshot tree", multistage_process=multistage_process)
@@ -208,6 +213,7 @@ class SnapshotInstallationStepGenerateSnapshot(SnapshotInstallationStep):
             print(f"Error during snapshot generation: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+@final
 class SnapshotInstallationStepSetupPermissions(SnapshotInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Setup permissions", description="Sets generated snapshot file permissions", multistage_process=multistage_process)
@@ -237,6 +243,7 @@ class SnapshotInstallationStepSetupPermissions(SnapshotInstallationStep):
             delete_file(file_path=snapshot_real_path, root_dir=snapshots_location)
         return True
 
+@final
 class SnapshotInstallationStepAnalyze(SnapshotInstallationStep):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Analyze snapshots", description="Read metadata from snapshot", multistage_process=multistage_process)

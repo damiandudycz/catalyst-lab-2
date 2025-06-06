@@ -1,9 +1,11 @@
 import requests
+from typing import final
 from typing import Callable
 from urllib.parse import urlparse, urljoin, ParseResult
 from .architecture import Architecture
 from concurrent.futures import ThreadPoolExecutor
 
+@final
 class ToolsetEnvBuilder:
 
     @staticmethod
