@@ -46,7 +46,7 @@ class RelengManager:
 
     def add_releng_directory(self, releng_directory: RelengDirectory):
         # Remove existing releng directory with the same name
-        Repository.RelengDirectory.value = [s for s in Repository.RelengDirectory.value if s.uuid != releng_directory.uuid]
+        Repository.RelengDirectory.value = [s for s in Repository.RelengDirectory.value if s.id != releng_directory.id]
         Repository.RelengDirectory.value.append(releng_directory)
 
     def remove_releng_directory(self, releng_directory: RelengDirectory):

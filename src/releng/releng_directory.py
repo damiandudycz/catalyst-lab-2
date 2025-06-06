@@ -20,9 +20,9 @@ class RelengDirectoryStatus(Enum):
 @final
 class RelengDirectory(Serializable):
 
-    def __init__(self, name: str, uuid: uuid.UUID | None = None, branch_name: str | None = None, last_commit_date: datetime | None = None, has_remote_changes: bool = False):
+    def __init__(self, name: str, id: uuid.UUID | None = None, branch_name: str | None = None, last_commit_date: datetime | None = None, has_remote_changes: bool = False):
         self.name = name
-        self.uuid = uuid or uuid.uuid4()
+        self.id = id or uuid.uuid4()
         self.status: RelengDirectoryStatus = RelengDirectoryStatus.UNKNOWN
         self.last_commit_date = last_commit_date
         self.branch_name = branch_name
@@ -37,7 +37,7 @@ class RelengDirectory(Serializable):
     def serialize(self) -> dict:
         return {
             "name": self.name,
-            "uuid": str(self.uuid),
+            "id": str(self.id),
             "last_commit_date": self.last_commit_date.isoformat() if self.last_commit_date else None,
             "branch_name": self.branch_name,
             "has_remote_changes": self.has_remote_changes
@@ -46,7 +46,7 @@ class RelengDirectory(Serializable):
     def init_from(cls, data: dict) -> Self:
         try:
             name = data["name"]
-            uuid_value = uuid.UUID(data["uuid"])
+            id_value = uuid.UUID(data["id"])
             last_commit_date = (
                 datetime.fromisoformat(data["last_commit_date"])
                 if data.get("last_commit_date") else None
@@ -57,7 +57,7 @@ class RelengDirectory(Serializable):
             raise ValueError(f"Failed to parse {data}")
         return cls(
             name=name,
-            uuid=uuid_value,
+            id=id_value,
             last_commit_date=last_commit_date,
             branch_name=branch_name,
             has_remote_changes=has_remote_changes
