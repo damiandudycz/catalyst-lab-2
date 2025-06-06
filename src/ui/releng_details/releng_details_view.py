@@ -144,7 +144,7 @@ class RelengDetailsView(Gtk.Box):
             started_processes = MultiStageProcess.get_started_processes_by_class(RelengUpdate)
         if self.update_in_progress is not None :
             self.update_in_progress.event_bus.unsubscribe(MultiStageProcessEvent.STATE_CHANGED, self)
-        self.update_in_progress = next((process for process in started_processes if process.releng_directory == self.releng_directory), None)
+        self.update_in_progress = next((process for process in started_processes if process.directory == self.releng_directory), None)
         if self.update_in_progress:
             self.update_in_progress.event_bus.subscribe(
                 MultiStageProcessEvent.STATE_CHANGED,
@@ -228,7 +228,7 @@ class RelengDetailsView(Gtk.Box):
     def start_update(self):
         if self.update_in_progress:
             self.update_in_progress.clean_from_started_processes()
-        update = RelengUpdate(releng_directory=self.releng_directory)
+        update = RelengUpdate(directory=self.releng_directory)
         update.start()
         self.show_update(update=update)
 

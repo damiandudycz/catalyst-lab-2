@@ -8,7 +8,7 @@ from typing import Type
 from .releng_directory import GitDirectory
 from .repository import Serializable, Repository
 
-class GitManager:
+class GitManager(ABC):
     _instances = {}
 
     # --------------------------------------------------------------------------
