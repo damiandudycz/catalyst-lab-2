@@ -23,6 +23,54 @@
             <property name="margin-bottom">24</property>
 
             <child>
+              <object class="RepositoryListView">
+                <property name="title">Releng directories</property>
+                <property name="item_class_name">RelengDirectory</property>
+                <property name="item_installation_class_name">RelengInstallation</property>
+                <property name="item_icon">book-minimalistic-svgrepo-com-symbolic</property>
+                <property name="item_title_property_name">name</property>
+                <property name="item_subtitle_property_name">short_details</property>
+                <property name="item_status_property_name"></property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkSeparator"/>
+            </child>
+
+            <child>
+              <object class="RepositoryListView">
+                <property name="title">Toolsets</property>
+                <property name="item_class_name">Toolset</property>
+                <property name="item_installation_class_name">ToolsetInstallation</property>
+                <property name="item_icon">book-minimalistic-svgrepo-com-symbolic</property>
+                <property name="item_title_property_name">name</property>
+                <property name="item_subtitle_property_name">short_details</property>
+                <property name="item_status_property_name"></property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkSeparator"/>
+            </child>
+
+            <child>
+              <object class="RepositoryListView">
+                <property name="title">Snapshots</property>
+                <property name="item_class_name">Snapshot</property>
+                <property name="item_installation_class_name">SnapshotInstallation</property>
+                <property name="item_icon">book-minimalistic-svgrepo-com-symbolic</property>
+                <property name="item_title_property_name">name</property>
+                <property name="item_subtitle_property_name">short_details</property>
+                <property name="item_status_property_name"></property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkSeparator"/>
+            </child>
+
+            <child>
               <object class="GtkBox" id="actions_section">
                 <property name="orientation">vertical</property>
                 <property name="halign">center</property>

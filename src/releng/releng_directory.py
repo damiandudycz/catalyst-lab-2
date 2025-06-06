@@ -30,6 +30,10 @@ class RelengDirectory(Serializable):
         self.logs: list[dict] = []
         self.event_bus = EventBus[RelengDirectoryEvent]()
 
+    @property
+    def short_details(self) -> str:
+        return f"{self.branch_name}, {self.last_commit_date.strftime('%Y-%d-%m %H:%M') if self.last_commit_date else 'Unknown date'}"
+
     def serialize(self) -> dict:
         return {
             "name": self.name,
@@ -212,7 +216,7 @@ class RelengDirectory(Serializable):
 
     @staticmethod
     def directory_path_for_name(name: str) -> str:
-        releng_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.releng_location))
+        releng_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.releng_location))
         return os.path.join(releng_location, RelengDirectory.sanitized_name_for_name(name))
 
     def directory_path(self) -> str:

@@ -60,7 +60,7 @@ class ToolsetUpdate(MultiStageProcess):
                     self.analysis_result.setdefault(app_selection.app.package, {})["version_id"] = str(app_selection.version.id)
             self.analysis_result['date_updated'] = int(time.time())
             self.toolset.metadata = self.analysis_result
-            Repository.TOOLSETS.save()
+            Repository.Toolset.save()
         self.toolset.release()
 
     def _process_selected_apps(self):

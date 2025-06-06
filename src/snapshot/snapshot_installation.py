@@ -143,7 +143,7 @@ class SnapshotInstallationStepPrepareToolset(SnapshotInstallationStep):
         return [
             BindMount(
                 mount_path="/var/tmp/catalyst/snapshots",
-                host_path=Repository.SETTINGS.value.snapshots_location,
+                host_path=Repository.Settings.value.snapshots_location,
                 store_changes=True,
                 create_if_missing=True
             )
@@ -160,7 +160,7 @@ class SnapshotInstallationStepCopyFile(SnapshotInstallationStep):
             def sanitize_filename_linux(name: str) -> str:
                 return name.replace('/', '_').replace('\0', '_')
             filename = sanitize_filename_linux(self.custom_filename or self.file.get_basename())
-            snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+            snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
             snapshot_copy_path = os.path.join(snapshots_location, filename)
             source_path = self.file.get_path()
             creation_timestamp = os.stat(source_path).st_ctime
@@ -216,7 +216,7 @@ class SnapshotInstallationStepSetupPermissions(SnapshotInstallationStep):
         try:
             if self.multistage_process.snapshot is None:
                 raise RuntimeError("Unknown spanshot")
-            snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+            snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
             snapshot_real_path = os.path.join(snapshots_location, self.multistage_process.snapshot.filename)
             base_name, _ = os.path.splitext(self.multistage_process.snapshot.filename)
             lock_filename = base_name + ".lock"
@@ -232,7 +232,7 @@ class SnapshotInstallationStepSetupPermissions(SnapshotInstallationStep):
             return False
         # Remove file if installation failed
         if self.multistage_process.status == MultiStageProcessState.FAILED and self.multistage_process.snapshot:
-            snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+            snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
             snapshot_real_path = os.path.join(snapshots_location, self.multistage_process.snapshot.filename)
             delete_file(file_path=snapshot_real_path, root_dir=snapshots_location)
         return True
@@ -245,7 +245,7 @@ class SnapshotInstallationStepAnalyze(SnapshotInstallationStep):
         try:
             if self.multistage_process.snapshot is None:
                 raise RuntimeError("Unknown spanshot")
-            snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+            snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
             snapshot_real_path = os.path.join(snapshots_location, self.multistage_process.snapshot.filename)
             # Mount snapshot and read timestamp from it.
             self.multistage_process.squashfs_mount_path = mount_squashfs(squashfs_path=snapshot_real_path)

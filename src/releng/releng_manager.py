@@ -11,7 +11,7 @@ from .releng_directory import RelengDirectory
 class RelengManager:
     _instance = None
 
-    # Note: To get releng directories list use Repository.RELENG.value
+    # Note: To get releng directories list use Repository.RelengDirectory.value
 
     @classmethod
     def shared(cls):
@@ -20,9 +20,9 @@ class RelengManager:
         return cls._instance
 
     def refresh_releng_directories(self):
-        releng_directories = Repository.RELENG.value
+        releng_directories = Repository.RelengDirectory.value
         # Detect missing releng directories and add them to repository if they contain releng
-        releng_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.releng_location))
+        releng_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.releng_location))
         # --- Step 1: Scan directory for existing releng directories ---
         if not os.path.isdir(releng_location):
             os.makedirs(releng_location, exist_ok=True)
@@ -41,18 +41,18 @@ class RelengManager:
         for releng_directory in deleted_releng_directories:
             self.remove_releng_directory(releng_directory)
         # Update statuses of all releng directories
-        for releng_directory in Repository.RELENG.value:
+        for releng_directory in Repository.RelengDirectory.value:
             releng_directory.update_status()
 
     def add_releng_directory(self, releng_directory: RelengDirectory):
         # Remove existing releng directory with the same name
-        Repository.RELENG.value = [s for s in Repository.RELENG.value if s.uuid != releng_directory.uuid]
-        Repository.RELENG.value.append(releng_directory)
+        Repository.RelengDirectory.value = [s for s in Repository.RelengDirectory.value if s.uuid != releng_directory.uuid]
+        Repository.RelengDirectory.value.append(releng_directory)
 
     def remove_releng_directory(self, releng_directory: RelengDirectory):
         if os.path.isdir(releng_directory.directory_path()):
             shutil.rmtree(releng_directory.directory_path())
-        Repository.RELENG.value.remove(releng_directory)
+        Repository.RelengDirectory.value.remove(releng_directory)
 
     def is_name_available(self, name: str) -> bool:
         directory_path = RelengDirectory.directory_path_for_name(name=name)
@@ -64,4 +64,4 @@ class RelengManager:
         new_directory = RelengDirectory.directory_path_for_name(name=name)
         shutil.move(releng_directory.directory_path(), new_directory)
         releng_directory.name = name
-        Repository.RELENG.save()
+        Repository.RelengDirectory.save()

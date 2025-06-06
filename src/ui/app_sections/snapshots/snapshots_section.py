@@ -24,7 +24,7 @@ class SnapshotsSection(Gtk.Box):
         # Setup snapshots entries
         self._load_snapshots()
         # Subscribe to relevant events
-        Repository.SNAPSHOTS.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.snapshots_updated)
+        Repository.Snapshot.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.snapshots_updated)
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.snapshot_installations_updated)
 
     def snapshot_installations_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
@@ -51,7 +51,7 @@ class SnapshotsSection(Gtk.Box):
         self._snapshot_rows = []
 
         # Refresh the list
-        snapshots = Repository.SNAPSHOTS.value
+        snapshots = Repository.Snapshot.value
 
         for snapshot in snapshots:
             snapshot_row = SnapshotRow(snapshot=snapshot)

@@ -62,6 +62,20 @@ class Toolset(Serializable):
         self.work_dir: str | None = None
         self.event_bus = EventBus[ToolsetEvents]()
 
+    @property
+    def short_details(self) -> str:
+        app_strings: [str] = []
+        for app in ToolsetApplication.ALL:
+            if app.auto_select:
+                continue
+            app_install = self.get_app_install(app=app)
+            if app_install:
+                app_strings.append(f"{app.name}: {app_install.version}")
+        if app_strings:
+            return ", ".join(app_strings)
+        else:
+            return ""
+
     @classmethod
     def init_from(cls, data: dict) -> Toolset:
         try:
@@ -466,7 +480,7 @@ class Toolset(Serializable):
                 checks_succeeded = False
         if checks_succeded and save:
             self.metadata = metadata_copy
-            Repository.TOOLSETS.save() # Make sure changes are saved in repository.
+            Repository.Toolset.save() # Make sure changes are saved in repository.
         return metadata_copy if checks_succeded else None
 
     def _perform_app_installed_version_check(self, app: ToolsetApplication, metadata: dict[str, Any]):

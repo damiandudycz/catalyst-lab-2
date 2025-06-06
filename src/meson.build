@@ -73,6 +73,7 @@ catalystlab_sources = [
   'ui/main_window/main_window_content.py',
   'ui/main_window/main_window_side_menu.py',
   'ui/main_window/main_window_side_menu_button.py',
+  'ui/repository_list/repository_list_view.py',
   'ui/toolset_details/toolset_details_view.py',
   'ui/snapshot_details/snapshot_details_view.py',
   'ui/releng_details/releng_details_view.py',

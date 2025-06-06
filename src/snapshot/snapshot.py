@@ -26,8 +26,16 @@ class Snapshot(Serializable):
             date=datetime.fromisoformat(data["date"]) if data.get("date") else None
         )
 
+    @property
+    def name(self) -> str:
+        return self.date.strftime("%Y-%d-%m %H:%M")
+
+    @property
+    def short_details(self) -> str:
+        return self.filename.rsplit('.', 1)[0]
+
     def file_path(self) -> str:
-        snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+        snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
         return os.path.join(snapshots_location, self.filename)
 
     def load_ebuilds(self) -> dict[str, dict[str, list[str]]]:

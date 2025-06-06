@@ -41,7 +41,7 @@ class EnvironmentsSection(Gtk.Box):
         # Setup external env entries
         self._load_external_toolsets()
         # Subscribe to relevant events
-        Repository.TOOLSETS.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.toolsets_updated)
+        Repository.Toolset.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.toolsets_updated)
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.toolsets_installations_updated)
 
     def toolsets_updated(self, _):
@@ -54,7 +54,7 @@ class EnvironmentsSection(Gtk.Box):
 
     def _load_system_toolset(self):
         if ToolsetEnv.SYSTEM.is_allowed_in_current_host():
-            system_toolset_selected = any(toolset.env == ToolsetEnv.SYSTEM for toolset in Repository.TOOLSETS.value)
+            system_toolset_selected = any(toolset.env == ToolsetEnv.SYSTEM for toolset in Repository.Toolset.value)
             self._set_toolset_system_checkbox_active(system_toolset_selected)
             self.toolset_system_validate_button.set_visible(system_toolset_selected)
         else:
@@ -73,7 +73,7 @@ class EnvironmentsSection(Gtk.Box):
 
         # Refresh the list
         external_toolsets = [
-            toolset for toolset in Repository.TOOLSETS.value
+            toolset for toolset in Repository.Toolset.value
             if toolset.env == ToolsetEnv.EXTERNAL
         ]
 
@@ -120,9 +120,9 @@ class EnvironmentsSection(Gtk.Box):
         # If checkbox is checked, place it at the start of the list
         if checkbox.get_active():
             system_toolset = Toolset.create_system()
-            Repository.TOOLSETS.value.append(system_toolset)
-        elif (ts := next((ts for ts in Repository.TOOLSETS.value if ts.env == ToolsetEnv.SYSTEM), None)):
-            Repository.TOOLSETS.value.remove(ts)
+            Repository.Toolset.value.append(system_toolset)
+        elif (ts := next((ts for ts in Repository.Toolset.value if ts.env == ToolsetEnv.SYSTEM), None)):
+            Repository.Toolset.value.remove(ts)
 
     @Gtk.Template.Callback()
     def on_add_toolset_activated(self, button):
@@ -135,7 +135,7 @@ class EnvironmentsSection(Gtk.Box):
     def on_validate_system_toolset_pressed(self, button):
         # Testing only
         system_toolset = next(
-            (toolset for toolset in Repository.TOOLSETS.value if toolset.env == ToolsetEnv.SYSTEM),
+            (toolset for toolset in Repository.Toolset.value if toolset.env == ToolsetEnv.SYSTEM),
             None  # default if no match found
         )
         if not system_toolset:

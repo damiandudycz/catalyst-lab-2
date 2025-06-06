@@ -28,7 +28,7 @@ class RelengUpdate(MultiStageProcess):
     def complete_process(self, success: bool):
         if success:
             # ...
-            Repository.RELENG.save()
+            Repository.RelengDirectory.save()
 
 # ------------------------------------------------------------------------------
 # Update process steps.

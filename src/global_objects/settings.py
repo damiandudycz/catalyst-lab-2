@@ -56,7 +56,7 @@ class Settings(Serializable):
         if self._keep_root_unlocked != value:
             self._keep_root_unlocked = value
             self.event_bus.emit(SettingsEvents.KEEP_ROOT_UNLOCKED_CHANGED, value)
-            Repository.SETTINGS.value = self # Triggers save()
+            Repository.Settings.value = self # Triggers save()
 
     # --------------------------------------------------------------------------
     # Accessors for toolsets location:
@@ -69,7 +69,7 @@ class Settings(Serializable):
         if self._toolsets_location != value:
             self._toolsets_location = value
             self.event_bus.emit(SettingsEvents.TOOLSETS_LOCATION_CHANGED, value)
-            Repository.SETTINGS.value = self # Triggers save()
+            Repository.Settings.value = self # Triggers save()
 
     # --------------------------------------------------------------------------
     # Accessors for snapshots location:
@@ -82,7 +82,7 @@ class Settings(Serializable):
         if self._snapshots_location != value:
             self._snapshots_location = value
             self.event_bus.emit(SettingsEvents.SNAPSHOTS_LOCATION_CHANGED, value)
-            Repository.SETTINGS.value = self # Triggers save()
+            Repository.Settings.value = self # Triggers save()
 
     # --------------------------------------------------------------------------
     # Accessors for releng location:
@@ -95,5 +95,5 @@ class Settings(Serializable):
         if self._releng_location != value:
             self._releng_location = value
             self.event_bus.emit(SettingsEvents.RELENG_LOCATION_CHANGED, value)
-            Repository.SETTINGS.value = self # Triggers save()
+            Repository.Settings.value = self # Triggers save()
 

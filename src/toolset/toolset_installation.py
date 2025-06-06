@@ -345,7 +345,7 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
                 return name.replace('/', '_').replace('\0', '_')
             random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
             file_name = f"{sanitize_filename_linux(self.multistage_process.name())}_{random_id}.squashfs"
-            file_path = os.path.join(os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.toolsets_location)), file_name)
+            file_path = os.path.join(os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location)), file_name)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             shutil.move(self.toolset_squashfs_file, file_path)
             self.multistage_process.toolset.unspawn(rebuild_squashfs_if_needed=False) # Need to unspawn now, to prevent issues with unmounting after squashfs_file was set

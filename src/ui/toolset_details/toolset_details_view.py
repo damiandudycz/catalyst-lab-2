@@ -240,7 +240,7 @@ class ToolsetDetailsView(Gtk.Box):
     @Gtk.Template.Callback()
     def on_toolset_name_activate(self, sender):
         self.toolset.name = self.toolset_name_row.get_text()
-        Repository.TOOLSETS.save()
+        Repository.Toolset.save()
         self.get_root().set_focus(None)
 
     # --------------------------------------------------------------------------
@@ -395,7 +395,7 @@ class ToolsetDetailsView(Gtk.Box):
     @Gtk.Template.Callback()
     def on_allow_binpkgs_toggled(self, checkbox):
         self.toolset.metadata['allow_binpkgs'] = checkbox.get_active()
-        Repository.TOOLSETS.save()
+        Repository.Toolset.save()
 
     @Gtk.Template.Callback()
     def applications_button_cancel_clicked(self, sender):

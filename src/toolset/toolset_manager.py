@@ -13,7 +13,7 @@ from .toolset import Toolset
 class ToolsetManager:
     _instance = None
 
-    # Note: To get toolset list use Repository.TOOLSETS.value
+    # Note: To get toolset list use Repository.Toolset.value
 
     @classmethod
     def shared(cls):
@@ -26,11 +26,11 @@ class ToolsetManager:
 
     def add_toolset(self, toolset: Toolset):
         # Remove existing toolset before adding.
-        Repository.TOOLSETS.value = [s for s in Repository.TOOLSETS.value if s.id != toolset.id]
-        Repository.TOOLSETS.value.append(toolset)
+        Repository.Toolset.value = [s for s in Repository.Toolset.value if s.id != toolset.id]
+        Repository.Toolset.value.append(toolset)
 
     def remove_toolset(self, toolset: Toolset):
         if os.path.isfile(toolset.squashfs_file):
             os.remove(toolset.squashfs_file)
-        Repository.TOOLSETS.value.remove(toolset)
+        Repository.Toolset.value.remove(toolset)
 

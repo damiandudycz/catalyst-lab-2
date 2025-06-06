@@ -14,7 +14,7 @@ from .snapshot import Snapshot
 class SnapshotManager:
     _instance = None
 
-    # Note: To get spanshots list use Repository.SNAPSHOTS.value
+    # Note: To get spanshots list use Repository.Snapshot.value
 
     @classmethod
     def shared(cls):
@@ -23,9 +23,9 @@ class SnapshotManager:
         return cls._instance
 
     def refresh_snapshots(self):
-        snapshots = Repository.SNAPSHOTS.value
+        snapshots = Repository.Snapshot.value
         # Detect missing snapshots and add them to repository without date
-        snapshots_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.snapshots_location))
+        snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
         # --- Step 1: Scan directory for existing .sqfs files ---
         if not os.path.isdir(snapshots_location):
             os.makedirs(snapshots_location, exist_ok=True)
@@ -49,11 +49,11 @@ class SnapshotManager:
 
     def add_snapshot(self, snapshot: Snapshot):
         # Remove existing snapshot with the same filename
-        Repository.SNAPSHOTS.value = [s for s in Repository.SNAPSHOTS.value if s.filename != snapshot.filename]
-        Repository.SNAPSHOTS.value.append(snapshot)
+        Repository.Snapshot.value = [s for s in Repository.Snapshot.value if s.filename != snapshot.filename]
+        Repository.Snapshot.value.append(snapshot)
 
     def remove_snapshot(self, snapshot: Snapshot):
         if os.path.isfile(snapshot.file_path()):
             os.remove(snapshot.file_path())
-        Repository.SNAPSHOTS.value.remove(snapshot)
+        Repository.Snapshot.value.remove(snapshot)
 

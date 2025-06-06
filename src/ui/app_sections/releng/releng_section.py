@@ -26,7 +26,7 @@ class RelengSection(Gtk.Box):
         # Setup releng entries
         self._load_releng_directories()
         # Subscribe to relevant events
-        Repository.RELENG.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.releng_updated)
+        Repository.RelengDirectory.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.releng_updated)
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.releng_installations_updated)
 
     def releng_installations_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
@@ -46,7 +46,7 @@ class RelengSection(Gtk.Box):
         self._releng_rows = []
 
         # Refresh the list
-        releng_directories = Repository.RELENG.value
+        releng_directories = Repository.RelengDirectory.value
 
         for releng_directory in releng_directories:
             releng_directory_row = RelengDirectoryRow(releng_directory=releng_directory)

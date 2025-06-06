@@ -43,7 +43,7 @@ class SnapshotCreateView(Gtk.Box):
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
         self.install_view.set_multistage_process(self.installation_in_progress)
         if installation_in_progress is None or installation_in_progress.status == MultiStageProcessState.SETUP:
-            self._fill_toolsets_rows(Repository.TOOLSETS.value)
+            self._fill_toolsets_rows(Repository.Toolset.value)
         self.connect("map", self.on_map)
 
     def on_map(self, widget):
