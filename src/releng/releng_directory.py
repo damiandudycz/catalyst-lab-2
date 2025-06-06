@@ -131,7 +131,7 @@ class RelengDirectory(Serializable):
                     print(f"Warning: Failed to check for updates: {e}")
                     self.has_remote_changes = False
             except Exception as e:
-                print(f"EX: {e}")
+                print(f"STATUS EXCEPTION: {e}")
                 self.status = RelengDirectoryStatus.UNKNOWN
                 self.last_commit_date = None
                 self.branch_name = None
@@ -177,6 +177,20 @@ class RelengDirectory(Serializable):
                 print(f"LOG EXCEPTION: {e}")
                 self.logs = []
             self.event_bus.emit(RelengDirectoryEvent.LOGS_CHANGED, self.logs)
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        if wait:
+            thread.join()
+
+    def discard_changes(self, wait: bool = False):
+        def worker():
+            try:
+                subprocess.run(["git", "reset", "--hard"], cwd=self.directory_path(), check=True)
+                subprocess.run(["git", "clean", "-fdx"], cwd=self.directory_path(), check=True)
+                self.update_status(wait=wait)
+                self.update_logs(wait=wait)
+            except Exception as e:
+                print(f"DISCARD EXCEPTION: {e}")
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:

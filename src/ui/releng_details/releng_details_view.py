@@ -203,11 +203,11 @@ class RelengDetailsView(Gtk.Box):
         self._changes_action_group.add_action(action)
         return action
 
-    def save_changes(self):
+    def save_changes(self, action, param):
         pass
 
-    def discard_changes(self):
-        pass
+    def discard_changes(self, action, param):
+        self.releng_directory.discard_changes()
 
     @Gtk.Template.Callback()
     def action_button_update_clicked(self, sender):
