@@ -195,16 +195,10 @@ class RelengDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_save_changes_clicked(self, sender):
-        pass
-
-    def _add_changes_action(self, name, callback) -> Gio.SimpleAction:
-        action = Gio.SimpleAction.new(name, None)
-        action.connect("activate", callback)
-        self._changes_action_group.add_action(action)
-        return action
+        self.releng_directory.commit_changes()
 
     def save_changes(self, action, param):
-        pass
+        self.releng_directory.commit_changes()
 
     def discard_changes(self, action, param):
         self.releng_directory.discard_changes()
@@ -220,6 +214,12 @@ class RelengDetailsView(Gtk.Box):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
             self.content_navigation_view.pop()
+
+    def _add_changes_action(self, name, callback) -> Gio.SimpleAction:
+        action = Gio.SimpleAction.new(name, None)
+        action.connect("activate", callback)
+        self._changes_action_group.add_action(action)
+        return action
 
     def start_update(self):
         if self.update_in_progress:

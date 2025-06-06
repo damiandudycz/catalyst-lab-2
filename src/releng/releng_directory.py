@@ -196,6 +196,20 @@ class RelengDirectory(Serializable):
         if wait:
             thread.join()
 
+    def commit_changes(self, wait: bool = False):
+        def worker():
+            try:
+                subprocess.run(["git", "add", "-A"], cwd=self.directory_path(), check=True)
+                subprocess.run(["git", "commit", "-m", "Save changes"], cwd=self.directory_path(), check=True)
+                self.update_status(wait=wait)
+                self.update_logs(wait=wait)
+            except Exception as e:
+                print(f"COMMIT EXCEPTION: {e}")
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        if wait:
+            thread.join()
+
     @staticmethod
     def directory_path_for_name(name: str) -> str:
         releng_location = os.path.realpath(os.path.expanduser(Repository.SETTINGS.value.releng_location))

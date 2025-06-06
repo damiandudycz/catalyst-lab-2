@@ -49,6 +49,11 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [x] Job.process doesn't seem to be initiated. Need to check
 - [x] CANCEL_JOB sends a term signal, but stall server process doesn't react to it. Other processes might have similar issue, need to check that
 
+### Releng.
+- [ ] GIT commands migh require setting user details and accepting github certificate.
+- [ ] Add view to set commit message, and show changed files
+- [ ] Add possibility to clone isung git@, fork branch and to push changes
+
 ## App requirements
  - BWrap >= 0.11
  - pkexec
