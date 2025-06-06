@@ -1,4 +1,5 @@
-# Managing GIT based directory (local or remote). Base for RelengDirectory and OverlayDirectory.
+# Managing GIT based directory (local or remote). Base for RelengDirectory and
+# OverlayDirectory.
 from __future__ import annotations
 import os, threading, subprocess, uuid
 from dataclasses import dataclass, field
@@ -8,6 +9,7 @@ from datetime import datetime
 from .repository import Serializable
 from .event_bus import EventBus, SharedEvent
 from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+from abc import ABC, abstractmethod
 
 class GitDirectoryEvent(Enum):
     LOGS_CHANGED = auto()
@@ -18,14 +20,21 @@ class GitDirectoryStatus(Enum):
     UNCHANGED = auto()
     CHANGED = auto()
 
-class GitDirectory(Serializable):
+class GitDirectory(Serializable, ABC):
 
     # Overwrite in subclassed
     @classmethod
+    @abstractmethod
     def base_location(cls) -> str:
-        return None
+        pass
 
-    def __init__(self, name: str, id: uuid.UUID | None = None, branch_name: str | None = None, last_commit_date: datetime | None = None, has_remote_changes: bool = False):
+    def __init__(
+        self, name: str,
+        id: uuid.UUID | None = None,
+        branch_name: str | None = None,
+        last_commit_date: datetime | None = None,
+        has_remote_changes: bool = False
+    ):
         self.name = name
         self.id = id or uuid.uuid4()
         self.status: GitDirectoryStatus = GitDirectoryStatus.UNKNOWN
@@ -37,23 +46,36 @@ class GitDirectory(Serializable):
 
     @property
     def short_details(self) -> str:
-        return f"{self.branch_name}, {self.last_commit_date.strftime('%Y-%d-%m %H:%M') if self.last_commit_date else 'Unknown date'}"
+        return f"{self.branch_name}, {
+            self.last_commit_date.strftime('%Y-%d-%m %H:%M')
+            if self.last_commit_date else 'Unknown date'
+        }"
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
         match self.status:
             case GitDirectoryStatus.UNKNOWN | GitDirectoryStatus.UNCHANGED:
-                return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
+                return StatusIndicatorValues(
+                    state=StatusIndicatorState.DISABLED,
+                    blinking=False
+                )
             case GitDirectoryStatus.CHANGED:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=False)
+                return StatusIndicatorValues(
+                    state=StatusIndicatorState.ENABLED_UNSAFE,
+                    blinking=False
+                )
             case _:
-                return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
+                return StatusIndicatorValues(
+                    state=StatusIndicatorState.DISABLED,
+                    blinking=False
+                )
 
     def serialize(self) -> dict:
         return {
             "name": self.name,
             "id": str(self.id),
-            "last_commit_date": self.last_commit_date.isoformat() if self.last_commit_date else None,
+            "last_commit_date": self.last_commit_date.isoformat()
+            if self.last_commit_date else None,
             "branch_name": self.branch_name,
             "has_remote_changes": self.has_remote_changes
         }
@@ -81,7 +103,9 @@ class GitDirectory(Serializable):
     def update_status(self, wait: bool = False):
         def worker():
             directory = self.directory_path()
-            if not os.path.isdir(directory) or not os.path.isdir(os.path.join(directory, ".git")):
+            if not os.path.isdir(directory) or not os.path.isdir(
+                os.path.join(directory, ".git")
+            ):
                 self.status = GitDirectoryStatus.UNKNOWN
                 self.last_commit_date = None
                 self.branch_name = None
@@ -110,7 +134,9 @@ class GitDirectory(Serializable):
                     text=True
                 )
                 last_commit_date, _ = process_date.communicate()
-                self.last_commit_date = datetime.fromisoformat(last_commit_date.strip())
+                self.last_commit_date = datetime.fromisoformat(
+                    last_commit_date.strip()
+                )
                 # Get current branch name
                 process_branch = subprocess.Popen(
                     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -133,7 +159,13 @@ class GitDirectory(Serializable):
                     if process_fetch.returncode != 0:
                         raise RuntimeError("git fetch failed")
                     process_diff = subprocess.Popen(
-                        ["git", "rev-list", "--count", "--left-only", "@{u}...HEAD"],
+                        [
+                            "git",
+                            "rev-list",
+                            "--count",
+                            "--left-only",
+                            "@{u}...HEAD"
+                        ],
                         cwd=directory,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
@@ -144,7 +176,9 @@ class GitDirectory(Serializable):
                         behind_count = int(output.strip())
                         self.has_remote_changes = behind_count > 0
                     else:
-                        print(f"Warning: Failed to compare with upstream: {error.strip()}")
+                        print(f"Warning: Failed to compare with upstream: {
+                            error.strip()
+                        }")
                         self.has_remote_changes = False
                 except Exception as e:
                     print(f"Warning: Failed to check for updates: {e}")
@@ -164,14 +198,20 @@ class GitDirectory(Serializable):
         def worker():
             directory = self.directory_path()
             self.logs = []
-            if not os.path.isdir(directory) or not os.path.isdir(os.path.join(directory, ".git")):
+            if not os.path.isdir(directory) or not os.path.isdir(
+                os.path.join(directory, ".git")
+            ):
                 self.event_bus.emit(GitDirectoryEvent.LOGS_CHANGED, self.logs)
                 return
             try:
                 # Use a custom format to make parsing easier
-                log_format = "%H%x1f%an%x1f%aI%x1f%s"  # hash␟author␟ISO date␟subject
+                log_format = "%H%x1f%an%x1f%aI%x1f%s"
                 process = subprocess.Popen(
-                    ["git", "log", f"--format={log_format}"],
+                    [
+                        "git",
+                        "log",
+                        f"--format={log_format}"
+                    ],
                     cwd=directory,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
@@ -195,7 +235,7 @@ class GitDirectory(Serializable):
             except Exception as e:
                 print(f"LOG EXCEPTION: {e}")
                 self.logs = []
-            self.event_bus.emit(RelengDirectoryEvent.LOGS_CHANGED, self.logs)
+            self.event_bus.emit(GitDirectoryEvent.LOGS_CHANGED, self.logs)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:
@@ -204,8 +244,16 @@ class GitDirectory(Serializable):
     def discard_changes(self, wait: bool = False):
         def worker():
             try:
-                subprocess.run(["git", "reset", "--hard"], cwd=self.directory_path(), check=True)
-                subprocess.run(["git", "clean", "-fdx"], cwd=self.directory_path(), check=True)
+                subprocess.run(
+                    ["git", "reset", "--hard"],
+                    cwd=self.directory_path(),
+                    check=True
+                )
+                subprocess.run(
+                    ["git", "clean", "-fdx"],
+                    cwd=self.directory_path(),
+                    check=True
+                )
                 self.update_status(wait=wait)
                 self.update_logs(wait=wait)
             except Exception as e:
@@ -218,8 +266,16 @@ class GitDirectory(Serializable):
     def commit_changes(self, wait: bool = False):
         def worker():
             try:
-                subprocess.run(["git", "add", "-A"], cwd=self.directory_path(), check=True)
-                subprocess.run(["git", "commit", "-m", "Save changes"], cwd=self.directory_path(), check=True)
+                subprocess.run(
+                    ["git", "add", "-A"],
+                    cwd=self.directory_path(),
+                    check=True
+                )
+                subprocess.run(
+                    ["git", "commit", "-m", "Save changes"],
+                    cwd=self.directory_path(),
+                    check=True
+                )
                 self.update_status(wait=wait)
                 self.update_logs(wait=wait)
             except Exception as e:
@@ -231,7 +287,10 @@ class GitDirectory(Serializable):
 
     @classmethod
     def directory_path_for_name(cls, name: str) -> str:
-        return os.path.join(cls.base_location(), cls.sanitized_name_for_name(name))
+        return os.path.join(
+            cls.base_location(),
+            cls.sanitized_name_for_name(name)
+        )
 
     def directory_path(self) -> str:
         return self.__class__.directory_path_for_name(self.name)

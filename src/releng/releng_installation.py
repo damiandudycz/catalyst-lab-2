@@ -22,12 +22,19 @@ class RelengInstallation(MultiStageProcess):
         return self.alias
 
     def setup_stages(self):
-        self.stages.append(RelengInstallationStepClone(alias=self.alias, multistage_process=self))
+        self.stages.append(
+            RelengInstallationStepClone(
+                alias=self.alias,
+                multistage_process=self
+            )
+        )
         super().setup_stages()
 
     def complete_process(self, success: bool):
         if success:
-            RelengManager.shared().add_releng_directory(releng_directory=self.releng_directory)
+            RelengManager.shared().add_directory(
+                directory=self.releng_directory
+            )
 
 # ------------------------------------------------------------------------------
 # Installation process steps.

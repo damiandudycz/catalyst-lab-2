@@ -179,7 +179,7 @@ class RelengDetailsView(Gtk.Box):
         try:
             if not is_name_available:
                 raise RuntimeError(f"Releng directory name {new_name} is not available")
-            RelengManager.shared().rename_releng_directory(releng_directory=self.releng_directory, name=new_name)
+            RelengManager.shared().rename_directory(directory=self.releng_directory, name=new_name)
             self.get_root().set_focus(None)
             self.setup_releng_directory_details()
         except Exception as e:
@@ -213,7 +213,7 @@ class RelengDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
-        RelengManager.shared().remove_releng_directory(releng_directory=self.releng_directory)
+        RelengManager.shared().remove_directory(directory=self.releng_directory)
         if hasattr(self, "_window"):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
