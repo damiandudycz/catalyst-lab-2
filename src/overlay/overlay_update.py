@@ -1,0 +1,15 @@
+from typing import final
+from .git_update import GitUpdate
+from .git_manager import GitManager
+from .overlay_manager import OverlayManager
+from .overlay_directory import OverlayDirectory
+
+@final
+class OverlayUpdate(GitUpdate):
+    """Handles the full overlay directory installation lifecycle."""
+
+    # Overwrite in subclassed
+    @classmethod
+    def manager(cls) -> GitManager:
+        return OverlayManager.shared()
+

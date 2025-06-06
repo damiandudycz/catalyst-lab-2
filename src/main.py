@@ -11,6 +11,7 @@ from .root_helper_client import RootHelperClient
 from .toolset_manager import ToolsetManager
 from .snapshot_manager import SnapshotManager
 from .releng_manager import RelengManager
+from .overlay_manager import OverlayManager
 
 class CatalystlabApplication(Adw.Application):
     """The main application singleton class."""
@@ -25,6 +26,7 @@ class CatalystlabApplication(Adw.Application):
         ToolsetManager.shared().refresh()
         SnapshotManager.shared().refresh()
         RelengManager.shared().refresh()
+        OverlayManager.shared().refresh()
 
     def do_activate(self):
         """Called when the application is activated.

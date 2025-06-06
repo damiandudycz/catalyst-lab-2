@@ -20,11 +20,6 @@ class GitManager(ABC):
     def repository(cls) -> Repository:
         pass
 
-    @classmethod
-    @abstractmethod
-    def item_class(cls) -> Type[GitDirectory]:
-        pass
-
     # --------------------------------------------------------------------------
 
     @classmethod
@@ -38,7 +33,7 @@ class GitManager(ABC):
         repository = self.__class__.repository()
         git_directories = repository.value
         # Detect missing git directories and add them to repository.
-        storage_location = self.__class__.item_class().base_location()
+        storage_location = self.__class__.repository()._cls.base_location()
         # --- Step 1: Scan directory for existing directories ---
         if not os.path.isdir(storage_location):
             os.makedirs(storage_location, exist_ok=True)
@@ -53,7 +48,7 @@ class GitManager(ABC):
         missing_dirs = found_directories - existing_dirnames
         for dirname in missing_dirs:
             full_path = os.path.join(storage_location, dirname)
-            self.add_directory(self.__class__.item_class()(name=dirname))
+            self.add_directory(self.__class__.repository()._cls(name=dirname))
         # --- Step 3: Remove records for deleted directories ---
         deleted_directories = [
             directory for directory in git_directories
@@ -79,7 +74,7 @@ class GitManager(ABC):
         self.__class__.repository().value.remove(directory)
 
     def is_name_available(self, name: str) -> bool:
-        directory_path = self.__class__.item_class().directory_path_for_name(
+        directory_path = self.__class__.repository()._cls.directory_path_for_name(
             name=name
         )
         return not os.path.exists(directory_path)
@@ -87,7 +82,7 @@ class GitManager(ABC):
     def rename_directory(self, directory: GitDirectory, name: str):
         if not self.is_name_available(name=name):
             raise RuntimeError(f"GIT directory name {name} is not available")
-        new_directory = self.__class__.item_class().directory_path_for_name(
+        new_directory = self.__class__.repository()._cls.directory_path_for_name(
             name=name
         )
         shutil.move(directory.directory_path(), new_directory)

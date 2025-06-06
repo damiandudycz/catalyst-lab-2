@@ -14,16 +14,18 @@ class SettingsEvents(Enum):
     TOOLSETS_LOCATION_CHANGED = auto()
     SNAPSHOTS_LOCATION_CHANGED = auto()
     RELENG_LOCATION_CHANGED = auto()
+    OVERLAY_LOCATION_CHANGED = auto()
 
 @final
 class Settings(Serializable):
     """Global application settings."""
 
-    def __init__(self, keep_root_unlocked: bool = True, toolsets_location: str = "~/CatalystLab/Toolsets", snapshots_location: str = "~/CatalystLab/Snapshots", releng_location: str = "~/CatalystLab/Releng"):
+    def __init__(self, keep_root_unlocked: bool = True, toolsets_location: str = "~/CatalystLab/Toolsets", snapshots_location: str = "~/CatalystLab/Snapshots", releng_location: str = "~/CatalystLab/Releng", overlay_location: str = "~/CatalystLab/Overlays"):
         self._keep_root_unlocked = keep_root_unlocked
         self._toolsets_location = toolsets_location
         self._snapshots_location = snapshots_location
         self._releng_location = releng_location
+        self._overlay_location = overlay_location
         self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
@@ -33,7 +35,8 @@ class Settings(Serializable):
             toolsets_location = data["toolsets_location"]
             snapshots_location = data["snapshots_location"]
             releng_location = data["releng_location"]
-            return cls(keep_root_unlocked=keep_root_unlocked, toolsets_location=toolsets_location, snapshots_location=snapshots_location, releng_location=releng_location)
+            overlay_location = data["overlay_location"]
+            return cls(keep_root_unlocked=keep_root_unlocked, toolsets_location=toolsets_location, snapshots_location=snapshots_location, releng_location=releng_location, overlay_location=overlay_location)
         except:
             return cls()
 
@@ -42,7 +45,8 @@ class Settings(Serializable):
             "keep_root_unlocked": self.keep_root_unlocked,
             "toolsets_location": self.toolsets_location,
             "snapshots_location": self.snapshots_location,
-            "releng_location": self.releng_location
+            "releng_location": self.releng_location,
+            "overlay_location": self.overlay_location
         }
 
     # --------------------------------------------------------------------------
@@ -95,5 +99,18 @@ class Settings(Serializable):
         if self._releng_location != value:
             self._releng_location = value
             self.event_bus.emit(SettingsEvents.RELENG_LOCATION_CHANGED, value)
+            Repository.Settings.value = self # Triggers save()
+
+    # --------------------------------------------------------------------------
+    # Accessors for overlay location:
+
+    @property
+    def overlay_location(self) -> bool:
+        return self._overlay_location
+    @overlay_location.setter
+    def overlay_location(self, value: bool):
+        if self._overlay_location != value:
+            self._overlay_location = value
+            self.event_bus.emit(SettingsEvents.OVERLAY_LOCATION_CHANGED, value)
             Repository.Settings.value = self # Triggers save()
 

@@ -36,7 +36,7 @@ class GitInstallation(MultiStageProcess, ABC):
                 GitInstallationStepClone(
                     alias=self.alias,
                     repository_url=self.repository_url,
-                    item_class=self.manager().item_class(),
+                    item_class=self.manager().repository()._cls,
                     multistage_process=self
                 )
             )
@@ -44,7 +44,7 @@ class GitInstallation(MultiStageProcess, ABC):
             self.stages.append(
                 GitInstallationStepInitLocal(
                     alias=self.alias,
-                    item_class=self.manager().item_class(),
+                    item_class=self.manager().repository()._cls,
                     multistage_process=self
                 )
             )

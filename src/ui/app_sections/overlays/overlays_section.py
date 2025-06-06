@@ -16,15 +16,15 @@ class OverlaysSection(Gtk.Box):
     @Gtk.Template.Callback()
     def on_item_row_pressed(self, sender, item):
         pass
-        #self.content_navigation_view.push_view(ToolsetDetailsView(toolset=toolset), title="Toolset details")
+        #self.content_navigation_view.push_view(ToolsetDetailsView(toolset=toolset), title="Portage overlay details")
 
     @Gtk.Template.Callback()
     def on_installation_row_pressed(self, sender, installation):
         pass
-        #app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(installation_in_progress=installation), "New toolset", 640, 480)
+        #app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(installation_in_progress=installation), "New portage overlay", 640, 480)
 
     @Gtk.Template.Callback()
     def on_add_new_item_pressed(self, sender):
         pass
-        #app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(), "New toolset", 640, 480)
+        #app_event_bus.emit(AppEvents.PRESENT_VIEW, ToolsetCreateView(), "New portage overlay", 640, 480)
 
