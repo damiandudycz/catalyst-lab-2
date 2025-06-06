@@ -1,9 +1,12 @@
 import weakref
-from enum import Enum
+from enum import Enum, auto
 from typing import final, TypeVar, Generic, Callable, Dict, Any, Union, Hashable
 from gi.repository import GLib
 
 EventBusType = TypeVar("EventBusType", bound=Enum)
+
+class SharedEvent(Enum):
+    STATE_UPDATED = auto()
 
 @final
 class EventBus(Generic[EventBusType]):

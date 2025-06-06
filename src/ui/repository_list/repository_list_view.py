@@ -3,6 +3,7 @@ from .repository import Repository, RepositoryEvent
 from .repositories import * # Needed to get all classes in Repositiries for self.item_class = globals().get(self.item_class_name)
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
 from .status_indicator import StatusIndicator
+from .event_bus import SharedEvent
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/repository_list/repository_list_view.ui')
 class RepositoryListView(Gtk.Box):
@@ -99,11 +100,31 @@ class ItemRow(Adw.ActionRow):
             icon_name=item_icon
         )
         self.item = item
+        self.item_subtitle_property_name = item_subtitle_property_name
         # Status indicator
         self.status_indicator = StatusIndicator()
         self.status_indicator.set_margin_start(6)
         self.status_indicator.set_margin_end(6)
         self.add_suffix(self.status_indicator)
+        self.setup_status_indicator()
+        # Observe state related event
+        if hasattr(self.item, 'event_bus'):
+            self.item.event_bus.subscribe(
+                SharedEvent.STATE_UPDATED,
+                self.state_updated
+            )
+
+    def state_updated(self):
+        self.subtitle = getattr(self.item, self.item_subtitle_property_name, None)
+        self.setup_status_indicator()
+
+    def setup_status_indicator(self):
+        if not hasattr(self.item, "status_indicator_values"):
+            self.status_indicator.set_visible(False)
+            return
+        status_indicator_values = self.item.status_indicator_values
+        self.status_indicator.set_visible(True)
+        self.status_indicator.set_values(status_indicator_values)
 
 class ItemInstallationRow(Adw.ActionRow):
 

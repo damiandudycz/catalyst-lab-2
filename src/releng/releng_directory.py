@@ -3,12 +3,12 @@ from dataclasses import dataclass, field
 from .repository import Serializable, Repository
 from typing import final, ClassVar, Dict, Any
 from enum import Enum, auto
-from .event_bus import EventBus
+from .event_bus import EventBus, SharedEvent
 import os, threading, subprocess, uuid
 from datetime import datetime
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues
 
 class RelengDirectoryEvent(Enum):
-    STATUS_CHANGED = auto()
     LOGS_CHANGED = auto()
 
 class RelengDirectoryStatus(Enum):
@@ -33,6 +33,17 @@ class RelengDirectory(Serializable):
     @property
     def short_details(self) -> str:
         return f"{self.branch_name}, {self.last_commit_date.strftime('%Y-%d-%m %H:%M') if self.last_commit_date else 'Unknown date'}"
+
+    @property
+    def status_indicator_values(self) -> StatusIndicatorValues:
+        if self.status == RelengDirectoryStatus.UNKNOWN:
+            return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
+        elif self.status == RelengDirectoryStatus.UNCHANGED:
+            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=False)
+        elif self.status == RelengDirectoryStatus.CHANGED:
+            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=False)
+        else:
+            return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
 
     def serialize(self) -> dict:
         return {
@@ -70,7 +81,7 @@ class RelengDirectory(Serializable):
                 self.status = RelengDirectoryStatus.UNKNOWN
                 self.last_commit_date = None
                 self.branch_name = None
-                self.event_bus.emit(RelengDirectoryEvent.STATUS_CHANGED, self.status)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED)
                 return
             try:
                 # Get git status porcelain
@@ -139,7 +150,7 @@ class RelengDirectory(Serializable):
                 self.status = RelengDirectoryStatus.UNKNOWN
                 self.last_commit_date = None
                 self.branch_name = None
-            self.event_bus.emit(RelengDirectoryEvent.STATUS_CHANGED, self.status)
+            self.event_bus.emit(SharedEvent.STATE_UPDATED)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:

@@ -15,13 +15,14 @@ from .root_function import root_function
 from .runtime_env import RuntimeEnv
 from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture, Emulation
-from .event_bus import EventBus
+from .event_bus import EventBus, SharedEvent
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_client import AuthorizationKeeper
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection, ToolsetApplicationInstall
 from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs, create_squashfs
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues
 
 class ToolsetEvents(Enum):
     SPAWNED_CHANGED = auto()
@@ -75,6 +76,17 @@ class Toolset(Serializable):
             return ", ".join(app_strings)
         else:
             return ""
+
+    @property
+    def status_indicator_values(self) -> StatusIndicatorValues:
+        if self.is_reserved:
+            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=self.in_use)
+        elif self.spawned and self.store_changes:
+            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=self.in_use)
+        elif self.spawned:
+            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=self.in_use)
+        else:
+            return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=self.in_use)
 
     @classmethod
     def init_from(cls, data: dict) -> Toolset:
@@ -340,6 +352,7 @@ class Toolset(Serializable):
                     if chmod_result.code != ServerResponseStatusCode.OK:
                         raise RuntimeError("Toolset test failed")
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED)
             except Exception as e:
                 print(e)
                 self.unspawn(rebuild_squashfs_if_needed=False)
@@ -377,6 +390,7 @@ class Toolset(Serializable):
                 self.bind_options = None
                 self.spawned = False
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED)
             except Exception as e:
                 print(f"Error deleting toolset work_dir: {e}")
                 raise e
@@ -391,6 +405,7 @@ class Toolset(Serializable):
             else:
                 self.is_reserved = True
                 self.event_bus.emit(ToolsetEvents.IS_RESERVED_CHANGED, self.is_reserved)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED)
                 return True
 
     def release(self) -> bool:
@@ -399,6 +414,7 @@ class Toolset(Serializable):
                 return False
             self.is_reserved = False
             self.event_bus.emit(ToolsetEvents.IS_RESERVED_CHANGED, self.is_reserved)
+            self.event_bus.emit(SharedEvent.STATE_UPDATED)
             return True
 
     # --------------------------------------------------------------------------
@@ -415,11 +431,13 @@ class Toolset(Serializable):
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             self.in_use = True
             self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
+            self.event_bus.emit(SharedEvent.STATE_UPDATED)
 
             def on_complete(completion_handler: callable | None, result: ServerResponse):
                 with self.access_lock:
                     self.in_use = False
                     self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
+                    self.event_bus.emit(SharedEvent.STATE_UPDATED)
                 if completion_handler:
                     try:
                         completion_handler(result)
@@ -440,6 +458,7 @@ class Toolset(Serializable):
                 print(f"Failed to execute command: {e}")
                 self.in_use = False
                 self.event_bus.emit(ToolsetEvents.IN_USE_CHANGED, self.in_use)
+                self.event_bus.emit(SharedEvent.STATE_UPDATED)
                 raise e
 
     # --------------------------------------------------------------------------

@@ -4,6 +4,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Gtk, Gdk, cairo, GLib, Adw
 import math
 from enum import Enum, auto
+from collections import namedtuple
+
+StatusIndicatorValues = namedtuple("StatusIndicatorValues", ["state", "blinking"])
 
 class StatusIndicatorState(Enum):
     DISABLED = auto()
@@ -32,6 +35,10 @@ class StatusIndicator(Gtk.DrawingArea):
         self._dimmed = False
         # Use custom draw function
         self.set_draw_func(self._on_draw)
+
+    def set_values(self, values: StatusIndicatorValues):
+        self.set_state(values.state)
+        self.set_blinking(values.blinking)
 
     def set_state(self, state: StatusIndicatorState):
         self._state = state
@@ -73,5 +80,4 @@ class StatusIndicator(Gtk.DrawingArea):
         ctx.set_source_rgba(border_color.red, border_color.green, border_color.blue, border_color.alpha)
         ctx.set_line_width(1)
         ctx.stroke()
-
 
