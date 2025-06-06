@@ -22,7 +22,7 @@ class SnapshotManager:
             cls._instance = cls()
         return cls._instance
 
-    def refresh_snapshots(self):
+    def refresh(self):
         snapshots = Repository.Snapshot.value
         # Detect missing snapshots and add them to repository without date
         snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))

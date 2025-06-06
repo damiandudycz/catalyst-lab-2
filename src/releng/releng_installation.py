@@ -3,9 +3,9 @@ from .multistage_process import (
     MultiStageProcessState, MultiStageProcessStageState,
     MultiStageProcessEvent, MultiStageProcessStageEvent,
 )
-from .repository import Repository
-from .releng_directory import RelengDirectory, RelengDirectoryStatus
+from .releng_directory import RelengDirectory
 from .releng_manager import RelengManager
+from .git_directory import GitDirectoryEvent
 import subprocess, re, os, shutil
 
 # ------------------------------------------------------------------------------

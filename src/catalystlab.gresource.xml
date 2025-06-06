@@ -9,6 +9,7 @@
     <file preprocess="xml-stripblanks">ui/app_sections/environments/environments_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/snapshots/snapshots_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/releng/releng_section.ui</file>
+    <file preprocess="xml-stripblanks">ui/app_sections/overlays/overlays_section.ui</file>
     <file preprocess="xml-stripblanks">ui/repository_list/repository_list_view.ui</file>
     <file preprocess="xml-stripblanks">ui/root_command_output/root_command_output_view.ui</file>
     <file preprocess="xml-stripblanks">ui/toolset_create/toolset_create_view.ui</file>

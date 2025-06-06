@@ -21,7 +21,7 @@ class ToolsetManager:
             cls._instance = cls()
         return cls._instance
 
-    def refresh_snapshots(self):
+    def refresh(self):
         pass # TODO
 
     def add_toolset(self, toolset: Toolset):

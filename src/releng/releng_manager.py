@@ -19,7 +19,7 @@ class RelengManager:
             cls._instance = cls()
         return cls._instance
 
-    def refresh_releng_directories(self):
+    def refresh(self):
         releng_directories = Repository.RelengDirectory.value
         # Detect missing releng directories and add them to repository if they contain releng
         releng_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.releng_location))

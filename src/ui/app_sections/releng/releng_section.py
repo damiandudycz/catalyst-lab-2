@@ -4,7 +4,7 @@ from .releng_details_view import RelengDetailsView
 from .releng_create_view import RelengCreateView
 from .app_events import app_event_bus, AppEvents
 
-@app_section(title="Releng", icon="book-minimalistic-svgrepo-com-symbolic", order=4_000)
+@app_section(title="Releng", icon="book-minimalistic-svgrepo-com-symbolic", order=3_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/releng/releng_section.ui')
 class RelengSection(Gtk.Box):
     __gtype_name__ = "RelengSection"
@@ -14,8 +14,8 @@ class RelengSection(Gtk.Box):
         self.content_navigation_view = content_navigation_view
 
     @Gtk.Template.Callback()
-    def on_item_row_pressed(self, sender, releng_directory):
-        self.content_navigation_view.push_view(RelengDetailsView(releng_directory=releng_directory) , title="Releng directory details")
+    def on_item_row_pressed(self, sender, item):
+        self.content_navigation_view.push_view(RelengDetailsView(releng_directory=item) , title="Releng directory details")
 
     @Gtk.Template.Callback()
     def on_installation_row_pressed(self, sender, installation):

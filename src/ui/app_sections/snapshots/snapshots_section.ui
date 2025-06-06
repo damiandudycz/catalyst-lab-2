@@ -27,10 +27,10 @@
                 <property name="title">Snapshots</property>
                 <property name="item_class_name">Snapshot</property>
                 <property name="item_installation_class_name">SnapshotInstallation</property>
-                <property name="item_icon">book-minimalistic-svgrepo-com-symbolic</property>
+                <property name="item_icon">video-frame-svgrepo-com-symbolic</property>
                 <property name="item_title_property_name">name</property>
                 <property name="item_subtitle_property_name">short_details</property>
-                <property name="item_status_property_name">status_indicator_values</property>
+                <!-- <property name="item_status_property_name">status_indicator_values</property> -->
                 <signal name="item-row-pressed" handler="on_item_row_pressed"/>
                 <signal name="installation-row-pressed" handler="on_installation_row_pressed"/>
                 <signal name="add-new-item-pressed" handler="on_add_new_item_pressed"/>

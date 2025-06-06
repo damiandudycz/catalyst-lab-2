@@ -4,7 +4,7 @@ from .snapshot_details_view import SnapshotDetailsView
 from .snapshot_create_view import SnapshotCreateView
 from .app_events import app_event_bus, AppEvents
 
-@app_section(title="Snapshots", icon="video-frame-svgrepo-com-symbolic", order=3_000)
+@app_section(title="Snapshots", icon="video-frame-svgrepo-com-symbolic", order=4_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/snapshots/snapshots_section.ui')
 class SnapshotsSection(Gtk.Box):
     __gtype_name__ = "SnapshotsSection"
@@ -14,8 +14,8 @@ class SnapshotsSection(Gtk.Box):
         self.content_navigation_view = content_navigation_view
 
     @Gtk.Template.Callback()
-    def on_item_row_pressed(self, sender, snapshot):
-        self.content_navigation_view.push_view(SnapshotDetailsView(snapshot=snapshot) , title="Snapshot details")
+    def on_item_row_pressed(self, sender, item):
+        self.content_navigation_view.push_view(SnapshotDetailsView(snapshot=item) , title="Snapshot details")
 
     @Gtk.Template.Callback()
     def on_installation_row_pressed(self, sender, installation):

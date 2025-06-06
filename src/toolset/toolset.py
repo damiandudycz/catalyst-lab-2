@@ -79,14 +79,15 @@ class Toolset(Serializable):
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
-        if self.is_reserved:
-            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=self.in_use)
-        elif self.spawned and self.store_changes:
-            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=self.in_use)
-        elif self.spawned:
-            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=self.in_use)
-        else:
-            return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=self.in_use)
+        match (self.is_reserved, self.spawned, self.store_changes):
+            case True, _, _:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=self.in_use)
+            case False, True, True:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=self.in_use)
+            case False, True, False:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=self.in_use)
+            case _:
+                return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=self.in_use)
 
     @classmethod
     def init_from(cls, data: dict) -> Toolset:

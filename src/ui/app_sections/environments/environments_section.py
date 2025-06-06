@@ -14,8 +14,8 @@ class EnvironmentsSection(Gtk.Box):
         self.content_navigation_view = content_navigation_view
 
     @Gtk.Template.Callback()
-    def on_item_row_pressed(self, sender, toolset):
-        self.content_navigation_view.push_view(ToolsetDetailsView(toolset=toolset), title="Toolset details")
+    def on_item_row_pressed(self, sender, item):
+        self.content_navigation_view.push_view(ToolsetDetailsView(toolset=item), title="Toolset details")
 
     @Gtk.Template.Callback()
     def on_installation_row_pressed(self, sender, installation):

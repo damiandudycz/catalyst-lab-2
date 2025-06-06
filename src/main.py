@@ -6,8 +6,9 @@ gi.require_version('Adw', '1')
 
 from gi.repository import Gtk, Gio, Adw, Gdk
 from .main_window import CatalystlabWindow
-from .root_helper_client import RootHelperClient
 from .modules_scanner import scan_all_submodules
+from .root_helper_client import RootHelperClient
+from .toolset_manager import ToolsetManager
 from .snapshot_manager import SnapshotManager
 from .releng_manager import RelengManager
 
@@ -21,8 +22,9 @@ class CatalystlabApplication(Adw.Application):
         self.create_action('about', self.on_about_action)
         self.create_action('preferences', self.on_preferences_action)
         scan_all_submodules("catalystlab")
-        SnapshotManager.shared().refresh_snapshots()
-        RelengManager.shared().refresh_releng_directories()
+        ToolsetManager.shared().refresh()
+        SnapshotManager.shared().refresh()
+        RelengManager.shared().refresh()
 
     def do_activate(self):
         """Called when the application is activated.

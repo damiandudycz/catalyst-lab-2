@@ -1,5 +1,6 @@
 from gi.repository import Gtk, Adw, Gio, GLib
-from .releng_directory import RelengDirectory, RelengDirectoryEvent, RelengDirectoryStatus
+from .releng_directory import RelengDirectory
+from .git_directory import GitDirectoryEvent, GitDirectoryStatus
 from .releng_manager import RelengManager
 from .repository import Repository
 from .releng_update import RelengUpdate
@@ -46,7 +47,7 @@ class RelengDetailsView(Gtk.Box):
         self.setup_status()
         self.connect("map", self.on_map)
         releng_directory.event_bus.subscribe(SharedEvent.STATE_UPDATED, self.setup_releng_directory_details)
-        releng_directory.event_bus.subscribe(RelengDirectoryEvent.LOGS_CHANGED, self.setup_releng_directory_logs)
+        releng_directory.event_bus.subscribe(GitDirectoryEvent.LOGS_CHANGED, self.setup_releng_directory_logs)
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.releng_directories_updates_updated)
 
     def on_map(self, widget):
@@ -89,8 +90,8 @@ class RelengDetailsView(Gtk.Box):
 
     def setup_status(self, _ = None):
         """Updates controls visibility and sensitivity for current status."""
-        self.tag_unknown.set_visible(self.releng_directory.status == RelengDirectoryStatus.UNKNOWN)
-        self.tag_unchanged.set_visible(self.releng_directory.status == RelengDirectoryStatus.UNCHANGED)
+        self.tag_unknown.set_visible(self.releng_directory.status == GitDirectoryStatus.UNKNOWN)
+        self.tag_unchanged.set_visible(self.releng_directory.status == GitDirectoryStatus.UNCHANGED)
         self.tag_update_available.set_visible(self.releng_directory.has_remote_changes)
         self.tag_updating.set_visible(
             self.update_in_progress
@@ -120,9 +121,9 @@ class RelengDetailsView(Gtk.Box):
             self.update_in_progress
             and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
         )
-        self.tag_changed.set_visible(self.releng_directory.status == RelengDirectoryStatus.CHANGED)
+        self.tag_changed.set_visible(self.releng_directory.status == GitDirectoryStatus.CHANGED)
         self.action_button_save_changes.set_sensitive(
-            self.releng_directory.status == RelengDirectoryStatus.CHANGED
+            self.releng_directory.status == GitDirectoryStatus.CHANGED
             and (
                 not self.update_in_progress
                 or self.update_in_progress.status == MultiStageProcessState.COMPLETED
@@ -130,7 +131,7 @@ class RelengDetailsView(Gtk.Box):
             )
         )
         self.action_button_update.set_sensitive(
-            self.releng_directory.status == RelengDirectoryStatus.UNCHANGED
+            self.releng_directory.status == GitDirectoryStatus.UNCHANGED
             and (
                 not self.update_in_progress
                 or self.update_in_progress.status == MultiStageProcessState.COMPLETED
