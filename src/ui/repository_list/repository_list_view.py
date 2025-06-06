@@ -11,7 +11,7 @@ from .snapshot_installation import SnapshotInstallation
 from .releng_installation import RelengInstallation
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/repository_list/repository_list_view.ui')
-class RepositoryListView(Gtk.Box):
+class RepositoryListView(Adw.PreferencesGroup):
     __gtype_name__ = "RepositoryListView"
 
     __gsignals__ = {
@@ -21,7 +21,6 @@ class RepositoryListView(Gtk.Box):
     }
 
     # View elements:
-    title_label = Gtk.Template.Child()
     items_container = Gtk.Template.Child()
     # Properties:
     title = GObject.Property(type=str, default=None)
@@ -37,7 +36,7 @@ class RepositoryListView(Gtk.Box):
         self.connect("map", self.on_map)
 
     def on_map(self, widget):
-        self.title_label.set_label(self.title)
+        self.set_title(self.title)
         self.item_class = globals().get(self.item_class_name)
         self.item_installation_class = globals().get(self.item_installation_class_name)
         self.repository = getattr(Repository, self.item_class_name)

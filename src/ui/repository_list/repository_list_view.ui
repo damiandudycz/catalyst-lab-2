@@ -6,26 +6,13 @@
   <requires lib="Adw" version="1.0"/>
 
   <!-- Template -->
-  <template class="RepositoryListView" parent="GtkBox">
-    <property name="orientation">vertical</property>
-    <property name="spacing">20</property>
-    <property name="hexpand">True</property>
-    <property name="halign">fill</property>
-
-    <child>
-      <object class="GtkLabel" id="title_label">
-        <property name="label">Available items:</property>
-        <property name="halign">start</property>
-      </object>
-    </child>
-
+  <template class="RepositoryListView" parent="AdwPreferencesGroup">
     <child>
       <object class="GtkListBox" id="items_container">
         <property name="selection-mode">none</property>
         <style>
           <class name="boxed-list"/>
         </style>
-
         <child>
           <object class="AdwButtonRow">
             <property name="title">Add item</property>
@@ -37,7 +24,6 @@
             </style>
           </object>
         </child>
-
       </object>
     </child>
   </template>

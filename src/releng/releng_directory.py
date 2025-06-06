@@ -39,7 +39,7 @@ class RelengDirectory(Serializable):
         if self.status == RelengDirectoryStatus.UNKNOWN:
             return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
         elif self.status == RelengDirectoryStatus.UNCHANGED:
-            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=False)
+            return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
         elif self.status == RelengDirectoryStatus.CHANGED:
             return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=False)
         else:
