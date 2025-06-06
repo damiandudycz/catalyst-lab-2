@@ -4,7 +4,7 @@ from .repository import Serializable, Repository
 from typing import final, ClassVar, Dict, Any
 from enum import Enum, auto
 from .event_bus import EventBus
-import os, threading, subprocess
+import os, threading, subprocess, uuid
 from datetime import datetime
 
 class RelengDirectoryEvent(Enum):
@@ -20,8 +20,9 @@ class RelengDirectoryStatus(Enum):
 @final
 class RelengDirectory(Serializable):
 
-    def __init__(self, name: str, branch_name: str | None = None, last_commit_date: datetime | None = None, has_remote_changes: bool = False):
+    def __init__(self, name: str, uuid: uuid.UUID | None = None, branch_name: str | None = None, last_commit_date: datetime | None = None, has_remote_changes: bool = False):
         self.name = name
+        self.uuid = uuid or uuid.uuid4()
         self.status: RelengDirectoryStatus = RelengDirectoryStatus.UNKNOWN
         self.last_commit_date = last_commit_date
         self.branch_name = branch_name
@@ -32,20 +33,30 @@ class RelengDirectory(Serializable):
     def serialize(self) -> dict:
         return {
             "name": self.name,
+            "uuid": str(self.uuid),
             "last_commit_date": self.last_commit_date.isoformat() if self.last_commit_date else None,
             "branch_name": self.branch_name,
             "has_remote_changes": self.has_remote_changes
         }
     @classmethod
     def init_from(cls, data: dict) -> Self:
-        return cls(
-            name=data["name"],
-            last_commit_date=(
+        try:
+            name = data["name"]
+            uuid_value = uuid.UUID(data["uuid"])
+            last_commit_date = (
                 datetime.fromisoformat(data["last_commit_date"])
                 if data.get("last_commit_date") else None
-            ),
-            branch_name=data.get("branch_name"),
-            has_remote_changes=data.get("has_remote_changes")
+            )
+            branch_name = data.get("branch_name")
+            has_remote_changes = data.get("has_remote_changes")
+        except KeyError:
+            raise ValueError(f"Failed to parse {data}")
+        return cls(
+            name=name,
+            uuid=uuid_value,
+            last_commit_date=last_commit_date,
+            branch_name=branch_name,
+            has_remote_changes=has_remote_changes
         )
 
     def update_status(self, wait: bool = False):
@@ -188,7 +199,3 @@ class RelengDirectory(Serializable):
     def sanitized_name(self) -> str:
         return RelengDirectory.sanitized_name_for_name(self.name)
 
-    @staticmethod
-    def create_directory(name: str) -> Releng:
-        """Create a Releng directory with given name."""
-        return RelengDirectory(name=name)
