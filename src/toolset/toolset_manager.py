@@ -26,7 +26,7 @@ class ToolsetManager:
 
     def add_toolset(self, toolset: Toolset):
         # Remove existing toolset before adding.
-        Repository.Toolset.value = [s for s in Repository.Toolset.value if s.id != toolset.id]
+        Repository.Toolset.value = [s for s in Repository.Toolset.value if s.uuid != toolset.uuid]
         Repository.Toolset.value.append(toolset)
 
     def remove_toolset(self, toolset: Toolset):

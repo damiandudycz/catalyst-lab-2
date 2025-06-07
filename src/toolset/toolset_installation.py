@@ -41,8 +41,7 @@ class ToolsetInstallation(MultiStageProcess):
         self.stages.append(ToolsetInstallationStepDownload(url=self.stage_url, multistage_process=self))
         self.stages.append(ToolsetInstallationStepExtract(multistage_process=self))
         self.stages.append(ToolsetInstallationStepSpawn(multistage_process=self))
-        if self.apps_selection:
-            self.stages.append(ToolsetInstallationStepUpdatePortage(multistage_process=self))
+        self.stages.append(ToolsetInstallationStepUpdatePortage(multistage_process=self))
         for app_selection in self.apps_selection:
             self.stages.append(ToolsetInstallationStepInstallApp(app_selection=app_selection, multistage_process=self))
         self.stages.append(ToolsetInstallationStepVerify(multistage_process=self))
