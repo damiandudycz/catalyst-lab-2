@@ -7,6 +7,7 @@ from .releng_directory import RelengDirectory
 from .releng_manager import RelengManager
 from .event_bus import EventBus
 from .git_installation import GitDirectorySetupConfiguration, GitDirectorySource
+from .default_dir_content_builder import DefaultDirContentBuilder
 import os
 
 # Import additional classed so that it can be parsed in repository_list_view:
@@ -61,14 +62,14 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         self.directory_name_row.set_sensitive(self.allow_changing_directory_name)
         self.check_if_configuration_ready()
 
-    def get_configuration(self) -> GitDirectorySetupConfiguration:
+    def get_configuration(self, default_dir_content_builder: DefaultDirContentBuilder | None = None) -> GitDirectorySetupConfiguration:
         match self.selected_source:
             case GitDirectorySource.GIT_REPOSITORY:
                 data = self.directory_url_row.get_text()
             case GitDirectorySource.LOCAL_DIRECTORY:
                 data = self.selected_local_directory
             case GitDirectorySource.CREATE_NEW:
-                data = None # TODO
+                data = default_dir_content_builder
         return GitDirectorySetupConfiguration(
             source=self.selected_source,
             name=self.directory_name_row.get_text(),

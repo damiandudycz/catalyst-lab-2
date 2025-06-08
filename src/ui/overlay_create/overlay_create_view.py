@@ -6,7 +6,28 @@ from .overlay_installation import OverlayInstallation
 from .overlay_directory import OverlayDirectory
 from .overlay_manager import OverlayManager
 from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent
+from .default_dir_content_builder import DefaultDirContentBuilder
+from .git_installation import GitDirectorySetupConfiguration
 import os
+
+class DefaultOverlayDirContentBuilder(DefaultDirContentBuilder):
+    def build_in(self, path: str, repo_name: str):
+        """Create default files in given path for new overlay.
+        Args:
+            path (str): Base directory where the overlay structure will be created.
+            repo_name (str): Name of the overlay (used in metadata/layout.conf and profiles/repo_name).
+        """
+        structure = ['metadata', 'profiles']
+        for folder in structure:
+            os.makedirs(os.path.join(path, folder), exist_ok=True)
+        # Create metadata/layout.conf:
+        layout_conf_path = os.path.join(path, 'metadata', 'layout.conf')
+        with open(layout_conf_path, 'w') as f:
+            f.write(f"repo-name = {repo_name}\n")
+        # Create profiles/repo_name:
+        repo_name_path = os.path.join(path, 'profiles', 'repo_name')
+        with open(repo_name_path, 'w') as f:
+            f.write(f"{repo_name}\n")
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/overlay_create/overlay_create_view.ui')
 class OverlayCreateView(Gtk.Box):
@@ -64,7 +85,7 @@ class OverlayCreateView(Gtk.Box):
         if not is_last_page:
             self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page + 1), True)
         else:
-            configuration = self.config_page.get_configuration()
+            configuration = self.config_page.get_configuration(default_dir_content_builder=DefaultOverlayDirContentBuilder())
             self._start_installation(configuration=configuration)
 
     @Gtk.Template.Callback()

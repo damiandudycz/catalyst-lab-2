@@ -4,7 +4,6 @@ from gi.repository import GLib
 from typing import final, Callable
 from pathlib import Path
 from enum import Enum, auto
-from abc import ABC, abstractmethod
 from .root_function import root_function
 from .runtime_env import RuntimeEnv
 from .architecture import Architecture, Emulation

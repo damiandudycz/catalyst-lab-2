@@ -93,7 +93,8 @@ catalystlab_sources = [
   'ui/snapshot_create/snapshot_create_view.py',
   'ui/releng_create/releng_create_view.py',
   'ui/git_directory_create/git_directory_create_config_view.py',
-  'ui/root_command_output/root_command_output_view.py'
+  'ui/root_command_output/root_command_output_view.py',
+  'default_dir_content_builder/default_dir_content_builder.py'
 ]
 
 install_data(catalystlab_sources, install_dir: moduledir)

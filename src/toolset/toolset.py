@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 from collections import namedtuple
-from abc import ABC, abstractmethod
 from urllib.parse import ParseResult
 from multiprocessing import Event
 from .root_function import root_function

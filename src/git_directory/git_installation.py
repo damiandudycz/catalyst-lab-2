@@ -10,6 +10,7 @@ from .multistage_process import (
 from .git_directory import GitDirectory
 from .git_manager import GitManager
 from .git_directory import GitDirectoryEvent
+from .default_dir_content_builder import DefaultDirContentBuilder
 import subprocess, re, os, shutil
 
 # ------------------------------------------------------------------------------
@@ -76,10 +77,10 @@ class GitInstallation(MultiStageProcess, ABC):
                     )
                 )
             case GitDirectorySource.CREATE_NEW:
-                # TODO: Get some instructions on how to create new directory of selected type. For example create new portage overlay.
                 self.stages.append(
                     GitInstallationStepInitLocal(
                         dir_name=self.configuration.name,
+                        default_dir_content_builder=self.configuration.data,
                         item_class=self.manager().repository()._cls,
                         multistage_process=self
                     )
@@ -272,6 +273,7 @@ class GitInstallationStepInitLocal(MultiStageProcessStage):
     def __init__(
         self,
         dir_name: str,
+        default_dir_content_builder: DefaultDirContentBuilder | None,
         item_class: type[GitDirectory],
         multistage_process: MultiStageProcess
     ):
@@ -281,6 +283,7 @@ class GitInstallationStepInitLocal(MultiStageProcessStage):
             multistage_process=multistage_process
         )
         self.dir_name = dir_name
+        self.default_dir_content_builder = default_dir_content_builder
         self.item_class = item_class
         self.process_started = False
     def start(self):
@@ -292,6 +295,8 @@ class GitInstallationStepInitLocal(MultiStageProcessStage):
                 raise RuntimeError(f"Directory {path} already exists")
             self.process_started = True
             os.makedirs(path, exist_ok=True)
+            if self.default_dir_content_builder:
+                self.default_dir_content_builder.build_in(path, self.dir_name)
             self.multistage_process.directory = self.directory
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
@@ -306,7 +311,6 @@ class GitInstallationStepInitLocal(MultiStageProcessStage):
                 shutil.rmtree(path)
         return True
 
-# TODO: Create new git repository in given dir if it doesnt exists yet
 class GitInstallationStepSetupRepository(MultiStageProcessStage):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(
