@@ -10,7 +10,6 @@ from collections import namedtuple
 from abc import ABC, abstractmethod
 from urllib.parse import ParseResult
 from multiprocessing import Event
-from collections import namedtuple
 from .root_function import root_function
 from .runtime_env import RuntimeEnv
 from .toolset_env_builder import ToolsetEnvBuilder

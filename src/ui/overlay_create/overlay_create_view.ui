@@ -6,7 +6,7 @@
   <requires lib="Adw" version="1.0"/>
 
   <!-- Template -->
-  <template class="RelengCreateView" parent="GtkBox">
+  <template class="OverlayCreateView" parent="GtkBox">
 
     <!-- Setup view -->
     <child>
@@ -41,7 +41,7 @@
                     </child>
                     <child>
                       <object class="GtkLabel">
-                        <property name="label">Create new Releng directory</property>
+                        <property name="label">Create new Portage overlay</property>
                         <property name="halign">center</property>
                         <property name="wrap">True</property>
                         <style>
@@ -73,7 +73,7 @@
                             </style>
                             <child>
                               <object class="AdwButtonRow">
-                                <property name="title">Configure Releng directory</property>
+                                <property name="title">Configure Portage overlay</property>
                                 <property name="activatable">True</property>
                                 <signal name="activated" handler="on_start_row_activated"/>
                                 <style>
@@ -93,13 +93,9 @@
             <!-- Page 2: Config screen -->
             <child>
               <object class="GitDirectoryCreateConfigView" id="config_page">
-                <property name="manager_class_name">RelengManager</property>
-                <property name="available_sources">GIT_REPOSITORY</property>
-                <!-- <property name="available_sources">GIT_REPOSITORY,LOCAL_DIRECTORY,CREATE_NEW_PORTAGE_OVERLAY</property> -->
-                <property name="default_git_repository">https://github.com/gentoo/releng.git</property>
-                <!-- <property name="default_local_directory">/home/damiandudycz</property> -->
-                <property name="allow_changing_git_repository">False</property>
-                <property name="default_directory_name">Releng</property>
+                <property name="manager_class_name">OverlayManager</property>
+                <property name="available_sources">GIT_REPOSITORY,LOCAL_DIRECTORY,CREATE_NEW</property>
+                <property name="default_directory_name">Overlay</property>
               </object>
             </child>
 

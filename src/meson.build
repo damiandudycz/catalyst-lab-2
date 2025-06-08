@@ -89,6 +89,7 @@ catalystlab_sources = [
   'ui/components/root_access_button.py',
   'ui/components/status_indicator.py',
   'ui/toolset_create/toolset_create_view.py',
+  'ui/overlay_create/overlay_create_view.py',
   'ui/snapshot_create/snapshot_create_view.py',
   'ui/releng_create/releng_create_view.py',
   'ui/git_directory_create/git_directory_create_config_view.py',

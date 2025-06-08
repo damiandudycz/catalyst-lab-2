@@ -37,7 +37,6 @@ class SnapshotInstallation(MultiStageProcess):
             self.stages.append(SnapshotInstallationStepCopyFile(file=self.file, custom_filename=self.custom_filename, multistage_process=self))
         self.stages.append(SnapshotInstallationStepSetupPermissions(multistage_process=self))
         self.stages.append(SnapshotInstallationStepAnalyze(multistage_process=self))
-        super().setup_stages()
 
     def complete_process(self, success: bool):
         if success:

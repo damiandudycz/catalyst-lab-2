@@ -1,11 +1,20 @@
 from __future__ import annotations
-from gi.repository import Gtk, GLib, Gio, Adw
-from enum import Enum
+from gi.repository import Gtk, GLib, Gio, Adw, GObject
+from enum import Enum, auto
 from .multistage_process import MultiStageProcessState
 from .releng_installation import RelengInstallation
 from .releng_directory import RelengDirectory
 from .releng_manager import RelengManager
+from .event_bus import EventBus
+from .git_installation import GitDirectorySetupConfiguration, GitDirectorySource
 import os
+
+# Import additional classed so that it can be parsed in repository_list_view:
+from .releng_manager import RelengManager
+from .overlay_manager import OverlayManager
+
+class GitDirectoryCreateConfigViewEvent(Enum):
+    CONFIGURATION_READY_CHANGED = auto()
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/git_directory_create/git_directory_create_config_view.ui')
 class GitDirectoryCreateConfigView(Gtk.Box):
@@ -16,38 +25,79 @@ class GitDirectoryCreateConfigView(Gtk.Box):
     source_toggle_group_container = Gtk.Template.Child()
     directory_name_row = Gtk.Template.Child()
     directory_local_directory_row = Gtk.Template.Child()
+    directory_local_directory_button = Gtk.Template.Child()
     directory_url_row = Gtk.Template.Child()
     name_used_label = Gtk.Template.Child()
 
+    manager_class_name = GObject.Property(type=str, default=None)
+    available_sources = GObject.Property(type=str, default=None)
+    default_git_repository = GObject.Property(type=str, default=None)
+    default_local_directory = GObject.Property(type=str, default=None)
+    default_directory_name = GObject.Property(type=str, default=None)
+
+    allow_changing_git_repository = GObject.Property(type=bool, default=True)
+    allow_changing_local_directory = GObject.Property(type=bool, default=True)
+    allow_changing_directory_name = GObject.Property(type=bool, default=True)
+
     def __init__(self):
         super().__init__()
-        self.selected_source = GitDirectorySource.GIT_REPOSITORY
-        self.selected_local_directory: Gio.File | None = None
-        self._update_source_rows()
-        self.check_filename_is_free()
-        self.check_source_is_configured()
+        self.event_bus = EventBus[GitDirectoryCreateConfigViewEvent]()
+        self.configuration_ready = False
         self.connect("map", self.on_map)
 
     def on_map(self, widget):
+        self.manager_class = globals().get(self.manager_class_name)
         self.setup_source_toggles()
+        self._update_source_rows()
+        self.directory_url_row.set_text(self.default_git_repository or "")
+        self.selected_local_directory: Gio.File | None = Gio.File.new_for_path(self.default_local_directory) if self.default_local_directory else None
+        self.directory_local_directory_row.set_subtitle(self.selected_local_directory.get_path() if self.selected_local_directory else "(Select directory)")
+        self.directory_name_row.set_text(self.default_directory_name if self.default_directory_name else "")
+        self.directory_url_row.set_editable(self.allow_changing_git_repository)
+        self.directory_url_row.set_sensitive(self.allow_changing_git_repository)
+        self.directory_local_directory_button.set_visible(self.allow_changing_git_repository)
+        self.directory_local_directory_button.set_sensitive(self.allow_changing_git_repository)
+        self.directory_name_row.set_editable(self.allow_changing_directory_name)
+        self.directory_name_row.set_sensitive(self.allow_changing_directory_name)
+        self.check_if_configuration_ready()
+
+    def get_configuration(self) -> GitDirectorySetupConfiguration:
+        match self.selected_source:
+            case GitDirectorySource.GIT_REPOSITORY:
+                data = self.directory_url_row.get_text()
+            case GitDirectorySource.LOCAL_DIRECTORY:
+                data = self.selected_local_directory
+            case GitDirectorySource.CREATE_NEW:
+                data = None # TODO
+        return GitDirectorySetupConfiguration(
+            source=self.selected_source,
+            name=self.directory_name_row.get_text(),
+            data=data
+        )
 
     def setup_source_toggles(self):
         toggle_group = Adw.ToggleGroup()
         toggle_group.add_css_class("round")
         toggle_group.add_css_class("caption")
-        for source in GitDirectorySource:
+
+        sources_raw = self.available_sources
+        sources = [GitDirectorySource[value.strip()] for value in sources_raw.split(",")]
+        self.selected_source = sources[0]
+        self.source_group.set_visible(len(sources) > 1)
+
+        for source in sources:
             toggle = Adw.Toggle(label=source.name())
             toggle_group.add(toggle)
             if source == self.selected_source:
                 toggle_group.set_active(source.value)
         def on_toggle_source_clicked(group, pspec):
             index = group.get_active()
-            self.directory_url_row.set_text("")
-            self.selected_local_directory = None
-            self.directory_local_directory_row.set_subtitle("(Select directory)")
+            self.directory_url_row.set_text(self.default_git_repository or "")
+            self.selected_local_directory = Gio.File.new_for_path(self.default_local_directory) if self.default_local_directory else None
+            self.directory_local_directory_row.set_subtitle(self.selected_local_directory.get_path() if self.selected_local_directory else "(Select directory)")
             self.selected_source = list(GitDirectorySource)[index]
             self._update_source_rows()
-            self.check_source_is_configured()
+            self.check_if_configuration_ready()
         toggle_group.connect("notify::active", on_toggle_source_clicked)
         self.source_toggle_group_container.append(toggle_group)
 
@@ -56,8 +106,7 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         self.directory_url_row.set_visible(self.selected_source == GitDirectorySource.GIT_REPOSITORY)
 
     def check_filename_is_free(self) -> bool:
-        self.filename_is_free = RelengManager.shared().is_name_available(name=self.directory_name_row.get_text())
-        self.setup_back_next_buttons()
+        self.filename_is_free = self.manager_class.shared().is_name_available(name=self.directory_name_row.get_text())
         self.name_used_label.set_visible(not self.filename_is_free)
         return self.filename_is_free
 
@@ -67,34 +116,44 @@ class GitDirectoryCreateConfigView(Gtk.Box):
                 self.source_is_configured = self.directory_url_row.get_text()
             case GitDirectorySource.LOCAL_DIRECTORY:
                 self.source_is_configured = self.selected_local_directory
-            case GitDirectorySource.CREATE_NEW_PORTAGE_OVERLAY:
+            case GitDirectorySource.CREATE_NEW:
                 self.source_is_configured = True
-        self.setup_back_next_buttons()
         return self.source_is_configured
+
+    def check_if_configuration_ready(self) -> bool:
+        self.configuration_ready = self.check_filename_is_free() and self.check_source_is_configured()
+        self.event_bus.emit(GitDirectoryCreateConfigViewEvent.CONFIGURATION_READY_CHANGED, self.configuration_ready)
+        return self.configuration_ready
 
     @Gtk.Template.Callback()
     def on_directory_name_activate(self, sender):
-        self.check_filename_is_free()
+        self.check_if_configuration_ready()
         self.get_root().set_focus(None)
 
     @Gtk.Template.Callback()
     def on_directory_name_changed(self, sender):
-        self.check_filename_is_free()
+        self.check_if_configuration_ready()
 
     @Gtk.Template.Callback()
     def on_directory_url_activate(self, sender):
         self.get_root().set_focus(None)
-        self.directory_name_row.set_text(self.directory_url_row.get_text().rstrip('/').split('/')[-1])
-        self.check_source_is_configured()
+        if self.allow_changing_directory_name:
+            self.directory_name_row.set_text(self.directory_url_row.get_text().rstrip('/').split('/')[-1])
+        self.check_if_configuration_ready()
+
+    @Gtk.Template.Callback()
+    def on_directory_url_changed(self, sender):
+        self.check_if_configuration_ready()
 
     @Gtk.Template.Callback()
     def _on_select_local_directory_clicked(self, sender):
         def on_folder_selected(dialog, result):
             try:
                 self.selected_local_directory = dialog.select_folder_finish(result)
-                self.directory_name_row.set_text(self.selected_local_directory.get_basename())
+                if self.allow_changing_directory_name:
+                    self.directory_name_row.set_text(self.selected_local_directory.get_basename())
                 self.directory_local_directory_row.set_subtitle(self.selected_local_directory.get_path())
-                self.check_source_is_configured()
+                self.check_if_configuration_ready()
                 print("Selected folder:", self.selected_local_directory.get_path())
             except GLib.Error as e:
                 print("Folder selection canceled or failed:", e)

@@ -2,15 +2,15 @@ from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio, Adw
 from enum import Enum
 from .multistage_process import MultiStageProcessState
-from .releng_installation import RelengInstallation
-from .releng_directory import RelengDirectory
-from .releng_manager import RelengManager
-from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent, GitDirectorySetupConfiguration, GitDirectorySource
+from .overlay_installation import OverlayInstallation
+from .overlay_directory import OverlayDirectory
+from .overlay_manager import OverlayManager
+from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent
 import os
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_create/releng_create_view.ui')
-class RelengCreateView(Gtk.Box):
-    __gtype_name__ = "RelengCreateView"
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/overlay_create/overlay_create_view.ui')
+class OverlayCreateView(Gtk.Box):
+    __gtype_name__ = "OverlayCreateView"
 
     # Main views:
     setup_view = Gtk.Template.Child()
@@ -21,7 +21,7 @@ class RelengCreateView(Gtk.Box):
     back_button = Gtk.Template.Child()
     next_button = Gtk.Template.Child()
 
-    def __init__(self, installation_in_progress: RelengInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
+    def __init__(self, installation_in_progress: OverlayInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
@@ -77,9 +77,7 @@ class RelengCreateView(Gtk.Box):
         self.install_view.set_visible(stage != MultiStageProcessState.SETUP)
 
     def _start_installation(self, configuration: GitDirectorySetupConfiguration):
-        if configuration.source != GitDirectorySource.GIT_REPOSITORY:
-            raise ValueError("Releng installation accepts only GitDirectorySource.GIT_REPOSITORY as source")
-        self.installation_in_progress = RelengInstallation(configuration=configuration)
+        self.installation_in_progress = OverlayInstallation(configuration=configuration)
         self.installation_in_progress.start()
         self.install_view.set_multistage_process(self.installation_in_progress)
         self._set_current_stage(self.installation_in_progress.status)

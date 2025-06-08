@@ -67,11 +67,14 @@ class MultiStageProcess(ABC):
         self.progress: float = 0.0 # Calculated automatically from all stages.
         self.stages: list[MultiStageProcessStage] = [] # Set in setup_stages.
         self.setup_stages()
+        self.observe_stages_progress()
 
     @abstractmethod
     def setup_stages(self):
-        """Setup required stages based on information passed in init()."""
-        """Call super().setup_stages() at the end of implementation."""
+        # TODO: No need to call super in direct subclasses
+        pass
+
+    def observe_stages_progress(self):
         for stage in self.stages:
             stage.event_bus.subscribe(
                 MultiStageProcessStageEvent.PROGRESS_CHANGED,

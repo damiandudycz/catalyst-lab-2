@@ -12,9 +12,3 @@ class OverlayInstallation(GitInstallation):
     def manager(cls) -> GitManager:
         return OverlayManager.shared()
 
-    def __init__(self, name: str, repository_url: str | None):
-        super().__init__(
-            name=name,
-            repository_url=repository_url
-        )
-

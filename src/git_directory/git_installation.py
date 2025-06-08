@@ -1,4 +1,7 @@
+from gi.repository import Gio
 from abc import ABC, abstractmethod
+from enum import Enum, auto
+from collections import namedtuple
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
     MultiStageProcessState, MultiStageProcessStageState,
@@ -8,6 +11,29 @@ from .git_directory import GitDirectory
 from .git_manager import GitManager
 from .git_directory import GitDirectoryEvent
 import subprocess, re, os, shutil
+
+# ------------------------------------------------------------------------------
+# Helper objects.
+# ------------------------------------------------------------------------------
+
+class GitDirectorySource(Enum):
+    GIT_REPOSITORY = 0 # Clone git repository.
+    LOCAL_DIRECTORY = 1 # Copy local directory.
+    CREATE_NEW = 2 # Create new empty directory.
+
+    def name(self) -> str:
+        match self:
+            case GitDirectorySource.GIT_REPOSITORY:
+                return "GIT repository"
+            case GitDirectorySource.LOCAL_DIRECTORY:
+                return "Local directory"
+            case GitDirectorySource.CREATE_NEW:
+                return "Create new"
+
+GitDirectorySetupConfiguration = namedtuple(
+    "GitDirectorySetupConfiguration",
+    ["source", "name", "data"]
+)
 
 # ------------------------------------------------------------------------------
 # Git installation.
@@ -22,59 +48,82 @@ class GitInstallation(MultiStageProcess, ABC):
     def manager(cls) -> GitManager:
         pass
 
-    def __init__(self, name: str, repository_url: str | None = None):
-        self.alias = name
-        self.repository_url = repository_url
+    def __init__(self, configuration: GitDirectorySetupConfiguration):
+        self.configuration = configuration
         super().__init__(title="GIT directory installation")
 
     def name(self) -> str:
-        return self.alias
+        return self.configuration.name
 
     def setup_stages(self):
-        if self.repository_url:
-            self.stages.append(
-                GitInstallationStepClone(
-                    alias=self.alias,
-                    repository_url=self.repository_url,
-                    item_class=self.manager().repository()._cls,
-                    multistage_process=self
+        match self.configuration.source:
+            case GitDirectorySource.GIT_REPOSITORY:
+                self.stages.append(
+                    GitInstallationStepClone(
+                        dir_name=self.configuration.name,
+                        repository_url=self.configuration.data,
+                        item_class=self.manager().repository()._cls,
+                        multistage_process=self
+                    )
                 )
-            )
-        else:
-            self.stages.append(
-                GitInstallationStepInitLocal(
-                    alias=self.alias,
-                    item_class=self.manager().repository()._cls,
-                    multistage_process=self
+            case GitDirectorySource.LOCAL_DIRECTORY:
+                self.stages.append(
+                    GitInstallationStepCopyLocal(
+                        dir_name=self.configuration.name,
+                        local_path=self.configuration.data,
+                        item_class=self.manager().repository()._cls,
+                        multistage_process=self
+                    )
                 )
-            )
-            GitInstallationStepInitLocal
-        super().setup_stages()
+            case GitDirectorySource.CREATE_NEW:
+                # TODO: Get some instructions on how to create new directory of selected type. For example create new portage overlay.
+                self.stages.append(
+                    GitInstallationStepInitLocal(
+                        dir_name=self.configuration.name,
+                        item_class=self.manager().repository()._cls,
+                        multistage_process=self
+                    )
+                )
+        self.stages.append(
+            GitInstallationStepSetupRepository(multistage_process=self)
+        )
+        self.stages.append(
+            GitInstallationStepAnalyzeRepository(multistage_process=self)
+        )
 
     def complete_process(self, success: bool):
         if success:
             manager = self.__class__.manager()
-            manager.add_directory(
-                directory=self.directory
-            )
+            manager.add_directory(directory=self.directory)
 
 # ------------------------------------------------------------------------------
 # Installation process steps.
 # ------------------------------------------------------------------------------
 
 class GitInstallationStepClone(MultiStageProcessStage):
-    def __init__(self, alias: str, repository_url: str, item_class: type[GitDirectory], multistage_process: MultiStageProcess):
-        super().__init__(name="Clone GIT repository", description="Clones GIT repository", multistage_process=multistage_process)
-        self.alias = alias
+    def __init__(
+        self,
+        dir_name: str,
+        repository_url: str,
+        item_class: type[GitDirectory],
+        multistage_process: MultiStageProcess
+    ):
+        super().__init__(
+            name="Clone GIT repository",
+            description="Clones GIT repository",
+            multistage_process=multistage_process
+        )
+        self.dir_name = dir_name
         self.repository_url = repository_url
         self.item_class = item_class
         self.process_started = False
     def start(self):
         super().start()
         try:
-            self.directory = self.item_class(name=self.alias)
-            if os.path.exists(self.directory.directory_path()):
-                raise RuntimeError(f"Directory {self.directory.directory_path()} already exists")
+            self.directory = self.item_class(name=self.dir_name)
+            path=self.directory.directory_path()
+            if os.path.exists(path):
+                raise RuntimeError(f"Directory {path} already exists")
             self.process_started = True
             progress_pattern = re.compile(r"Receiving objects:\s+(\d+)%")
             process = subprocess.Popen(
@@ -97,9 +146,10 @@ class GitInstallationStepClone(MultiStageProcessStage):
                     self._update_progress(percent / 100)
             process.wait()
             if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, process.args)
-            self.directory.update_status(wait=True)
-            self.directory.update_logs(wait=True)
+                raise subprocess.CalledProcessError(
+                    process.returncode,
+                    process.args
+                )
             self.multistage_process.directory = self.directory
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
@@ -113,45 +163,101 @@ class GitInstallationStepClone(MultiStageProcessStage):
                 shutil.rmtree(self.directory.directory_path())
         return True
 
-class GitInstallationStepInitLocal(MultiStageProcessStage):
+class GitInstallationStepCopyLocal(MultiStageProcessStage):
     def __init__(
         self,
-        alias: str,
+        dir_name: str,
+        local_path: Gio.File,
         item_class: type[GitDirectory],
         multistage_process: MultiStageProcess
     ):
         super().__init__(
-            name="Initialize Local GIT Repository",
-            description="Initializes an empty local GIT repository",
+            name="Copy Local directory",
+            description="Copies contents of local directory",
             multistage_process=multistage_process
         )
-        self.alias = alias
+        self.dir_name = dir_name
+        self.local_path = local_path
         self.item_class = item_class
         self.process_started = False
-
     def start(self):
         super().start()
         try:
-            self.directory = self.item_class(name=self.alias)
+            self.directory = self.item_class(name=self.dir_name)
             path = self.directory.directory_path()
             if os.path.exists(path):
                 raise RuntimeError(f"Directory {path} already exists")
-            os.makedirs(path, exist_ok=True)
+            if not os.path.isdir(self.local_path):
+                raise RuntimeError(f"Path {self.local_path} is not a directory")
             self.process_started = True
-            process = subprocess.run(
-                ["git", "init", path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True
-            )
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, process.args, output=process.stdout)
-            self.directory.update_status(wait=True)
-            self.directory.update_logs(wait=True)
+            # Create destination directory:
+            dest = Gio.File.new_for_path(path)
+            dest.make_directory_with_parents(None)
             self.multistage_process.directory = self.directory
+            # Calculating number of files
+            def count_total_files(dir: Gio.File) -> int:
+                """Recursively count the number of files (not directories) in a directory."""
+                total = 0
+                enumerator = dir.enumerate_children(
+                    "standard::name,standard::type",
+                    Gio.FileQueryInfoFlags.NONE,
+                    None
+                )
+                info = enumerator.next_file(None)
+                while info:
+                    file_type = info.get_file_type()
+                    name = info.get_name()
+                    child = dir.get_child(name)
+                    if file_type == Gio.FileType.DIRECTORY:
+                        total += count_total_files(child)
+                    else:
+                        total += 1
+                    info = enumerator.next_file(None)
+                return total
+            # Copy files:
+            def copy_directory_contents_with_progress(
+                source: Gio.File,
+                destination_path: str
+            ):
+                dest = Gio.File.new_for_path(destination_path)
+                if not dest.query_exists(None):
+                    dest.make_directory_with_parents(None)
+                total_files = count_total_files(source)
+                copied_files = 0
+                def copy_recursive(src: Gio.File, dst: Gio.File):
+                    nonlocal copied_files
+                    enumerator = src.enumerate_children(
+                        "standard::name,standard::type",
+                        Gio.FileQueryInfoFlags.NONE,
+                        None
+                    )
+                    info = enumerator.next_file(None)
+                    while info:
+                        name = info.get_name()
+                        file_type = info.get_file_type()
+                        child_src = src.get_child(name)
+                        child_dst = dst.get_child(name)
+                        if file_type == Gio.FileType.DIRECTORY:
+                            child_dst.make_directory_with_parents(None)
+                            copy_recursive(child_src, child_dst)
+                        else:
+                            child_src.copy(
+                                child_dst,
+                                Gio.FileCopyFlags.OVERWRITE,
+                                None, None, None
+                            )
+                            copied_files += 1
+                            self._update_progress(copied_files / total_files)
+                        info = enumerator.next_file(None)
+                copy_recursive(source, dest)
+            copy_directory_contents_with_progress(
+                source=self.local_path,
+                destination_path=path
+            )
+            # Complete
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
-            print(f"Error during local Git init: {e}")
+            print(f"Error during copying local directory: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
     def cleanup(self) -> bool:
         if not super().cleanup():
@@ -161,4 +267,99 @@ class GitInstallationStepInitLocal(MultiStageProcessStage):
             if os.path.exists(path):
                 shutil.rmtree(path)
         return True
+
+class GitInstallationStepInitLocal(MultiStageProcessStage):
+    def __init__(
+        self,
+        dir_name: str,
+        item_class: type[GitDirectory],
+        multistage_process: MultiStageProcess
+    ):
+        super().__init__(
+            name="Create new directory",
+            description="Creates new directory with default content",
+            multistage_process=multistage_process
+        )
+        self.dir_name = dir_name
+        self.item_class = item_class
+        self.process_started = False
+    def start(self):
+        super().start()
+        try:
+            self.directory = self.item_class(name=self.dir_name)
+            path = self.directory.directory_path()
+            if os.path.exists(path):
+                raise RuntimeError(f"Directory {path} already exists")
+            self.process_started = True
+            os.makedirs(path, exist_ok=True)
+            self.multistage_process.directory = self.directory
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            print(f"Error during creating new directory: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
+        if self.multistage_process.status == MultiStageProcessState.FAILED and self.process_started:
+            path = self.directory.directory_path()
+            if os.path.exists(path):
+                shutil.rmtree(path)
+        return True
+
+# TODO: Create new git repository in given dir if it doesnt exists yet
+class GitInstallationStepSetupRepository(MultiStageProcessStage):
+    def __init__(self, multistage_process: MultiStageProcess):
+        super().__init__(
+            name="Configure GIT repository",
+            description="Creates empty GIT repository if not present",
+            multistage_process=multistage_process
+        )
+    def start(self):
+        super().start()
+        try:
+            path = self.multistage_process.directory.directory_path()
+            git_dir_path = os.path.join(path, '.git')
+            if not os.path.exists(git_dir_path):
+                # Initialize repo:
+                commands = [
+                    ["git", "init", "--initial-branch=main", path],
+                    ["git", "-C", path, "add", "."]
+                ]
+                for cmd in commands:
+                    result = subprocess.run(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True
+                    )
+                    if result.returncode != 0:
+                        raise subprocess.CalledProcessError(result.returncode, result.args, output=result.stdout)
+                # Commit:
+                if subprocess.run(
+                    ["git", "-C", path, "status", "--porcelain"],
+                    stdout=subprocess.PIPE,
+                    text=True
+                ).stdout.strip():
+                    subprocess.run(["git", "-C", path, "commit", "-m", "Initial commit"], check=True)
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            print(f"Error during local Git init: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
+
+class GitInstallationStepAnalyzeRepository(MultiStageProcessStage):
+    def __init__(self, multistage_process: MultiStageProcess):
+        super().__init__(
+            name="Analyze GIT repository",
+            description="Reads state and logs of git repository",
+            multistage_process=multistage_process
+        )
+    def start(self):
+        super().start()
+        try:
+            self.multistage_process.directory.update_status(wait=True)
+            self.multistage_process.directory.update_logs(wait=True)
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            print(f"Error during analyzing git repository: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
 

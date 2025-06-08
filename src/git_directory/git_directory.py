@@ -46,10 +46,10 @@ class GitDirectory(Serializable, ABC):
 
     @property
     def short_details(self) -> str:
-        return f"{self.branch_name}, {
-            self.last_commit_date.strftime('%Y-%d-%m %H:%M')
-            if self.last_commit_date else 'Unknown date'
-        }"
+        parts = [self.branch_name]
+        if self.last_commit_date:
+            parts.append(self.last_commit_date.strftime('%Y-%d-%m %H:%M'))
+        return ", ".join(parts)
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
@@ -134,12 +134,15 @@ class GitDirectory(Serializable, ABC):
                     text=True
                 )
                 last_commit_date, _ = process_date.communicate()
-                self.last_commit_date = datetime.fromisoformat(
-                    last_commit_date.strip()
-                )
+                if last_commit_date:
+                    self.last_commit_date = datetime.fromisoformat(
+                        last_commit_date.strip()
+                    )
+                else:
+                    self.last_commit_date = None
                 # Get current branch name
                 process_branch = subprocess.Popen(
-                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    ["git", "symbolic-ref", "--short", "HEAD"],
                     cwd=directory,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.DEVNULL,
@@ -176,9 +179,6 @@ class GitDirectory(Serializable, ABC):
                         behind_count = int(output.strip())
                         self.has_remote_changes = behind_count > 0
                     else:
-                        print(f"Warning: Failed to compare with upstream: {
-                            error.strip()
-                        }")
                         self.has_remote_changes = False
                 except Exception as e:
                     print(f"Warning: Failed to check for updates: {e}")

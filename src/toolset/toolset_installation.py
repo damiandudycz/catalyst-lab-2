@@ -46,7 +46,6 @@ class ToolsetInstallation(MultiStageProcess):
             self.stages.append(ToolsetInstallationStepInstallApp(app_selection=app_selection, multistage_process=self))
         self.stages.append(ToolsetInstallationStepVerify(multistage_process=self))
         self.stages.append(ToolsetInstallationStepCompress(multistage_process=self))
-        super().setup_stages()
 
     def complete_process(self, success: bool):
         if success:

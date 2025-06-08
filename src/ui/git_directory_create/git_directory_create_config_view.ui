@@ -41,6 +41,7 @@
                     <property name="show-apply-button">True</property>
                     <property name="text"></property>
                     <signal name="apply" handler="on_directory_url_activate"/>
+                    <signal name="changed" handler="on_directory_url_changed"/>
                   </object>
                 </child>
                 <child>
@@ -51,7 +52,7 @@
                       <object class="GtkBox">
                         <property name="valign">center</property>
                         <child>
-                          <object class="GtkButton">
+                          <object class="GtkButton" id="directory_local_directory_button">
                             <style>
                               <class name="flat"/>
                               <class name="caption"/>
@@ -73,7 +74,7 @@
                   <object class="AdwEntryRow" id="directory_name_row">
                     <property name="title">Directory name</property>
                     <property name="show-apply-button">True</property>
-                    <property name="text">Releng</property>
+                    <property name="text"></property>
                     <signal name="apply" handler="on_directory_name_activate"/>
                     <signal name="changed" handler="on_directory_name_changed"/>
                   </object>
