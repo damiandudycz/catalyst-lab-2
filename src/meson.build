@@ -91,6 +91,7 @@ catalystlab_sources = [
   'ui/toolset_create/toolset_create_view.py',
   'ui/snapshot_create/snapshot_create_view.py',
   'ui/releng_create/releng_create_view.py',
+  'ui/git_directory_create/git_directory_create_config_view.py',
   'ui/root_command_output/root_command_output_view.py'
 ]
 

@@ -7,30 +7,9 @@ from .releng_directory import RelengDirectory
 from .releng_manager import RelengManager
 import os
 
-class GitDirectorySource(Enum):
-    GIT_REPOSITORY = 0 # Clone git repository
-    LOCAL_DIRECTORY = 1 # Copy local directory and initialize git in it
-    CREATE_NEW_PORTAGE_OVERLAY = 2 # Create new portage overlay directory and add git in it
-
-    def name(self) -> str:
-        match self:
-            case GitDirectorySource.GIT_REPOSITORY:
-                return "GIT Repository"
-            case GitDirectorySource.LOCAL_DIRECTORY:
-                return "Local Directory"
-            case GitDirectorySource.CREATE_NEW_PORTAGE_OVERLAY:
-                return "Create new overlay"
-
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_create/releng_create_view.ui')
-class RelengCreateView(Gtk.Box):
-    __gtype_name__ = "RelengCreateView"
-
-    # Main views:
-    setup_view = Gtk.Template.Child()
-    install_view = Gtk.Template.Child()
-    # Setup view elements:
-    carousel = Gtk.Template.Child()
-    config_page = Gtk.Template.Child()
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/git_directory_create/git_directory_create_config_view.ui')
+class GitDirectoryCreateConfigView(Gtk.Box):
+    __gtype_name__ = "GitDirectoryCreateConfigView"
 
     source_group = Gtk.Template.Child()
     options_group = Gtk.Template.Child()
@@ -40,24 +19,19 @@ class RelengCreateView(Gtk.Box):
     directory_url_row = Gtk.Template.Child()
     name_used_label = Gtk.Template.Child()
 
-    back_button = Gtk.Template.Child()
-    next_button = Gtk.Template.Child()
-
-    def __init__(self, installation_in_progress: RelengInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
+    def __init__(self):
         super().__init__()
-        self.installation_in_progress = installation_in_progress
-        self.content_navigation_view = content_navigation_view
-        self.current_page = 0
         self.selected_source = GitDirectorySource.GIT_REPOSITORY
         self.selected_local_directory: Gio.File | None = None
-        self.carousel.connect('page-changed', self.on_page_changed)
-        self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
         self._update_source_rows()
-        self.install_view.set_multistage_process(self.installation_in_progress)
         self.check_filename_is_free()
         self.check_source_is_configured()
         self.connect("map", self.on_map)
 
+    def on_map(self, widget):
+        self.setup_source_toggles()
+
+    def setup_source_toggles(self):
         toggle_group = Adw.ToggleGroup()
         toggle_group.add_css_class("round")
         toggle_group.add_css_class("caption")
@@ -81,22 +55,6 @@ class RelengCreateView(Gtk.Box):
         self.directory_local_directory_row.set_visible(self.selected_source == GitDirectorySource.LOCAL_DIRECTORY)
         self.directory_url_row.set_visible(self.selected_source == GitDirectorySource.GIT_REPOSITORY)
 
-    def on_map(self, widget):
-        self.install_view.content_navigation_view = self.content_navigation_view
-        self.install_view._window = self._window
-
-    def on_page_changed(self, carousel, pspec):
-        self.current_page = int(carousel.get_position())
-        self.setup_back_next_buttons()
-
-    def setup_back_next_buttons(self, _ = None):
-        is_first_page = self.current_page == 0
-        is_last_page = self.current_page == 1
-        self.back_button.set_sensitive(not is_first_page)
-        self.back_button.set_opacity(0.0 if is_first_page else 1.0)
-        self.next_button.set_sensitive(self.filename_is_free and self.source_is_configured)
-        self.next_button.set_opacity(0.0 if not is_last_page else 1.0)
-
     def check_filename_is_free(self) -> bool:
         self.filename_is_free = RelengManager.shared().is_name_available(name=self.directory_name_row.get_text())
         self.setup_back_next_buttons()
@@ -113,29 +71,6 @@ class RelengCreateView(Gtk.Box):
                 self.source_is_configured = True
         self.setup_back_next_buttons()
         return self.source_is_configured
-
-    @Gtk.Template.Callback()
-    def on_back_pressed(self, _):
-        is_first_page = self.current_page == 0
-        if not is_first_page:
-            self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page - 1), True)
-
-    @Gtk.Template.Callback()
-    def on_next_pressed(self, _):
-        is_last_page = self.current_page == 1
-        if not is_last_page:
-            self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page + 1), True)
-        else:
-            self._start_installation(name=self.directory_name_row.get_text())
-
-    @Gtk.Template.Callback()
-    def on_start_row_activated(self, _):
-        self.carousel.scroll_to(self.config_page, True)
-
-    def _set_current_stage(self, stage: MultiStageProcessState):
-        # Setup views visibility:
-        self.setup_view.set_visible(stage == MultiStageProcessState.SETUP)
-        self.install_view.set_visible(stage != MultiStageProcessState.SETUP)
 
     @Gtk.Template.Callback()
     def on_directory_name_activate(self, sender):
@@ -170,12 +105,4 @@ class RelengCreateView(Gtk.Box):
             None,
             on_folder_selected
         )
-
-    def _start_installation(self, name: str):
-        if not self.check_filename_is_free():
-            return
-        self.installation_in_progress = RelengInstallation(name=name)
-        self.installation_in_progress.start()
-        self.install_view.set_multistage_process(self.installation_in_progress)
-        self._set_current_stage(self.installation_in_progress.status)
 

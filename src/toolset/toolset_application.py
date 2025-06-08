@@ -152,3 +152,14 @@ ToolsetApplication.QEMU = ToolsetApplication(
     toolset_additional_analysis=toolset_additional_analysis_qemu
 )
 
+ToolsetApplication.ESELECT_REPOSITORY = ToolsetApplication(
+    name="Eselect repository", description="Used to create new overlays",
+    package="app-eselect/eselect-repository",
+    versions=(
+            ToolsetApplicationVersion(
+                name="Stable",
+                id=uuid.UUID("66bd5153-04be-44a6-bd93-e2757d72dd94"),
+                config=None
+            ),
+        ),
+)

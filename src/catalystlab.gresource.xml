@@ -15,6 +15,7 @@
     <file preprocess="xml-stripblanks">ui/toolset_create/toolset_create_view.ui</file>
     <file preprocess="xml-stripblanks">ui/snapshot_create/snapshot_create_view.ui</file>
     <file preprocess="xml-stripblanks">ui/releng_create/releng_create_view.ui</file>
+    <file preprocess="xml-stripblanks">ui/git_directory_create/git_directory_create_config_view.ui</file>
     <file preprocess="xml-stripblanks">ui/multistage_process_execution_view/multistage_process_execution_view.ui</file>
     <file preprocess="xml-stripblanks">ui/toolset_details/toolset_details_view.ui</file>
     <file preprocess="xml-stripblanks">ui/snapshot_details/snapshot_details_view.ui</file>
