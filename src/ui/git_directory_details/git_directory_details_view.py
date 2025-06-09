@@ -81,7 +81,7 @@ class GitDirectoryDetailsView(Gtk.Box):
         self.directory_name_row.set_text(self.git_directory.name)
         last_commit_date = self.git_directory.last_commit_date
         self.status_directory_url_row.set_subtitle(self.git_directory.remote_url or "(local)")
-        self.status_directory_branch_name_row.set_subtitle(self.git_directory.branch_name)
+        self.status_directory_branch_name_row.set_subtitle(self.git_directory.branch_name or "(none)")
         self.status_directory_date_updated_row.set_subtitle(last_commit_date.strftime("%Y-%d-%m %H:%M") if last_commit_date else "unknown")
         self.status_directory_path_row.set_subtitle(self.git_directory.directory_path())
         self.setup_status()

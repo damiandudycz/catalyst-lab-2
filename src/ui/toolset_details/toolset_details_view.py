@@ -17,6 +17,7 @@ class ToolsetDetailsView(Gtk.Box):
     __gtype_name__ = "ToolsetDetailsView"
 
     toolset_name_row = Gtk.Template.Child()
+    name_used_row = Gtk.Template.Child()
     applications_group = Gtk.Template.Child()
     status_file_row = Gtk.Template.Child()
     status_size_row = Gtk.Template.Child()
@@ -92,8 +93,8 @@ class ToolsetDetailsView(Gtk.Box):
     def setup_toolset_details(self, event_data = None):
         """Displays main details of the toolset."""
         self.toolset_name_row.set_text(self.toolset.name)
-        self.status_file_row.set_subtitle(self.toolset.squashfs_file)
-        self.status_size_row.set_subtitle(get_file_size_string(self.toolset.squashfs_file) or "unknown")
+        self.status_file_row.set_subtitle(self.toolset.file_path())
+        self.status_size_row.set_subtitle(get_file_size_string(self.toolset.file_path()) or "unknown")
         source = self.toolset.metadata.get('source')
         timestamp_date_created = self.toolset.metadata.get('date_created')
         timestamp_date_updated = self.toolset.metadata.get('date_updated')
@@ -113,6 +114,14 @@ class ToolsetDetailsView(Gtk.Box):
 
     def setup_status(self, _ = None):
         """Updates controls visibility and sensitivity for current status."""
+        self.toolset_name_row.set_editable(
+            not self.toolset.spawned
+            and not self.toolset.is_reserved
+        )
+        self.toolset_name_row.set_sensitive(
+            not self.toolset.spawned
+            and not self.toolset.is_reserved
+        )
         self.tag_free.set_visible(
             not self.toolset.spawned
             and not self.toolset.in_use
@@ -238,9 +247,27 @@ class ToolsetDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_toolset_name_activate(self, sender):
-        self.toolset.name = self.toolset_name_row.get_text()
-        Repository.Toolset.save()
-        self.get_root().set_focus(None)
+        new_name = self.toolset_name_row.get_text()
+        if new_name == self.toolset.name:
+            self.get_root().set_focus(None)
+            return
+        is_name_available = ToolsetManager.shared().is_name_available(name=new_name)
+        try:
+            if not is_name_available:
+                raise RuntimeError(f"Toolset name {new_name} is not available")
+            ToolsetManager.shared().rename_toolset(toolset=self.toolset, name=new_name)
+            self.get_root().set_focus(None)
+            self.setup_toolset_details()
+        except Exception as e:
+            print(f"Error renaming toolset: {e}")
+            self.toolset_name_row.add_css_class("error")
+            self.toolset_name_row.grab_focus()
+
+    @Gtk.Template.Callback()
+    def on_toolset_name_changed(self, sender):
+        is_name_available = ToolsetManager.shared().is_name_available(name=self.toolset_name_row.get_text()) or self.toolset_name_row.get_text() == self.toolset.name
+        self.name_used_row.set_visible(not is_name_available)
+        self.toolset_name_row.remove_css_class("error")
 
     # --------------------------------------------------------------------------
     # Apps selection:

@@ -37,9 +37,7 @@ class Toolset(Serializable):
             case ToolsetEnv.SYSTEM:
                 pass
             case ToolsetEnv.EXTERNAL:
-                self.squashfs_file = kwargs.get("squashfs_file")
-                if not isinstance(self.squashfs_file, str) and not self.squashfs_binding_dir:
-                    raise ValueError("EXTERNAL requires a 'squashfs_file' or a 'squashfs_binding_dir'")
+                pass
             case _:
                 raise ValueError(f"Unknown env: {env}")
         self.access_lock = threading.RLock()
@@ -92,13 +90,11 @@ class Toolset(Serializable):
             raise ValueError(f"Failed to parse {data}")
         kwargs = {}
         match env:
+            # Additional data only for given type (set as kwargs):
             case ToolsetEnv.SYSTEM:
                 pass
             case ToolsetEnv.EXTERNAL:
-                squashfs_file = data.get("squashfs_file")
-                if not isinstance(squashfs_file, str):
-                    raise ValueError("Missing or invalid 'squashfs_file' for EXTERNAL environment")
-                kwargs["squashfs_file"] = squashfs_file
+                pass
         return cls(env, uuid_value, name, metadata, None, **kwargs)
 
     def serialize(self) -> dict:
@@ -108,8 +104,6 @@ class Toolset(Serializable):
             "name": self.name,
             "metadata": self.metadata
         }
-        if self.env == ToolsetEnv.EXTERNAL:
-            data["squashfs_file"] = self.squashfs_file
         return data
 
     @staticmethod
@@ -118,9 +112,9 @@ class Toolset(Serializable):
         return Toolset(ToolsetEnv.SYSTEM, uuid.uuid4(), "Host system")
 
     @staticmethod
-    def create_external(squashfs_file: str, name: str) -> Toolset:
+    def create_external(name: str) -> Toolset:
         """Create a Toolset with the EXTERNAL environment and a specified squashfs file."""
-        return Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), name, squashfs_file=squashfs_file)
+        return Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), name)
 
     def is_allowed_in_current_host() -> bool:
         return self.env.is_running_in_gentoo_host()
@@ -147,8 +141,8 @@ class Toolset(Serializable):
             runtime_env = RuntimeEnv.current()
 
             # Create squashfs mounting if needed.
-            if self.squashfs_file:
-                self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.squashfs_file)
+            if self.file_path() and os.path.exists(self.file_path()):
+                self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.file_path())
             self.squashfs_binding_dir_overlay = mount_overlayfs(source_dir=self.squashfs_binding_dir) if store_changes else None
 
             resolved_toolset_root = str(Path(self.toolset_root()).resolve())
@@ -350,7 +344,7 @@ class Toolset(Serializable):
                 print(e)
                 self.unspawn(rebuild_squashfs_if_needed=False)
 
-    def unspawn(self, rebuild_squashfs_if_needed: bool = True):
+    def unspawn(self, rebuild_squashfs_if_needed: bool = True, clean_squashfs_binding_dir: bool = True):
         """Clear tmp folders."""
         with self.access_lock:
             if not self.is_reserved:
@@ -360,15 +354,14 @@ class Toolset(Serializable):
             if self.in_use:
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             try:
-                if rebuild_squashfs_if_needed and self.store_changes and self.squashfs_file and self.squashfs_binding_dir_overlay:
-                    create_squashfs_process = create_squashfs(source_directory=self.toolset_root(), output_file=self.squashfs_file+"_tmp")
+                if rebuild_squashfs_if_needed and self.store_changes and self.file_path() and self.squashfs_binding_dir_overlay:
+                    create_squashfs_process = create_squashfs(source_directory=self.toolset_root(), output_file=self.file_path()+"_tmp")
                     create_squashfs_process.wait()
-                    if os.path.isfile(self.squashfs_file+"_tmp"):
-                        shutil.move(self.squashfs_file+"_tmp", self.squashfs_file)
+                    if os.path.isfile(self.file_path()+"_tmp"):
+                        shutil.move(self.file_path()+"_tmp", self.file_path())
                 if self.squashfs_binding_dir_overlay:
                     unmount_overlayfs(tmp_dir=self.squashfs_binding_dir_overlay)
-                # Only umount if both are set. This is to make installation work correctly, where squashfs is first generated.
-                if self.squashfs_binding_dir and self.squashfs_file:
+                if self.squashfs_binding_dir and clean_squashfs_binding_dir:
                     umount_squashfs(mount_point=self.squashfs_binding_dir)
                 if self.work_dir:
                     delete_temp_workdir(path=self.work_dir)
@@ -544,6 +537,9 @@ class Toolset(Serializable):
     def _perform_app_additional_checks(self, app: ToolsetApplication, metadata: dict[str, Any]):
         if app.toolset_additional_analysis:
             app.toolset_additional_analysis(app=app, toolset=self, metadata=metadata)
+
+    def file_path(self) -> str:
+        return Toolset.file_path_for_name(name=self.name)
 
     @staticmethod
     def file_path_for_name(name: str) -> str:

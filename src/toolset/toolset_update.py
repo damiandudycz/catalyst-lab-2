@@ -349,7 +349,7 @@ class ToolsetUpdateStepStepCompress(ToolsetUpdateStep):
     def start(self):
         super().start()
         try:
-            toolset_tmp_squashfs_path = self.toolset.squashfs_file + "_tmp"
+            toolset_tmp_squashfs_path = self.toolset.file_path() + "_tmp"
             self.squashfs_process = create_squashfs(source_directory=self.toolset.toolset_root(), output_file=toolset_tmp_squashfs_path)
             for line in self.squashfs_process.stdout:
                 line = line.strip()
@@ -358,7 +358,7 @@ class ToolsetUpdateStepStepCompress(ToolsetUpdateStep):
                     self._update_progress(percent / 100.0)
             self.squashfs_process.wait()
             self.squashfs_process = None
-            shutil.move(toolset_tmp_squashfs_path, self.toolset.squashfs_file)
+            shutil.move(toolset_tmp_squashfs_path, self.toolset.file_path())
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during toolset compression: {e}")

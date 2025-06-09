@@ -328,11 +328,10 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
                     self._update_progress(percent / 100.0)
             self.squashfs_process.wait()
             self.squashfs_process = None
-            file_path = Toolset.file_path_for_name(name=self.multistage_process.alias)
+            file_path = self.multistage_process.toolset.file_path()
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             shutil.move(self.toolset_squashfs_file, file_path)
-            self.multistage_process.toolset.unspawn(rebuild_squashfs_if_needed=False) # Need to unspawn now, to prevent issues with unmounting after squashfs_file was set
-            self.multistage_process.toolset.squashfs_file = file_path
+            self.multistage_process.toolset.unspawn(rebuild_squashfs_if_needed=False, clean_squashfs_binding_dir=False) # Need to unspawn now, to prevent issues with unmounting after squashfs_file was set
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during toolset compression: {e}")
@@ -340,8 +339,11 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        if self.state != MultiStageProcessStageState.COMPLETED and self.toolset_squashfs_file and os.path.isfile(self.toolset_squashfs_file):
-            os.remove(self.toolset_squashfs_file)
+        if self.state != MultiStageProcessStageState.COMPLETED:
+            if self.toolset_squashfs_file and os.path.isfile(self.toolset_squashfs_file):
+                os.remove(self.toolset_squashfs_file)
+            if os.path.isfile(self.multistage_process.toolset.file_path):
+                os.remove(self.multistage_process.toolset.file_path)
         if self.toolset_squashfs_dir:
             delete_temp_workdir(path=self.toolset_squashfs_dir)
     def cancel(self):

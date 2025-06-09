@@ -33,6 +33,16 @@
                     <property name="title">Toolset name</property>
                     <property name="show-apply-button">True</property>
                     <signal name="apply" handler="on_toolset_name_activate" swapped="no"/>
+                    <signal name="changed" handler="on_toolset_name_changed" swapped="no"/>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="name_used_row">
+                    <property name="title">This directory name is already used.</property>
+                    <style>
+                      <class name="caption-heading"/>
+                      <class name="error"/>
+                    </style>
                   </object>
                 </child>
                 <child>

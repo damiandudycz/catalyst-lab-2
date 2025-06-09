@@ -68,7 +68,6 @@ class ToolsetCreateView(Gtk.Box):
         is_last_page = self.current_page == 2
         is_stage_selected = self.selected_stage is not None
         is_filename_free = self.filename_is_free
-        print(f"FN FREE:{is_filename_free}")
         if is_first_page:
             allow_continue = True
         elif is_second_page:

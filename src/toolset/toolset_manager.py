@@ -1,5 +1,5 @@
 from .repository import Repository
-import os
+import os, shutil
 from .toolset import Toolset
 
 class ToolsetManager:
@@ -22,8 +22,8 @@ class ToolsetManager:
         Repository.Toolset.value.append(toolset)
 
     def remove_toolset(self, toolset: Toolset):
-        if os.path.isfile(toolset.squashfs_file):
-            os.remove(toolset.squashfs_file)
+        if os.path.isfile(toolset.file_path()):
+            os.remove(toolset.file_path())
         Repository.Toolset.value.remove(toolset)
 
     def is_name_available(self, name: str) -> bool:
@@ -31,4 +31,12 @@ class ToolsetManager:
             return False
         file_path = Toolset.file_path_for_name(name=name)
         return not os.path.exists(file_path)
+
+    def rename_toolset(self, toolset: Toolset, name: str):
+        if not self.is_name_available(name=name):
+            raise RuntimeError(f"Toolset name {name} is not available")
+        new_path = Toolset.file_path_for_name(name=name)
+        shutil.move(toolset.file_path(), new_path)
+        toolset.name = name
+        Repository.Toolset.save()
 
