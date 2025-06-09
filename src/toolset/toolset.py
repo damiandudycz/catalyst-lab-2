@@ -545,6 +545,17 @@ class Toolset(Serializable):
         if app.toolset_additional_analysis:
             app.toolset_additional_analysis(app=app, toolset=self, metadata=metadata)
 
+    @staticmethod
+    def file_path_for_name(name: str) -> str:
+        file_name = Toolset.sanitized_name_for_name(name) + ".sqfs"
+        return os.path.join(os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location)), file_name)
+
+    @staticmethod
+    def sanitized_name_for_name(name: str) -> str:
+        def sanitize_filename_linux(name: str) -> str:
+            return name.replace('/', '_').replace('\0', '_')
+        return sanitize_filename_linux(name=name)
+
 @dataclass
 class BindMount:
     mount_path: str                 # Mount location inside the isolated environment.

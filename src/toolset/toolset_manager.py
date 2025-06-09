@@ -26,3 +26,9 @@ class ToolsetManager:
             os.remove(toolset.squashfs_file)
         Repository.Toolset.value.remove(toolset)
 
+    def is_name_available(self, name: str) -> bool:
+        if not name:
+            return False
+        file_path = Toolset.file_path_for_name(name=name)
+        return not os.path.exists(file_path)
+

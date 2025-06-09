@@ -147,6 +147,27 @@
                             </child>
                           </object>
                         </child>
+                        <child>
+                          <object class="AdwEntryRow" id="environment_name_row">
+                            <property name="title">Environment name</property>
+                            <property name="show-apply-button">True</property>
+                            <property name="text"></property>
+                            <signal name="apply" handler="on_environment_name_activate"/>
+                            <signal name="changed" handler="on_environment_name_changed"/>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="name_used_label">
+                            <property name="label">This environment name is already used.</property>
+                            <property name="halign">center</property>
+                            <property name="wrap">True</property>
+                            <property name="justify">fill</property>
+                            <property name="margin-top">12</property>
+                            <style>
+                              <class name="error"/>
+                            </style>
+                          </object>
+                        </child>
                       </object>
                     </child>
                   </object>

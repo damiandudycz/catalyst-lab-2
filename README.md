@@ -54,6 +54,11 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] Add view to set commit message, and show changed files
 - [ ] Add possibility to clone isung git@, fork branch and to push changes
 
+### Git directories.
+- [ ] Add installation stage for checking if created GIT directory is correct for given type - eg. contains struct for overlay, releng etc.
+- [ ] Add view for setting commit message and selecting files when commiting git_directory changes.
+- [ ] Handle not configured GIT settings (username, email, missing known_hosts)
+
 ## App requirements:
  - BWrap >= 0.11
  - pkexec

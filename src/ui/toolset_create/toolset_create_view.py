@@ -4,7 +4,9 @@ from gi.repository import Gtk, GLib, Gio
 from gi.repository import Adw
 from urllib.parse import ParseResult
 from datetime import datetime
+from pathlib import Path
 from .toolset_env_builder import ToolsetEnvBuilder
+from .toolset_manager import ToolsetManager
 from .architecture import Architecture
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .multistage_process import MultiStageProcessState
@@ -26,6 +28,8 @@ class ToolsetCreateView(Gtk.Box):
     stages_list = Gtk.Template.Child()
     tools_list = Gtk.Template.Child()
     allow_binpkgs_checkbox = Gtk.Template.Child()
+    environment_name_row = Gtk.Template.Child()
+    name_used_label = Gtk.Template.Child()
     back_button = Gtk.Template.Child()
     next_button = Gtk.Template.Child()
 
@@ -33,6 +37,7 @@ class ToolsetCreateView(Gtk.Box):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
+        self.filename_is_free = False
         self.selected_stage: ParseResult | None = None
         self.architecture = Architecture.HOST
         self.allow_binpkgs = True
@@ -59,12 +64,21 @@ class ToolsetCreateView(Gtk.Box):
 
     def setup_back_next_buttons(self):
         is_first_page = self.current_page == 0
+        is_second_page = self.current_page == 1
         is_last_page = self.current_page == 2
         is_stage_selected = self.selected_stage is not None
+        is_filename_free = self.filename_is_free
+        print(f"FN FREE:{is_filename_free}")
+        if is_first_page:
+            allow_continue = True
+        elif is_second_page:
+            allow_continue = is_stage_selected
+        elif is_last_page:
+            allow_continue = is_filename_free
         self.back_button.set_sensitive(not is_first_page)
         self.back_button.set_opacity(0.0 if is_first_page else 1.0)
-        self.next_button.set_sensitive(not is_first_page and is_stage_selected)
-        self.next_button.set_opacity(0.0 if is_first_page or not is_stage_selected else 1.0)
+        self.next_button.set_sensitive(allow_continue)
+        self.next_button.set_opacity(0.0 if is_first_page else 1.0)
         self.next_button.set_label("Create toolset" if is_last_page else "Next")
 
     @Gtk.Template.Callback()
@@ -98,6 +112,7 @@ class ToolsetCreateView(Gtk.Box):
             for app, _ in self.tools_selection.items()
         ]
         self.installation_in_progress = ToolsetInstallation(
+            alias=self.environment_name_row.get_text(),
             stage_url=self.selected_stage,
             allow_binpkgs=self.allow_binpkgs,
             apps_selection=apps_selection
@@ -134,6 +149,8 @@ class ToolsetCreateView(Gtk.Box):
                     os.path.basename(stage.geturl()), self.architecture
                 ))
                 self.selected_stage = sorted_stages[0]
+                self.environment_name_row.set_text(self.default_name())
+                self.check_filename_is_free()
             self._stage_rows = []
             stages_check_buttons_group = []
             for stage in sorted_stages:
@@ -160,6 +177,8 @@ class ToolsetCreateView(Gtk.Box):
         """Callback for when a row's checkbox is toggled."""
         if button.get_active():
             self.selected_stage = stage
+            self.environment_name_row.set_text(self.default_name())
+            self.check_filename_is_free()
         else:
             # Deselect if unchecked
             if self.selected_stage == stage:
@@ -314,4 +333,35 @@ class ToolsetCreateView(Gtk.Box):
         # Setup views visibility:
         self.setup_view.set_visible(stage == MultiStageProcessState.SETUP)
         self.install_view.set_visible(stage != MultiStageProcessState.SETUP)
+
+    @Gtk.Template.Callback()
+    def on_environment_name_activate(self, sender):
+        self.check_filename_is_free()
+        self.get_root().set_focus(None)
+
+    @Gtk.Template.Callback()
+    def on_environment_name_changed(self, sender):
+        self.check_filename_is_free()
+
+    def check_filename_is_free(self) -> bool:
+        self.filename_is_free = ToolsetManager.shared().is_name_available(name=self.environment_name_row.get_text())
+        self.name_used_label.set_visible(not self.filename_is_free)
+        self.setup_back_next_buttons()
+        return self.filename_is_free
+
+    def default_name(self) -> str:
+        if self.selected_stage is None:
+            return ""
+        file_path = Path(self.selected_stage.path)
+        suffixes = file_path.suffixes
+        filename_without_extension = file_path.stem
+        for suffix in suffixes:
+            filename_without_extension = filename_without_extension.rstrip(suffix)
+        parts = filename_without_extension.split("-")
+        if len(parts) > 2:
+            middle_parts = parts[1:-1]
+            installer_name = " ".join(middle_parts)
+        else:
+            installer_name = filename_without_extension
+        return installer_name
 

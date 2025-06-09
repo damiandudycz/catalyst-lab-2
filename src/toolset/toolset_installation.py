@@ -21,7 +21,8 @@ from .multistage_process import (
 @final
 class ToolsetInstallation(MultiStageProcess):
     """Handles the full toolset installation lifecycle."""
-    def __init__(self, stage_url: ParseResult, allow_binpkgs: bool, apps_selection: list[ToolsetApplicationSelection]):
+    def __init__(self, alias: str, stage_url: ParseResult, allow_binpkgs: bool, apps_selection: list[ToolsetApplicationSelection]):
+        self.alias = alias
         self.stage_url = stage_url
         self.allow_binpkgs = allow_binpkgs
         self.apps_selection = apps_selection
@@ -68,18 +69,7 @@ class ToolsetInstallation(MultiStageProcess):
         self.apps_selection = sorted_entries
 
     def name(self) -> str:
-        file_path = Path(self.stage_url.path)
-        suffixes = file_path.suffixes
-        filename_without_extension = file_path.stem
-        for suffix in suffixes:
-            filename_without_extension = filename_without_extension.rstrip(suffix)
-        parts = filename_without_extension.split("-")
-        if len(parts) > 2:
-            middle_parts = parts[1:-1]
-            installer_name = " ".join(middle_parts)
-        else:
-            installer_name = filename_without_extension
-        return installer_name
+        return self.alias
 
 # ------------------------------------------------------------------------------
 # Installation process steps.
@@ -338,11 +328,7 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
                     self._update_progress(percent / 100.0)
             self.squashfs_process.wait()
             self.squashfs_process = None
-            def sanitize_filename_linux(name: str) -> str:
-                return name.replace('/', '_').replace('\0', '_')
-            random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
-            file_name = f"{sanitize_filename_linux(self.multistage_process.name())}_{random_id}.squashfs"
-            file_path = os.path.join(os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location)), file_name)
+            file_path = Toolset.file_path_for_name(name=self.multistage_process.alias)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             shutil.move(self.toolset_squashfs_file, file_path)
             self.multistage_process.toolset.unspawn(rebuild_squashfs_if_needed=False) # Need to unspawn now, to prevent issues with unmounting after squashfs_file was set
