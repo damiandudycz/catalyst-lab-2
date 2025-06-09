@@ -1,8 +1,4 @@
-from gi.repository import Adw
-from gi.repository import Gtk
-from typing import Type
-from .main_window_side_menu import CatalystlabWindowSideMenu
-from .main_window_content import CatalystlabWindowContent
+from gi.repository import Adw, Gtk
 from .app_section import AppSection
 from .app_events import AppEvents, app_event_bus
 from .navigation_view_extensions import *

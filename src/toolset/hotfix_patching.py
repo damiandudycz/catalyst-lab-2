@@ -1,7 +1,6 @@
 import os, shutil, subprocess, tempfile
 from gi.repository import Gio
 from enum import Enum, auto
-from pathlib import Path
 from dataclasses import dataclass
 from .runtime_env import RuntimeEnv
 

@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 
 class DefaultDirContentBuilder(ABC):
     """Base class responsible for generating default content for various"""

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from gi.repository import Gtk, GLib, Gio, GObject, Adw
+from gi.repository import Gtk, GLib, Adw
 from .multistage_process import (
     # Process
     MultiStageProcess,

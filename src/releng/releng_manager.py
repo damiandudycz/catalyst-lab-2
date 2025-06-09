@@ -1,7 +1,5 @@
-from typing import Type, final
+from typing import final
 from .git_manager import GitManager
-from .git_directory import GitDirectory
-from .releng_directory import RelengDirectory
 from .repository import Repository
 
 @final

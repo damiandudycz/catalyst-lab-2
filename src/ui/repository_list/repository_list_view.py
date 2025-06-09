@@ -121,7 +121,7 @@ class ItemRow(Adw.ActionRow):
 
     def state_updated(self, object):
         if object == self.item:
-            self.subtitle = getattr(self.item, self.item_subtitle_property_name, None)
+            self.set_subtitle(getattr(self.item, self.item_subtitle_property_name, None))
             self.setup_status_indicator()
 
     def setup_status_indicator(self):

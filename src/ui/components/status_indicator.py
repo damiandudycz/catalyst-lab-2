@@ -1,7 +1,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Gdk, cairo, GLib, Adw
+from gi.repository import Gtk, cairo, GLib
 import math
 from enum import Enum, auto
 from collections import namedtuple

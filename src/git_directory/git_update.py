@@ -1,22 +1,18 @@
 from __future__ import annotations
-import os, threading, shutil, re, time, subprocess
+import os, subprocess
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
-    MultiStageProcessState, MultiStageProcessStageState,
-    MultiStageProcessEvent, MultiStageProcessStageEvent,
+    MultiStageProcessState, MultiStageProcessStageState
 )
 from .git_directory import GitDirectory
 from .git_manager import GitManager
-from .repository import Repository
-from datetime import datetime
-from gi.repository import GLib, Gio
 from abc import ABC, abstractmethod
 
 # ------------------------------------------------------------------------------
 # Git update.
 # ------------------------------------------------------------------------------
 
-class GitUpdate(MultiStageProcess):
+class GitUpdate(MultiStageProcess, ABC):
     """Handles the GIT directory update lifecycle."""
 
     # Overwrite in subclassed

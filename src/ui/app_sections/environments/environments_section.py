@@ -1,5 +1,5 @@
-from gi.repository import Gtk, GObject, Adw
-from .app_section import AppSection, app_section
+from gi.repository import Gtk, Adw
+from .app_section import app_section
 from .toolset_details_view import ToolsetDetailsView
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents

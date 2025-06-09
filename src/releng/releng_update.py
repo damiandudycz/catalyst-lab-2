@@ -2,7 +2,6 @@ from typing import final
 from .git_update import GitUpdate
 from .git_manager import GitManager
 from .releng_manager import RelengManager
-from .releng_directory import RelengDirectory
 
 @final
 class RelengUpdate(GitUpdate):

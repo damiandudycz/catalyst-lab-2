@@ -1,14 +1,9 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio, Adw, GObject
 from enum import Enum, auto
-from .multistage_process import MultiStageProcessState
-from .releng_installation import RelengInstallation
-from .releng_directory import RelengDirectory
-from .releng_manager import RelengManager
 from .event_bus import EventBus
 from .git_installation import GitDirectorySetupConfiguration, GitDirectorySource
 from .default_dir_content_builder import DefaultDirContentBuilder
-import os
 
 # Import additional classed so that it can be parsed in repository_list_view:
 from .releng_manager import RelengManager

@@ -1,24 +1,18 @@
 from __future__ import annotations
-import os, uuid, shutil, tempfile, threading, stat, time, subprocess, requests, re
-import tarfile, re, random, string, copy
-from gi.repository import Gtk, GLib, Adw
-from typing import final, ClassVar, Dict, Any
-from dataclasses import dataclass, field
+import os, uuid, shutil, threading, stat, re
+import re, copy
+from typing import final, Any
+from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from collections import namedtuple
-from urllib.parse import ParseResult
-from multiprocessing import Event
 from .root_function import root_function
 from .runtime_env import RuntimeEnv
-from .toolset_env_builder import ToolsetEnvBuilder
-from .architecture import Architecture, Emulation
 from .event_bus import EventBus, SharedEvent
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
-from .root_helper_client import AuthorizationKeeper
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
-from .toolset_application import ToolsetApplication, ToolsetApplicationSelection, ToolsetApplicationInstall
+from .toolset_application import ToolsetApplication, ToolsetApplicationInstall
 from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs, create_squashfs
 from .status_indicator import StatusIndicatorState, StatusIndicatorValues
 
@@ -497,9 +491,14 @@ class Toolset(Serializable):
                 print(f"Error in additional checks: {e}")
                 checks_succeeded = False
         if checks_succeded and save:
-            self.metadata = metadata_copy
-            Repository.Toolset.save() # Make sure changes are saved in repository.
+            self.replace_metadata(metadata_copy)
         return metadata_copy if checks_succeded else None
+
+    def replace_metadata(self, metadata: dict[str, Any] | None):
+        """Updates whole metadata dictionary and emits event."""
+        self.metadata = metadata
+        Repository.Toolset.save() # Make sure changes are saved in repository.
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
     def _perform_app_installed_version_check(self, app: ToolsetApplication, metadata: dict[str, Any]):
         package_root = Path(self.toolset_root()) / "var" / "db" / "pkg"

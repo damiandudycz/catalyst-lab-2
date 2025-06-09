@@ -1,19 +1,15 @@
 from __future__ import annotations
-import os, re, time
+import os, re
 from gi.repository import Gtk, GLib, Gio
 from gi.repository import Adw
 from urllib.parse import ParseResult
-from dataclasses import dataclass
-from typing import ClassVar
-from enum import Enum, auto
 from datetime import datetime
 from .toolset_env_builder import ToolsetEnvBuilder
 from .architecture import Architecture
-from .event_bus import EventBus
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .multistage_process import MultiStageProcessState
 from .toolset_installation import ToolsetInstallation
-from .toolset_application import ToolsetApplication, ToolsetApplicationVersion, ToolsetApplicationSelection
+from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_create/toolset_create_view.ui')
 class ToolsetCreateView(Gtk.Box):

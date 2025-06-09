@@ -1,5 +1,5 @@
 from typing import final
-from .git_installation import GitInstallation, GitDirectorySetupConfiguration, GitDirectorySource
+from .git_installation import GitInstallation
 from .git_manager import GitManager
 from .releng_manager import RelengManager
 

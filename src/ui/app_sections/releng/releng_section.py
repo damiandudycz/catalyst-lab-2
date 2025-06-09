@@ -1,5 +1,5 @@
-from gi.repository import Gtk, GObject, Adw
-from .app_section import AppSection, app_section
+from gi.repository import Gtk, Adw
+from .app_section import app_section
 from .releng_details_view import RelengDetailsView
 from .releng_create_view import RelengCreateView
 from .app_events import app_event_bus, AppEvents

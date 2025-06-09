@@ -1,6 +1,5 @@
 import importlib
 import pkgutil
-import sys
 
 def scan_all_submodules(package_name: str):
     """Import all submodules under a given package to ensure decorators run."""

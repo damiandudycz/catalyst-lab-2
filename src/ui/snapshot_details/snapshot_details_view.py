@@ -1,8 +1,7 @@
-from gi.repository import Gtk, Adw, Gio, GLib
+from gi.repository import Gtk, Adw
 from .snapshot_manager import SnapshotManager
 from .snapshot import Snapshot
-from .repository import Repository
-import threading, os
+import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot_details/snapshot_details_view.ui')
 class SnapshotDetailsView(Gtk.Box):

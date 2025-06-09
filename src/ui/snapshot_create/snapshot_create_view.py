@@ -1,15 +1,6 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio
 from gi.repository import Adw
-from urllib.parse import ParseResult
-from dataclasses import dataclass
-from typing import ClassVar
-from enum import Enum, auto
-from abc import ABC, abstractmethod
-import os, re, time
-from datetime import datetime
-from .architecture import Architecture
-from .event_bus import EventBus
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .multistage_process import MultiStageProcessState
 from .toolset import Toolset, ToolsetEvents
@@ -130,7 +121,6 @@ class SnapshotCreateView(Gtk.Box):
         ]
         # Monitor valid toolsets for is_reserved changes
         for toolset in valid_toolsets:
-            print(f"Monitor {toolset}")
             toolset.event_bus.subscribe(
                 ToolsetEvents.IS_RESERVED_CHANGED,
                 self.setup_back_next_buttons

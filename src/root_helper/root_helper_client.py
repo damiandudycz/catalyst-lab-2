@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import os, socket, subprocess, sys, uuid, pwd, tempfile, time, struct, signal
-import threading, json, inspect, re, select, shutil
+import os, socket, subprocess, uuid, time
+import threading, inspect, select, shutil
 from enum import Enum
 from typing import Any, Callable
-from functools import wraps
-from gi.repository import Gio, GLib
+from gi.repository import Gio
 from dataclasses import dataclass, field
 from .runtime_env import RuntimeEnv
-from .app_events import AppEvents, app_event_bus
 from .settings import *
 from .root_helper_server import ServerCommand, ServerFunction
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .root_helper_server import RootHelperServer, StreamPipe, StreamPipeEvent, WatchDog
-from .root_function import ROOT_FUNCTION_REGISTRY, root_function
+from .root_function import ROOT_FUNCTION_REGISTRY
 
 class RootHelperClient:
 

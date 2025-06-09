@@ -1,8 +1,7 @@
-from gi.repository import Gtk, Adw, Gio, GLib
+from gi.repository import Gtk, Adw, Gio
 from .releng_directory import RelengDirectory
 from .git_directory import GitDirectoryEvent, GitDirectoryStatus
 from .releng_manager import RelengManager
-from .repository import Repository
 from .releng_update import RelengUpdate
 import threading, os
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState

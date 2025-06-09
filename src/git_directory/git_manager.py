@@ -1,12 +1,7 @@
-import os, shutil, subprocess, re
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Self
-from collections import defaultdict
+import os, shutil
 from abc import ABC, abstractmethod
-from typing import Type
 from .releng_directory import GitDirectory
-from .repository import Serializable, Repository
+from .repository import Repository
 
 class GitManager(ABC):
     _instances = {}

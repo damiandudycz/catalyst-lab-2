@@ -1,5 +1,5 @@
 import platform
-from enum import Enum, auto
+from enum import Enum
 
 class Architecture(Enum):
     x86 = "x86"             # 32-bit Intel/AMD (i386, i686, etc.)

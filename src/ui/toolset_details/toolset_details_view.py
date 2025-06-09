@@ -2,7 +2,6 @@ from gi.repository import Gtk, Adw, Gio, GLib
 from .toolset import Toolset, ToolsetEvents
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
 from .helper_functions import get_file_size_string
-import uuid
 import os
 from datetime import datetime
 from urllib.parse import urlparse

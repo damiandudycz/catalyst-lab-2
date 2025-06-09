@@ -1,11 +1,6 @@
 from gi.repository import Gtk, GObject, Adw
 from functools import partial
-from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
-from .main_window_side_menu import CatalystlabWindowSideMenu
-from .root_function import root_function
-from .root_helper_client import RootHelperClient
-from .root_helper_server import ServerCommand, ServerFunction
 from .root_access_button import RootAccessButton
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/main_window/main_window_content.ui')

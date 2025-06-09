@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import os, socket, subprocess, sys, uuid, pwd, time, struct, signal, threading
+import os, socket, sys, uuid, time, struct, threading
 import json, multiprocessing, select
 from enum import Enum, auto
-from functools import wraps
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Any, Callable
-from contextlib import redirect_stdout, redirect_stderr
-from multiprocessing import Event
 
 class StreamPipe(Enum):
     STDOUT = 1

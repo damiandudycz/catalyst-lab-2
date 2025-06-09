@@ -1,9 +1,6 @@
 from __future__ import annotations
-from enum import Enum
-from typing import Any, Callable
+from typing import Callable
 from functools import wraps
-from gi.repository import Gio, GLib
-from dataclasses import dataclass, field
 
 # ------------------------------------------------------------------------------
 # @root_function decorator.

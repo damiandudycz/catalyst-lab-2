@@ -1,9 +1,6 @@
-from gi.repository import Gtk, GObject
-from gi.repository import Adw
+from gi.repository import Gtk, Adw
 from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection, app_section
-from .runtime_env import RuntimeEnv
-from .root_helper_client import RootHelperClient
 from .repository import Repository, RepositoryEvent
 
 @app_section(title="Welcome", label="Home", icon="go-home-symbolic", show_side_bar=False, order=1_000)

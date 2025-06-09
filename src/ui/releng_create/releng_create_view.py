@@ -1,12 +1,8 @@
 from __future__ import annotations
-from gi.repository import Gtk, GLib, Gio, Adw
-from enum import Enum
+from gi.repository import Gtk, Adw
 from .multistage_process import MultiStageProcessState
 from .releng_installation import RelengInstallation
-from .releng_directory import RelengDirectory
-from .releng_manager import RelengManager
 from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent, GitDirectorySetupConfiguration, GitDirectorySource
-import os
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_create/releng_create_view.ui')
 class RelengCreateView(Gtk.Box):

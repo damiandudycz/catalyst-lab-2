@@ -2,17 +2,15 @@ from __future__ import annotations
 import os, threading, shutil, re, time
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
-    MultiStageProcessState, MultiStageProcessStageState,
-    MultiStageProcessEvent, MultiStageProcessStageEvent,
+    MultiStageProcessStageState
 )
-from .toolset import Toolset, BindMount
+from .toolset import Toolset
 from .toolset_application import ToolsetApplication
 from .root_function import root_function
 from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
-from datetime import datetime
-from .helper_functions import mount_squashfs, umount_squashfs, create_squashfs
-from gi.repository import GLib, Gio
+from .helper_functions import  create_squashfs
+from gi.repository import Gio
 from .toolset_installation import insert_portage_config, insert_portage_patch
 
 # ------------------------------------------------------------------------------
@@ -59,8 +57,7 @@ class ToolsetUpdate(MultiStageProcess):
                 for app_selection in self.apps_selection:
                     self.analysis_result.setdefault(app_selection.app.package, {})["version_id"] = str(app_selection.version.id)
             self.analysis_result['date_updated'] = int(time.time())
-            self.toolset.metadata = self.analysis_result
-            Repository.Toolset.save()
+            self.toolset.replace_metadata(self.analysis_result)
         self.toolset.release()
 
     def _process_selected_apps(self):

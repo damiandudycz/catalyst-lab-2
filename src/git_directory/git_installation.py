@@ -1,15 +1,13 @@
 from gi.repository import Gio
 from abc import ABC, abstractmethod
-from enum import Enum, auto
+from enum import Enum
 from collections import namedtuple
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
-    MultiStageProcessState, MultiStageProcessStageState,
-    MultiStageProcessEvent, MultiStageProcessStageEvent,
+    MultiStageProcessState, MultiStageProcessStageState
 )
 from .git_directory import GitDirectory
 from .git_manager import GitManager
-from .git_directory import GitDirectoryEvent
 from .default_dir_content_builder import DefaultDirContentBuilder
 import subprocess, re, os, shutil
 

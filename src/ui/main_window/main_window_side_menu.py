@@ -1,4 +1,4 @@
-from gi.repository import Gtk, GObject
+from gi.repository import Gtk
 from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
 from .main_window_side_menu_button import MainWindowSideMenuButton

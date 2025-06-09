@@ -1,6 +1,6 @@
 import weakref
 from enum import Enum, auto
-from typing import final, TypeVar, Generic, Callable, Dict, Any, Union, Hashable
+from typing import final, TypeVar, Generic, Callable, Dict, Any, Hashable
 from gi.repository import GLib
 
 EventBusType = TypeVar("EventBusType", bound=Enum)
@@ -12,8 +12,8 @@ class SharedEvent(Enum):
 class EventBus(Generic[EventBusType]):
     def __init__(self, scheduler: Callable[..., Any] = GLib.idle_add):
         self.scheduler = scheduler
-        self._subscribers: Dict[EventBusType, list[Union[weakref.ReferenceType, weakref.WeakMethod]]] = {}
-        self._handles: Dict[EventBusType, Dict[Hashable, Union[weakref.ReferenceType, weakref.WeakMethod]]] = {}
+        self._subscribers: Dict[EventBusType, list[weakref.ReferenceType | weakref.WeakMethod]] = {}
+        self._handles: Dict[EventBusType, Dict[Hashable, weakref.ReferenceType | weakref.WeakMethod]] = {}
 
     def subscribe(self, event: EventBusType, callback: Callable, handle: Hashable | None = None):
         if hasattr(callback, '__self__') and callback.__self__ is not None:

@@ -1,11 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Tuple, ClassVar
-from enum import Enum, auto
 from pathlib import Path
 from collections import namedtuple
 from .architecture import Emulation
-from .repository import Repository
 from .root_helper_client import ServerCall
 import uuid
 
