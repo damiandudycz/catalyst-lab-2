@@ -85,7 +85,6 @@ catalystlab_sources = [
   'ui/repository_list/repository_list_view.py',
   'ui/toolset_details/toolset_details_view.py',
   'ui/snapshot_details/snapshot_details_view.py',
-  'ui/releng_details/releng_details_view.py',
   'ui/components/root_access_button.py',
   'ui/components/status_indicator.py',
   'ui/toolset_create/toolset_create_view.py',
@@ -94,6 +93,7 @@ catalystlab_sources = [
   'ui/releng_create/releng_create_view.py',
   'ui/git_directory_create/git_directory_create_config_view.py',
   'ui/root_command_output/root_command_output_view.py',
+  'ui/git_directory_details/git_directory_details_view.py',
   'default_dir_content_builder/default_dir_content_builder.py'
 ]
 

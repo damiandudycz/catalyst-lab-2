@@ -73,7 +73,7 @@ class ToolsetDetailsView(Gtk.Box):
         self.load_update_state()
         self.load_bindings()
         self.setup_status()
-        self.connect("map", self.on_map)
+        self.connect("realize", self.on_realize)
 
         toolset.event_bus.subscribe(ToolsetEvents.SPAWNED_CHANGED, self.load_bindings)
         toolset.event_bus.subscribe(ToolsetEvents.SPAWNED_CHANGED, self.setup_status)
@@ -82,7 +82,7 @@ class ToolsetDetailsView(Gtk.Box):
         toolset.event_bus.subscribe(ToolsetEvents.IS_RESERVED_CHANGED, self.setup_status)
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.toolsets_updates_updated)
 
-    def on_map(self, widget):
+    def on_realize(self, widget):
         # Disables toolset_name_row auto focus on start
         self.get_root().set_focus(None)
 

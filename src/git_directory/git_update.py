@@ -54,29 +54,31 @@ class GitUpdateStepUpdate(MultiStageProcessStage):
             multistage_process=multistage_process
         )
         self.directory = directory
+    def run_git_command(self, repo_path: str, args):
+        result = subprocess.run(
+            ["git"] + args,
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            check=True
+        )
+        return result.stdout.strip()
     def start(self):
         super().start()
         repo_path = self.directory.directory_path()
-        def run_git_command(args):
-            result = subprocess.run(
-                ["git"] + args,
-                cwd=repo_path,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                check=True
-            )
-            return result.stdout.strip()
         try:
             if not os.path.exists(repo_path):
                 raise RuntimeError(
                     f"Directory {repo_path} does not exist for update"
                 )
             self.process_started = True
-            run_git_command(
+            self.run_git_command(
+                repo_path,
                 ["fetch", "--all", "--prune"]
             )
-            run_git_command(
+            self.run_git_command(
+                repo_path,
                 ["rebase", "--autostash", "--rebase-merges", "origin/HEAD"]
             )
             self.directory.update_status(wait=True)
@@ -89,6 +91,6 @@ class GitUpdateStepUpdate(MultiStageProcessStage):
         if not super().cleanup():
             return False
         if self.multistage_process.status == MultiStageProcessState.FAILED and self.process_started:
-            run_git_command(["rebase", "--abort"])
+            self.run_git_command(self.directory.directory_path(), ["rebase", "--abort"])
         return True
 

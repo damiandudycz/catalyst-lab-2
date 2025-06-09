@@ -47,9 +47,9 @@ class ToolsetCreateView(Gtk.Box):
         self.install_view.set_multistage_process(self.installation_in_progress)
         if installation_in_progress is None or installation_in_progress.status == MultiStageProcessState.SETUP:
             ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
-        self.connect("map", self.on_map)
+        self.connect("realize", self.on_realize)
 
-    def on_map(self, widget):
+    def on_realize(self, widget):
         self.install_view.content_navigation_view = self.content_navigation_view
         self.install_view._window = self._window
 

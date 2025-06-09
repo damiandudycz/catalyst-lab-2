@@ -1,19 +1,26 @@
-from gi.repository import Gtk, Adw, Gio
-from .releng_directory import RelengDirectory
+from __future__ import annotations
+from gi.repository import Gtk, GLib, Gio, Adw, GObject
 from .git_directory import GitDirectoryEvent, GitDirectoryStatus
-from .releng_manager import RelengManager
-from .releng_update import RelengUpdate
+from .git_manager import GitManager
+from .git_update import GitUpdate
 import threading, os
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
 from .multistage_process_execution_view import MultistageProcessExecutionView
 from .event_bus import SharedEvent
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_details/releng_details_view.ui')
-class RelengDetailsView(Gtk.Box):
-    __gtype_name__ = "RelengDetailsView"
+# Import additional classes so that they can be parsed for self.manager_class and self.update_class_name:
+from .releng_manager import RelengManager
+from .releng_update import RelengUpdate
+from .overlay_manager import OverlayManager
+from .overlay_update import OverlayUpdate
+
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/git_directory_details/git_directory_details_view.ui')
+class GitDirectoryDetailsView(Gtk.Box):
+    __gtype_name__ = "GitDirectoryDetailsView"
 
     directory_name_row = Gtk.Template.Child()
     name_used_row = Gtk.Template.Child()
+    status_directory_url_row = Gtk.Template.Child()
     status_directory_branch_name_row = Gtk.Template.Child()
     status_directory_date_updated_row = Gtk.Template.Child()
     status_directory_path_row = Gtk.Template.Child()
@@ -31,52 +38,67 @@ class RelengDetailsView(Gtk.Box):
     status_update_row = Gtk.Template.Child()
     status_update_progress_label = Gtk.Template.Child()
 
-    def __init__(self, releng_directory: RelengDirectory, content_navigation_view: Adw.NavigationView | None = None):
+    # Use these properties if using GitDirectoryDetailsView in .ui file.
+    # If created in code, pass manager_class and update_class in initializer.
+    manager_class_name = GObject.Property(type=str, default=None)
+    update_class_name = GObject.Property(type=str, default=None)
+
+    def __init__(self, git_directory: GitDirectory | None = None, manager_class: Type[GitManager] | None = None, update_class: Type[GitUpdate] | None = None):
         super().__init__()
-        self.releng_directory = releng_directory
-        self.update_in_progress: RelengUpdate | None = None
+        self.update_in_progress: GitUpdate | None = None
+        self.git_directory = git_directory
+        self.manager_class = manager_class
+        self.update_class = update_class
+        self.connect("realize", self.on_realize)
+
+    def setup(self, git_directory: GitDirectory, content_navigation_view: Adw.NavigationView | None = None):
+        """Call this after init, before view appears."""
+        self.git_directory = git_directory
         self.content_navigation_view = content_navigation_view
+
+    def on_realize(self, widget):
+        self.get_root().set_focus(None)
+        if self.manager_class_name and self.manager_class is None:
+            self.manager_class = globals().get(self.manager_class_name)
+        if self.update_class_name and self.update_class is None:
+            self.update_class = globals().get(self.update_class_name)
         self._changes_action_group = Gio.SimpleActionGroup()
         self._add_changes_action("save_changes", self.save_changes)
         self._add_changes_action("discard_changes", self.discard_changes)
         self.insert_action_group("changes", self._changes_action_group)
-        self.setup_releng_directory_details()
-        self.setup_releng_directory_logs()
+        self.setup_git_directory_details()
+        self.setup_git_directory_logs()
         self.load_update_state()
         self.setup_status()
-        self.connect("map", self.on_map)
-        releng_directory.event_bus.subscribe(SharedEvent.STATE_UPDATED, self.setup_releng_directory_details)
-        releng_directory.event_bus.subscribe(GitDirectoryEvent.LOGS_CHANGED, self.setup_releng_directory_logs)
-        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.releng_directories_updates_updated)
+        self.git_directory.event_bus.subscribe(SharedEvent.STATE_UPDATED, self.setup_git_directory_details)
+        self.git_directory.event_bus.subscribe(GitDirectoryEvent.LOGS_CHANGED, self.setup_git_directory_logs)
+        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.git_directories_updates_updated)
 
-    def on_map(self, widget):
-        # Disables directory_name_row auto focus on start
-        self.get_root().set_focus(None)
-
-    def setup_releng_directory_details(self, object = None):
-        if object is not None and object != self.releng_directory:
+    def setup_git_directory_details(self, object = None):
+        if object is not None and object != self.git_directory:
             return
-        """Displays main details of the releng directory."""
-        self.directory_name_row.set_text(self.releng_directory.name)
-        last_commit_date = self.releng_directory.last_commit_date
-        self.status_directory_branch_name_row.set_subtitle(self.releng_directory.branch_name)
+        """Displays main details of the git directory."""
+        self.directory_name_row.set_text(self.git_directory.name)
+        last_commit_date = self.git_directory.last_commit_date
+        self.status_directory_url_row.set_subtitle(self.git_directory.remote_url or "(local)")
+        self.status_directory_branch_name_row.set_subtitle(self.git_directory.branch_name)
         self.status_directory_date_updated_row.set_subtitle(last_commit_date.strftime("%Y-%d-%m %H:%M") if last_commit_date else "unknown")
-        self.status_directory_path_row.set_subtitle(self.releng_directory.directory_path())
+        self.status_directory_path_row.set_subtitle(self.git_directory.directory_path())
         self.setup_status()
         if object is None:
-            self.releng_directory.update_status()
-            self.releng_directory.update_logs()
+            self.git_directory.update_status()
+            self.git_directory.update_logs()
 
-    def setup_releng_directory_logs(self, event_data = None):
+    def setup_git_directory_logs(self, event_data = None):
         if hasattr(self, "_log_rows"):
             for row in self._log_rows:
                 self.status_logs_row.remove(row)
         self.status_logs_row.set_expanded(False)
         self._log_rows = []
         max_logs = 10
-        if self.releng_directory.logs:
+        if self.git_directory.logs:
             i = 1
-            for log in self.releng_directory.logs:
+            for log in self.git_directory.logs:
                 message = log.get("message")
                 author = log.get("author")
                 date = log.get("date")
@@ -89,9 +111,9 @@ class RelengDetailsView(Gtk.Box):
 
     def setup_status(self, _ = None):
         """Updates controls visibility and sensitivity for current status."""
-        self.tag_unknown.set_visible(self.releng_directory.status == GitDirectoryStatus.UNKNOWN)
-        self.tag_unchanged.set_visible(self.releng_directory.status == GitDirectoryStatus.UNCHANGED)
-        self.tag_update_available.set_visible(self.releng_directory.has_remote_changes)
+        self.tag_unknown.set_visible(self.git_directory.status == GitDirectoryStatus.UNKNOWN)
+        self.tag_unchanged.set_visible(self.git_directory.status == GitDirectoryStatus.UNCHANGED)
+        self.tag_update_available.set_visible(self.git_directory.has_remote_changes)
         self.tag_updating.set_visible(
             self.update_in_progress
             and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
@@ -112,7 +134,7 @@ class RelengDetailsView(Gtk.Box):
             else "Update failed" if self.update_in_progress.status == MultiStageProcessState.FAILED
             else ""
         )
-        if self.releng_directory.has_remote_changes:
+        if self.git_directory.has_remote_changes:
             self.action_button_update.get_style_context().add_class("suggested-action")
         else:
             self.action_button_update.get_style_context().remove_class("suggested-action")
@@ -120,9 +142,9 @@ class RelengDetailsView(Gtk.Box):
             self.update_in_progress
             and self.update_in_progress.status == MultiStageProcessState.IN_PROGRESS
         )
-        self.tag_changed.set_visible(self.releng_directory.status == GitDirectoryStatus.CHANGED)
+        self.tag_changed.set_visible(self.git_directory.status == GitDirectoryStatus.CHANGED)
         self.action_button_save_changes.set_sensitive(
-            self.releng_directory.status == GitDirectoryStatus.CHANGED
+            self.git_directory.status == GitDirectoryStatus.CHANGED
             and (
                 not self.update_in_progress
                 or self.update_in_progress.status == MultiStageProcessState.COMPLETED
@@ -130,65 +152,66 @@ class RelengDetailsView(Gtk.Box):
             )
         )
         self.action_button_update.set_sensitive(
-            self.releng_directory.status == GitDirectoryStatus.UNCHANGED
+            self.git_directory.status == GitDirectoryStatus.UNCHANGED
             and (
                 not self.update_in_progress
                 or self.update_in_progress.status == MultiStageProcessState.COMPLETED
                 or self.update_in_progress.status == MultiStageProcessState.FAILED
             )
+            and self.git_directory.remote_url is not None
         )
 
-    def load_update_state(self, started_processes: list[RelengUpdate] | None = None):
+    def load_update_state(self, started_processes: list[GitUpdate] | None = None):
         if started_processes is None:
-            started_processes = MultiStageProcess.get_started_processes_by_class(RelengUpdate)
+            started_processes = MultiStageProcess.get_started_processes_by_class(GitUpdate)
         if self.update_in_progress is not None :
             self.update_in_progress.event_bus.unsubscribe(MultiStageProcessEvent.STATE_CHANGED, self)
-        self.update_in_progress = next((process for process in started_processes if process.directory == self.releng_directory), None)
+        self.update_in_progress = next((process for process in started_processes if process.directory == self.git_directory), None)
         if self.update_in_progress:
             self.update_in_progress.event_bus.subscribe(
                 MultiStageProcessEvent.STATE_CHANGED,
-                self.releng_directories_update_process_state_changed,
+                self.git_directories_update_process_state_changed,
                 self
             )
             self.status_update_progress_label.set_label(f"{int(self.update_in_progress.progress * 100)}%")
             self.update_in_progress.event_bus.subscribe(
                 MultiStageProcessEvent.PROGRESS_CHANGED,
-                self.releng_directories_update_process_progress_changed,
+                self.git_directories_update_process_progress_changed,
                 self
             )
 
-    def releng_directories_updates_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
-        if issubclass(process_class, RelengUpdate):
+    def git_directories_updates_updated(self, process_class: type[MultiStageProcess], started_processes: list[MultiStageProcess]):
+        if issubclass(process_class, GitUpdate):
             self.load_update_state(started_processes=started_processes)
             self.setup_status()
 
-    def releng_directories_update_process_state_changed(self, state: MultiStageProcessState):
+    def git_directories_update_process_state_changed(self, state: MultiStageProcessState):
         self.setup_status()
 
-    def releng_directories_update_process_progress_changed(self, progress: float):
+    def git_directories_update_process_progress_changed(self, progress: float):
         self.status_update_progress_label.set_label(f"{int(progress * 100)}%")
 
     @Gtk.Template.Callback()
     def on_directory_name_activate(self, sender):
         new_name = self.directory_name_row.get_text()
-        if new_name == self.releng_directory.name:
+        if new_name == self.git_directory.name:
             self.get_root().set_focus(None)
             return
-        is_name_available = RelengManager.shared().is_name_available(name=new_name)
+        is_name_available = self.manager_class.shared().is_name_available(name=new_name)
         try:
             if not is_name_available:
-                raise RuntimeError(f"Releng directory name {new_name} is not available")
-            RelengManager.shared().rename_directory(directory=self.releng_directory, name=new_name)
+                raise RuntimeError(f"GIT directory name {new_name} is not available")
+            self.manager_class.shared().rename_directory(directory=self.git_directory, name=new_name)
             self.get_root().set_focus(None)
-            self.setup_releng_directory_details()
+            self.setup_git_directory_details()
         except Exception as e:
-            print(f"Error renaming releng directory: {e}")
+            print(f"Error renaming git directory: {e}")
             self.directory_name_row.add_css_class("error")
             self.directory_name_row.grab_focus()
 
     @Gtk.Template.Callback()
     def on_directory_name_changed(self, sender):
-        is_name_available = RelengManager.shared().is_name_available(name=self.directory_name_row.get_text()) or self.directory_name_row.get_text() == self.releng_directory.name
+        is_name_available = self.manager_class.shared().is_name_available(name=self.directory_name_row.get_text()) or self.directory_name_row.get_text() == self.git_directory.name
         self.name_used_row.set_visible(not is_name_available)
         self.directory_name_row.remove_css_class("error")
 
@@ -198,13 +221,13 @@ class RelengDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_save_changes_clicked(self, sender):
-        self.releng_directory.commit_changes()
+        self.git_directory.commit_changes()
 
     def save_changes(self, action, param):
-        self.releng_directory.commit_changes()
+        self.git_directory.commit_changes()
 
     def discard_changes(self, action, param):
-        self.releng_directory.discard_changes()
+        self.git_directory.discard_changes()
 
     @Gtk.Template.Callback()
     def action_button_update_clicked(self, sender):
@@ -212,7 +235,7 @@ class RelengDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
-        RelengManager.shared().remove_directory(directory=self.releng_directory)
+        self.manager_class.shared().remove_directory(directory=self.git_directory)
         if hasattr(self, "_window"):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
@@ -227,11 +250,12 @@ class RelengDetailsView(Gtk.Box):
     def start_update(self):
         if self.update_in_progress:
             self.update_in_progress.clean_from_started_processes()
-        update = RelengUpdate(directory=self.releng_directory)
+        update = self.update_class(directory=self.git_directory)
         update.start()
         self.show_update(update=update)
 
-    def show_update(self, update: RelengUpdate):
+    def show_update(self, update: GitUpdate):
         update_view = MultistageProcessExecutionView()
         update_view.set_multistage_process(multistage_process=update)
-        self.content_navigation_view.push_view(update_view, title="Updating Releng")
+        self.content_navigation_view.push_view(update_view, title="Updating GIT repository")
+

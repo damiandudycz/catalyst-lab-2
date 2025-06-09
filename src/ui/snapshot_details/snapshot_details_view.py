@@ -1,4 +1,4 @@
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, GLib
 from .snapshot_manager import SnapshotManager
 from .snapshot import Snapshot
 import threading
@@ -23,16 +23,15 @@ class SnapshotDetailsView(Gtk.Box):
         self.category_rows = []
         for category, packages in self.snapshot.load_ebuilds().items():
             category_row = Adw.ExpanderRow(title=category)
-            category_row.category = category          # eq. app-emulation
-            category_row.packages = packages          # dict with all packages in this category
-            category_row.packages_filtered = packages # Currently filtered packages
-            category_row.package_rows_shown = []      # Store currently displayed rows (cleared when collapsed)
-            self.category_rows.append(category_row)
+            category_row.category = category
+            category_row.packages = packages
+            category_row.packages_filtered = packages
+            category_row.package_rows_shown = []
             def on_expanded(row, _param):
                 if row.get_expanded():
                     for package, versions in row.packages_filtered.items():
                         package_row = Adw.ActionRow(title=package)
-                        package_row.package = package # eq. qemu
+                        package_row.package = package
                         row.add_row(package_row)
                         row.package_rows_shown.append(package_row)
                 else:
@@ -40,10 +39,16 @@ class SnapshotDetailsView(Gtk.Box):
                         row.remove(child)
                     row.package_rows_shown.clear()
             category_row.connect("notify::expanded", on_expanded)
+            self.category_rows.append(category_row)
         self.category_rows_filtered = self.category_rows
+        # Schedule UI update in the main thread
+        GLib.idle_add(self.update_ui_after_load)
+
+    def update_ui_after_load(self):
         self.display_rows()
         self.search_entry.set_sensitive(True)
         self.loading_page.set_visible(False)
+        return False  # Remove idle callback after running once
 
     def on_search_changed(self, entry):
         # Clear current rows first:

@@ -47,9 +47,9 @@ class OverlayCreateView(Gtk.Box):
         self.carousel.connect('page-changed', self.on_page_changed)
         self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
         self.install_view.set_multistage_process(self.installation_in_progress)
-        self.connect("map", self.on_map)
+        self.connect("realize", self.on_realize)
 
-    def on_map(self, widget):
+    def on_realize(self, widget):
         self.install_view.content_navigation_view = self.content_navigation_view
         self.install_view._window = self._window
         self.config_page.event_bus.subscribe(

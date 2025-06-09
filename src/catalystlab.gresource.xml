@@ -20,7 +20,7 @@
     <file preprocess="xml-stripblanks">ui/multistage_process_execution_view/multistage_process_execution_view.ui</file>
     <file preprocess="xml-stripblanks">ui/toolset_details/toolset_details_view.ui</file>
     <file preprocess="xml-stripblanks">ui/snapshot_details/snapshot_details_view.ui</file>
-    <file preprocess="xml-stripblanks">ui/releng_details/releng_details_view.ui</file>
+    <file preprocess="xml-stripblanks">ui/git_directory_details/git_directory_details_view.ui</file>
     <file preprocess="xml-stripblanks">gtk/help-overlay.ui</file>
     <file>style.css</file>
     <file>patches/namespaces.patch</file>

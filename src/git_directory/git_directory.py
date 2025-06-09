@@ -31,6 +31,7 @@ class GitDirectory(Serializable, ABC):
         id: uuid.UUID | None = None,
         branch_name: str | None = None,
         last_commit_date: datetime | None = None,
+        remote_url: str | None = None,
         has_remote_changes: bool = False
     ):
         self.name = name
@@ -38,6 +39,7 @@ class GitDirectory(Serializable, ABC):
         self.status: GitDirectoryStatus = GitDirectoryStatus.UNKNOWN
         self.last_commit_date = last_commit_date
         self.branch_name = branch_name
+        self.remote_url = remote_url
         self.has_remote_changes = has_remote_changes
         self.logs: list[dict] = []
         self.event_bus = EventBus[GitDirectoryEvent]()
@@ -72,8 +74,8 @@ class GitDirectory(Serializable, ABC):
         return {
             "name": self.name,
             "id": str(self.id),
-            "last_commit_date": self.last_commit_date.isoformat()
-            if self.last_commit_date else None,
+            "last_commit_date": self.last_commit_date.isoformat() if self.last_commit_date else None,
+            "remote_url": self.remote_url,
             "branch_name": self.branch_name,
             "has_remote_changes": self.has_remote_changes
         }
@@ -86,6 +88,7 @@ class GitDirectory(Serializable, ABC):
                 datetime.fromisoformat(data["last_commit_date"])
                 if data.get("last_commit_date") else None
             )
+            remote_url = data.get("remote_url")
             branch_name = data.get("branch_name")
             has_remote_changes = data.get("has_remote_changes")
         except KeyError:
@@ -94,6 +97,7 @@ class GitDirectory(Serializable, ABC):
             name=name,
             id=id_value,
             last_commit_date=last_commit_date,
+            remote_url=remote_url,
             branch_name=branch_name,
             has_remote_changes=has_remote_changes
         )
@@ -148,6 +152,16 @@ class GitDirectory(Serializable, ABC):
                 )
                 branch_name, _ = process_branch.communicate()
                 self.branch_name = branch_name.strip() if process_branch.returncode == 0 else None
+                # Get remote URL
+                process_remote = subprocess.Popen(
+                    ["git", "remote", "get-url", "origin"],
+                    cwd=directory,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True
+                )
+                remote_url, _ = process_remote.communicate()
+                self.remote_url = remote_url.strip() if process_remote.returncode == 0 else None
                 # Check if there are remote changes
                 try:
                     process_fetch = subprocess.Popen(
@@ -195,10 +209,11 @@ class GitDirectory(Serializable, ABC):
     def update_logs(self, wait: bool = False):
         def worker():
             directory = self.directory_path()
-            self.logs = []
+            logs = []
             if not os.path.isdir(directory) or not os.path.isdir(
                 os.path.join(directory, ".git")
             ):
+                self.logs = []
                 self.event_bus.emit(GitDirectoryEvent.LOGS_CHANGED, self.logs)
                 return
             try:
@@ -224,7 +239,7 @@ class GitDirectory(Serializable, ABC):
                             date = datetime.fromisoformat(date_str)
                         except ValueError:
                             date = None
-                        self.logs.append({
+                        logs.append({
                             "hash": commit_hash,
                             "author": author,
                             "date": date,
@@ -233,6 +248,7 @@ class GitDirectory(Serializable, ABC):
             except Exception as e:
                 print(f"LOG EXCEPTION: {e}")
                 self.logs = []
+            self.logs = logs
             self.event_bus.emit(GitDirectoryEvent.LOGS_CHANGED, self.logs)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()

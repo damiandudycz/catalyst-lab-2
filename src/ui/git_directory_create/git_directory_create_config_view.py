@@ -39,9 +39,9 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         super().__init__()
         self.event_bus = EventBus[GitDirectoryCreateConfigViewEvent]()
         self.configuration_ready = False
-        self.connect("map", self.on_map)
+        self.connect("realize", self.on_realize)
 
-    def on_map(self, widget):
+    def on_realize(self, widget):
         self.manager_class = globals().get(self.manager_class_name)
         self.setup_source_toggles()
         self._update_source_rows()

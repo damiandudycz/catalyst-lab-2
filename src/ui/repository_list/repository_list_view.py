@@ -34,9 +34,9 @@ class RepositoryListView(Adw.PreferencesGroup):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.connect("map", self.on_map)
+        self.connect("realize", self.on_realize)
 
-    def on_map(self, widget):
+    def on_realize(self, widget):
         self.set_title(self.title)
         self.item_class = globals().get(self.item_class_name)
         self.item_installation_class = globals().get(self.item_installation_class_name)
