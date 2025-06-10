@@ -1,7 +1,7 @@
 from typing import final
 from datetime import datetime
 from .repository import Repository
-import os
+import os, subprocess
 from .snapshot import Snapshot
 
 @final
@@ -32,10 +32,12 @@ class SnapshotManager:
         missing_files = found_filenames - existing_filenames
         for filename in missing_files:
             full_path = os.path.join(snapshots_location, filename)
-            stat_info = os.stat(full_path)
-            # TODO: Load date from squashfs instead
-            creation_time = datetime.fromtimestamp(stat_info.st_ctime)
-            self.add_snapshot(Snapshot(filename=filename, date=creation_time))
+            try:
+                output = subprocess.check_output(['/app/bin/unsquashfs', '-cat', full_path, "metadata/timestamp.chk"], text=True)
+                timestamp = datetime.strptime(output.strip(), "%a, %d %b %Y %H:%M:%S %z")
+                self.add_snapshot(Snapshot(filename=filename, date=timestamp))
+            except subprocess.CalledProcessError as e:
+                print(f"Error reading {full_path}: {e}")
         # --- Step 3: Remove records for deleted snapshot files ---
         deleted_snapshots = [snapshot for snapshot in snapshots if snapshot.filename not in found_filenames]
         for snapshot in deleted_snapshots:

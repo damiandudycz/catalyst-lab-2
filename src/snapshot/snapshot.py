@@ -10,7 +10,7 @@ from collections import defaultdict
 @dataclass
 class Snapshot(Serializable):
     filename: str
-    date: datetime
+    date: datetime | None
     def serialize(self) -> dict:
         return {
             "filename": self.filename,
@@ -25,7 +25,7 @@ class Snapshot(Serializable):
 
     @property
     def name(self) -> str:
-        return self.date.strftime("%Y-%m-%d %H:%M")
+        return self.date.strftime("%Y-%m-%d %H:%M") if self.date else "(Unknown date)"
 
     @property
     def short_details(self) -> str:

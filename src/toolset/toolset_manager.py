@@ -41,7 +41,7 @@ class ToolsetManager:
                 )
                 self.add_toolset(toolset)
             except subprocess.CalledProcessError as e:
-                print(f"Error reading {snapshot_file_path}: {e}")
+                print(f"Error reading {full_path}: {e}")
         # --- Step 3: Remove records for deleted toolset files ---
         deleted_toolsets = [toolset for toolset in toolsets if toolset.filename not in found_filenames]
         for toolset in deleted_toolsets:
