@@ -126,7 +126,7 @@ class Settings(Serializable):
 
     @property
     def project_location(self) -> bool:
-        return self._overlay_location
+        return self._project_location
     @project_location.setter
     def project_location(self, value: bool):
         if self._project_location != value:

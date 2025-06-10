@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, uuid, shutil, threading, stat, re
+import os, uuid, shutil, threading, stat, re, json
 import re, copy
 from typing import final, Any
 from dataclasses import dataclass
@@ -490,8 +490,13 @@ class Toolset(Serializable):
     def replace_metadata(self, metadata: dict[str, Any] | None):
         """Updates whole metadata dictionary and emits event."""
         self.metadata = metadata
+        if self.store_changes:
+            self.write_metadata_to_json(metadata=metadata)
         Repository.Toolset.save() # Make sure changes are saved in repository.
         self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    def write_metadata_to_json(self, metadata: dict[str, Any] | None):
+        write_metadata_to_json(toolset_root=self.toolset_root(), metadata=metadata)
 
     def _perform_app_installed_version_check(self, app: ToolsetApplication, metadata: dict[str, Any]):
         package_root = Path(self.toolset_root()) / "var" / "db" / "pkg"
@@ -537,6 +542,10 @@ class Toolset(Serializable):
     def _perform_app_additional_checks(self, app: ToolsetApplication, metadata: dict[str, Any]):
         if app.toolset_additional_analysis:
             app.toolset_additional_analysis(app=app, toolset=self, metadata=metadata)
+
+    @property
+    def filename(self) -> str:
+        return os.path.basename(self.file_path())
 
     def file_path(self) -> str:
         return Toolset.file_path_for_name(name=self.name)
@@ -633,3 +642,16 @@ def unmount_overlayfs(tmp_dir: str):
     subprocess.run(['umount', mountpoint], check=True)
     shutil.rmtree(tmp_dir)
 
+@root_function
+def write_metadata_to_json(toolset_root: str, metadata: dict[str, Any] | None):
+    # Save metadata result inside toolset json file
+    json_file_path = os.path.join(toolset_root, "toolset.json")
+    try:
+        if metadata is None:
+            if os.path.exists(json_file_path):
+                os.remove(json_file_path)
+        else:
+            with open(json_file_path, 'w') as json_file:
+                json.dump(metadata, json_file, indent=4)
+    except Exception as e:
+        print(f"Failed to write metadata to toolset: {e}")

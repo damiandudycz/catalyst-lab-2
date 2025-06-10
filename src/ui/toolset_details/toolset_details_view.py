@@ -104,8 +104,8 @@ class ToolsetDetailsView(Gtk.Box):
         source_url = urlparse(source).path if source else None
         filename = os.path.basename(source_url) if source_url else None
         # Display source, date_created, date_updateds
-        self.toolset_date_created_row.set_subtitle(date_created.strftime("%Y-%d-%m %H:%M") if date_created else "unknown")
-        self.toolset_date_updated_row.set_subtitle(date_updated.strftime("%Y-%d-%m %H:%M") if date_created else "unknown")
+        self.toolset_date_created_row.set_subtitle(date_created.strftime("%Y-%m-%d %H:%M") if date_created else "unknown")
+        self.toolset_date_updated_row.set_subtitle(date_updated.strftime("%Y-%m-%d %H:%M") if date_updated else "unknown")
         self.toolset_source_row.set_subtitle(filename or "unknown")
         self.allow_binpkgs_checkbox.set_active(allow_binpkgs)
         if event_data is None or not self.toolset.is_reserved:

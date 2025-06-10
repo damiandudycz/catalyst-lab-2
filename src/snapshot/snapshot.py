@@ -25,7 +25,7 @@ class Snapshot(Serializable):
 
     @property
     def name(self) -> str:
-        return self.date.strftime("%Y-%d-%m %H:%M")
+        return self.date.strftime("%Y-%m-%d %H:%M")
 
     @property
     def short_details(self) -> str:

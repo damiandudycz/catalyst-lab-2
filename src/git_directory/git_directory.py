@@ -50,7 +50,7 @@ class GitDirectory(Serializable, ABC):
         if self.branch_name:
             parts.append(self.branch_name)
         if self.last_commit_date:
-            parts.append(self.last_commit_date.strftime('%Y-%d-%m %H:%M'))
+            parts.append(self.last_commit_date.strftime('%Y-%m-%d %H:%M'))
         return ", ".join(parts)
 
     @property

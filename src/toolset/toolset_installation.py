@@ -305,6 +305,7 @@ class ToolsetInstallationStepVerify(ToolsetInstallationStep):
         super().start()
         try:
             analysis_result = self.multistage_process.toolset.analyze(save=True)
+            self.multistage_process.toolset.write_metadata_to_json(metadata=analysis_result)
             self.complete(MultiStageProcessStageState.COMPLETED if analysis_result else MultiStageProcessStageState.FAILED)
         except Exception as e:
             print(f"Error during toolset verification: {e}")
