@@ -1,12 +1,8 @@
 from __future__ import annotations
-from gi.repository import Gtk, GLib, Gio, GObject
-from gi.repository import Adw
-from .root_helper_client import RootHelperClient, AuthorizationKeeper
-from .multistage_process import MultiStageProcessState
+from gi.repository import Gtk, GLib, Gio, GObject, Adw
 from .toolset import Toolset, ToolsetEvents
 from .repository import Repository
 from .toolset_application import ToolsetApplication
-from .snapshot_installation import SnapshotInstallation
 from .repository_list_view import ItemRow
 from enum import Enum, auto
 from .event_bus import EventBus
@@ -31,12 +27,12 @@ class ToolsetSelectionView(Gtk.Box):
     def on_realize(self, widget):
         if self.required_apps and self.apps_requirements is None:
             self.apps_requirements = [getattr(ToolsetApplication, value) for value in self.required_apps.split(",")]
-        self._fill_toolsets_rows(Repository.Toolset.value)
+        self._fill_rows(Repository.Toolset.value)
 
     def _toolset_is_reserved_changed(self, data):
         self.event_bus.emit(ToolsetSelectionViewEvent.TOOLSET_CHANGED, self)
 
-    def _fill_toolsets_rows(self, result: list[Toolset]):
+    def _fill_rows(self, result: list[Toolset]):
         self.selected_toolset = None
         sorted_toolsets = sorted(result, key=lambda toolset: toolset.metadata.get("date_updated", 0), reverse=True)
         valid_toolsets = [

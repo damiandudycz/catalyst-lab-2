@@ -22,6 +22,7 @@
     <file preprocess="xml-stripblanks">ui/overlay_create/overlay_create_view.ui</file>
     <file preprocess="xml-stripblanks">ui/project_create/project_create_view.ui</file>
     <file preprocess="xml-stripblanks">ui/releng_create/releng_create_view.ui</file>
+    <file preprocess="xml-stripblanks">ui/releng_select/releng_select_view.ui</file>
     <file preprocess="xml-stripblanks">ui/repository_list/repository_list_view.ui</file>
     <file preprocess="xml-stripblanks">ui/root_command_output/root_command_output_view.ui</file>
     <file preprocess="xml-stripblanks">ui/snapshot_create/snapshot_create_view.ui</file>
