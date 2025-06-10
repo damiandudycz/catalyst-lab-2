@@ -106,9 +106,8 @@
                     <property name="orientation">vertical</property>
                     <property name="spacing">12</property>
                     <child>
-                      <object class="AdwPreferencesGroup" id="toolsets_list">
-                        <property name="title">Select Toolset</property>
-                        <property name="description">Select toolset to use for generating a snapshot.</property>
+                      <object class="ToolsetSelectionView" id="toolset_selection_view">
+                        <property name="required-apps">CATALYST</property>
                       </object>
                     </child>
                     <child>

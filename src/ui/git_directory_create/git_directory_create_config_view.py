@@ -77,8 +77,7 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         toggle_group.add_css_class("round")
         toggle_group.add_css_class("caption")
 
-        sources_raw = self.available_sources
-        sources = [GitDirectorySource[value.strip()] for value in sources_raw.split(",")]
+        sources = [GitDirectorySource[value.strip()] for value in self.available_sources.split(",")]
 
         self.selected_source = sources[0]
         self.source_group.set_visible(len(sources) > 1)

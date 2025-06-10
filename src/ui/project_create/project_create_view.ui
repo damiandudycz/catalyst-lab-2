@@ -99,6 +99,23 @@
               </object>
             </child>
 
+            <!-- Page 3: Toolset screen -->
+            <child>
+              <object class="GtkBox" id="toolset_page">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="ToolsetSelectionView" id="toolset_selection_view">
+                    <property name="required-apps">CATALYST</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+
           </object>
         </child>
 
