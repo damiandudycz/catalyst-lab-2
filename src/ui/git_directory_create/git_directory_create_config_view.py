@@ -8,6 +8,7 @@ from .default_dir_content_builder import DefaultDirContentBuilder
 # Import additional classed so that it can be parsed in repository_list_view:
 from .releng_manager import RelengManager
 from .overlay_manager import OverlayManager
+from .project_manager import ProjectManager
 
 class GitDirectoryCreateConfigViewEvent(Enum):
     CONFIGURATION_READY_CHANGED = auto()
@@ -78,20 +79,20 @@ class GitDirectoryCreateConfigView(Gtk.Box):
 
         sources_raw = self.available_sources
         sources = [GitDirectorySource[value.strip()] for value in sources_raw.split(",")]
+
         self.selected_source = sources[0]
         self.source_group.set_visible(len(sources) > 1)
-
-        for source in sources:
+        for index, source in enumerate(sources):
             toggle = Adw.Toggle(label=source.name())
             toggle_group.add(toggle)
             if source == self.selected_source:
-                toggle_group.set_active(source.value)
+                toggle_group.set_active(index)
         def on_toggle_source_clicked(group, pspec):
             index = group.get_active()
             self.directory_url_row.set_text(self.default_git_repository or "")
             self.selected_local_directory = Gio.File.new_for_path(self.default_local_directory) if self.default_local_directory else None
             self.directory_local_directory_row.set_subtitle(self.selected_local_directory.get_path() if self.selected_local_directory else "(Select directory)")
-            self.selected_source = list(GitDirectorySource)[index]
+            self.selected_source = sources[index]
             self._update_source_rows()
             self.check_if_configuration_ready()
         toggle_group.connect("notify::active", on_toggle_source_clicked)

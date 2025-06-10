@@ -10,6 +10,7 @@ from .toolset_installation import ToolsetInstallation
 from .snapshot_installation import SnapshotInstallation
 from .releng_installation import RelengInstallation
 from .overlay_installation import OverlayInstallation
+from .project_installation import ProjectInstallation
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/repository_list/repository_list_view.ui')
 class RepositoryListView(Adw.PreferencesGroup):

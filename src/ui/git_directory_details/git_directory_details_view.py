@@ -13,6 +13,8 @@ from .releng_manager import RelengManager
 from .releng_update import RelengUpdate
 from .overlay_manager import OverlayManager
 from .overlay_update import OverlayUpdate
+from .project_manager import ProjectManager
+from .project_update import ProjectUpdate
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/git_directory_details/git_directory_details_view.ui')
 class GitDirectoryDetailsView(Gtk.Box):

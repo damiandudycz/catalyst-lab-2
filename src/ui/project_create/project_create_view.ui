@@ -6,7 +6,7 @@
   <requires lib="Adw" version="1.0"/>
 
   <!-- Template -->
-  <template class="ToolsetCreateView" parent="GtkBox">
+  <template class="ProjectCreateView" parent="GtkBox">
 
     <!-- Setup view -->
     <child>
@@ -35,13 +35,13 @@
                     <property name="margin-end">24</property>
                     <child>
                       <object class="GtkImage">
-                        <property name="icon-name">sledgehammer-svgrepo-com-symbolic</property>
+                        <property name="icon-name">notes-minimalistic-svgrepo-com-symbolic</property>
                         <property name="pixel-size">128</property>
                       </object>
                     </child>
                     <child>
                       <object class="GtkLabel">
-                        <property name="label">Create new toolset environment</property>
+                        <property name="label">Create new Project</property>
                         <property name="halign">center</property>
                         <property name="wrap">True</property>
                         <style>
@@ -51,7 +51,7 @@
                     </child>
                     <child>
                       <object class="GtkLabel">
-                        <property name="label">This wizard will help you prepare new external toolset for Catalyst Lab. It will download Gentoo Stage3 image and install required tools in it.</property>
+                        <property name="label">This wizard will help you prepare new Portage snapshot. It will use one of available toolsets to get the newest snapshot available.</property>
                         <property name="halign">center</property>
                         <property name="wrap">True</property>
                         <property name="justify">fill</property>
@@ -73,7 +73,7 @@
                             </style>
                             <child>
                               <object class="AdwButtonRow">
-                                <property name="title">Configure toolset</property>
+                                <property name="title">Configure Project</property>
                                 <property name="activatable">True</property>
                                 <signal name="activated" handler="on_start_row_activated"/>
                                 <style>
@@ -90,90 +90,15 @@
               </object>
             </child>
 
-            <!-- Page 2: Stages screen -->
+            <!-- Page 2: Config screen -->
             <child>
-              <object class="GtkScrolledWindow" id="configuration_page">
-                <property name="hscrollbar-policy">never</property>
-                <property name="vscrollbar-policy">automatic</property>
-                <property name="hexpand">True</property>
-                <property name="vexpand">True</property>
-                <child>
-                  <object class="AdwPreferencesGroup" id="stages_list">
-                    <property name="margin-start">24</property>
-                    <property name="margin-end">24</property>
-                    <property name="margin-top">4</property>
-                    <property name="margin-bottom">4</property>
-                    <property name="title">Select Gentoo image</property>
-                    <property name="description">Select stage3 file to use as a base for the toolset.</property>                      </object>
-                </child>
+              <object class="GitDirectoryCreateConfigView" id="config_page">
+                <property name="manager_class_name">ProjectManager</property>
+                <property name="available_sources">CREATE_NEW,GIT_REPOSITORY</property>
+                <property name="default_directory_name">Project</property>
               </object>
             </child>
 
-            <!-- Page 3: Tools screen -->
-            <child>
-              <object class="GtkScrolledWindow" id="tools_page">
-                <property name="hscrollbar-policy">never</property>
-                <property name="vscrollbar-policy">automatic</property>
-                <property name="hexpand">True</property>
-                <property name="vexpand">True</property>
-                <child>
-                  <object class="GtkBox">
-                    <property name="margin-start">24</property>
-                    <property name="margin-end">24</property>
-                    <property name="margin-top">4</property>
-                    <property name="margin-bottom">4</property>
-                    <property name="orientation">vertical</property>
-                    <property name="spacing">12</property>
-                    <child>
-                      <object class="AdwPreferencesGroup" id="tools_list">
-                        <property name="title">Select tools to install</property>
-                        <!-- <property name="description"></property> -->
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwPreferencesGroup">
-                        <property name="title">Options</property>
-                        <!-- <property name="description"></property> -->
-                        <child>
-                          <object class="AdwActionRow">
-                            <property name="title">Allow binary packages</property>
-                            <property name="subtitle">Makes the installation quicker</property>
-                            <property name="activatable-widget">allow_binpkgs_checkbox</property>
-                            <child type="prefix">
-                              <object class="GtkCheckButton" id="allow_binpkgs_checkbox">
-                                <property name="valign">center</property>
-                                <signal name="toggled" handler="on_allow_binpkgs_toggled"/>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="AdwEntryRow" id="environment_name_row">
-                            <property name="title">Environment name</property>
-                            <property name="show-apply-button">True</property>
-                            <property name="text"></property>
-                            <signal name="apply" handler="on_environment_name_activate"/>
-                            <signal name="changed" handler="on_environment_name_changed"/>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkLabel" id="name_used_label">
-                            <property name="label">This environment name is already used.</property>
-                            <property name="halign">center</property>
-                            <property name="wrap">True</property>
-                            <property name="justify">fill</property>
-                            <property name="margin-top">12</property>
-                            <style>
-                              <class name="error"/>
-                            </style>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
           </object>
         </child>
 
@@ -215,7 +140,7 @@
                 <property name="halign">end</property>
                 <child>
                   <object class="GtkButton" id="next_button">
-                    <property name="label">Next</property>
+                    <property name="label">Create project</property>
                     <property name="sensitive">False</property>
                     <property name="opacity">0.0</property>
                     <signal name="clicked" handler="on_next_pressed"/>

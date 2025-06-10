@@ -1,14 +1,14 @@
 from typing import final
 from .git_update import GitUpdate
 from .git_manager import GitManager
-from .overlay_manager import OverlayManager
+from .project_manager import ProjectManager
 
 @final
-class OverlayUpdate(GitUpdate):
-    """Handles the full overlay directory update lifecycle."""
+class ProjectUpdate(GitUpdate):
+    """Handles the full project directory update lifecycle."""
 
     # Overwrite in subclassed
     @classmethod
     def manager(cls) -> GitManager:
-        return OverlayManager.shared()
+        return ProjectManager.shared()
 

@@ -156,7 +156,7 @@ class SnapshotCreateView(Gtk.Box):
                 item_title_property_name="name",
                 item_subtitle_property_name="short_details",
                 item_status_property_name="status_indicator_values",
-                item_icon="preferences-other-symbolic"
+                item_icon="sledgehammer-svgrepo-com-symbolic"
             )
             check_button = Gtk.CheckButton()
             check_button.set_active(toolset == self.selected_toolset)

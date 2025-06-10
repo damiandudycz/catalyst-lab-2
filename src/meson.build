@@ -66,6 +66,10 @@ catalystlab_sources = [
   'snapshot/snapshot.py',
   'snapshot/snapshot_manager.py',
   'snapshot/snapshot_installation.py',
+  'project/project_directory.py',
+  'project/project_installation.py',
+  'project/project_manager.py',
+  'project/project_update.py',
   'ui/multistage_process_execution_view/multistage_process_execution_view.py',
   'ui/app_sections/about/about_section.py',
   'ui/app_sections/bugs/bugs_section.py',
@@ -94,6 +98,7 @@ catalystlab_sources = [
   'ui/git_directory_create/git_directory_create_config_view.py',
   'ui/root_command_output/root_command_output_view.py',
   'ui/git_directory_details/git_directory_details_view.py',
+  'ui/project_create/project_create_view.py',
   'default_dir_content_builder/default_dir_content_builder.py'
 ]
 

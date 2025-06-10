@@ -5,7 +5,7 @@ from .releng_manager import RelengManager
 
 @final
 class RelengUpdate(GitUpdate):
-    """Handles the full releng directory installation lifecycle."""
+    """Handles the full releng directory update lifecycle."""
 
     # Overwrite in subclassed
     @classmethod
