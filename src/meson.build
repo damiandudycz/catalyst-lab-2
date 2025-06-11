@@ -102,6 +102,7 @@ catalystlab_sources = [
   'ui/toolset_create/toolset_create_view.py',
   'ui/toolset_details/toolset_details_view.py',
   'ui/toolset_select/toolset_select_view.py',
+  'ui/snapshot_select/snapshot_select_view.py',
   'ui/wizard/wizard_view.py',
 ]
 

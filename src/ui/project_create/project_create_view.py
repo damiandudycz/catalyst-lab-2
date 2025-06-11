@@ -7,6 +7,7 @@ from .default_dir_content_builder import DefaultDirContentBuilder
 from .git_installation import GitDirectorySetupConfiguration
 from .toolset_select_view import ToolsetSelectionViewEvent
 from .releng_select_view import RelengSelectionViewEvent
+from .snapshot_select_view import SnapshotSelectionViewEvent
 from .wizard_view import WizardView
 import os
 
@@ -24,8 +25,10 @@ class ProjectCreateView(Gtk.Box):
     config_page = Gtk.Template.Child()
     toolset_page = Gtk.Template.Child()
     releng_page = Gtk.Template.Child()
+    snapshot_page = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
     releng_selection_view = Gtk.Template.Child()
+    snapshot_selection_view = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: ProjectInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -43,6 +46,10 @@ class ProjectCreateView(Gtk.Box):
             RelengSelectionViewEvent.SELECTION_CHANGED,
             self.releng_changed
         )
+        self.snapshot_selection_view.event_bus.subscribe(
+            SnapshotSelectionViewEvent.SELECTION_CHANGED,
+            self.snapshot_changed
+        )
         self.connect("realize", self.on_realize)
 
     def config_ready_changed(self, data):
@@ -52,6 +59,9 @@ class ProjectCreateView(Gtk.Box):
         self.wizard_view._refresh_buttons_state()
 
     def releng_changed(self, data):
+        self.wizard_view._refresh_buttons_state()
+
+    def snapshot_changed(self, data):
         self.wizard_view._refresh_buttons_state()
 
     def on_realize(self, widget):
@@ -68,6 +78,8 @@ class ProjectCreateView(Gtk.Box):
                 return not (self.toolset_selection_view.selected_toolset is None or self.toolset_selection_view.selected_toolset.is_reserved)
             case self.releng_page:
                 return self.releng_selection_view.selected_releng_directory is not None
+            case self.snapshot_page:
+                return self.snapshot_selection_view.selected_snapshot is not None
         return True
 
     @Gtk.Template.Callback()

@@ -60,6 +60,22 @@
           </object>
         </child>
 
+        <!-- Page 4: Snapshot screen -->
+        <child>
+          <object class="GtkBox" id="snapshot_page">
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="margin-top">4</property>
+            <property name="margin-bottom">4</property>
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <child>
+              <object class="SnapshotSelectionView" id="snapshot_selection_view">
+              </object>
+            </child>
+          </object>
+        </child>
+
       </object>
     </child>
 
