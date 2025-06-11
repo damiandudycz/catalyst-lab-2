@@ -9,54 +9,58 @@ from .toolset_application import ToolsetApplication
 from .snapshot_installation import SnapshotInstallation
 from .repository_list_view import ItemRow
 from .toolset_select_view import ToolsetSelectionViewEvent
+from .wizard_view import WizardView
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot_create/snapshot_create_view.ui')
 class SnapshotCreateView(Gtk.Box):
     __gtype_name__ = "SnapshotCreateView"
 
     # Main views:
-    setup_view = Gtk.Template.Child()
-    install_view = Gtk.Template.Child()
+    wizard_view = Gtk.Template.Child()
     # Setup view elements:
-    carousel = Gtk.Template.Child()
-    welcome_page = Gtk.Template.Child()
     config_page = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
-    back_button = Gtk.Template.Child()
-    next_button = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: SnapshotInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
-        self.current_page = 0
-        self.carousel.connect('page-changed', self.on_page_changed)
-        self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
-        self.install_view.set_multistage_process(self.installation_in_progress)
+        self.connect("realize", self.on_realize)
         self.toolset_selection_view.event_bus.subscribe(
             ToolsetSelectionViewEvent.TOOLSET_CHANGED,
-            self.setup_back_next_buttons
+            self.toolset_changed
         )
-        self.connect("realize", self.on_realize)
 
-    def on_realize(self, widget):
-        self.install_view.content_navigation_view = self.content_navigation_view
-        self.install_view._window = self._window
-
-    def on_page_changed(self, carousel, pspec):
-        self.current_page = int(carousel.get_position())
-        self.setup_back_next_buttons()
-
-    def setup_back_next_buttons(self, _ = None):
-        is_first_page = self.current_page == 0
-        is_last_page = self.current_page == 1
-        is_stage_selected = self.toolset_selection_view.selected_toolset is not None
-        self.back_button.set_sensitive(not is_first_page)
-        self.back_button.set_opacity(0.0 if is_first_page else 1.0)
-        self.next_button.set_sensitive(is_stage_selected and is_last_page and not self.toolset_selection_view.selected_toolset.is_reserved)
-        self.next_button.set_opacity(0.0 if not is_last_page else 1.0)
+    def toolset_changed(self, data):
+        self.wizard_view._refresh_buttons_state()
         if hasattr(self, 'reserved_label'):
             self.reserved_label.set_visible(self.toolset_selection_view.selected_toolset and self.toolset_selection_view.selected_toolset.is_reserved)
+
+    def on_realize(self, widget):
+        self.wizard_view.content_navigation_view = self.content_navigation_view
+        self.wizard_view._window = self._window
+        self.wizard_view.set_installation(self.installation_in_progress)
+
+    @Gtk.Template.Callback()
+    def is_page_ready_to_continue(self, sender, page) -> bool:
+        match page:
+            case self.config_page:
+                return self.toolset_selection_view.selected_toolset is not None and not self.toolset_selection_view.selected_toolset.is_reserved
+        return True
+
+    @Gtk.Template.Callback()
+    def begin_installation(self, view):
+        RootHelperClient.shared().authorize_and_run(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper, selected_toolset=self.toolset_selection_view.selected_toolset))
+
+    def _start_installation(self, authorization_keeper: AuthorizationKeeper, selected_toolset: Toolset | None = None, selected_file: Gio.File | None = None):
+        if not authorization_keeper:
+            return
+        installation_in_progress = SnapshotInstallation(
+            toolset=selected_toolset,
+            file=selected_file
+        )
+        installation_in_progress.start()
+        self.wizard_view.set_installation(installation_in_progress)
 
     @Gtk.Template.Callback()
     def on_select_file_pressed(self, _):
@@ -84,38 +88,4 @@ class SnapshotCreateView(Gtk.Box):
         filters = create_filter_list()
         file_dialog.set_filters(filters)
         file_dialog.open(getattr(self, '_window', None) or self.get_root(), None, on_file_open_response)
-
-    @Gtk.Template.Callback()
-    def on_back_pressed(self, _):
-        is_first_page = self.current_page == 0
-        if not is_first_page:
-            self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page - 1), True)
-
-    @Gtk.Template.Callback()
-    def on_next_pressed(self, _):
-        is_last_page = self.current_page == 1
-        if not is_last_page:
-            self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page + 1), True)
-        else:
-            RootHelperClient.shared().authorize_and_run(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper, selected_toolset=self.toolset_selection_view.selected_toolset))
-
-    def _start_installation(self, authorization_keeper: AuthorizationKeeper, selected_toolset: Toolset | None = None, selected_file: Gio.File | None = None):
-        if not authorization_keeper:
-            return
-        self.installation_in_progress = SnapshotInstallation(
-            toolset=selected_toolset,
-            file=selected_file
-        )
-        self.installation_in_progress.start(authorization_keeper=authorization_keeper)
-        self.install_view.set_multistage_process(self.installation_in_progress)
-        self._set_current_stage(self.installation_in_progress.status)
-
-    @Gtk.Template.Callback()
-    def on_start_row_activated(self, _):
-        self.carousel.scroll_to(self.config_page, True)
-
-    def _set_current_stage(self, stage: MultiStageProcessState):
-        # Setup views visibility:
-        self.setup_view.set_visible(stage == MultiStageProcessState.SETUP)
-        self.install_view.set_visible(stage != MultiStageProcessState.SETUP)
 
