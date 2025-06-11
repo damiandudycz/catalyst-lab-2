@@ -66,11 +66,11 @@ class RepositoryListView(Adw.PreferencesGroup):
 
         for item in self.repository.value:
             item_row = ItemRow(
-                item,
-                self.item_title_property_name,
-                self.item_subtitle_property_name,
-                self.item_status_property_name,
-                self.item_icon
+                item=item,
+                item_title_property_name=self.item_title_property_name,
+                item_subtitle_property_name=self.item_subtitle_property_name,
+                item_status_property_name=self.item_status_property_name,
+                item_icon=self.item_icon
             )
             item_row.set_activatable(True)
             icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
