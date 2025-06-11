@@ -30,6 +30,7 @@ class ToolsetSelectionView(Gtk.Box):
         self._fill_rows(Repository.Toolset.value)
 
     def _toolset_is_reserved_changed(self, data):
+        self.reserved_label.set_visible(self.selected_toolset and self.selected_toolset.is_reserved)
         self.event_bus.emit(ToolsetSelectionViewEvent.TOOLSET_CHANGED, self)
 
     def _fill_rows(self, result: list[Toolset]):
