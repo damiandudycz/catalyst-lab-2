@@ -55,8 +55,15 @@
                 <property name="orientation">vertical</property>
                 <property name="spacing">12</property>
                 <child>
-                  <object class="ToolsetSelectionView" id="toolset_selection_view">
-                    <property name="required-apps">CATALYST</property>
+                  <object class="ItemSelectionView" id="toolset_selection_view">
+                    <property name="item_class_name">Toolset</property>
+                    <property name="item_icon">sledgehammer-svgrepo-com-symbolic</property>
+                    <property name="item_title_property_name">name</property>
+                    <property name="item_subtitle_property_name">short_details</property>
+                    <property name="item_status_property_name">status_indicator_values</property>
+                    <signal name="is-item-selectable" handler="is_item_selectable"/>
+                    <signal name="is-item-usable" handler="is_item_usable"/>
+                    <signal name="setup-items-monitoring" handler="setup_items_monitoring"/>
                   </object>
                 </child>
               </object>
@@ -80,7 +87,15 @@
                 <property name="orientation">vertical</property>
                 <property name="spacing">12</property>
                 <child>
-                  <object class="RelengSelectionView" id="releng_selection_view">
+                  <object class="ItemSelectionView" id="releng_selection_view">
+                    <property name="item_class_name">RelengDirectory</property>
+                    <property name="item_icon">book-minimalistic-svgrepo-com-symbolic</property>
+                    <property name="item_title_property_name">name</property>
+                    <property name="item_subtitle_property_name">short_details</property>
+                    <property name="item_status_property_name">status_indicator_values</property>
+                    <signal name="is-item-selectable" handler="is_item_selectable"/>
+                    <signal name="is-item-usable" handler="is_item_usable"/>
+                    <signal name="setup-items-monitoring" handler="setup_items_monitoring"/>
                   </object>
                 </child>
               </object>
@@ -104,7 +119,15 @@
                 <property name="orientation">vertical</property>
                 <property name="spacing">12</property>
                 <child>
-                  <object class="SnapshotSelectionView" id="snapshot_selection_view">
+                  <object class="ItemSelectionView" id="snapshot_selection_view">
+                    <property name="item_class_name">Snapshot</property>
+                    <property name="item_icon">video-frame-svgrepo-com-symbolic</property>
+                    <property name="item_title_property_name">name</property>
+                    <property name="item_subtitle_property_name">short_details</property>
+                    <property name="item_status_property_name">status_indicator_values</property>
+                    <signal name="is-item-selectable" handler="is_item_selectable"/>
+                    <signal name="is-item-usable" handler="is_item_usable"/>
+                    <signal name="setup-items-monitoring" handler="setup_items_monitoring"/>
                   </object>
                 </child>
               </object>

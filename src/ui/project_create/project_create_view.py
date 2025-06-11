@@ -5,10 +5,10 @@ from .project_installation import ProjectInstallation
 from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent
 from .default_dir_content_builder import DefaultDirContentBuilder
 from .git_installation import GitDirectorySetupConfiguration
-from .toolset_select_view import ToolsetSelectionViewEvent
-from .releng_select_view import RelengSelectionViewEvent
-from .snapshot_select_view import SnapshotSelectionViewEvent
+from .toolset_application import ToolsetApplication
+from .toolset import ToolsetEvents
 from .wizard_view import WizardView
+from .item_select_view import ItemSelectionViewEvent
 import os
 
 class DefaultProjectDirContentBuilder(DefaultDirContentBuilder):
@@ -35,20 +35,21 @@ class ProjectCreateView(Gtk.Box):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
+        self.apps_requirements = [ToolsetApplication.CATALYST]
         self.config_view.event_bus.subscribe(
             GitDirectoryCreateConfigViewEvent.CONFIGURATION_READY_CHANGED,
             self.config_ready_changed
         )
         self.toolset_selection_view.event_bus.subscribe(
-            ToolsetSelectionViewEvent.TOOLSET_CHANGED,
+            ItemSelectionViewEvent.ITEM_CHANGED,
             self.toolset_changed
         )
         self.releng_selection_view.event_bus.subscribe(
-            RelengSelectionViewEvent.SELECTION_CHANGED,
+            ItemSelectionViewEvent.ITEM_CHANGED,
             self.releng_changed
         )
         self.snapshot_selection_view.event_bus.subscribe(
-            SnapshotSelectionViewEvent.SELECTION_CHANGED,
+            ItemSelectionViewEvent.ITEM_CHANGED,
             self.snapshot_changed
         )
         self.connect("realize", self.on_realize)
@@ -71,16 +72,57 @@ class ProjectCreateView(Gtk.Box):
         self.wizard_view.set_installation(self.installation_in_progress)
 
     @Gtk.Template.Callback()
+    def is_item_selectable(self, sender, item) -> bool:
+        match sender:
+            case self.toolset_selection_view:
+                return all(item.get_app_install(app) is not None for app in self.apps_requirements)
+            case self.releng_selection_view:
+                return True
+            case self.snapshot_selection_view:
+                return True
+        return False
+
+    @Gtk.Template.Callback()
+    def is_item_usable(self, sender, item) -> bool:
+        match sender:
+            case self.toolset_selection_view:
+                return not item.is_reserved
+            case self.releng_selection_view:
+                return True
+            case self.snapshot_selection_view:
+                return True
+        return False
+
+    @Gtk.Template.Callback()
+    def setup_items_monitoring(self, sender, items):
+        match sender:
+            case self.toolset_selection_view:
+                print("Monitor Toolsets")
+                for item in items:
+                    item.event_bus.subscribe(
+                        ToolsetEvents.IS_RESERVED_CHANGED,
+                        self.toolset_selection_view.refresh_items_state
+                    )
+            case self.releng_selection_view:
+                pass
+            case self.snapshot_selection_view:
+                pass
+
+    @Gtk.Template.Callback()
     def is_page_ready_to_continue(self, sender, page) -> bool:
         match page:
             case self.config_page:
                 return self.config_view.configuration_ready
             case self.toolset_page:
-                return not (self.toolset_selection_view.selected_toolset is None or self.toolset_selection_view.selected_toolset.is_reserved)
+                return (
+                    self.toolset_selection_view.selected_item is not None
+                    and self.is_item_usable(self.toolset_selection_view, self.toolset_selection_view.selected_item)
+                    and self.is_item_selectable(self.toolset_selection_view, self.toolset_selection_view.selected_item)
+                )
             case self.releng_page:
-                return self.releng_selection_view.selected_releng_directory is not None
+                return self.releng_selection_view.selected_item is not None
             case self.snapshot_page:
-                return self.snapshot_selection_view.selected_snapshot is not None
+                return self.snapshot_selection_view.selected_item is not None
         return True
 
     @Gtk.Template.Callback()

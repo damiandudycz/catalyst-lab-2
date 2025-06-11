@@ -8,7 +8,7 @@ from .repository import Repository
 from .toolset_application import ToolsetApplication
 from .snapshot_installation import SnapshotInstallation
 from .repository_list_view import ItemRow
-from .toolset_select_view import ToolsetSelectionViewEvent
+from .item_select_view import ItemSelectionViewEvent
 from .wizard_view import WizardView
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot_create/snapshot_create_view.ui')
@@ -25,16 +25,15 @@ class SnapshotCreateView(Gtk.Box):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
+        self.apps_requirements = [ToolsetApplication.CATALYST]
         self.connect("realize", self.on_realize)
         self.toolset_selection_view.event_bus.subscribe(
-            ToolsetSelectionViewEvent.TOOLSET_CHANGED,
+            ItemSelectionViewEvent.ITEM_CHANGED,
             self.toolset_changed
         )
 
     def toolset_changed(self, data):
         self.wizard_view._refresh_buttons_state()
-        if hasattr(self, 'reserved_label'):
-            self.reserved_label.set_visible(self.toolset_selection_view.selected_toolset and self.toolset_selection_view.selected_toolset.is_reserved)
 
     def on_realize(self, widget):
         self.wizard_view.content_navigation_view = self.content_navigation_view
@@ -42,15 +41,35 @@ class SnapshotCreateView(Gtk.Box):
         self.wizard_view.set_installation(self.installation_in_progress)
 
     @Gtk.Template.Callback()
+    def is_item_selectable(self, sender, item) -> bool:
+        return all(item.get_app_install(app) is not None for app in self.apps_requirements)
+
+    @Gtk.Template.Callback()
+    def is_item_usable(self, sender, item) -> bool:
+        return not item.is_reserved
+
+    @Gtk.Template.Callback()
+    def setup_items_monitoring(self, sender, items):
+        for item in items:
+            item.event_bus.subscribe(
+                ToolsetEvents.IS_RESERVED_CHANGED,
+                self.toolset_selection_view.refresh_items_state
+            )
+
+    @Gtk.Template.Callback()
     def is_page_ready_to_continue(self, sender, page) -> bool:
         match page:
             case self.config_page:
-                return self.toolset_selection_view.selected_toolset is not None and not self.toolset_selection_view.selected_toolset.is_reserved
+                return (
+                    self.toolset_selection_view.selected_item is not None
+                    and self.is_item_usable(self.toolset_selection_view, self.toolset_selection_view.selected_item)
+                    and self.is_item_selectable(self.toolset_selection_view, self.toolset_selection_view.selected_item)
+                )
         return True
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
-        RootHelperClient.shared().authorize_and_run(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper, selected_toolset=self.toolset_selection_view.selected_toolset))
+        RootHelperClient.shared().authorize_and_run(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper, selected_toolset=self.toolset_selection_view.selected_item))
 
     def _start_installation(self, authorization_keeper: AuthorizationKeeper, selected_toolset: Toolset | None = None, selected_file: Gio.File | None = None):
         if not authorization_keeper:

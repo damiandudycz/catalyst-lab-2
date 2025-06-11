@@ -95,15 +95,13 @@ catalystlab_sources = [
   'ui/project_create/project_create_view.py',
   'ui/project_details/project_details_view.py',
   'ui/releng_create/releng_create_view.py',
-  'ui/releng_select/releng_select_view.py',
   'ui/repository_list/repository_list_view.py',
   'ui/root_command_output/root_command_output_view.py',
   'ui/snapshot_create/snapshot_create_view.py',
   'ui/snapshot_details/snapshot_details_view.py',
   'ui/toolset_create/toolset_create_view.py',
   'ui/toolset_details/toolset_details_view.py',
-  'ui/toolset_select/toolset_select_view.py',
-  'ui/snapshot_select/snapshot_select_view.py',
+  'ui/item_select/item_select_view.py',
   'ui/wizard/wizard_view.py',
 ]
 
