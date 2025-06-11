@@ -35,12 +35,13 @@ class OverlayCreateView(Gtk.Box):
     wizard_view = Gtk.Template.Child()
     # Setup view elements:
     config_page = Gtk.Template.Child()
+    config_view = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: OverlayInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
-        self.config_page.event_bus.subscribe(
+        self.config_view.event_bus.subscribe(
             GitDirectoryCreateConfigViewEvent.CONFIGURATION_READY_CHANGED,
             self.config_ready_changed
         )
@@ -58,12 +59,12 @@ class OverlayCreateView(Gtk.Box):
     def is_page_ready_to_continue(self, sender, page) -> bool:
         match page:
             case self.config_page:
-                return self.config_page.configuration_ready
+                return self.config_view.configuration_ready
         return True
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
-        self._start_installation(configuration=self.config_page.get_configuration(default_dir_content_builder=DefaultOverlayDirContentBuilder()))
+        self._start_installation(configuration=self.config_view.get_configuration(default_dir_content_builder=DefaultOverlayDirContentBuilder()))
 
     def _start_installation(self, configuration: GitDirectorySetupConfiguration):
         installation_in_progress = OverlayInstallation(configuration=configuration)

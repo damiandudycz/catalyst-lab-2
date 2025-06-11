@@ -23,6 +23,10 @@ class RelengSection(Gtk.Box):
             update_class=RelengUpdate
         )
         view.content_navigation_view = self.content_navigation_view
+        view.set_margin_start(24)
+        view.set_margin_end(24)
+        view.set_margin_top(24)
+        view.set_margin_bottom(24)
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scrolled_window.set_hexpand(True)

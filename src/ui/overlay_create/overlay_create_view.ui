@@ -20,10 +20,22 @@
 
         <!-- Page 1: Config screen -->
         <child>
-          <object class="GitDirectoryCreateConfigView" id="config_page">
-            <property name="manager_class_name">OverlayManager</property>
-            <property name="available_sources">GIT_REPOSITORY,LOCAL_DIRECTORY,CREATE_NEW</property>
-            <property name="default_directory_name">Overlay</property>
+          <object class="GtkScrolledWindow" id="config_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GitDirectoryCreateConfigView" id="config_view">
+                <property name="manager_class_name">OverlayManager</property>
+                <property name="available_sources">GIT_REPOSITORY,LOCAL_DIRECTORY,CREATE_NEW</property>
+                <property name="default_directory_name">Overlay</property>
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+              </object>
+            </child>
           </object>
         </child>
 

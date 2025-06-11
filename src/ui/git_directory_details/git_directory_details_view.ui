@@ -9,10 +9,6 @@
   <template class="GitDirectoryDetailsView" parent="GtkBox">
     <property name="orientation">vertical</property>
     <property name="spacing">24</property>
-    <property name="margin-start">24</property>
-    <property name="margin-end">24</property>
-    <property name="margin-top">24</property>
-    <property name="margin-bottom">24</property>
     <child>
       <object class="AdwPreferencesGroup">
         <property name="title">Basic information</property>

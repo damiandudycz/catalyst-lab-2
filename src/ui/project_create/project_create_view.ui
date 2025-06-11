@@ -20,25 +20,45 @@
 
         <!-- Page 1: Config screen -->
         <child>
-          <object class="GitDirectoryCreateConfigView" id="config_page">
-            <property name="manager_class_name">ProjectManager</property>
-            <property name="available_sources">CREATE_NEW,GIT_REPOSITORY</property>
-            <property name="default_directory_name">Project</property>
+          <object class="GtkScrolledWindow" id="config_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GitDirectoryCreateConfigView" id="config_view">
+                <property name="manager_class_name">ProjectManager</property>
+                <property name="available_sources">CREATE_NEW,GIT_REPOSITORY</property>
+                <property name="default_directory_name">Project</property>
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+              </object>
+            </child>
           </object>
         </child>
 
         <!-- Page 2: Toolset screen -->
         <child>
-          <object class="GtkBox" id="toolset_page">
-            <property name="margin-start">24</property>
-            <property name="margin-end">24</property>
-            <property name="margin-top">4</property>
-            <property name="margin-bottom">4</property>
-            <property name="orientation">vertical</property>
-            <property name="spacing">12</property>
+          <object class="GtkScrolledWindow" id="toolset_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
             <child>
-              <object class="ToolsetSelectionView" id="toolset_selection_view">
-                <property name="required-apps">CATALYST</property>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="ToolsetSelectionView" id="toolset_selection_view">
+                    <property name="required-apps">CATALYST</property>
+                  </object>
+                </child>
               </object>
             </child>
           </object>
@@ -46,15 +66,23 @@
 
         <!-- Page 3: Releng screen -->
         <child>
-          <object class="GtkBox" id="releng_page">
-            <property name="margin-start">24</property>
-            <property name="margin-end">24</property>
-            <property name="margin-top">4</property>
-            <property name="margin-bottom">4</property>
-            <property name="orientation">vertical</property>
-            <property name="spacing">12</property>
+          <object class="GtkScrolledWindow" id="releng_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
             <child>
-              <object class="RelengSelectionView" id="releng_selection_view">
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="RelengSelectionView" id="releng_selection_view">
+                  </object>
+                </child>
               </object>
             </child>
           </object>
@@ -62,15 +90,23 @@
 
         <!-- Page 4: Snapshot screen -->
         <child>
-          <object class="GtkBox" id="snapshot_page">
-            <property name="margin-start">24</property>
-            <property name="margin-end">24</property>
-            <property name="margin-top">4</property>
-            <property name="margin-bottom">4</property>
-            <property name="orientation">vertical</property>
-            <property name="spacing">12</property>
+          <object class="GtkScrolledWindow" id="snapshot_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
             <child>
-              <object class="SnapshotSelectionView" id="snapshot_selection_view">
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="SnapshotSelectionView" id="snapshot_selection_view">
+                  </object>
+                </child>
               </object>
             </child>
           </object>

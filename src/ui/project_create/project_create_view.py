@@ -26,6 +26,7 @@ class ProjectCreateView(Gtk.Box):
     toolset_page = Gtk.Template.Child()
     releng_page = Gtk.Template.Child()
     snapshot_page = Gtk.Template.Child()
+    config_view = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
     releng_selection_view = Gtk.Template.Child()
     snapshot_selection_view = Gtk.Template.Child()
@@ -34,7 +35,7 @@ class ProjectCreateView(Gtk.Box):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
-        self.config_page.event_bus.subscribe(
+        self.config_view.event_bus.subscribe(
             GitDirectoryCreateConfigViewEvent.CONFIGURATION_READY_CHANGED,
             self.config_ready_changed
         )
@@ -73,7 +74,7 @@ class ProjectCreateView(Gtk.Box):
     def is_page_ready_to_continue(self, sender, page) -> bool:
         match page:
             case self.config_page:
-                return self.config_page.configuration_ready
+                return self.config_view.configuration_ready
             case self.toolset_page:
                 return not (self.toolset_selection_view.selected_toolset is None or self.toolset_selection_view.selected_toolset.is_reserved)
             case self.releng_page:
@@ -84,7 +85,7 @@ class ProjectCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
-        self._start_installation(configuration=self.config_page.get_configuration(default_dir_content_builder=DefaultProjectDirContentBuilder()))
+        self._start_installation(configuration=self.config_view.get_configuration(default_dir_content_builder=DefaultProjectDirContentBuilder()))
 
     def _start_installation(self, configuration: GitDirectorySetupConfiguration):
         installation_in_progress = ProjectInstallation(configuration=configuration)

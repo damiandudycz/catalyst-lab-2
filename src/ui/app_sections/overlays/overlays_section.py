@@ -22,6 +22,10 @@ class OverlaysSection(Gtk.Box):
             manager_class=OverlayManager,
             update_class=OverlayUpdate
         )
+        view.set_margin_start(24)
+        view.set_margin_end(24)
+        view.set_margin_top(24)
+        view.set_margin_bottom(24)
         view.content_navigation_view = self.content_navigation_view
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
