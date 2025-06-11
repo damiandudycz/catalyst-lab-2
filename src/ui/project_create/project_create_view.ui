@@ -10,188 +10,57 @@
 
     <!-- Setup view -->
     <child>
-      <object class="GtkBox" id="setup_view">
-        <property name="orientation">vertical</property>
+      <object class="WizardView" id="wizard_view">
+        <signal name="is-page-ready-to-continue" handler="is_page_ready_to_continue"/>
+        <signal name="begin-installation" handler="begin_installation"/>
+        <property name="show_welcome_screen">True</property>
+        <property name="welcome_screen_icon_name">notes-minimalistic-svgrepo-com-symbolic</property>
+        <property name="welcome_screen_title">Create Project</property>
+        <property name="welcome_screen_description">bla bla bla</property>
 
+        <!-- Page 1: Config screen -->
         <child>
-          <object class="AdwCarousel" id="carousel">
-            <property name="vexpand">True</property>
-
-            <!-- Page 1: Welcome screen -->
-            <child>
-              <object class="GtkScrolledWindow" id="welcome_page">
-                <property name="hscrollbar-policy">never</property>
-                <property name="vscrollbar-policy">automatic</property>
-                <property name="hexpand">True</property>
-                <property name="vexpand">True</property>
-                <child>
-                  <object class="GtkBox">
-                    <property name="orientation">vertical</property>
-                    <property name="spacing">24</property>
-                    <property name="valign">center</property>
-                    <property name="vexpand">True</property>
-                    <property name="hexpand">True</property>
-                    <property name="margin-start">24</property>
-                    <property name="margin-end">24</property>
-                    <child>
-                      <object class="GtkImage">
-                        <property name="icon-name">notes-minimalistic-svgrepo-com-symbolic</property>
-                        <property name="pixel-size">128</property>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="label">Create new Project</property>
-                        <property name="halign">center</property>
-                        <property name="wrap">True</property>
-                        <style>
-                          <class name="title-1"/>
-                        </style>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="label">This wizard will help you prepare new Portage snapshot. It will use one of available toolsets to get the newest snapshot available.</property>
-                        <property name="halign">center</property>
-                        <property name="wrap">True</property>
-                        <property name="justify">fill</property>
-                        <attributes>
-                          <attribute name="foreground" value="grey"/>
-                        </attributes>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkBox">
-                        <property name="orientation">vertical</property>
-                        <property name="halign">center</property>
-                        <property name="width-request">300</property>
-                        <child>
-                          <object class="GtkListBox">
-                            <property name="selection-mode">none</property>
-                            <style>
-                              <class name="boxed-list"/>
-                            </style>
-                            <child>
-                              <object class="AdwButtonRow">
-                                <property name="title">Configure Project</property>
-                                <property name="activatable">True</property>
-                                <signal name="activated" handler="on_start_row_activated"/>
-                                <style>
-                                  <class name="suggested-action"/>
-                                </style>
-                              </object>
-                            </child>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
-
-            <!-- Page 2: Config screen -->
-            <child>
-              <object class="GitDirectoryCreateConfigView" id="config_page">
-                <property name="manager_class_name">ProjectManager</property>
-                <property name="available_sources">CREATE_NEW,GIT_REPOSITORY</property>
-                <property name="default_directory_name">Project</property>
-              </object>
-            </child>
-
-            <!-- Page 3: Toolset screen -->
-            <child>
-              <object class="GtkBox" id="toolset_page">
-                <property name="margin-start">24</property>
-                <property name="margin-end">24</property>
-                <property name="margin-top">4</property>
-                <property name="margin-bottom">4</property>
-                <property name="orientation">vertical</property>
-                <property name="spacing">12</property>
-                <child>
-                  <object class="ToolsetSelectionView" id="toolset_selection_view">
-                    <property name="required-apps">CATALYST</property>
-                  </object>
-                </child>
-              </object>
-            </child>
-
-            <!-- Page 4: Releng screen -->
-            <child>
-              <object class="GtkBox" id="releng_page">
-                <property name="margin-start">24</property>
-                <property name="margin-end">24</property>
-                <property name="margin-top">4</property>
-                <property name="margin-bottom">4</property>
-                <property name="orientation">vertical</property>
-                <property name="spacing">12</property>
-                <child>
-                  <object class="RelengSelectionView" id="releng_selection_view">
-                  </object>
-                </child>
-              </object>
-            </child>
-
+          <object class="GitDirectoryCreateConfigView" id="config_page">
+            <property name="manager_class_name">ProjectManager</property>
+            <property name="available_sources">CREATE_NEW,GIT_REPOSITORY</property>
+            <property name="default_directory_name">Project</property>
           </object>
         </child>
 
-        <!-- Bottom panel -->
+        <!-- Page 2: Toolset screen -->
         <child>
-          <object class="GtkBox">
-            <property name="homogeneous">True</property>
-            <property name="hexpand">True</property>
+          <object class="GtkBox" id="toolset_page">
             <property name="margin-start">24</property>
             <property name="margin-end">24</property>
-            <property name="margin-top">12</property>
-            <property name="margin-bottom">12</property>
-            <!-- Back button -->
+            <property name="margin-top">4</property>
+            <property name="margin-bottom">4</property>
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
             <child>
-              <object class="GtkBox">
-                <property name="halign">start</property>
-                <child>
-                  <object class="GtkButton" id="back_button">
-                    <property name="label">Back</property>
-                    <property name="sensitive">False</property>
-                    <property name="opacity">0.0</property>
-                    <signal name="clicked" handler="on_back_pressed"/>
-                    <style>
-                      <class name="flat"/>
-                    </style>
-                  </object>
-                </child>
-              </object>
-            </child>
-            <!-- Carousel (Centered in Grid) -->
-            <child>
-              <object class="AdwCarouselIndicatorDots">
-                <property name="carousel">carousel</property>
-              </object>
-            </child>
-            <!-- Next button -->
-            <child>
-              <object class="GtkBox">
-                <property name="halign">end</property>
-                <child>
-                  <object class="GtkButton" id="next_button">
-                    <property name="label">Create project</property>
-                    <property name="sensitive">False</property>
-                    <property name="opacity">0.0</property>
-                    <signal name="clicked" handler="on_next_pressed"/>
-                    <style>
-                      <class name="suggested-action"/>
-                    </style>
-                  </object>
-                </child>
+              <object class="ToolsetSelectionView" id="toolset_selection_view">
+                <property name="required-apps">CATALYST</property>
               </object>
             </child>
           </object>
         </child>
-      </object>
-    </child>
 
-    <!-- Install view -->
-    <child>
-      <object class="MultistageProcessExecutionView" id="install_view"/>
+        <!-- Page 3: Releng screen -->
+        <child>
+          <object class="GtkBox" id="releng_page">
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="margin-top">4</property>
+            <property name="margin-bottom">4</property>
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <child>
+              <object class="RelengSelectionView" id="releng_selection_view">
+              </object>
+            </child>
+          </object>
+        </child>
+
+      </object>
     </child>
 
   </template>

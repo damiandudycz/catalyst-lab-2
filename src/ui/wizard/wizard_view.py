@@ -36,7 +36,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         # Bottom bar:
         self._setup_bottom_bar()
         self.setup_view.append(self.bottom_bar)
-        # Welcome page: # TODO
+        # Welcome page:
         self.welcome_page: Gtk.Widget = None
         # State:
         self.current_page = 0

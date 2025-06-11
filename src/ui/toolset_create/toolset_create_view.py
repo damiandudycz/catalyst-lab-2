@@ -12,17 +12,15 @@ from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .multistage_process import MultiStageProcessState
 from .toolset_installation import ToolsetInstallation
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
+from .wizard_view import WizardView
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_create/toolset_create_view.ui')
 class ToolsetCreateView(Gtk.Box):
     __gtype_name__ = "ToolsetCreateView"
 
     # Main views:
-    setup_view = Gtk.Template.Child()
-    install_view = Gtk.Template.Child()
+    wizard_view = Gtk.Template.Child()
     # Setup view elements:
-    carousel = Gtk.Template.Child()
-    welcome_page = Gtk.Template.Child()
     configuration_page = Gtk.Template.Child()
     tools_page = Gtk.Template.Child()
     stages_list = Gtk.Template.Child()
@@ -30,8 +28,6 @@ class ToolsetCreateView(Gtk.Box):
     allow_binpkgs_checkbox = Gtk.Template.Child()
     environment_name_row = Gtk.Template.Child()
     name_used_label = Gtk.Template.Child()
-    back_button = Gtk.Template.Child()
-    next_button = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: ToolsetInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -41,58 +37,32 @@ class ToolsetCreateView(Gtk.Box):
         self.selected_stage: ParseResult | None = None
         self.architecture = Architecture.HOST
         self.allow_binpkgs = True
-        self.current_page = 0
-        self.carousel.connect('page-changed', self.on_page_changed)
         self.tools_selection: Dict[ToolsetApplication, bool] = {app: not app.auto_select for app in ToolsetApplication.ALL}
         self.tools_selection_versions: Dict[ToolsetApplication, ToolsetApplicationSelection] = {app: app.versions[0] for app in ToolsetApplication.ALL}
         self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile]] = {app: [] for app in ToolsetApplication.ALL}
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
-        self._set_current_stage(self.installation_in_progress.status if self.installation_in_progress else MultiStageProcessState.SETUP)
-        self.install_view.set_multistage_process(self.installation_in_progress)
         if installation_in_progress is None or installation_in_progress.status == MultiStageProcessState.SETUP:
             ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
         self.connect("realize", self.on_realize)
 
     def on_realize(self, widget):
-        self.install_view.content_navigation_view = self.content_navigation_view
-        self.install_view._window = self._window
-
-    def on_page_changed(self, carousel, pspec):
-        self.current_page = int(carousel.get_position())
-        self.setup_back_next_buttons()
-
-    def setup_back_next_buttons(self):
-        is_first_page = self.current_page == 0
-        is_second_page = self.current_page == 1
-        is_last_page = self.current_page == 2
-        is_stage_selected = self.selected_stage is not None
-        is_filename_free = self.filename_is_free
-        if is_first_page:
-            allow_continue = True
-        elif is_second_page:
-            allow_continue = is_stage_selected
-        elif is_last_page:
-            allow_continue = is_filename_free
-        self.back_button.set_sensitive(not is_first_page)
-        self.back_button.set_opacity(0.0 if is_first_page else 1.0)
-        self.next_button.set_sensitive(allow_continue)
-        self.next_button.set_opacity(0.0 if is_first_page else 1.0)
-        self.next_button.set_label("Create toolset" if is_last_page else "Next")
+        self.wizard_view.content_navigation_view = self.content_navigation_view
+        self.wizard_view._window = self._window
+        self.wizard_view.set_installation(self.installation_in_progress)
 
     @Gtk.Template.Callback()
-    def on_back_pressed(self, _):
-        is_first_page = self.current_page == 0
-        if not is_first_page:
-            self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page - 1), True)
+    def is_page_ready_to_continue(self, sender, page) -> bool:
+        match page:
+            case self.configuration_page:
+                return self.selected_stage is not None
+            case self.tools_page:
+                return self.filename_is_free
+        return True
 
     @Gtk.Template.Callback()
-    def on_next_pressed(self, _):
-        is_last_page = self.current_page == 2
-        if not is_last_page:
-            self.carousel.scroll_to(self.carousel.get_nth_page(self.current_page + 1), True)
-        else:
-            RootHelperClient.shared().authorize_and_run(callback=self._start_installation)
+    def begin_installation(self, view):
+        RootHelperClient.shared().authorize_and_run(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper))
 
     @Gtk.Template.Callback()
     def on_allow_binpkgs_toggled(self, checkbox):
@@ -110,19 +80,14 @@ class ToolsetCreateView(Gtk.Box):
             )
             for app, _ in self.tools_selection.items()
         ]
-        self.installation_in_progress = ToolsetInstallation(
+        installation_in_progress = ToolsetInstallation(
             alias=self.environment_name_row.get_text(),
             stage_url=self.selected_stage,
             allow_binpkgs=self.allow_binpkgs,
             apps_selection=apps_selection
         )
-        self.installation_in_progress.start(authorization_keeper=authorization_keeper)
-        self.install_view.set_multistage_process(self.installation_in_progress)
-        self._set_current_stage(self.installation_in_progress.status)
-
-    @Gtk.Template.Callback()
-    def on_start_row_activated(self, _):
-        self.carousel.scroll_to(self.configuration_page, True)
+        installation_in_progress.start()
+        self.wizard_view.set_installation(installation_in_progress)
 
     def _update_stages_result(self, result: list[ParseResult] | Exception):
         self.selected_stage = None
@@ -182,12 +147,12 @@ class ToolsetCreateView(Gtk.Box):
             # Deselect if unchecked
             if self.selected_stage == stage:
                 self.selected_stage = None
-        self.setup_back_next_buttons()
+        self.wizard_view._refresh_buttons_state()
 
     def _on_tool_selected(self, button: Gtk.CheckButton, app: ToolsetApplication, row: Adw.ExpanderRow):
         """Callback for when a row's checkbox is toggled."""
         self.tools_selection[app] = button.get_active()
-        self.setup_back_next_buttons()
+        self.wizard_view._refresh_buttons_state()
         self._update_dependencies()
         row.set_enable_expansion(self.tools_selection[app])
         row.set_expanded(False)
@@ -328,11 +293,6 @@ class ToolsetCreateView(Gtk.Box):
                 row.set_expanded(False)
             self.tools_rows[app].check_button.set_sensitive(is_sensitive)
 
-    def _set_current_stage(self, stage: MultiStageProcessState):
-        # Setup views visibility:
-        self.setup_view.set_visible(stage == MultiStageProcessState.SETUP)
-        self.install_view.set_visible(stage != MultiStageProcessState.SETUP)
-
     @Gtk.Template.Callback()
     def on_environment_name_activate(self, sender):
         self.check_filename_is_free()
@@ -345,7 +305,7 @@ class ToolsetCreateView(Gtk.Box):
     def check_filename_is_free(self) -> bool:
         self.filename_is_free = ToolsetManager.shared().is_name_available(name=self.environment_name_row.get_text())
         self.name_used_label.set_visible(not self.filename_is_free)
-        self.setup_back_next_buttons()
+        self.wizard_view._refresh_buttons_state()
         return self.filename_is_free
 
     def default_name(self) -> str:
