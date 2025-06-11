@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+
+  <!-- Libraries -->
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
+  <template class="ProjectDetailsView" parent="GtkBox">
+
+    <!-- Project details view -->
+    <child>
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">automatic</property>
+        <property name="vscrollbar-policy">automatic</property>
+        <property name="hexpand">True</property>
+        <property name="vexpand">True</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">24</property>
+            <child>
+              <object class="GitDirectoryDetailsView" id="directory_details_view">
+                <property name="manager_class_name">ProjectManager</property>
+                <property name="update_class_name">ProjectUpdate</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+
+  </template>
+</interface>
+

@@ -93,6 +93,7 @@ catalystlab_sources = [
   'ui/multistage_process_execution_view/multistage_process_execution_view.py',
   'ui/overlay_create/overlay_create_view.py',
   'ui/project_create/project_create_view.py',
+  'ui/project_details/project_details_view.py',
   'ui/releng_create/releng_create_view.py',
   'ui/releng_select/releng_select_view.py',
   'ui/repository_list/repository_list_view.py',

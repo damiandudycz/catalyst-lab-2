@@ -5,6 +5,7 @@ from .project_manager import ProjectManager
 from .project_update import ProjectUpdate
 from .app_events import app_event_bus, AppEvents
 from .git_directory_details_view import GitDirectoryDetailsView
+from .project_details_view import ProjectDetailsView
 
 @app_section(title="Projects", icon="notes-minimalistic-svgrepo-com-symbolic", order=6_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/projects/projects_section.ui')
@@ -17,19 +18,20 @@ class ProjectsSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_item_row_pressed(self, sender, item):
-        view = GitDirectoryDetailsView(
-            git_directory=item,
-            manager_class=ProjectManager,
-            update_class=ProjectUpdate
-        )
-        view.content_navigation_view = self.content_navigation_view
-        scrolled_window = Gtk.ScrolledWindow()
-        scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scrolled_window.set_hexpand(True)
-        scrolled_window.set_vexpand(True)
-        scrolled_window.set_child(view)
+        view = ProjectDetailsView(project_directory=item, content_navigation_view=self.content_navigation_view)
+        #view = GitDirectoryDetailsView(
+        #    git_directory=item,
+        #    manager_class=ProjectManager,
+        #    update_class=ProjectUpdate
+        #)
+        #view.content_navigation_view = self.content_navigation_view
+        #scrolled_window = Gtk.ScrolledWindow()
+        #scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        #scrolled_window.set_hexpand(True)
+        #scrolled_window.set_vexpand(True)
+        #scrolled_window.set_child(view)
         self.content_navigation_view.push_view(
-            scrolled_window,
+            view,
             title="Project details"
         )
 
