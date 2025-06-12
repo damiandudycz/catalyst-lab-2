@@ -17,6 +17,7 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] In bugs allow linking to bugzilla issues
 - [x] bwrap: Unknown option --overlay-src in Fedora
 - [ ] Create system checks for host required components - bwrap (including capabilities / version), pkexec etc
+- [ ] When restoring things from Repository it should try to also restore IDs, but only if these are free. Otherwise generate new IDs
 
 ### Toolsets.
 - [x] Block environment calls on single env to one command at a time.
@@ -52,7 +53,7 @@ efficiently without requiring in-depth knowledge of the underlying components.
 ### Releng.
 - [ ] GIT commands migh require setting user details and accepting github certificate.
 - [ ] Add view to set commit message, and show changed files
-- [ ] Add possibility to clone isung git@, fork branch and to push changes
+- [ ] Add possibility to clone using git@, fork branch and to push changes
 
 ### Git directories.
 - [ ] Add installation stage for checking if created GIT directory is correct for given type - eg. contains struct for overlay, releng etc.

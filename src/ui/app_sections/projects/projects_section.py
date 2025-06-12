@@ -19,21 +19,7 @@ class ProjectsSection(Gtk.Box):
     @Gtk.Template.Callback()
     def on_item_row_pressed(self, sender, item):
         view = ProjectDetailsView(project_directory=item, content_navigation_view=self.content_navigation_view)
-        #view = GitDirectoryDetailsView(
-        #    git_directory=item,
-        #    manager_class=ProjectManager,
-        #    update_class=ProjectUpdate
-        #)
-        #view.content_navigation_view = self.content_navigation_view
-        #scrolled_window = Gtk.ScrolledWindow()
-        #scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        #scrolled_window.set_hexpand(True)
-        #scrolled_window.set_vexpand(True)
-        #scrolled_window.set_child(view)
-        self.content_navigation_view.push_view(
-            view,
-            title="Project details"
-        )
+        self.content_navigation_view.push_view(view, title=item.name)
 
     @Gtk.Template.Callback()
     def on_installation_row_pressed(self, sender, installation):

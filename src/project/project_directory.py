@@ -1,5 +1,6 @@
 from typing import final
 from .git_directory import GitDirectory
+from .repository import Serializable
 
 @final
 class ProjectDirectory(GitDirectory):
@@ -13,4 +14,9 @@ class ProjectDirectory(GitDirectory):
                 Repository.Settings.value.project_location
             )
         )
+
+    # TODO: Complete this functionality and also create metadata structure
+    def parse_metadata(self, dict: dict) -> Serializable:
+        """Overwrite in subclasses that use metadata"""
+        return None
 

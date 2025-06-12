@@ -10,7 +10,6 @@
     <child>
       <object class="AdwPreferencesGroup" id="items_list">
         <property name="title">Select entry</property>
-        <property name="description">Select entry to use.</property>
       </object>
     </child>
 

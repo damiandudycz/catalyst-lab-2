@@ -13,7 +13,9 @@ import os
 
 class DefaultProjectDirContentBuilder(DefaultDirContentBuilder):
     def build_in(self, path: str, repo_name: str):
-        pass
+        structure = ['stages', 'config']
+        for folder in structure:
+            os.makedirs(os.path.join(path, folder), exist_ok=True)
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project_create/project_create_view.ui')
 class ProjectCreateView(Gtk.Box):
@@ -22,13 +24,13 @@ class ProjectCreateView(Gtk.Box):
     # Main views:
     wizard_view = Gtk.Template.Child()
     # Setup view elements:
-    config_page = Gtk.Template.Child()
+    source_page = Gtk.Template.Child()
+    source_view = Gtk.Template.Child()
     toolset_page = Gtk.Template.Child()
-    releng_page = Gtk.Template.Child()
-    snapshot_page = Gtk.Template.Child()
-    config_view = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
+    releng_page = Gtk.Template.Child()
     releng_selection_view = Gtk.Template.Child()
+    snapshot_page = Gtk.Template.Child()
     snapshot_selection_view = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: ProjectInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
@@ -36,7 +38,7 @@ class ProjectCreateView(Gtk.Box):
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
         self.apps_requirements = [ToolsetApplication.CATALYST]
-        self.config_view.event_bus.subscribe(
+        self.source_view.event_bus.subscribe(
             GitDirectoryCreateConfigViewEvent.CONFIGURATION_READY_CHANGED,
             self.config_ready_changed
         )
@@ -111,8 +113,8 @@ class ProjectCreateView(Gtk.Box):
     @Gtk.Template.Callback()
     def is_page_ready_to_continue(self, sender, page) -> bool:
         match page:
-            case self.config_page:
-                return self.config_view.configuration_ready
+            case self.source_page:
+                return self.source_view.configuration_ready
             case self.toolset_page:
                 return (
                     self.toolset_selection_view.selected_item is not None
@@ -127,10 +129,26 @@ class ProjectCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
-        self._start_installation(configuration=self.config_view.get_configuration(default_dir_content_builder=DefaultProjectDirContentBuilder()))
+        self._start_installation(
+            source_config=self.source_view.get_configuration(default_dir_content_builder=DefaultProjectDirContentBuilder()),
+            toolset=self.toolset_selection_view.selected_item,
+            releng_directory=self.releng_selection_view.selected_item,
+            snapshot=self.snapshot_selection_view.selected_item
+        )
 
-    def _start_installation(self, configuration: GitDirectorySetupConfiguration):
-        installation_in_progress = ProjectInstallation(configuration=configuration)
+    def _start_installation(
+        self,
+        source_config: GitDirectorySetupConfiguration,
+        toolset: Toolset,
+        releng_directory: RelengDirectory,
+        snapshot: Snapshot
+    ):
+        installation_in_progress = ProjectInstallation(
+            source_config=source_config,
+            toolset=toolset,
+            releng_directory=releng_directory,
+            snapshot=snapshot
+        )
         installation_in_progress.start()
         self.wizard_view.set_installation(installation_in_progress)
 

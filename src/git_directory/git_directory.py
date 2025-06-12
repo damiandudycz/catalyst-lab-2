@@ -32,7 +32,8 @@ class GitDirectory(Serializable, ABC):
         branch_name: str | None = None,
         last_commit_date: datetime | None = None,
         remote_url: str | None = None,
-        has_remote_changes: bool = False
+        has_remote_changes: bool = False,
+        metadata: Serializable | None = None
     ):
         self.name = name
         self.id = id or uuid.uuid4()
@@ -41,6 +42,7 @@ class GitDirectory(Serializable, ABC):
         self.branch_name = branch_name
         self.remote_url = remote_url
         self.has_remote_changes = has_remote_changes
+        self.metadata = metadata
         self.logs: list[dict] = []
         self.event_bus = EventBus[GitDirectoryEvent]()
 
@@ -72,6 +74,10 @@ class GitDirectory(Serializable, ABC):
                     blinking=False
                 )
 
+    def parse_metadata(self, dict: dict) -> Serializable:
+        """Overwrite in subclasses that use metadata"""
+        return None
+
     def serialize(self) -> dict:
         return {
             "name": self.name,
@@ -79,8 +85,10 @@ class GitDirectory(Serializable, ABC):
             "last_commit_date": self.last_commit_date.isoformat() if self.last_commit_date else None,
             "remote_url": self.remote_url,
             "branch_name": self.branch_name,
-            "has_remote_changes": self.has_remote_changes
+            "has_remote_changes": self.has_remote_changes,
+            "metadata": self.metadata.serialize() if self.metadata else None
         }
+
     @classmethod
     def init_from(cls, data: dict) -> Self:
         try:
@@ -93,6 +101,10 @@ class GitDirectory(Serializable, ABC):
             remote_url = data.get("remote_url")
             branch_name = data.get("branch_name")
             has_remote_changes = data.get("has_remote_changes")
+            metadata = (
+                self.parse_metadata(dict=data.get("metadata"))
+                if data.get("metadata") else None
+            )
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         return cls(
