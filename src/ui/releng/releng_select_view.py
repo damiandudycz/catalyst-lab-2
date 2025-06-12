@@ -9,7 +9,7 @@ from .event_bus import EventBus
 class RelengSelectionViewEvent(Enum):
     SELECTION_CHANGED = auto() # Means selection was changed
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_select/releng_select_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng/releng_select_view.ui')
 class RelengSelectionView(Gtk.Box):
     __gtype_name__ = "RelengSelectionView"
 

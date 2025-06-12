@@ -11,7 +11,7 @@ from .repository_list_view import ItemRow
 from .item_select_view import ItemSelectionViewEvent
 from .wizard_view import WizardView
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot_create/snapshot_create_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot/snapshot_create_view.ui')
 class SnapshotCreateView(Gtk.Box):
     __gtype_name__ = "SnapshotCreateView"
 

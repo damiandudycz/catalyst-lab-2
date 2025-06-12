@@ -8,7 +8,7 @@ from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
 import threading
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project_details/project_details_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_details_view.ui')
 class ProjectDetailsView(Gtk.Box):
     __gtype_name__ = "ProjectDetailsView"
 

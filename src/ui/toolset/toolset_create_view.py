@@ -14,7 +14,7 @@ from .toolset_installation import ToolsetInstallation
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
 from .wizard_view import WizardView
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_create/toolset_create_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset/toolset_create_view.ui')
 class ToolsetCreateView(Gtk.Box):
     __gtype_name__ = "ToolsetCreateView"
 

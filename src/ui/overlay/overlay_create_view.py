@@ -3,7 +3,7 @@ from gi.repository import Gtk, Adw
 from .multistage_process import MultiStageProcessState
 from .overlay_installation import OverlayInstallation
 from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent
-from .default_dir_content_builder import DefaultDirContentBuilder
+from .git_directory_default_content_builder import DefaultDirContentBuilder
 from .git_installation import GitDirectorySetupConfiguration
 from .wizard_view import WizardView
 import os
@@ -27,7 +27,7 @@ class DefaultOverlayDirContentBuilder(DefaultDirContentBuilder):
         with open(repo_name_path, 'w') as f:
             f.write(f"{repo_name}\n")
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/overlay_create/overlay_create_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/overlay/overlay_create_view.ui')
 class OverlayCreateView(Gtk.Box):
     __gtype_name__ = "OverlayCreateView"
 

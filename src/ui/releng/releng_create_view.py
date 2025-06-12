@@ -5,7 +5,7 @@ from .releng_installation import RelengInstallation
 from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent, GitDirectorySetupConfiguration, GitDirectorySource
 from .wizard_view import WizardView
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng_create/releng_create_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/releng/releng_create_view.ui')
 class RelengCreateView(Gtk.Box):
     __gtype_name__ = "RelengCreateView"
 

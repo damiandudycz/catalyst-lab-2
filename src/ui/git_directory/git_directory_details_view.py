@@ -16,7 +16,7 @@ from .overlay_update import OverlayUpdate
 from .project_manager import ProjectManager
 from .project_update import ProjectUpdate
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/git_directory_details/git_directory_details_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/git_directory/git_directory_details_view.ui')
 class GitDirectoryDetailsView(Gtk.Box):
     __gtype_name__ = "GitDirectoryDetailsView"
 

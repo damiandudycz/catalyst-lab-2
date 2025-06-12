@@ -11,7 +11,7 @@ from .multistage_process import (
     MultiStageProcessStageEvent
 )
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/multistage_process_execution_view/multistage_process_execution_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/components/multistage_process_execution_view/multistage_process_execution_view.ui')
 class MultistageProcessExecutionView(Gtk.Box):
     __gtype_name__ = 'MultistageProcessExecutionView'
 

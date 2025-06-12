@@ -3,7 +3,7 @@ from gi.repository import Gtk, GLib, Gio, Adw, GObject
 from enum import Enum, auto
 from .event_bus import EventBus
 from .git_installation import GitDirectorySetupConfiguration, GitDirectorySource
-from .default_dir_content_builder import DefaultDirContentBuilder
+from .git_directory_default_content_builder import DefaultDirContentBuilder
 
 # Import additional classed so that it can be parsed in repository_list_view:
 from .releng_manager import RelengManager
@@ -13,7 +13,7 @@ from .project_manager import ProjectManager
 class GitDirectoryCreateConfigViewEvent(Enum):
     CONFIGURATION_READY_CHANGED = auto()
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/git_directory_create/git_directory_create_config_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/git_directory/git_directory_create_config_view.ui')
 class GitDirectoryCreateConfigView(Gtk.Box):
     __gtype_name__ = "GitDirectoryCreateConfigView"
 

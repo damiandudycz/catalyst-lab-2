@@ -8,7 +8,7 @@ from .multistage_process import (
 )
 from .git_directory import GitDirectory
 from .git_manager import GitManager
-from .default_dir_content_builder import DefaultDirContentBuilder
+from .git_directory_default_content_builder import DefaultDirContentBuilder
 import subprocess, re, os, shutil
 
 # ------------------------------------------------------------------------------

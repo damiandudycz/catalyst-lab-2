@@ -8,7 +8,7 @@ from .event_bus import EventBus
 class ItemSelectionViewEvent(Enum):
     ITEM_CHANGED = auto() # Means selection was changed or currently selected state changed.
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/item_select/item_select_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/components/item_select/item_select_view.ui')
 class tools_list(Gtk.Box):
     __gtype_name__ = "ItemSelectionView"
 

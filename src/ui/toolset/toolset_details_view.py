@@ -12,7 +12,7 @@ from .multistage_process import MultiStageProcess, MultiStageProcessEvent, Multi
 from .multistage_process_execution_view import MultistageProcessExecutionView
 from .toolset_manager import ToolsetManager
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset_details/toolset_details_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset/toolset_details_view.ui')
 class ToolsetDetailsView(Gtk.Box):
     __gtype_name__ = "ToolsetDetailsView"
 

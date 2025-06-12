@@ -3,7 +3,7 @@ from gi.repository import Gtk, Adw
 from .multistage_process import MultiStageProcessState
 from .project_installation import ProjectInstallation
 from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent
-from .default_dir_content_builder import DefaultDirContentBuilder
+from .git_directory_default_content_builder import DefaultDirContentBuilder
 from .git_installation import GitDirectorySetupConfiguration
 from .toolset_application import ToolsetApplication
 from .toolset import ToolsetEvents
@@ -17,7 +17,7 @@ class DefaultProjectDirContentBuilder(DefaultDirContentBuilder):
         for folder in structure:
             os.makedirs(os.path.join(path, folder), exist_ok=True)
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project_create/project_create_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_create_view.ui')
 class ProjectCreateView(Gtk.Box):
     __gtype_name__ = "ProjectCreateView"
 

@@ -3,7 +3,7 @@ from .snapshot_manager import SnapshotManager
 from .snapshot import Snapshot
 import threading
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot_details/snapshot_details_view.ui')
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/snapshot/snapshot_details_view.ui')
 class SnapshotDetailsView(Gtk.Box):
     __gtype_name__ = "SnapshotDetailsView"
 
