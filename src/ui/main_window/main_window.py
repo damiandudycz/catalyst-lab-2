@@ -29,21 +29,26 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         # Connect sidebar_toggle_breakpoint actions
         self.sidebar_toggle_breakpoint.connect("apply", self._on_sidebar_toggle_breakpoint_apply)
         self.sidebar_toggle_breakpoint.connect("unapply", self._on_sidebar_toggle_breakpoint_unapply)
+        # Observe AppEvents.TOGGLE_SIDEBAR
+        app_event_bus.subscribe(AppEvents.TOGGLE_SIDEBAR, self.toggle_sidebar)
+
+    def toggle_sidebar(self, _ = None):
+        if self.allow_side_menu:
+            self.split_view.set_show_sidebar(not self.split_view.get_show_sidebar())
 
     # Toggle sidebar visibility with button.
     @Gtk.Template.Callback()
     def sidebar_toggle_button_clicked(self, window_content, button):
         """Callback function that is called when we click the button"""
-        if self.allow_side_menu:
-            self.split_view.set_show_sidebar(not self.split_view.get_show_sidebar())
+        self.toggle_sidebar()
 
     # Managing side bar and toggle side bar button visibility for selected section and collapsed state:
 
     def opened_app_section(self, section: AppSection):
-        self.content_view.open_app_section(section)
         self.allow_side_menu = section.section_details.show_side_bar
         self.split_view.set_show_sidebar(self.allow_side_menu and not self.split_view.get_collapsed())
         self.content_view.sidebar_toggle_button_visible = self.allow_side_menu and ( self.split_view.get_collapsed() or CatalystlabWindow.allow_side_menu_toggle )
+        self.content_view.open_app_section(section)
         self.navigation_view.pop_to_tag("root")
 
     def _on_sidebar_toggle_breakpoint_apply(self, breakpoint):

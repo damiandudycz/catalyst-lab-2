@@ -23,6 +23,7 @@ class CatalystlabWindowContent(Gtk.Box):
     def open_app_section(self, section: AppSection):
         """Load content of selected main section."""
         navigation_view = Adw.NavigationView()
+        navigation_view.sidebar_toggle_button_visible = self.sidebar_toggle_button_visible
 
         section_view = section(content_navigation_view=navigation_view)
 
@@ -44,8 +45,8 @@ class CatalystlabWindowContent(Gtk.Box):
         self.sidebar_toggle_button.set_tooltip_text("Toggle sidebar")
         self.sidebar_toggle_button.set_visible(self.sidebar_toggle_button_visible)
         self.sidebar_toggle_button.connect("clicked", partial(self.emit, "toggle-sidebar"))
-        header.pack_start(self.sidebar_toggle_button)
 
+        header.pack_start(self.sidebar_toggle_button)
         self.replace_content(navigation_view)
 
     def replace_content(self, new_widget: Gtk.Widget):

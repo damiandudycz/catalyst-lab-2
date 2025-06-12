@@ -25,7 +25,7 @@ class WelcomeSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        self.content_navigation_view.push_section(AppSection.EnvironmentsSection, wizard_mode=True)
+        self.content_navigation_view.push_section(AppSection.EnvironmentsSection)
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
@@ -34,7 +34,7 @@ class WelcomeSection(Gtk.Box):
         Repository.Toolset.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.setup_sections_visibility)
 
     def setup_sections_visibility(self, _ = None):
-        initial_setup_done = True#Repository.Toolset.value
+        initial_setup_done = Repository.Toolset.value
         self.setup_environments_section.set_visible(not initial_setup_done)
         self.suggested_actions_section.set_visible(initial_setup_done)
 

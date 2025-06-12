@@ -2,6 +2,8 @@ from gi.repository import Gtk
 from gi.repository import Adw
 from .app_section import AppSection
 from .root_access_button import RootAccessButton
+from .app_events import AppEvents, app_event_bus
+from functools import partial
 
 def _push_section(self, section: AppSection, **kwargs):
     view = section(content_navigation_view=self, **kwargs)
@@ -25,6 +27,14 @@ def _push_view(self, view: Gtk.Widget, title: str):
     # Create a navigation page with title and child
     page = Adw.NavigationPage.new(toolbar_view, title)
     view._page = page # TODO: Check if this needs weakref
+    # Add sidebar toggle button to new presented view:
+    if hasattr(self, 'sidebar_toggle_button_visible'):
+        self.sidebar_toggle_button = Gtk.Button.new()
+        self.sidebar_toggle_button.set_icon_name("sidebar-show-symbolic")
+        self.sidebar_toggle_button.set_tooltip_text("Toggle sidebar")
+        self.sidebar_toggle_button.set_visible(self.sidebar_toggle_button_visible)
+        self.sidebar_toggle_button.connect("clicked", partial(app_event_bus.emit, AppEvents.TOGGLE_SIDEBAR))
+        header.pack_start(self.sidebar_toggle_button)
     self.push(page)
 
 Adw.NavigationView.push_section = _push_section
