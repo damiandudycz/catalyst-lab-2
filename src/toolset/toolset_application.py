@@ -38,7 +38,7 @@ class PortageConfig:
 @dataclass(frozen=True)
 class ToolsetApplicationVersion:
     name: str
-    id: uuid.uuid
+    id: uuid.UUID
     config: PortageConfig = field(default_factory=PortageConfig)
 
 ToolsetApplication.CATALYST = ToolsetApplication(

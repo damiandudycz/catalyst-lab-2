@@ -99,7 +99,6 @@ class ProjectCreateView(Gtk.Box):
     def setup_items_monitoring(self, sender, items):
         match sender:
             case self.toolset_selection_view:
-                print("Monitor Toolsets")
                 for item in items:
                     item.event_bus.subscribe(
                         ToolsetEvents.IS_RESERVED_CHANGED,

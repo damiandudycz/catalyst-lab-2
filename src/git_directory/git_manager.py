@@ -1,6 +1,6 @@
 import os, shutil
 from abc import ABC, abstractmethod
-from .releng_directory import GitDirectory
+from .git_directory import GitDirectory, GitDirectoryEvent
 from .repository import Repository
 
 class GitManager(ABC):
@@ -82,5 +82,6 @@ class GitManager(ABC):
         )
         shutil.move(directory.directory_path(), new_directory)
         directory.name = name
+        directory.event_bus.emit(GitDirectoryEvent.NAME_CHANGED, directory.name)
         self.__class__.repository().save()
 

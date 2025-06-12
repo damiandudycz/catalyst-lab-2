@@ -3,7 +3,7 @@ from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection, app_section
 from .repository import Repository, RepositoryEvent
 
-@app_section(title="Welcome", label="Home", icon="go-home-symbolic", show_side_bar=False, order=1_000)
+@app_section(title="Welcome", label="Home", icon="go-home-symbolic", show_in_side_bar=False, show_side_bar=False, order=1_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/welcome/welcome_section.ui')
 class WelcomeSection(Gtk.Box):
     __gtype_name__ = "WelcomeSection"
@@ -14,6 +14,10 @@ class WelcomeSection(Gtk.Box):
     action_button_help = Gtk.Template.Child()
     suggested_actions_section = Gtk.Template.Child()
     setup_environments_section = Gtk.Template.Child()
+
+    @Gtk.Template.Callback()
+    def on_projects_row_activated(self, _):
+        app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ProjectsSection)
 
     @Gtk.Template.Callback()
     def on_environments_row_activated(self, _):

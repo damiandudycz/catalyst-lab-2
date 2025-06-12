@@ -6,7 +6,7 @@ from .releng_update import RelengUpdate
 from .app_events import app_event_bus, AppEvents
 from .git_directory_details_view import GitDirectoryDetailsView
 
-@app_section(title="Releng", icon="book-minimalistic-svgrepo-com-symbolic", order=3_000)
+@app_section(title="Releng", icon="book-minimalistic-svgrepo-com-symbolic", order=4_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/releng/releng_section.ui')
 class RelengSection(Gtk.Box):
     __gtype_name__ = "RelengSection"

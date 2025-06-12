@@ -63,6 +63,16 @@
             <!-- Menu buttons -->
 
             <child>
+              <object class="AdwActionRow" id="action_button_projects">
+                <property name="title">Manage projects</property>
+                <property name="subtitle">Create new or edit existing project</property>
+                <property name="icon-name">notes-minimalistic-svgrepo-com-symbolic</property>
+                <property name="activatable">True</property>
+                <signal name="activated" handler="on_projects_row_activated"/>
+              </object>
+            </child>
+
+            <child>
               <object class="AdwActionRow" id="action_button_environments">
                 <property name="title">Setup environments</property>
                 <property name="subtitle">Add or remove toolset environments</property>

@@ -356,7 +356,7 @@ class Job:
         self.conn = conn
         self.process: multiprocessing.Process | None = None
         self.mark_terminated = False
-        self.call_id: uuid | None = None # Set when handle_connection is called
+        self.call_id: uuid.UUID | None = None # Set when handle_connection is called
         self.thread_lock = threading.Lock()
         self.thread = threading.Thread(
             target=self.handle_connection,

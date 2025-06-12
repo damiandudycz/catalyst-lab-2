@@ -7,7 +7,7 @@ from .app_events import app_event_bus, AppEvents
 from .git_directory_details_view import GitDirectoryDetailsView
 from .project_details_view import ProjectDetailsView
 
-@app_section(title="Projects", icon="notes-minimalistic-svgrepo-com-symbolic", order=6_000)
+@app_section(title="Projects", icon="notes-minimalistic-svgrepo-com-symbolic", order=2_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/projects/projects_section.ui')
 class ProjectsSection(Gtk.Box):
     __gtype_name__ = "ProjectsSection"

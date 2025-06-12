@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 
 class GitDirectoryEvent(Enum):
     LOGS_CHANGED = auto()
+    NAME_CHANGED = auto
 
 class GitDirectoryStatus(Enum):
     # Git status
@@ -74,7 +75,8 @@ class GitDirectory(Serializable, ABC):
                     blinking=False
                 )
 
-    def parse_metadata(self, dict: dict) -> Serializable:
+    @classmethod
+    def parse_metadata(cls, dict: dict) -> Serializable:
         """Overwrite in subclasses that use metadata"""
         return None
 
@@ -102,7 +104,7 @@ class GitDirectory(Serializable, ABC):
             branch_name = data.get("branch_name")
             has_remote_changes = data.get("has_remote_changes")
             metadata = (
-                self.parse_metadata(dict=data.get("metadata"))
+                cls.parse_metadata(dict=data.get("metadata"))
                 if data.get("metadata") else None
             )
         except KeyError:
@@ -113,7 +115,8 @@ class GitDirectory(Serializable, ABC):
             last_commit_date=last_commit_date,
             remote_url=remote_url,
             branch_name=branch_name,
-            has_remote_changes=has_remote_changes
+            has_remote_changes=has_remote_changes,
+            metadata=metadata
         )
 
     def update_status(self, wait: bool = False):

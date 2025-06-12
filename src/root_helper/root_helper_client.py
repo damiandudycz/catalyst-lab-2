@@ -516,7 +516,7 @@ class ServerCall:
     request: ServerCommand | ServerFunction
     client: RootHelperClient
     thread: threading.Thread | None = None
-    call_id: uuid.uuid = field(default_factory=uuid.uuid4)
+    call_id: uuid.UUID = field(default_factory=uuid.uuid4)
     terminated: bool = False # Mark as terminated. Might still be terminating.
     output: list[str] = field(default_factory=list) # Contains output lines from stdout and stderr
     output_lock: threading.Lock = field(default_factory=threading.Lock)

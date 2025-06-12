@@ -26,10 +26,10 @@ class tools_list(Gtk.Box):
     item_title_property_name = GObject.Property(type=str, default=None)
     item_subtitle_property_name = GObject.Property(type=str, default=None)
     item_status_property_name = GObject.Property(type=str, default=None)
+    autoselect_default = GObject.Property(type=bool, default=False)
 
     def __init__(self):
         super().__init__()
-        self.selected_item: item | None = None
         self.event_bus = EventBus[ItemSelectionViewEvent]()
         self.connect("realize", self.on_realize)
 
@@ -38,37 +38,43 @@ class tools_list(Gtk.Box):
         self.repository = getattr(Repository, self.item_class_name)
         self._load_items()
 
+    def select(self, item):
+        self.selected_item = item
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+
     def refresh_items_state(self, data):
         """Call this from class using this view when monitoring_usable_changes triggers an update"""
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
         valid_items = [item for item in self.repository.value if self.emit("is-item-selectable", item)]
-        self.error_label.set_visible(not valid_items)
+        self.no_valid_entries_label.set_visible(not valid_items)
         for row in self.rows:
             row.set_sensitive(row.item in valid_items)
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     def _load_items(self):
-        self.selected_item = None
+        if not hasattr(self, 'selected_item'):
+            self.selected_item = None
         valid_items = [item for item in self.repository.value if self.emit("is-item-selectable", item)]
         # Monitor valid items for is_reserved changes
         self.emit("setup-items-monitoring", self.repository.value)
         # Select initial item
-        self.selected_item = next(
-            (item for item in valid_items if self.emit("is-item-usable", item)),
-            valid_items[0] if valid_items else None
-        )
-        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+        if self.autoselect_default and not self.selected_item:
+            self.selected_item = next(
+                (item for item in valid_items if self.emit("is-item-usable", item)),
+                valid_items[0] if valid_items else None
+            )
+            self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         # No items label
-        self.error_label = Gtk.Label(label=f"No valid items available")
-        self.error_label.set_wrap(True)
-        self.error_label.set_halign(Gtk.Align.CENTER)
-        self.error_label.set_margin_top(12)
-        self.error_label.set_margin_bottom(12)
-        self.error_label.set_margin_start(24)
-        self.error_label.set_margin_end(24)
-        self.error_label.add_css_class("dimmed")
-        self.error_label.set_visible(not valid_items)
-        self.items_list.add(self.error_label)
+        self.no_valid_entries_label = Gtk.Label(label=f"No valid items available")
+        self.no_valid_entries_label.set_wrap(True)
+        self.no_valid_entries_label.set_halign(Gtk.Align.CENTER)
+        self.no_valid_entries_label.set_margin_top(12)
+        self.no_valid_entries_label.set_margin_bottom(12)
+        self.no_valid_entries_label.set_margin_start(24)
+        self.no_valid_entries_label.set_margin_end(24)
+        self.no_valid_entries_label.add_css_class("dimmed")
+        self.no_valid_entries_label.set_visible(not valid_items)
+        self.items_list.add(self.no_valid_entries_label)
         # Is not usable label
         self.is_not_usable_label = Gtk.Label(label="This item is currently in use.")
         self.is_not_usable_label.set_wrap(True)
@@ -110,5 +116,6 @@ class tools_list(Gtk.Box):
         else:
             if self.selected_item == item:
                 self.selected_item = None
+        # TODO: This emits wtice - for deselecting previous and selecting new
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 

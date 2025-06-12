@@ -4,7 +4,7 @@ from .toolset_details_view import ToolsetDetailsView
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
 
-@app_section(title="Environments", icon="sledgehammer-svgrepo-com-symbolic", order=2_000)
+@app_section(title="Environments", icon="sledgehammer-svgrepo-com-symbolic", order=3_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
     __gtype_name__ = "EnvironmentsSection"

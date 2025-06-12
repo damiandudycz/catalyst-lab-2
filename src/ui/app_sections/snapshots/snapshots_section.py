@@ -4,7 +4,7 @@ from .snapshot_details_view import SnapshotDetailsView
 from .snapshot_create_view import SnapshotCreateView
 from .app_events import app_event_bus, AppEvents
 
-@app_section(title="Snapshots", icon="video-frame-svgrepo-com-symbolic", order=4_000)
+@app_section(title="Snapshots", icon="video-frame-svgrepo-com-symbolic", order=5_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/snapshots/snapshots_section.ui')
 class SnapshotsSection(Gtk.Box):
     __gtype_name__ = "SnapshotsSection"

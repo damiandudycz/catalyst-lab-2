@@ -6,7 +6,7 @@ from .overlay_update import OverlayUpdate
 from .app_events import app_event_bus, AppEvents
 from .git_directory_details_view import GitDirectoryDetailsView
 
-@app_section(title="Overlays", icon="layers-minimalistic-svgrepo-com-symbolic", order=5_000)
+@app_section(title="Overlays", icon="layers-minimalistic-svgrepo-com-symbolic", order=6_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/overlays/overlays_section.ui')
 class OverlaysSection(Gtk.Box):
     __gtype_name__ = "OverlaysSection"

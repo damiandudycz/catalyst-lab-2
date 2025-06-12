@@ -24,6 +24,7 @@ def _push_view(self, view: Gtk.Widget, title: str):
     header.pack_end(root_access_button)
     # Create a navigation page with title and child
     page = Adw.NavigationPage.new(toolbar_view, title)
+    view._page = page # TODO: Check if this needs weakref
     self.push(page)
 
 Adw.NavigationView.push_section = _push_section
