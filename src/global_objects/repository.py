@@ -93,7 +93,6 @@ class Repository(Generic[T]):
         return os.path.join(config_base, f"{self._alias}.json")
 
     def save(self):
-        print(f"Saving: {self}")
         path = self._config_file()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         try:

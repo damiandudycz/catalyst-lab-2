@@ -30,6 +30,7 @@ class tools_list(Gtk.Box):
 
     def __init__(self):
         super().__init__()
+        self._emit_idle_id = None
         self.event_bus = EventBus[ItemSelectionViewEvent]()
         self.connect("realize", self.on_realize)
 
@@ -116,6 +117,11 @@ class tools_list(Gtk.Box):
         else:
             if self.selected_item == item:
                 self.selected_item = None
-        # TODO: This emits wtice - for deselecting previous and selecting new
-        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+        # Schedule a single emission in the idle loop
+        if self._emit_idle_id is None:
+            self._emit_idle_id = GLib.idle_add(self._emit_selection_change)
 
+    def _emit_selection_change(self):
+        self._emit_idle_id = None
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+        return False
