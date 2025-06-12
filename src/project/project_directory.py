@@ -1,9 +1,8 @@
 from __future__ import annotations
-from typing import final
+from typing import Self, final
+from dataclasses import dataclass
 from .git_directory import GitDirectory
 from .repository import Serializable
-from typing import Self
-from dataclasses import dataclass
 import uuid
 
 @final
@@ -35,15 +34,10 @@ class ProjectConfiguration(Serializable):
     snapshot_id: str | None = None
 
     def serialize(self) -> dict:
-        dict = {
-            "toolset_id": str(self.toolset_id) if self.toolset_id else None,
-            "releng_directory_id": str(self.releng_directory_id) if self.releng_directory_id else None,
-            "snapshot_id": self.snapshot_id, # TODO: Store ID also in snapshot and use instead of filename
-        }
         return {
             "toolset_id": str(self.toolset_id) if self.toolset_id else None,
             "releng_directory_id": str(self.releng_directory_id) if self.releng_directory_id else None,
-            "snapshot_id": self.snapshot_id, # TODO: Store ID also in snapshot and use instead of filename
+            "snapshot_id": self.snapshot_id,
         }
 
     @classmethod
@@ -51,7 +45,7 @@ class ProjectConfiguration(Serializable):
         try:
             toolset_id = uuid.UUID(data["toolset_id"]) if data.get("toolset_id") else None
             releng_directory_id = uuid.UUID(data["releng_directory_id"]) if data.get("releng_directory_id") else None
-            snapshot_id = data["snapshot_id"] if data.get("snapshot_id") else None # TODO ^
+            snapshot_id = data["snapshot_id"] if data.get("snapshot_id") else None
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         return cls(
