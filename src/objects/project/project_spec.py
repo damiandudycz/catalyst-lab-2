@@ -108,11 +108,12 @@ def load_catalyst_targets(toolset: Toolset) -> list[str]:
         ['/app/bin/unsquashfs', '-l', toolset_file_path, f"{catalyst_path_targets}/*.py"],
         text=True
     )
-    except_files = ['__init__.py']
-    target_files = "\n".join(
-        os.path.splitext(os.path.basename(line))[0] for line in output.splitlines()
-        if line.strip().endswith('.py') and not os.path.basename(line) in except_files
-    )
+    except_files = {'__init__.py'}
+    target_files = [
+        os.path.splitext(os.path.basename(line))[0]
+        for line in output.splitlines()
+        if line.strip().endswith('.py') and os.path.basename(line) not in except_files
+    ]
     return target_files
 
 def extract_frozenset_values(code_str: str) -> dict[str, list[str]]:

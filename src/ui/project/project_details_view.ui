@@ -10,7 +10,6 @@
     <property name="orientation">vertical</property>
     <property name="spacing">8</property>
 
-
     <!-- Switcher -->
     <child>
       <object class="AdwViewSwitcher" id="switcher">
@@ -34,11 +33,46 @@
             <property name="title">Stages</property>
             <property name="icon-name">clock-world-symbolic</property>
             <property name="child">
-
-              <object class="GtkLabel">
-                <property name="label">STAGES</property>
+              <object class="GtkScrolledWindow">
+                <property name="hscrollbar-policy">never</property>
+                <property name="vscrollbar-policy">automatic</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">True</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">24</property>
+                    <property name="margin-start">24</property>
+                    <property name="margin-end">24</property>
+                    <!-- <property name="margin-top">24</property> -->
+                    <property name="margin-bottom">24</property>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">STAGES LIST [TODO]</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkListBox">
+                        <property name="selection-mode">none</property>
+                        <style>
+                          <class name="boxed-list"/>
+                        </style>
+                        <child>
+                          <object class="AdwButtonRow">
+                            <property name="title">Add stage</property>
+                            <property name="start-icon-name">list-add-symbolic</property>
+                            <property name="activatable">True</property>
+                            <signal name="activated" handler="on_add_stage_activated"/>
+                            <style>
+                              <class name="suggested-action"/>
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
               </object>
-
             </property>
           </object>
         </child>
@@ -50,7 +84,7 @@
             <property name="title">Configuration</property>
             <property name="icon-name">clock-world-symbolic</property>
             <property name="child">
-              <object class="GtkScrolledWindow" id="toolset_page">
+              <object class="GtkScrolledWindow">
                 <property name="hscrollbar-policy">never</property>
                 <property name="vscrollbar-policy">automatic</property>
                 <property name="hexpand">True</property>

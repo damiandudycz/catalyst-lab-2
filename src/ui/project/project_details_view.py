@@ -6,6 +6,8 @@ from .toolset_application import ToolsetApplication
 from .toolset import ToolsetEvents
 from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
+from .project_spec_create_view import ProjectSpecCreateView
+from .app_events import app_event_bus, AppEvents
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_details_view.ui')
@@ -28,19 +30,9 @@ class ProjectDetailsView(Gtk.Box):
         self.monitor_configuration_changes()
 
     def get_configuration(self):
-        if self.project_directory.metadata is None:
-            return
-        def get_by_id(items, target_id, attr):
-            if not target_id:
-                return None
-            return next((item for item in items if getattr(item, attr) == target_id), None)
-        metadata = self.project_directory.metadata
-        toolset = get_by_id(Repository.Toolset.value, metadata.toolset_id, 'uuid')
-        releng_directory = get_by_id(Repository.RelengDirectory.value, metadata.releng_directory_id, 'id')
-        snapshot = get_by_id(Repository.Snapshot.value, metadata.snapshot_id, 'filename')
-        self.toolset_selection_view.select(toolset)
-        self.releng_selection_view.select(releng_directory)
-        self.snapshot_selection_view.select(snapshot)
+        self.toolset_selection_view.select(self.project_directory.get_toolset())
+        self.releng_selection_view.select(self.project_directory.get_releng_directory())
+        self.snapshot_selection_view.select(self.project_directory.get_snapshot())
 
     def configuration_item_changed(self, container):
         match container:
@@ -117,4 +109,16 @@ class ProjectDetailsView(Gtk.Box):
                 pass
             case self.snapshot_selection_view:
                 pass
+
+    @Gtk.Template.Callback()
+    def on_add_stage_activated(self, sender):
+        if (
+            self.project_directory.get_toolset() is None
+            or self.project_directory.get_releng_directory() is None
+            or self.project_directory.get_snapshot() is None
+        ):
+            print("Missing configuration")
+            # TODO: Show error
+            return
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectSpecCreateView(project_directory=self.project_directory), "New Stage", 640, 480)
 

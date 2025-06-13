@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Self, final
 from dataclasses import dataclass
 from .git_directory import GitDirectory
-from .repository import Serializable
+from .repository import Serializable, Repository
 import uuid
 
 @final
@@ -26,6 +26,26 @@ class ProjectDirectory(GitDirectory):
         if not self.metadata:
             self.metadata = ProjectConfiguration()
         return self.metadata
+
+    def _get_by_id(self, items, target_id, attr):
+        if not target_id:
+            return None
+        return next((item for item in items if getattr(item, attr) == target_id), None)
+
+    def get_toolset(self) -> Toolset | None:
+        if self.metadata is None:
+            return None
+        return self._get_by_id(Repository.Toolset.value, self.metadata.toolset_id, 'uuid')
+
+    def get_releng_directory(self) -> RelengDirectory | None:
+        if self.metadata is None:
+            return None
+        return self._get_by_id(Repository.RelengDirectory.value, self.metadata.releng_directory_id, 'id')
+
+    def get_snapshot(self) -> Snapshot | None:
+        if self.metadata is None:
+            return None
+        return self._get_by_id(Repository.Snapshot.value, self.metadata.snapshot_id, 'filename')
 
 @dataclass
 class ProjectConfiguration(Serializable):

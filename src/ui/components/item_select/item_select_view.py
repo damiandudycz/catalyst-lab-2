@@ -34,10 +34,21 @@ class tools_list(Gtk.Box):
         self.event_bus = EventBus[ItemSelectionViewEvent]()
         self.connect("realize", self.on_realize)
 
-    def on_realize(self, widget):
-        self.item_class = globals().get(self.item_class_name)
-        self.repository = getattr(Repository, self.item_class_name)
+    def set_static_list(self, list: list):
+        """Use static list insetad of repository. Only call this once."""
+        self.static_list = list
         self._load_items()
+
+    def on_realize(self, widget):
+        if self.item_class_name:
+            self.item_class = globals().get(self.item_class_name)
+            self.repository = getattr(Repository, self.item_class_name)
+            if hasattr(self, 'static_list'):
+                raise ValueError("Canno't use both static_list and item_class_name")
+            self._load_items()
+
+    def items(self) -> list:
+        return self.static_list if hasattr(self, 'static_list') else self.repository.value
 
     def select(self, item):
         self.selected_item = item
@@ -46,7 +57,7 @@ class tools_list(Gtk.Box):
     def refresh_items_state(self, data):
         """Call this from class using this view when monitoring_usable_changes triggers an update"""
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
-        valid_items = [item for item in self.repository.value if self.emit("is-item-selectable", item)]
+        valid_items = [item for item in self.items() if self.emit("is-item-selectable", item)]
         self.no_valid_entries_label.set_visible(not valid_items)
         for row in self.rows:
             row.set_sensitive(row.item in valid_items)
@@ -55,9 +66,9 @@ class tools_list(Gtk.Box):
     def _load_items(self):
         if not hasattr(self, 'selected_item'):
             self.selected_item = None
-        valid_items = [item for item in self.repository.value if self.emit("is-item-selectable", item)]
+        valid_items = [item for item in self.items() if self.emit("is-item-selectable", item)]
         # Monitor valid items for is_reserved changes
-        self.emit("setup-items-monitoring", self.repository.value)
+        self.emit("setup-items-monitoring", self.items())
         # Select initial item
         if self.autoselect_default and not self.selected_item:
             self.selected_item = next(
@@ -90,7 +101,7 @@ class tools_list(Gtk.Box):
         # Create rows
         items_check_buttons_group = []
         self.rows = []
-        for item in self.repository.value:
+        for item in self.items():
             row = ItemRow(
                 item=item,
                 item_title_property_name=self.item_title_property_name,

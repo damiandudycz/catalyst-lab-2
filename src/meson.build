@@ -99,6 +99,7 @@ catalystlab_sources = [
   'ui/overlay/overlay_create_view.py',
   'ui/project/project_create_view.py',
   'ui/project/project_details_view.py',
+  'ui/project/project_spec_create_view.py',
   'ui/releng/releng_create_view.py',
   'ui/snapshot/snapshot_create_view.py',
   'ui/snapshot/snapshot_details_view.py',
