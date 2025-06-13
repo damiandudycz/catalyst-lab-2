@@ -59,6 +59,7 @@ class GitDirectory(Serializable, ABC):
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
         match self.status:
+            # TODO: Add new color when updates are available, here and in other classes.
             case GitDirectoryStatus.UNKNOWN | GitDirectoryStatus.UNCHANGED:
                 return StatusIndicatorValues(
                     state=StatusIndicatorState.DISABLED,

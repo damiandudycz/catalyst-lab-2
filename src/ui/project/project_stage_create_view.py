@@ -12,12 +12,12 @@ from .item_select_view import ItemSelectionViewEvent
 from .toolset import Toolset
 from .releng_directory import RelengDirectory
 from .snapshot import Snapshot
-from .project_spec import load_catalyst_targets
+from .project_stage import load_catalyst_targets
 import os, threading
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_spec_create_view.ui')
-class ProjectSpecCreateView(Gtk.Box):
-    __gtype_name__ = "ProjectSpecCreateView"
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_create_view.ui')
+class ProjectStageCreateView(Gtk.Box):
+    __gtype_name__ = "ProjectStageCreateView"
 
     # Main views:
     wizard_view = Gtk.Template.Child()

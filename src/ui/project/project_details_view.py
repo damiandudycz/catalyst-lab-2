@@ -6,7 +6,7 @@ from .toolset_application import ToolsetApplication
 from .toolset import ToolsetEvents
 from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
-from .project_spec_create_view import ProjectSpecCreateView
+from .project_stage_create_view import ProjectStageCreateView
 from .app_events import app_event_bus, AppEvents
 import threading
 
@@ -120,5 +120,5 @@ class ProjectDetailsView(Gtk.Box):
             print("Missing configuration")
             # TODO: Show error
             return
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectSpecCreateView(project_directory=self.project_directory), "New Stage", 640, 480)
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectStageCreateView(project_directory=self.project_directory), "New Stage", 640, 480)
 

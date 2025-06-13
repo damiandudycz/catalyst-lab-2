@@ -10,7 +10,7 @@ class StageArguments:
     required: FrozenSet[str]
     valid: FrozenSet[str]
 
-class ProjectSpec(Serializable):
+class ProjectStage(Serializable):
 
     def serialize(self) -> dict:
         return {

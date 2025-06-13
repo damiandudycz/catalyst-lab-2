@@ -6,7 +6,7 @@
   <requires lib="Adw" version="1.0"/>
 
   <!-- Template -->
-  <template class="ProjectSpecCreateView" parent="GtkBox">
+  <template class="ProjectStageCreateView" parent="GtkBox">
 
     <!-- Setup view -->
     <child>
@@ -35,6 +35,38 @@
                 <property name="spacing">12</property>
                 <child>
                   <object class="ItemSelectionView" id="spec_type_selection_view">
+                    <!-- <property name="item_class_name">Template</property> -->
+                    <property name="item_icon">ruler-cross-pen-svgrepo-com-symbolic</property>
+                    <property name="item_title_property_name">name</property>
+                    <property name="item_subtitle_property_name">short_details</property>
+                    <property name="item_status_property_name">status_indicator_values</property>
+                    <property name="autoselect_default">False</property>
+                    <signal name="is-item-selectable" handler="is_item_selectable"/>
+                    <signal name="is-item-usable" handler="is_item_usable"/>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 2: Releng base spec screen -->
+        <child>
+          <object class="GtkScrolledWindow" id="releng_base_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="ItemSelectionView" id="sreleng_base_selection_view">
                     <!-- <property name="item_class_name">Template</property> -->
                     <property name="item_icon">sledgehammer-svgrepo-com-symbolic</property>
                     <property name="item_title_property_name">name</property>

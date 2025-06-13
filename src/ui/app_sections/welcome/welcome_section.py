@@ -8,33 +8,51 @@ from .repository import Repository, RepositoryEvent
 class WelcomeSection(Gtk.Box):
     __gtype_name__ = "WelcomeSection"
 
-    actions_section = Gtk.Template.Child()
-    action_button_environments = Gtk.Template.Child()
-    action_button_builds = Gtk.Template.Child()
-    action_button_help = Gtk.Template.Child()
-    suggested_actions_section = Gtk.Template.Child()
-    setup_environments_section = Gtk.Template.Child()
-
-    @Gtk.Template.Callback()
-    def on_projects_row_activated(self, _):
-        app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.ProjectsSection)
-
-    @Gtk.Template.Callback()
-    def on_environments_row_activated(self, _):
-        app_event_bus.emit(AppEvents.OPEN_APP_SECTION, AppSection.EnvironmentsSection)
-
-    @Gtk.Template.Callback()
-    def on_start_row_activated(self, _):
-        self.content_navigation_view.push_section(AppSection.EnvironmentsSection)
+    default_actions_section = Gtk.Template.Child()
+    first_run_section = Gtk.Template.Child()
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
         self.content_navigation_view = content_navigation_view
         self.setup_sections_visibility()
-        Repository.Toolset.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.setup_sections_visibility)
+        Repository.Toolset.event_bus.subscribe(
+            RepositoryEvent.VALUE_CHANGED,
+            self.setup_sections_visibility
+        )
 
     def setup_sections_visibility(self, _ = None):
-        initial_setup_done = Repository.Toolset.value
-        self.setup_environments_section.set_visible(not initial_setup_done)
-        self.suggested_actions_section.set_visible(initial_setup_done)
+        initial_setup_done = Repository.Settings.value.initial_setup_done
+        self.default_actions_section.set_visible(initial_setup_done)
+        self.first_run_section.set_visible(not initial_setup_done)
+
+    # --------------------------------------------------------------------------
+    # Navigation:
+
+    @Gtk.Template.Callback()
+    def on_start_row_activated(self, _):
+        self.content_navigation_view.push_section(
+            AppSection.EnvironmentsSection
+        )
+        Repository.Settings.value.initial_setup_done = True
+
+    @Gtk.Template.Callback()
+    def on_projects_row_activated(self, _):
+        app_event_bus.emit(
+            AppEvents.OPEN_APP_SECTION,
+            AppSection.ProjectsSection
+        )
+
+    @Gtk.Template.Callback()
+    def on_builds_row_activated(self, _):
+        app_event_bus.emit(
+            AppEvents.OPEN_APP_SECTION,
+            AppSection.BuildsSection
+        )
+
+    @Gtk.Template.Callback()
+    def on_help_row_activated(self, _):
+        app_event_bus.emit(
+            AppEvents.OPEN_APP_SECTION,
+            AppSection.HelpSection
+        )
 

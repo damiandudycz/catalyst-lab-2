@@ -84,7 +84,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
             subtitle_label = Gtk.Label(label=self.welcome_screen_description)
             subtitle_label.set_halign(Gtk.Align.CENTER)
             subtitle_label.set_wrap(True)
-            subtitle_label.set_justify(Gtk.Justification.FILL)
+            subtitle_label.set_justify(Gtk.Justification.CENTER)
             vbox.append(subtitle_label)
         # Button container
         inner_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
