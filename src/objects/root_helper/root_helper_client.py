@@ -167,7 +167,7 @@ class RootHelperClient:
             os.remove(output_path)
 
         # Load the embedded server code from resources
-        data = Gio.resources_lookup_data('/com/damiandudycz/CatalystLab/root_helper/root_helper_server.py', Gio.ResourceLookupFlags.NONE)
+        data = Gio.resources_lookup_data('/com/damiandudycz/CatalystLab/objects/root_helper/root_helper_server.py', Gio.ResourceLookupFlags.NONE)
         server_code = data.get_data().decode()
         # Collect the root functions (dynamically registered)
         injected_functions = self.collect_root_function_sources()

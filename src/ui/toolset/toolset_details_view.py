@@ -443,7 +443,7 @@ class ToolsetDetailsView(Gtk.Box):
                     )
                     for app, _ in self.tools_selection.items()
                 ]
-            self.start_update(authorization_keeper=authorization_keeper, update_packages=False, apps_selection=apps_selection)
+                self.start_update(authorization_keeper=authorization_keeper, update_packages=False, apps_selection=apps_selection)
         RootHelperClient.shared().authorize_and_run(callback=update)
 
     def start_update(self, authorization_keeper: AuthorizationKeeper, update_packages: bool = True, apps_selection: list[ToolsetApplicationSelection] | None = None):

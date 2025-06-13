@@ -54,6 +54,7 @@ catalystlab_sources = [
   'objects/project/project_installation.py',
   'objects/project/project_manager.py',
   'objects/project/project_update.py',
+  'objects/project/project_spec.py',
   'objects/releng/releng_directory.py',
   'objects/releng/releng_installation.py',
   'objects/releng/releng_manager.py',
