@@ -149,7 +149,7 @@ class ItemRow(Adw.ActionRow):
             self.setup_status_indicator()
 
     def setup_status_indicator(self):
-        if not hasattr(self.item, self.item_status_property_name):
+        if self.item_status_property_name is None or not hasattr(self.item, self.item_status_property_name):
             self.status_indicator.set_visible(False)
             return
         status_indicator_values = getattr(

@@ -1,9 +1,10 @@
 from .repository import Serializable
 from .toolset import Toolset, ToolsetApplication, ToolsetEnv
 from .root_helper_client import RootHelperClient
+from .releng_directory import RelengDirectory
 from dataclasses import dataclass
 from typing import Self, FrozenSet
-import os, subprocess, ast
+import os, subprocess, ast, uuid
 
 @dataclass
 class StageArguments:
@@ -12,19 +13,44 @@ class StageArguments:
 
 class ProjectStage(Serializable):
 
+    DOWNLOAD_SEED_ID = uuid.UUID("24245937-ef36-49c0-b467-1315ebe99fbe")
+
+    def __init__(self, id: uuid.UUID | None, parent_id: uuid.UUID | None, name: str, target_name: str, releng_template_name: str | None):
+        self.id = id or uuid.uuid4()
+        self.parent_id = parent_id
+        self.name = name
+        self.target_name = target_name
+        self.releng_template_name = releng_template_name
+
     def serialize(self) -> dict:
         return {
-            "name": self.name
+            "id": str(self.id),
+            "parent_id": str(self.parent_id) if self.parent_id else None,
+            "name": self.name,
+            "target_name": self.target_name,
+            "releng_template_name": self.releng_template_name
         }
+
+    @property
+    def short_details(self) -> str:
+        return self.target_name
 
     @classmethod
     def init_from(cls, data: dict) -> Self:
         try:
+            id = uuid.UUID(data["id"])
+            parent_id = uuid.UUID(data["parent_id"]) if data.get("parent_id") else None
             name = data["name"]
+            target_name = data["target_name"]
+            releng_template_name = data.get('releng_template_name')
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         return cls(
+            id=id,
+            parent_id = parent_id,
             name=name,
+            target_name=target_name,
+            releng_template_name=releng_template_name
         )
 
 # ------------------------------------------------------------------------------
@@ -179,4 +205,27 @@ def extract_frozenset_values(code_str: str) -> dict[str, list[str]]:
     visitor = Visitor()
     visitor.visit(tree)
     return visitor.values
+
+# ------------------------------------------------------------------------------
+# Loading releng templates:
+
+def load_releng_templates(releng_directory: RelengDirectory, stage_name: str) -> list[str]:
+    specs_path = os.path.join(releng_directory.directory_path(), "releases/specs")
+    templates = []
+    for root, _, files in os.walk(specs_path):
+        for file in files:
+            if file.endswith(".spec"):
+                full_path = os.path.join(root, file)
+                # Check if file contains the desired stage_name
+                try:
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line.startswith("target:") and line.split(":", 1)[1].strip() == stage_name.replace('_', '-'):
+                                rel_path = os.path.relpath(full_path, specs_path)
+                                templates.append(rel_path)
+                                break
+                except Exception as e:
+                    print(f"Warning: Failed to read {full_path}: {e}")
+    return templates
 

@@ -30,12 +30,16 @@ class tools_list(Gtk.Box):
 
     def __init__(self):
         super().__init__()
-        self._emit_idle_id = None
+        self.selected_item = None
         self.event_bus = EventBus[ItemSelectionViewEvent]()
+        self._load_labels()
         self.connect("realize", self.on_realize)
 
     def set_static_list(self, list: list):
         """Use static list insetad of repository. Only call this once."""
+        if hasattr(self, 'selected_item'):
+            self.selected_item = None
+            self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         self.static_list = list
         self._load_items()
 
@@ -63,19 +67,7 @@ class tools_list(Gtk.Box):
             row.set_sensitive(row.item in valid_items)
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
-    def _load_items(self):
-        if not hasattr(self, 'selected_item'):
-            self.selected_item = None
-        valid_items = [item for item in self.items() if self.emit("is-item-selectable", item)]
-        # Monitor valid items for is_reserved changes
-        self.emit("setup-items-monitoring", self.items())
-        # Select initial item
-        if self.autoselect_default and not self.selected_item:
-            self.selected_item = next(
-                (item for item in valid_items if self.emit("is-item-usable", item)),
-                valid_items[0] if valid_items else None
-            )
-            self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+    def _load_labels(self):
         # No items label
         self.no_valid_entries_label = Gtk.Label(label=f"No valid items available")
         self.no_valid_entries_label.set_wrap(True)
@@ -85,7 +77,6 @@ class tools_list(Gtk.Box):
         self.no_valid_entries_label.set_margin_start(24)
         self.no_valid_entries_label.set_margin_end(24)
         self.no_valid_entries_label.add_css_class("dimmed")
-        self.no_valid_entries_label.set_visible(not valid_items)
         self.items_list.add(self.no_valid_entries_label)
         # Is not usable label
         self.is_not_usable_label = Gtk.Label(label="This item is currently in use.")
@@ -96,10 +87,26 @@ class tools_list(Gtk.Box):
         self.is_not_usable_label.set_margin_start(24)
         self.is_not_usable_label.set_margin_end(24)
         self.is_not_usable_label.add_css_class("dimmed")
-        self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
         self.items_list.add(self.is_not_usable_label)
+
+    def _load_items(self):
+        if not hasattr(self, 'selected_item'):
+            self.selected_item = None
+        valid_items = [item for item in self.items() if self.emit("is-item-selectable", item)]
+        # Monitor valid items for is_reserved changes
+        self.emit("setup-items-monitoring", self.items())
+        # Select initial item
+        if self.autoselect_default:
+            self.selected_item = next(
+                (item for item in valid_items if self.emit("is-item-usable", item)),
+                valid_items[0] if valid_items else None
+            )
+            self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         # Create rows
         items_check_buttons_group = []
+        if hasattr(self, 'rows'):
+            for row in self.rows:
+                self.items_list.remove(row)
         self.rows = []
         for item in self.items():
             row = ItemRow(
@@ -120,6 +127,8 @@ class tools_list(Gtk.Box):
             row.set_sensitive(item in valid_items)
             self.items_list.add(row)
             self.rows.append(row)
+        self.no_valid_entries_label.set_visible(not valid_items)
+        self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
 
     def _on_item_selected(self, button: Gtk.CheckButton, item: item):
         """Callback for when a row's checkbox is toggled."""
@@ -129,6 +138,8 @@ class tools_list(Gtk.Box):
             if self.selected_item == item:
                 self.selected_item = None
         # Schedule a single emission in the idle loop
+        if not hasattr(self, '_emit_idle_id'):
+            self._emit_idle_id = None
         if self._emit_idle_id is None:
             self._emit_idle_id = GLib.idle_add(self._emit_selection_change)
 
@@ -136,3 +147,4 @@ class tools_list(Gtk.Box):
         self._emit_idle_id = None
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         return False
+

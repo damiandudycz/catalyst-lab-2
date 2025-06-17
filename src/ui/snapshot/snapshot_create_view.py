@@ -50,6 +50,10 @@ class SnapshotCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def setup_items_monitoring(self, sender, items):
+        if hasattr(self, 'monitored_items'):
+            for item in self.monitored_items:
+                item.event_bus.unsubscribe(ToolsetEvents.IS_RESERVED_CHANGED, self)
+        self.monitored_items = items
         for item in items:
             item.event_bus.subscribe(
                 ToolsetEvents.IS_RESERVED_CHANGED,

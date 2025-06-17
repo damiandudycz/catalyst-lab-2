@@ -13,7 +13,7 @@ import os
 
 class DefaultProjectDirContentBuilder(DefaultDirContentBuilder):
     def build_in(self, path: str, repo_name: str):
-        structure = ['stages', 'config']
+        structure = ['stages']
         for folder in structure:
             os.makedirs(os.path.join(path, folder), exist_ok=True)
 
@@ -99,10 +99,15 @@ class ProjectCreateView(Gtk.Box):
     def setup_items_monitoring(self, sender, items):
         match sender:
             case self.toolset_selection_view:
+                if hasattr(self, 'monitored_items_toolset'):
+                    for item in self.monitored_items_toolset:
+                        item.event_bus.unsubscribe(ToolsetEvents.IS_RESERVED_CHANGED, self)
+                self.monitored_items_toolset = items
                 for item in items:
                     item.event_bus.subscribe(
                         ToolsetEvents.IS_RESERVED_CHANGED,
-                        self.toolset_selection_view.refresh_items_state
+                        self.toolset_selection_view.refresh_items_state,
+                        self
                     )
             case self.releng_selection_view:
                 pass

@@ -3,7 +3,8 @@ from typing import Self, final
 from dataclasses import dataclass
 from .git_directory import GitDirectory
 from .repository import Serializable, Repository
-import uuid
+from .project_stage import ProjectStage
+import uuid, json, os
 
 @final
 class ProjectDirectory(GitDirectory):
@@ -21,6 +22,26 @@ class ProjectDirectory(GitDirectory):
     @classmethod
     def parse_metadata(cls, dict: dict) -> Serializable:
         return ProjectConfiguration.init_from(data=dict)
+
+    @property
+    def stages(self) -> list[ProjectStage]:
+        if not hasattr(self, '_stages'):
+            self._stages = []
+            stages_dir = os.path.join(self.directory_path(), "stages")
+            for item in os.listdir(stages_dir):
+                stage_path = os.path.join(stages_dir, item)
+                config_path = os.path.join(stage_path, "stage.json")
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        stage = ProjectStage.init_from(data=data)
+                        self._stages.append(stage)
+                except Exception as e:
+                    print(f"Failed to load stage from {config_path}: {e}")
+        return self._stages
+    @stages.setter
+    def stages(self, value: list[ProjectStage]):
+        self._stages = value
 
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:
@@ -46,6 +67,19 @@ class ProjectDirectory(GitDirectory):
         if self.metadata is None:
             return None
         return self._get_by_id(Repository.Snapshot.value, self.metadata.snapshot_id, 'filename')
+
+    def install_stage(self, stage: ProjectStage):
+        # Save stage details in project directory
+        from .project_manager import ProjectManager
+        if not ProjectManager.shared().is_stage_name_available(project=self, name=stage.name):
+            raise RuntimeError(f"Stage with name {stage.name} already exists in this project.")
+        project_path = self.directory_path()
+        stage_path = os.path.join(project_path, "stages", stage.name)
+        config_path = os.path.join(stage_path, "stage.json")
+        os.makedirs(stage_path, exist_ok=False)
+        config_json = stage.serialize()
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_json, f, indent=4)
 
 @dataclass
 class ProjectConfiguration(Serializable):

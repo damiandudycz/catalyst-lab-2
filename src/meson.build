@@ -52,6 +52,7 @@ catalystlab_sources = [
   'objects/overlay/overlay_update.py',
   'objects/project/project_directory.py',
   'objects/project/project_installation.py',
+  'objects/project/project_stage_installation.py',
   'objects/project/project_manager.py',
   'objects/project/project_update.py',
   'objects/project/project_stage.py',
