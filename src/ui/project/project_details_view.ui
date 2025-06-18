@@ -47,8 +47,22 @@
                     <!-- <property name="margin-top">24</property> -->
                     <property name="margin-bottom">24</property>
                     <child>
-                      <object class="GtkLabel">
-                        <property name="label">STAGES LIST [TODO]</property>
+                      <object class="GtkScrolledWindow">
+                        <property name="hscrollbar-policy">automatic</property>
+                        <property name="vscrollbar-policy">automatic</property>
+                        <property name="hexpand">True</property>
+                        <property name="vexpand">True</property>
+                        <child>
+                          <object class="GtkBox" id="container_box">
+                            <property name="orientation">vertical</property>
+                            <property name="halign">center</property> <!-- Center horizontally -->
+                            <child>
+                              <object class="StagesTreeView" id="stages_tree_view">
+                                <property name="margin-top">24</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
                       </object>
                     </child>
                     <child>

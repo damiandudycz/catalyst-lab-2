@@ -91,6 +91,7 @@ catalystlab_sources = [
   'ui/components/root_command_output/root_command_output_view.py',
   'ui/components/item_select/item_select_view.py',
   'ui/components/wizard/wizard_view.py',
+  'ui/components/stages_tree_view.py',
   'ui/git_directory/git_directory_create_config_view.py',
   'ui/git_directory/git_directory_details_view.py',
   'ui/main_window/main_window_content.py',

@@ -8,12 +8,14 @@ from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
 from .project_stage_create_view import ProjectStageCreateView
 from .app_events import app_event_bus, AppEvents
+from .stages_tree_view import StagesTreeView, TreeNode
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_details_view.ui')
 class ProjectDetailsView(Gtk.Box):
     __gtype_name__ = "ProjectDetailsView"
 
+    stages_tree_view = Gtk.Template.Child()
     directory_details_view = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
     releng_selection_view = Gtk.Template.Child()
@@ -28,6 +30,7 @@ class ProjectDetailsView(Gtk.Box):
         self.get_configuration()
         self.monitor_information_changes()
         self.monitor_configuration_changes()
+        self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
 
     def get_configuration(self):
         self.toolset_selection_view.select(self.project_directory.get_toolset())

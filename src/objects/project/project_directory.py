@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from .git_directory import GitDirectory
 from .repository import Serializable, Repository
 from .project_stage import ProjectStage
+from .stages_tree_view import TreeNode
 import uuid, json, os
 
 @final
@@ -42,6 +43,18 @@ class ProjectDirectory(GitDirectory):
     @stages.setter
     def stages(self, value: list[ProjectStage]):
         self._stages = value
+
+    def stages_tree(self) -> list[dict]:
+        """Builds a tree of stages for seeds inheritance."""
+        stage_nodes = {stage.id: TreeNode(value=stage) for stage in self.stages}
+        roots = []
+        for stage_id, node in stage_nodes.items():
+            parent_id = node.value.parent_id
+            if parent_id and parent_id in stage_nodes:
+                stage_nodes[parent_id].children.append(node)
+            else:
+                roots.append(node)
+        return roots
 
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:
