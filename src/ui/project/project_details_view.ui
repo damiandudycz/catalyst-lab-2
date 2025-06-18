@@ -51,14 +51,7 @@
                         <property name="hexpand">True</property>
                         <property name="vexpand">True</property>
                         <child>
-                          <object class="GtkBox" id="container_box">
-                            <property name="orientation">vertical</property>
-                            <property name="halign">center</property> <!-- Center horizontally -->
-                            <child>
-                              <object class="StagesTreeView" id="stages_tree_view">
-                              </object>
-                            </child>
-                          </object>
+                          <object class="StagesTreeView" id="stages_tree_view"/>
                         </child>
                       </object>
                     </child>

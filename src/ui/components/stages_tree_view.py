@@ -13,15 +13,6 @@ class TreeNode:
         self.value = value
         self.children = []
 
-class Stage:
-    def __init__(self, id, name, parent_id=None):
-        self.id = id
-        self.name = name
-        self.parent_id = parent_id
-
-    def __repr__(self):
-        return f"Stage(id={self.id}, name='{self.name}')"
-
 class StagesTreeView(Gtk.Fixed):
     __gtype_name__ = 'StagesTreeView'
 
@@ -179,50 +170,3 @@ class StagesTreeView(Gtk.Fixed):
             self.put(separator, NODE_MARGIN_X, y_pos)
             self.separators.append(separator)
 
-if __name__ == '__main__':
-    def build_tree_from_list(items):
-        node_map = {item.id: TreeNode(item) for item in items}
-        root_nodes = []
-        for item in items:
-            node = node_map[item.id]
-            if item.parent_id and item.parent_id in node_map:
-                parent_node = node_map[item.parent_id]
-                parent_node.children.append(node)
-            else:
-                root_nodes.append(node)
-        return root_nodes
-
-    stages_data = [
-        # First root branch
-        Stage(id=1, name="Wide Parent"),
-        Stage(id=2, name="Overlapping Child", parent_id=1),
-
-        # Second root branch (will have a separator above it)
-        Stage(id=3, name="Root For Elbow Test"),
-        Stage(id=4, name="First Child", parent_id=3),
-        Stage(id=5, name="Second Child (Elbow from Side)", parent_id=3),
-
-        # Third root branch (will have a separator above it)
-        Stage(id=6, name="Another Root Node"),
-        Stage(id=7, name="Child of Another Root", parent_id=6),
-    ]
-
-    class ExampleApp(Gtk.Application):
-        def do_activate(self):
-            win = Gtk.ApplicationWindow(application=self, title="Stages Tree (Gtk.Separator)")
-            win.set_default_size(800, 600)
-
-            scrolled_window = Gtk.ScrolledWindow()
-            scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-            win.set_child(scrolled_window)
-
-            tree_view = StagesTreeView()
-            scrolled_window.set_child(tree_view)
-
-            root_nodes = build_tree_from_list(stages_data)
-            tree_view.set_root_nodes(root_nodes)
-
-            win.present()
-
-    app = ExampleApp()
-    app.run()

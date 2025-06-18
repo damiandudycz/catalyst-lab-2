@@ -28,6 +28,7 @@ class ProjectDetailsView(Gtk.Box):
         self.apps_requirements = [ToolsetApplication.CATALYST]
         self.directory_details_view.setup(git_directory=project_directory, content_navigation_view=self.content_navigation_view)
         self.get_configuration()
+        self.monitor_stages_changes()
         self.monitor_information_changes()
         self.monitor_configuration_changes()
         self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
@@ -58,6 +59,15 @@ class ProjectDetailsView(Gtk.Box):
 
     def _update_name(self, name: str):
         self._page.set_title(name)
+
+    def _update_stages(self, name: str):
+        self.stages_tree_view.set_root_nodes(self.project_directory.stages_tree())
+
+    def monitor_stages_changes(self):
+        self.project_directory.event_bus.subscribe(
+            GitDirectoryEvent.CONTENT_CHANGED,
+            self._update_stages
+        )
 
     def monitor_information_changes(self):
         self.project_directory.event_bus.subscribe(

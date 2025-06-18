@@ -47,7 +47,7 @@ class ProjectStageInstallation(MultiStageProcess, ABC):
 
     def complete_process(self, success: bool):
         if success:
-            self.project_directory.stages.append(self.stage)
+            self.project_directory.add_stage(self.stage)
             self.project_directory.update_status()
 
 # ------------------------------------------------------------------------------

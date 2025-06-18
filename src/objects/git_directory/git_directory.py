@@ -11,7 +11,8 @@ from abc import ABC, abstractmethod
 
 class GitDirectoryEvent(Enum):
     LOGS_CHANGED = auto()
-    NAME_CHANGED = auto
+    NAME_CHANGED = auto()
+    CONTENT_CHANGED = auto()
 
 class GitDirectoryStatus(Enum):
     # Git status

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Self, final
 from dataclasses import dataclass
-from .git_directory import GitDirectory
+from .git_directory import GitDirectory, GitDirectoryEvent
 from .repository import Serializable, Repository
 from .project_stage import ProjectStage
 from .stages_tree_view import TreeNode
@@ -43,6 +43,10 @@ class ProjectDirectory(GitDirectory):
     @stages.setter
     def stages(self, value: list[ProjectStage]):
         self._stages = value
+
+    def add_stage(self, stage: ProjectStage):
+        self.stages.append(stage)
+        self.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, self._stages)
 
     def stages_tree(self) -> list[dict]:
         """Builds a tree of stages for seeds inheritance."""
