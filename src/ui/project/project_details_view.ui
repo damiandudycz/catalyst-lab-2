@@ -41,9 +41,7 @@
                 <child>
                   <object class="GtkBox">
                     <property name="orientation">vertical</property>
-                    <property name="spacing">24</property>
-                    <property name="margin-start">24</property>
-                    <property name="margin-end">24</property>
+                    <property name="spacing">16</property>
                     <!-- <property name="margin-top">24</property> -->
                     <property name="margin-bottom">24</property>
                     <child>
@@ -58,7 +56,6 @@
                             <property name="halign">center</property> <!-- Center horizontally -->
                             <child>
                               <object class="StagesTreeView" id="stages_tree_view">
-                                <property name="margin-top">24</property>
                               </object>
                             </child>
                           </object>
@@ -67,6 +64,8 @@
                     </child>
                     <child>
                       <object class="GtkListBox">
+                        <property name="margin-start">24</property>
+                        <property name="margin-end">24</property>
                         <property name="selection-mode">none</property>
                         <style>
                           <class name="boxed-list"/>
