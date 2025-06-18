@@ -12,7 +12,7 @@ from .item_select_view import ItemSelectionViewEvent
 from .toolset import Toolset
 from .releng_directory import RelengDirectory
 from .snapshot import Snapshot
-from .project_stage import load_catalyst_targets, load_releng_templates
+from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates
 from .project_stage_installation import ProjectStageInstallation
 from .project_manager import ProjectManager
 from .item_select_view import ItemRow
@@ -216,7 +216,7 @@ class ProjectStageCreateView(Gtk.Box):
             stage_name=self.stage_name_row.get_text(),
             parent_id=(
                 None if self.selected_seed == ProjectStageSeedSpecial.NONE
-                else ProjectStage.DOWNLOAD_SEED_ID if self.selected_seed == ProjectStageSeedSpecial.NONE
+                else ProjectStage.DOWNLOAD_SEED_ID if self.selected_seed == ProjectStageSeedSpecial.DOWNLOAD
                 else self.selected_seed if isinstance(self.selected_seed, uuid.UUID)
                 else None
             )
