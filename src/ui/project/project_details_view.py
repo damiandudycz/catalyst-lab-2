@@ -136,7 +136,16 @@ class ProjectDetailsView(Gtk.Box):
             or self.project_directory.get_snapshot() is None
         ):
             print("Missing configuration")
-            # TODO: Show error
+            self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
             return
         app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectStageCreateView(project_directory=self.project_directory), "New Stage", 640, 480)
 
+    def show_alert(self, message):
+        dialog = Gtk.MessageDialog(
+            transient_for=self.get_root(),
+            modal=True,
+            buttons=Gtk.ButtonsType.CLOSE,
+            text=message
+        )
+        dialog.connect("response", lambda d, r: d.destroy())
+        dialog.show()
