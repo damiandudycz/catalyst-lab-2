@@ -6,7 +6,6 @@ from gi.repository import Gtk, GObject
 NODE_MARGIN_X = 24
 NODE_MARGIN_Y = 24 # Spacing WITHIN a branch
 ROOT_BRANCH_MARGIN_Y = 40 # Larger spacing BETWEEN root branches
-HORIZONTAL_PADDING = 0
 
 class TreeNode:
     def __init__(self, value):
@@ -55,8 +54,8 @@ class StagesTreeView(Gtk.Fixed):
                     child_x, child_y = self.node_positions[child]
                     child_w, child_h = self.node_sizes[child]
 
-                    parent_visible_start_x = px + HORIZONTAL_PADDING
-                    parent_visible_end_x = px + parent_w - HORIZONTAL_PADDING
+                    parent_visible_start_x = px
+                    parent_visible_end_x = px + parent_w
                     child_cx = child_x + child_w / 2
 
                     if child_cx >= parent_visible_start_x and child_cx <= parent_visible_end_x:
@@ -92,10 +91,7 @@ class StagesTreeView(Gtk.Fixed):
     def _measure_nodes(self):
         self.node_sizes = {}
         for node in self._get_all_nodes():
-            label = str(getattr(node.value, "name", "Unnamed"))
-            temp_button = Gtk.Button(label=label)
-            temp_button.set_margin_start(HORIZONTAL_PADDING)
-            temp_button.set_margin_end(HORIZONTAL_PADDING)
+            temp_button = Gtk.Button(label=node.value.name)
             min_size, nat_size = temp_button.get_preferred_size()
             self.node_sizes[node] = (nat_size.width, nat_size.height)
 
@@ -187,10 +183,7 @@ class StagesTreeView(Gtk.Fixed):
         self.drawing_area.set_size_request(total_width, total_height)
 
         for node, (x, y) in self.node_positions.items():
-            label = str(getattr(node.value, "name", "Unnamed"))
-            button = Gtk.Button(label=label)
-            button.set_margin_start(HORIZONTAL_PADDING)
-            button.set_margin_end(HORIZONTAL_PADDING)
+            button = Gtk.Button(label=node.value.name)
             button.connect("clicked", self.on_node_clicked, node)
             self.put(button, x, y)
             self.buttons[node] = button

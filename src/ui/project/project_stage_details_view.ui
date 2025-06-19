@@ -44,6 +44,33 @@
                 <child>
                   <object class="AdwExpanderRow" id="stage_target_row">
                     <property name="title">Target type</property>
+                    <child>
+                      <object class="AdwActionRow">
+                        <property name="title">Warning! Changing target type will invalidate current releng template.</property>
+                        <style>
+                          <class name="caption-heading"/>
+                          <class name="warning"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwExpanderRow" id="stage_releng_template_row">
+                    <property name="title">Releng template</property>
+                    <child>
+                      <object class="AdwActionRow">
+                        <property name="title">None</property>
+                        <property name="subtitle">Do not use Releng template</property>
+                        <property name="icon-name">clapperboard-edit-svgrepo-com-symbolic</property>
+                        <child type="prefix">
+                          <object class="GtkCheckButton" id="stage_releng_template_none_checkbox">
+                            <signal name="toggled" handler="on_releng_template_selected"/>
+                          </object>
+                        </child>
+                        <property name="activatable-widget">stage_releng_template_none_checkbox</property>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>

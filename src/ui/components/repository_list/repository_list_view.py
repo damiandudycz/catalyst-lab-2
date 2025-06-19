@@ -121,8 +121,8 @@ class ItemRow(Adw.ActionRow):
         item_icon
     ):
         super().__init__(
-            title     = getattr(item, item_title_property_name, None),
-            subtitle  = getattr(item, item_subtitle_property_name, None),
+            title     = getattr(item, item_title_property_name, None) if item_title_property_name else None,
+            subtitle  = getattr(item, item_subtitle_property_name, None) if item_subtitle_property_name else None,
             icon_name = item_icon
         )
         self.item = item
