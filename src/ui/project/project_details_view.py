@@ -9,6 +9,7 @@ from .item_select_view import ItemSelectionViewEvent
 from .project_stage_create_view import ProjectStageCreateView
 from .app_events import app_event_bus, AppEvents
 from .stages_tree_view import StagesTreeView, TreeNode
+from .project_stage_details_view import ProjectStageDetailsView
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_details_view.ui')
@@ -60,7 +61,7 @@ class ProjectDetailsView(Gtk.Box):
     def _update_name(self, name: str):
         self._page.set_title(name)
 
-    def _update_stages(self, name: str):
+    def _update_stages(self, data):
         self.stages_tree_view.set_root_nodes(self.project_directory.stages_tree())
 
     def monitor_stages_changes(self):
@@ -140,6 +141,11 @@ class ProjectDetailsView(Gtk.Box):
             return
         app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectStageCreateView(project_directory=self.project_directory), "New Stage", 640, 480)
 
+    @Gtk.Template.Callback()
+    def on_stage_selected(self, sender, stage):
+        view = ProjectStageDetailsView(project_directory=self.project_directory, stage=stage, content_navigation_view=self.content_navigation_view)
+        self.content_navigation_view.push_view(view, title=stage.name)
+
     def show_alert(self, message):
         dialog = Gtk.MessageDialog(
             transient_for=self.get_root(),
@@ -149,3 +155,4 @@ class ProjectDetailsView(Gtk.Box):
         )
         dialog.connect("response", lambda d, r: d.destroy())
         dialog.show()
+

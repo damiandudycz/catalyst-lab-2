@@ -5,11 +5,16 @@ from .releng_directory import RelengDirectory
 from dataclasses import dataclass
 from typing import Self, FrozenSet
 import os, subprocess, ast, uuid
+from enum import Enum, auto
+from .event_bus import EventBus, SharedEvent
 
 @dataclass
 class StageArguments:
     required: FrozenSet[str]
     valid: FrozenSet[str]
+
+class ProjectStageEvent(Enum):
+    NAME_CHANGED = auto()
 
 class ProjectStage(Serializable):
 
@@ -21,6 +26,7 @@ class ProjectStage(Serializable):
         self.name = name
         self.target_name = target_name
         self.releng_template_name = releng_template_name
+        self.event_bus = EventBus[ProjectStageEvent]()
 
     def serialize(self) -> dict:
         return {

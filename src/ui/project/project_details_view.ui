@@ -8,13 +8,13 @@
   <!-- Template -->
   <template class="ProjectDetailsView" parent="GtkBox">
     <property name="orientation">vertical</property>
-    <property name="spacing">8</property>
 
     <!-- Switcher -->
     <child>
       <object class="AdwViewSwitcher" id="switcher">
         <property name="margin-start">24</property>
         <property name="margin-end">24</property>
+        <property name="margin-bottom">12</property>
         <property name="stack">stack</property>
         <property name="policy">wide</property>
       </object>
@@ -41,9 +41,6 @@
                 <child>
                   <object class="GtkBox">
                     <property name="orientation">vertical</property>
-                    <property name="spacing">16</property>
-                    <!-- <property name="margin-top">24</property> -->
-                    <property name="margin-bottom">24</property>
                     <child>
                       <object class="GtkScrolledWindow">
                         <property name="hscrollbar-policy">automatic</property>
@@ -51,7 +48,9 @@
                         <property name="hexpand">True</property>
                         <property name="vexpand">True</property>
                         <child>
-                          <object class="StagesTreeView" id="stages_tree_view"/>
+                          <object class="StagesTreeView" id="stages_tree_view">
+                            <signal name="stage-selected" handler="on_stage_selected"/>
+                          </object>
                         </child>
                       </object>
                     </child>
@@ -59,6 +58,8 @@
                       <object class="GtkListBox">
                         <property name="margin-start">24</property>
                         <property name="margin-end">24</property>
+                        <property name="margin-top">12</property>
+                        <property name="margin-bottom">12</property>
                         <property name="selection-mode">none</property>
                         <style>
                           <class name="boxed-list"/>

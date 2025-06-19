@@ -3,8 +3,8 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GObject
 
 # Constants for spacing
-NODE_MARGIN_X = 20
-NODE_MARGIN_Y = 20 # Spacing WITHIN a branch
+NODE_MARGIN_X = 24
+NODE_MARGIN_Y = 24 # Spacing WITHIN a branch
 ROOT_BRANCH_MARGIN_Y = 40 # Larger spacing BETWEEN root branches
 HORIZONTAL_PADDING = 0
 
@@ -15,6 +15,10 @@ class TreeNode:
 
 class StagesTreeView(Gtk.Fixed):
     __gtype_name__ = 'StagesTreeView'
+
+    __gsignals__ = {
+        "stage-selected": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
+    }
 
     def __init__(self, centered=False):
         super().__init__()
@@ -32,7 +36,7 @@ class StagesTreeView(Gtk.Fixed):
         self.put(self.drawing_area, 0, 0)
 
     def on_node_clicked(self, button, node):
-        print(f"Button clicked for node: {node.value}")
+        self.emit("stage-selected", node.value)
 
     def set_root_nodes(self, root_nodes: list[TreeNode]):
         self.root_nodes = root_nodes
@@ -113,7 +117,7 @@ class StagesTreeView(Gtk.Fixed):
         self.separators.clear()
 
         all_positions = {}
-        current_y = ROOT_BRANCH_MARGIN_Y
+        current_y = 0
         total_max_x = 0
         separator_y_positions = []
 

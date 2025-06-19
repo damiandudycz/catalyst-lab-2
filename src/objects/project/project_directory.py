@@ -46,7 +46,7 @@ class ProjectDirectory(GitDirectory):
 
     def add_stage(self, stage: ProjectStage):
         self.stages.append(stage)
-        self.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, self._stages)
+        self.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, self)
 
     def stages_tree(self) -> list[dict]:
         """Builds a tree of stages for seeds inheritance."""
@@ -85,13 +85,24 @@ class ProjectDirectory(GitDirectory):
             return None
         return self._get_by_id(Repository.Snapshot.value, self.metadata.snapshot_id, 'filename')
 
+    # TODO: Maybe move this and some other methods to project manager?
+    @classmethod
+    def stage_directory_path_for_name(cls, name: str, project: ProjectDirectory) -> str:
+        project_path = project.directory_path()
+        return os.path.join(
+            project_path, "stages",
+            cls.sanitized_name_for_name(name)
+        )
+
+    def stage_directory_path(self, name: str) -> str:
+        return ProjectDirectory.stage_directory_path_for_name(name=name, project=self)
+
     def install_stage(self, stage: ProjectStage):
         # Save stage details in project directory
         from .project_manager import ProjectManager
         if not ProjectManager.shared().is_stage_name_available(project=self, name=stage.name):
             raise RuntimeError(f"Stage with name {stage.name} already exists in this project.")
-        project_path = self.directory_path()
-        stage_path = os.path.join(project_path, "stages", stage.name)
+        stage_path = self.stage_directory_path(name=stage.name)
         config_path = os.path.join(stage_path, "stage.json")
         os.makedirs(stage_path, exist_ok=False)
         config_json = stage.serialize()

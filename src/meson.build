@@ -102,6 +102,7 @@ catalystlab_sources = [
   'ui/project/project_create_view.py',
   'ui/project/project_details_view.py',
   'ui/project/project_stage_create_view.py',
+  'ui/project/project_stage_details_view.py',
   'ui/releng/releng_create_view.py',
   'ui/snapshot/snapshot_create_view.py',
   'ui/snapshot/snapshot_details_view.py',

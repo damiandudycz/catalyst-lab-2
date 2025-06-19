@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+
+  <!-- Libraries -->
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
+  <template class="ProjectStageDetailsView" parent="GtkBox">
+    <child>
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">never</property>
+        <property name="vscrollbar-policy">automatic</property>
+        <property name="hexpand">True</property>
+        <property name="vexpand">True</property>
+        <child>
+          <object class="GtkBox">
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="margin-top">4</property>
+            <property name="margin-bottom">4</property>
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <child>
+              <object class="AdwPreferencesGroup">
+                <property name="title">Basic information</property>
+                <child>
+                  <object class="AdwEntryRow" id="stage_name_row">
+                    <property name="title">Stage name</property>
+                    <property name="show-apply-button">True</property>
+                    <signal name="apply" handler="on_stage_name_activate"/>
+                    <signal name="changed" handler="on_stage_name_changed"/>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="name_used_row">
+                    <property name="title">This stage name is already used.</property>
+                    <style>
+                      <class name="caption-heading"/>
+                      <class name="error"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>
+
