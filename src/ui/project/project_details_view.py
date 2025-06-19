@@ -143,6 +143,14 @@ class ProjectDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_stage_selected(self, sender, stage):
+        if (
+            self.project_directory.get_toolset() is None
+            or self.project_directory.get_releng_directory() is None
+            or self.project_directory.get_snapshot() is None
+        ):
+            print("Missing configuration")
+            self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
+            return
         view = ProjectStageDetailsView(project_directory=self.project_directory, stage=stage, content_navigation_view=self.content_navigation_view)
         self.content_navigation_view.push_view(view, title=stage.name)
 

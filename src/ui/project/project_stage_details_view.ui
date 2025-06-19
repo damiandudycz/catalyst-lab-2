@@ -41,6 +41,11 @@
                     </style>
                   </object>
                 </child>
+                <child>
+                  <object class="AdwExpanderRow" id="stage_target_row">
+                    <property name="title">Target type</property>
+                  </object>
+                </child>
               </object>
             </child>
           </object>

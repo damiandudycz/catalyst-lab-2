@@ -24,11 +24,16 @@ class ProjectManager(GitManager):
             raise RuntimeError(f"Project name {name} is not available")
         stage_path_old = project.stage_directory_path(name=stage.name)
         stage_path_new = project.stage_directory_path(name=name)
-        config_path_new = os.path.join(stage_path_new, "stage.json")
         shutil.move(stage_path_old, stage_path_new)
         stage.name = name
+        self.save_stage(project=project, stage=stage)
+
+    def save_stage(self, project: ProjectDirectory, stage: ProjectStage):
+        stage_path = project.stage_directory_path(name=stage.name)
+        config_path = os.path.join(stage_path, "stage.json")
         config_json = stage.serialize()
-        with open(config_path_new, 'w', encoding='utf-8') as f:
+        os.makedirs(stage_path, exist_ok=True)
+        with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config_json, f, indent=4)
         project.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, project)
         stage.event_bus.emit(ProjectStageEvent.NAME_CHANGED, stage)

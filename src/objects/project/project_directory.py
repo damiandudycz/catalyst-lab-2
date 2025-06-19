@@ -102,12 +102,7 @@ class ProjectDirectory(GitDirectory):
         from .project_manager import ProjectManager
         if not ProjectManager.shared().is_stage_name_available(project=self, name=stage.name):
             raise RuntimeError(f"Stage with name {stage.name} already exists in this project.")
-        stage_path = self.stage_directory_path(name=stage.name)
-        config_path = os.path.join(stage_path, "stage.json")
-        os.makedirs(stage_path, exist_ok=False)
-        config_json = stage.serialize()
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config_json, f, indent=4)
+        ProjectManager.shared().save_stage(project=self, stage=stage)
 
 @dataclass
 class ProjectConfiguration(Serializable):
