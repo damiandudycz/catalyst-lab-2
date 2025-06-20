@@ -90,7 +90,6 @@ class RepositoryListView(Gtk.Box):
             item_row.connect("activated", self.on_item_row_pressed)
             self.items_container.insert(item_row, 0)
             self._item_rows.append(item_row)
-        self.items_container.set_visible(self._item_rows)
 
         for installation in started_processes:
             installation_row = ItemInstallationRow(installation, self.item_icon)
@@ -99,6 +98,8 @@ class RepositoryListView(Gtk.Box):
             )
             self.items_container.insert(installation_row, 0)
             self._item_rows.append(installation_row)
+
+        self.items_container.set_visible(self._item_rows)
 
     def on_item_row_pressed(self, sender):
         self.emit("item-row-pressed", sender.item)
