@@ -13,8 +13,8 @@
         "--socket=wayland",
         "--filesystem=xdg-run/catalystlab-root-helper:create",
         "--filesystem=host:ro",
-        "--filesystem=/tmp",
-        "--filesystem=/var/tmp",
+        "--filesystem=/tmp/catalystlab:create",
+        "--filesystem=/var/tmp/catalystlab:create",
         "--filesystem=home",
         "--talk-name=org.freedesktop.Flatpak"
     ],

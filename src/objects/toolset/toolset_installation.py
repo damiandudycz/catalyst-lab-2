@@ -128,7 +128,8 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
             total_size = int(response.headers.get('content-length', 0))
             downloaded = 0
             chunk_size = 1024 * 1024 # 1MB chunks.
-            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+            os.makedirs('/tmp/catalystlab', exist_ok=True)
+            with tempfile.NamedTemporaryFile(delete=False, dir='/tmp/catalystlab') as tmp_file:
                 self.multistage_process.tmp_stage_file = tmp_file
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if self._cancel_event.is_set():
