@@ -39,7 +39,7 @@ class Snapshot(Serializable):
         snapshot_file_path = self.file_path()
 
         try:
-            output = subprocess.check_output(['/app/bin/unsquashfs', '-l', snapshot_file_path], text=True)
+            output = subprocess.check_output(['unsquashfs', '-l', snapshot_file_path], text=True)
         except subprocess.CalledProcessError as e:
             print(f"Error reading {snapshot_file_path}: {e}")
             return {}

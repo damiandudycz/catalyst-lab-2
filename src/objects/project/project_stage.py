@@ -81,7 +81,7 @@ def load_catalyst_stage_arguments(toolset: Toolset, target_name: str | None) -> 
 
     # Find stage .py path:
     output = subprocess.check_output(
-        ['/app/bin/unsquashfs', '-l', toolset_file_path, catalyst_path_stage],
+        ['unsquashfs', '-l', toolset_file_path, catalyst_path_stage],
         text=True
     )
     catalyst_path_stage_found = None
@@ -96,7 +96,7 @@ def load_catalyst_stage_arguments(toolset: Toolset, target_name: str | None) -> 
 
     # Read stage arguments:
     stage_content = subprocess.check_output(
-        ['/app/bin/unsquashfs', '-cat', toolset_file_path, catalyst_path_stage_found],
+        ['unsquashfs', '-cat', toolset_file_path, catalyst_path_stage_found],
         text=True
     )
     results = extract_frozenset_values(stage_content)
@@ -137,7 +137,7 @@ def load_catalyst_targets(toolset: Toolset) -> list[str]:
 
     # Read the list of potential target files:
     output = subprocess.check_output(
-        ['/app/bin/unsquashfs', '-l', toolset_file_path, f"{catalyst_path_targets}/*.py"],
+        ['unsquashfs', '-l', toolset_file_path, f"{catalyst_path_targets}/*.py"],
         text=True
     )
     except_files = {'__init__.py'}

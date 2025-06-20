@@ -33,7 +33,7 @@ class SnapshotManager:
         for filename in missing_files:
             full_path = os.path.join(snapshots_location, filename)
             try:
-                output = subprocess.check_output(['/app/bin/unsquashfs', '-cat', full_path, "metadata/timestamp.chk"], text=True)
+                output = subprocess.check_output(['unsquashfs', '-cat', full_path, "metadata/timestamp.chk"], text=True)
                 timestamp = datetime.strptime(output.strip(), "%a, %d %b %Y %H:%M:%S %z")
                 self.add_snapshot(Snapshot(filename=filename, date=timestamp))
             except subprocess.CalledProcessError as e:
