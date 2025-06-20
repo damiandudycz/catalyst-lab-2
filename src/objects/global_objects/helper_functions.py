@@ -1,6 +1,6 @@
 from .root_function import root_function
-import subprocess
-import os
+import subprocess, os, re
+from datetime import datetime, timezone, timedelta
 
 # ------------------------------------------------------------------------------
 # Global helper functions:
@@ -98,3 +98,28 @@ def get_file_size_string(path: str) -> str | None:
     except Exception as e:
         print(e)
         return None
+
+def parse_strict_rfc_datetime(s: str) -> datetime:
+    import locale
+    match = re.search(r'([+-]\d{4})$', s.strip())
+    if not match:
+        raise ValueError("No timezone offset found")
+    tz_str = match.group(1)
+    s_no_tz = s.replace(tz_str, '').strip()
+    # Save the current locale
+    current_locale = locale.setlocale(locale.LC_TIME)
+    try:
+        # Temporarily set locale to "C" for strptime to parse English weekday/month
+        locale.setlocale(locale.LC_TIME, "C")
+        dt = datetime.strptime(s_no_tz, "%a, %d %b %Y %H:%M:%S")
+    finally:
+        # Restore the original locale no matter what happens
+        locale.setlocale(locale.LC_TIME, current_locale)
+    # Convert timezone offset to tzinfo
+    hours = int(tz_str[1:3])
+    minutes = int(tz_str[3:5])
+    delta = timedelta(hours=hours, minutes=minutes)
+    if tz_str.startswith('-'):
+        delta = -delta
+    return dt.replace(tzinfo=timezone(delta))
+

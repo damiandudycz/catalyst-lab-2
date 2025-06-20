@@ -3,6 +3,7 @@ from datetime import datetime
 from .repository import Repository
 import os, subprocess
 from .snapshot import Snapshot
+from .helper_functions import parse_strict_rfc_datetime
 
 @final
 class SnapshotManager:
@@ -34,9 +35,13 @@ class SnapshotManager:
             full_path = os.path.join(snapshots_location, filename)
             try:
                 output = subprocess.check_output(['unsquashfs', '-cat', full_path, "metadata/timestamp.chk"], text=True)
-                timestamp = datetime.strptime(output.strip(), "%a, %d %b %Y %H:%M:%S %z")
+                try:
+                    timestamp = parse_strict_rfc_datetime(output.strip())
+                except Exception as e:
+                    print(e)
+                    timestamp = None
                 self.add_snapshot(Snapshot(filename=filename, date=timestamp))
-            except subprocess.CalledProcessError as e:
+            except Exception as e:
                 print(f"Error reading {full_path}: {e}")
         # --- Step 3: Remove records for deleted snapshot files ---
         deleted_snapshots = [snapshot for snapshot in snapshots if snapshot.filename not in found_filenames]

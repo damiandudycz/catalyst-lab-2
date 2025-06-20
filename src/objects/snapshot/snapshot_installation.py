@@ -12,7 +12,7 @@ from .root_function import root_function
 from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from datetime import datetime
-from .helper_functions import mount_squashfs, umount_squashfs
+from .helper_functions import mount_squashfs, umount_squashfs, parse_strict_rfc_datetime
 
 # ------------------------------------------------------------------------------
 # Installation process.
@@ -260,9 +260,12 @@ class SnapshotInstallationStepAnalyze(SnapshotInstallationStep):
                 raise RuntimeError("Timestamp metadata not found")
             def read_timestamp_from_file(snapshot_metadata_timestamp_path):
                 with open(snapshot_metadata_timestamp_path, 'r', encoding='utf-8') as file:
-                    timestamp_str = file.read().strip()
-                timestamp = datetime.strptime(timestamp_str, "%a, %d %b %Y %H:%M:%S %z")
-                return timestamp
+                    try:
+                        timestamp = parse_strict_rfc_datetime(file.read().strip())
+                        return timestamp
+                    except Exception as e:
+                        print(e)
+                        return None
             self.multistage_process.snapshot.date = read_timestamp_from_file(snapshot_metadata_timestamp_path=snapshot_metadata_timestamp_path)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
