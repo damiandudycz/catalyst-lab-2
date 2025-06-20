@@ -11,6 +11,7 @@ from .toolset_update import ToolsetUpdate
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
 from .multistage_process_execution_view import MultistageProcessExecutionView
 from .toolset_manager import ToolsetManager
+from .cl_toggle_group import CLToggle, CLToggleGroup
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset/toolset_details_view.ui')
 class ToolsetDetailsView(Gtk.Box):
@@ -310,11 +311,11 @@ class ToolsetDetailsView(Gtk.Box):
             versions_row = Adw.ActionRow()
             versions_row.set_activatable(False)
 
-            toggle_group = Adw.ToggleGroup()
+            toggle_group = CLToggleGroup()
             toggle_group.add_css_class("round")
             toggle_group.add_css_class("caption")
             for version in app.versions:
-                toggle = Adw.Toggle(label=version.name)
+                toggle = CLToggle(label=version.name)
                 toggle_group.add(toggle)
             if app_install: # Activate selected app variant toggle
                 for i, version in enumerate(app.versions):

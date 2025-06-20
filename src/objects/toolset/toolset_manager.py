@@ -31,7 +31,7 @@ class ToolsetManager:
             full_path = os.path.join(toolsets_location, filename)
             # Load metadata from json file:
             try:
-                output = subprocess.check_output(['/app/bin/unsquashfs', '-cat', full_path, "toolset.json"], text=True)
+                output = subprocess.check_output(['unsquashfs', '-cat', full_path, "toolset.json"], text=True)
                 metadata = json.loads(output)
                 toolset = Toolset(
                     env=ToolsetEnv.EXTERNAL,

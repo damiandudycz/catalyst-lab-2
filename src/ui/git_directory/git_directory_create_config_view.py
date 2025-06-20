@@ -4,6 +4,7 @@ from enum import Enum, auto
 from .event_bus import EventBus
 from .git_installation import GitDirectorySetupConfiguration, GitDirectorySource
 from .git_directory_default_content_builder import DefaultDirContentBuilder
+from .cl_toggle_group import CLToggle, CLToggleGroup
 
 # Import additional classed so that it can be parsed in repository_list_view:
 from .releng_manager import RelengManager
@@ -73,7 +74,7 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         )
 
     def setup_source_toggles(self):
-        toggle_group = Adw.ToggleGroup()
+        toggle_group = CLToggleGroup()
         toggle_group.add_css_class("round")
         toggle_group.add_css_class("caption")
 
@@ -82,7 +83,7 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         self.selected_source = sources[0]
         self.source_group.set_visible(len(sources) > 1)
         for index, source in enumerate(sources):
-            toggle = Adw.Toggle(label=source.name())
+            toggle = CLToggle(label=source.name())
             toggle_group.add(toggle)
             if source == self.selected_source:
                 toggle_group.set_active(index)
