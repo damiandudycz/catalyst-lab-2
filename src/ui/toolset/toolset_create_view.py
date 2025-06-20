@@ -201,20 +201,59 @@ class ToolsetCreateView(Gtk.Box):
             versions_row = Adw.ActionRow()
             versions_row.set_activatable(False)
 
-            toggle_group = Adw.ToggleGroup()
+            wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+
+            # ADW 1.7:
+
+            #toggle_group = Adw.ToggleGroup()
+            #toggle_group.add_css_class("round")
+            #toggle_group.add_css_class("caption")
+            #for version in app.versions:
+            #    toggle = Adw.Toggle(label=version.name)
+            #    toggle_group.add(toggle)
+            #def on_toggle_clicked(group, pspec, app, row):
+            #    index = group.get_active()
+            #    self.tools_selection_versions[app] = app.versions[index]
+            #    self._update_application_info_label(row=row, app=app)
+            #toggle_group.connect("notify::active", on_toggle_clicked, app, row)
+            #wrapper.append(toggle_group)
+
+            # ADW 1.6:
+
+            toggle_group = CLToggleGroup()
             toggle_group.add_css_class("round")
             toggle_group.add_css_class("caption")
             for version in app.versions:
-                toggle = Adw.Toggle(label=version.name)
+                toggle = CLToggle(label=version.name)
                 toggle_group.add(toggle)
             def on_toggle_clicked(group, pspec, app, row):
                 index = group.get_active()
                 self.tools_selection_versions[app] = app.versions[index]
                 self._update_application_info_label(row=row, app=app)
             toggle_group.connect("notify::active", on_toggle_clicked, app, row)
-
-            wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
             wrapper.append(toggle_group)
+
+            #wrapper.add_css_class("linked")
+
+            #def on_version_toggled(button, index, app, row):
+            #    if button.get_active():
+            #        self.tools_selection_versions[app] = app.versions[index]
+            #        self._update_application_info_label(row=row, app=app)
+            #first_toggle_button = None
+            #for i, version in enumerate(app.versions):
+            #    toggle_button = Gtk.ToggleButton(label=version.name)
+            #    toggle_button.get_style_context().add_class("caption-heading")
+            #    if first_toggle_button is None:
+            #        first_toggle_button = toggle_button
+            #    else:
+            #        toggle_button.set_group(first_toggle_button)
+            #    if self.tools_selection_versions.get(app) == version:
+            #        toggle_button.set_active(True)
+            #    toggle_button.connect("toggled", on_version_toggled, i, app, row)
+            #    wrapper.append(toggle_button)
+
+            # --
+
             versions_row.add_prefix(wrapper)
             row.add_row(versions_row)
 
@@ -324,3 +363,83 @@ class ToolsetCreateView(Gtk.Box):
             installer_name = filename_without_extension
         return installer_name
 
+
+
+
+
+
+
+
+import gi
+gi.require_version('Gtk', '4.0')
+from gi.repository import Gtk, GObject, GLib
+
+class FallbackToggle(Gtk.ToggleButton):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.get_style_context().add_class("caption-heading")
+
+
+class FallbackToggleGroup(Gtk.Box):
+    __gtype_name__ = 'FallbackToggleGroup'
+    __gproperties__ = {
+        "active": (int,
+            "Active Toggle Index",
+            "The index of the active toggle button in the group",
+            -1, GLib.MAXINT, -1, GObject.ParamFlags.READWRITE,
+        ),
+    }
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.set_orientation(Gtk.Orientation.HORIZONTAL)
+        self.add_css_class("linked")
+        self._toggles = []
+        self._active_index = -1
+
+    def do_get_property(self, prop):
+        if prop.name == 'active':
+            return self._active_index
+        else:
+            raise AttributeError(f'unknown property {prop.name}')
+
+    def do_set_property(self, prop, value):
+        if prop.name == 'active':
+            if 0 <= value < len(self._toggles):
+                self._toggles[value].set_active(True)
+        else:
+            raise AttributeError(f'unknown property {prop.name}')
+
+    def add(self, toggle: Gtk.ToggleButton):
+        if not isinstance(toggle, Gtk.ToggleButton):
+            raise TypeError("Only Gtk.ToggleButton instances can be added.")
+        is_first_toggle = not self._toggles
+        index = len(self._toggles)
+        self._toggles.append(toggle)
+        if not is_first_toggle:
+            toggle.set_group(self._toggles[0])
+        toggle.connect("toggled", self._on_child_toggled, index)
+        self.append(toggle)
+        if is_first_toggle:
+            toggle.set_active(True)
+
+    def get_active(self) -> int:
+        return self.get_property('active')
+
+    def _on_child_toggled(self, button, index):
+        """Internal handler to update the active index and emit notify::active."""
+        if button.get_active():
+            if self._active_index != index:
+                self._active_index = index
+                self.notify("active")
+
+try:
+    from gi.repository import Adw
+    if hasattr(Adw, 'ToggleGroup') and hasattr(Adw, 'Toggle'):
+        CLToggleGroup = Adw.ToggleGroup
+        CLToggle = Adw.Toggle
+    else:
+        raise ImportError("Adwaita version is too old, missing ToggleGroup.")
+except (ImportError, ValueError) as e:
+    CLToggleGroup = FallbackToggleGroup
+    CLToggle = FallbackToggle

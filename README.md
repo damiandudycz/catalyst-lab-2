@@ -18,6 +18,7 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [x] bwrap: Unknown option --overlay-src in Fedora
 - [ ] Create system checks for host required components - bwrap (including capabilities / version), pkexec etc
 - [ ] When restoring things from Repository it should try to also restore IDs, but only if these are free. Otherwise generate new IDs
+- [ ] When using host env, use tools from env, and not from flatpak container - bwrap, unsquashfs, etc.
 
 ### Toolsets.
 - [x] Block environment calls on single env to one command at a time.
