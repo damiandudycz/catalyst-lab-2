@@ -60,6 +60,14 @@
                     <property name="title">Releng template</property>
                     <child>
                       <object class="AdwActionRow">
+                        <property name="title">You can use any architecture for releng template. CatalystLab will try to find matching one when building or use the one from selected arch.</property>
+                        <style>
+                          <class name="caption-heading"/>
+                        </style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwActionRow">
                         <property name="title">None</property>
                         <property name="subtitle">Do not use Releng template</property>
                         <property name="icon-name">clapperboard-edit-svgrepo-com-symbolic</property>
