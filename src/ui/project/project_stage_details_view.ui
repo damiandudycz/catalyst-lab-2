@@ -20,7 +20,7 @@
             <property name="margin-top">4</property>
             <property name="margin-bottom">4</property>
             <property name="orientation">vertical</property>
-            <property name="spacing">12</property>
+            <property name="spacing">24</property>
             <child>
               <object class="AdwPreferencesGroup">
                 <property name="title">Basic information</property>
@@ -39,6 +39,11 @@
                       <class name="caption-heading"/>
                       <class name="error"/>
                     </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwActionRow" id="stage_target_static_row">
+                    <property name="title">Target type</property>
                   </object>
                 </child>
                 <child>
@@ -81,6 +86,43 @@
                     </child>
                   </object>
                 </child>
+                <child>
+                  <object class="AdwExpanderRow" id="stage_seed_row">
+                    <property name="title">Seed</property>
+                    <child>
+                      <object class="AdwActionRow" id="use_automatic_seed_row">
+                        <property name="title">Download seed automatically</property>
+                        <property name="subtitle">Get latest stage3 tarball from gentoo.org</property>
+                        <property name="activatable-widget">use_automatic_seed_checkbox</property>
+                        <child type="prefix">
+                          <object class="GtkCheckButton" id="use_automatic_seed_checkbox">
+                            <property name="valign">center</property>
+                            <signal name="toggled" handler="on_use_automatic_seed_toggled"/>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwActionRow" id="use_none_seed_row">
+                        <property name="title">None</property>
+                        <property name="subtitle">Setup seed later</property>
+                        <property name="activatable-widget">use_none_seed_checkbox</property>
+                        <child type="prefix">
+                          <object class="GtkCheckButton" id="use_none_seed_checkbox">
+                            <property name="valign">center</property>
+                            <property name="group">use_automatic_seed_checkbox</property>
+                            <signal name="toggled" handler="on_use_none_seed_toggled"/>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="configuration_pref_group">
+                <property name="title">Configuration</property>
               </object>
             </child>
           </object>

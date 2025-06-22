@@ -183,15 +183,18 @@ class ProjectStageCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_use_automatic_seed_toggled(self, sender):
-        self.selected_seed = ProjectStageSeedSpecial.DOWNLOAD
-        self.check_if_seed_correct()
+        if sender.get_active():
+            self.selected_seed = ProjectStageSeedSpecial.DOWNLOAD
+            self.check_if_seed_correct()
     @Gtk.Template.Callback()
     def on_use_none_seed_toggled(self, sender):
-        self.selected_seed = ProjectStageSeedSpecial.NONE
-        self.check_if_seed_correct()
+        if sender.get_active():
+            self.selected_seed = ProjectStageSeedSpecial.NONE
+            self.check_if_seed_correct()
     def _on_seed_item_selected(self, sender, item):
-        self.selected_seed = item.id
-        self.check_if_seed_correct()
+        if sender.get_active():
+            self.selected_seed = item.id
+            self.check_if_seed_correct()
     def check_if_seed_correct(self) -> bool:
         self.selected_seed_is_correct = (
             self.selected_seed is not None

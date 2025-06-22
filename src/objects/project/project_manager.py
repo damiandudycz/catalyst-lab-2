@@ -4,7 +4,7 @@ from .repository import Repository
 from .project_directory import ProjectDirectory
 from .project_stage import ProjectStage, ProjectStageEvent
 from .git_directory import GitDirectoryEvent
-import os, shutil, json
+import os, shutil, json, uuid
 
 @final
 class ProjectManager(GitManager):
@@ -33,12 +33,14 @@ class ProjectManager(GitManager):
         stage.target_name = target_name
         stage.releng_template_name = None
         self.save_stage(project=project, stage=stage)
-        stage.event_bus.emit(ProjectStageEvent.NAME_CHANGED, stage)
+
+    def change_stage_parent(self, project: ProjectDirectory, stage: ProjectStage, parent_id: uuid.UUID | None):
+        stage.parent_id = parent_id
+        self.save_stage(project=project, stage=stage)
 
     def change_stage_releng_template(self, project: ProjectDirectory, stage: ProjectStage, releng_template_name: str):
         stage.releng_template_name = releng_template_name
         self.save_stage(project=project, stage=stage)
-        stage.event_bus.emit(ProjectStageEvent.NAME_CHANGED, stage)
 
     def save_stage(self, project: ProjectDirectory, stage: ProjectStage):
         stage_path = project.stage_directory_path(name=stage.name)

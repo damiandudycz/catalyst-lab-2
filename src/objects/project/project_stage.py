@@ -140,7 +140,7 @@ def load_catalyst_targets(toolset: Toolset) -> list[str]:
         ['unsquashfs', '-l', toolset_file_path, f"{catalyst_path_targets}/*.py"],
         text=True
     )
-    except_files = {'__init__.py'}
+    except_files = {'__init__.py', 'snapshot.py'}
     target_files = [
         os.path.splitext(os.path.basename(line))[0]
         for line in output.splitlines()

@@ -20,6 +20,22 @@ class Architecture(Enum):
     s390 = "s390"           # IBM S/390 (31-bit)
     s390x = "s390x"         # IBM S/390 (64-bit)
 
+class RelengBaseArch(Enum):
+    """Basearch families used by releng templates. Value represents base directory in releng"""
+    x86 = "x86"
+    amd64 = "amd64"
+    arm = "arm"
+    arm64 = "arm64"
+    hppa = "hppa"
+    ia64 = "ia64"
+    ppc = "ppc/ppc32"
+    ppc64 = "ppc/ppc64"
+    ppc64le = "ppc/ppc64le"
+    s390 = "s390/s390"
+    s390x = "s390/s390x"
+    sparc = "sparc"
+    # Missing: riscv, loong, m64k, alpha
+
 # Mappings:
 _arch_mapping = {
     'i386': Architecture.x86,
