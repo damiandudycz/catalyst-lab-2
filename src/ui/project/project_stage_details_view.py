@@ -1,6 +1,6 @@
 from gi.repository import Gtk, Adw, GLib
 from .project_directory import ProjectDirectory
-from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates
+from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates, load_catalyst_stage_arguments
 from .project_manager import ProjectManager
 from .git_directory import GitDirectoryEvent
 from .project_stage import ProjectStageEvent
@@ -194,8 +194,12 @@ class ProjectStageDetailsView(Gtk.Box):
             self.load_configuration_rows()
 
     def load_configuration_rows(self):
-#        target_variables =
-        pass
+        supported_arguments = load_catalyst_stage_arguments(toolset=self.project_directory.get_toolset(), target_name=self.stage.target_name)
+        for arg_name in sorted(supported_arguments.valid):
+            is_required = arg_name in supported_arguments.required
+            row = Adw.ActionRow(title=arg_name)
+            self.configuration_pref_group.add(row)
+            print(f"{arg_name}: {'required' if is_required else 'optional'}")
 
     @Gtk.Template.Callback()
     def on_use_automatic_seed_toggled(self, sender):
