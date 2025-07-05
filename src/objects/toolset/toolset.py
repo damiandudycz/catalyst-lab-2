@@ -32,7 +32,6 @@ class Toolset(Serializable):
         self.name = name
         self.metadata = metadata
         self.squashfs_binding_dir = squashfs_binding_dir # Directory used as toolset_root, mounted when setting up or spawning.
-        self.squashfs_binding_dir_overlay = None # Only set if spawned RW from squashfs
         match env:
             case ToolsetEnv.SYSTEM:
                 pass
@@ -124,7 +123,7 @@ class Toolset(Serializable):
             case ToolsetEnv.SYSTEM:
                 return "/"
             case ToolsetEnv.EXTERNAL:
-                return os.path.join(self.squashfs_binding_dir_overlay, "merged") if self.squashfs_binding_dir_overlay else self.squashfs_binding_dir
+                return self.squashfs_binding_dir
 
     # --------------------------------------------------------------------------
     # Spawning cycle:
@@ -142,8 +141,7 @@ class Toolset(Serializable):
 
             # Create squashfs mounting if needed.
             if self.file_path() and os.path.exists(self.file_path()):
-                self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.file_path())
-            self.squashfs_binding_dir_overlay = mount_overlayfs(source_dir=self.squashfs_binding_dir) if store_changes else None
+                self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.file_path(), prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.name)}/mount_")
 
             resolved_toolset_root = str(Path(self.toolset_root()).resolve())
             if resolved_toolset_root == "/" and store_changes:
@@ -198,7 +196,7 @@ class Toolset(Serializable):
             work_dir: str | None = None
             try:
                 OverlayPaths = namedtuple("OverlayPaths", ["upper", "work"])
-                work_dir = create_temp_workdir(prefix="gentoo_toolset_spawn_")
+                work_dir = create_temp_workdir(prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.name)}/bwrap_")
 
                 # Prepare work dirs:
                 fake_root = os.path.join(work_dir, "fake_root")
@@ -354,20 +352,17 @@ class Toolset(Serializable):
             if self.in_use:
                 raise RuntimeError(f"Toolset {self} is currently in use.")
             try:
-                if rebuild_squashfs_if_needed and self.store_changes and self.file_path() and self.squashfs_binding_dir_overlay:
+                if rebuild_squashfs_if_needed and self.store_changes and self.file_path():
                     create_squashfs_process = create_squashfs(source_directory=self.toolset_root(), output_file=self.file_path()+"_tmp")
                     create_squashfs_process.wait()
                     if os.path.isfile(self.file_path()+"_tmp"):
                         shutil.move(self.file_path()+"_tmp", self.file_path())
-                if self.squashfs_binding_dir_overlay:
-                    unmount_overlayfs(tmp_dir=self.squashfs_binding_dir_overlay)
                 if self.squashfs_binding_dir and clean_squashfs_binding_dir:
                     umount_squashfs(mount_point=self.squashfs_binding_dir)
                 if self.work_dir:
                     delete_temp_workdir(path=self.work_dir)
                 # Reset spawned settings:
                 self.squashfs_binding_dir = None
-                self.squashfs_binding_dir_overlay = None
                 self.work_dir = None
                 self.hot_fixes = None
                 self.current_bindings = None
@@ -558,7 +553,7 @@ class Toolset(Serializable):
     @staticmethod
     def sanitized_name_for_name(name: str) -> str:
         def sanitize_filename_linux(name: str) -> str:
-            return name.replace('/', '_').replace('\0', '_')
+            return name.replace('/', '_').replace('\0', '_').replace(' ', '_')
         return sanitize_filename_linux(name=name)
 
 @dataclass
@@ -613,34 +608,6 @@ class ToolsetEnv(Enum):
                 return RuntimeEnv.is_running_in_gentoo_host()
             case ToolsetEnv.EXTERNAL:
                 return True
-
-@root_function
-def mount_overlayfs(source_dir: str) -> str:
-    import os, subprocess
-    tmp_dir = create_temp_workdir(prefix="gentoo_toolset_spawn_overlay_")
-
-    upperdir = os.path.join(tmp_dir, "upper")
-    workdir = os.path.join(tmp_dir, "work")
-    mountpoint = os.path.join(tmp_dir, "merged")
-    os.makedirs(upperdir, exist_ok=True)
-    os.makedirs(workdir, exist_ok=True)
-    os.makedirs(mountpoint, exist_ok=True)
-    # Construct and run the mount command
-    mount_cmd = [
-        'mount', '-t', 'overlay', 'overlay',
-        '-o', f'lowerdir={source_dir},upperdir={upperdir},workdir={workdir}',
-        mountpoint
-    ]
-    subprocess.run(mount_cmd, check=True)
-    print(f"OverlayFS mounted at: {mountpoint}")
-    return tmp_dir
-
-@root_function
-def unmount_overlayfs(tmp_dir: str):
-    import shutil, subprocess
-    mountpoint = os.path.join(tmp_dir, "merged")
-    subprocess.run(['umount', mountpoint], check=True)
-    shutil.rmtree(tmp_dir)
 
 @root_function
 def write_metadata_to_json(toolset_root: str, metadata: dict[str, Any] | None):

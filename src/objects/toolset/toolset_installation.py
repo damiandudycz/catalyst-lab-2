@@ -162,7 +162,7 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            self.multistage_process.tmp_stage_extract_dir = create_temp_workdir(prefix="gentoo_stage_extract_")
+            self.multistage_process.tmp_stage_extract_dir = create_temp_workdir(prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/setup_")
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -320,7 +320,7 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            self.toolset_squashfs_dir = create_temp_workdir(prefix="gentoo_toolset_squashfs_")
+            self.toolset_squashfs_dir = create_temp_workdir(prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/compress_")
             self.toolset_squashfs_file = os.path.join(self.toolset_squashfs_dir, "toolset.squashfs")
             self.squashfs_process = create_squashfs(source_directory=self.multistage_process.toolset.toolset_root(), output_file=self.toolset_squashfs_file)
             for line in self.squashfs_process.stdout:

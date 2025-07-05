@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, threading
+import os, threading, subprocess
 from typing import final
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
@@ -253,31 +253,20 @@ class SnapshotInstallationStepAnalyze(SnapshotInstallationStep):
             snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
             snapshot_real_path = os.path.join(snapshots_location, self.multistage_process.snapshot.filename)
             # Mount snapshot and read timestamp from it.
-            self.multistage_process.squashfs_mount_path = mount_squashfs(squashfs_path=snapshot_real_path)
-            snapshot_metadata_path = os.path.join(self.multistage_process.squashfs_mount_path, 'metadata')
-            snapshot_metadata_timestamp_path = os.path.join(snapshot_metadata_path, 'timestamp.chk')
-            if not os.path.isfile(snapshot_metadata_timestamp_path):
-                raise RuntimeError("Timestamp metadata not found")
-            def read_timestamp_from_file(snapshot_metadata_timestamp_path):
-                with open(snapshot_metadata_timestamp_path, 'r', encoding='utf-8') as file:
-                    try:
-                        timestamp = parse_strict_rfc_datetime(file.read().strip())
-                        return timestamp
-                    except Exception as e:
-                        print(e)
-                        return None
-            self.multistage_process.snapshot.date = read_timestamp_from_file(snapshot_metadata_timestamp_path=snapshot_metadata_timestamp_path)
+            output = subprocess.check_output(['unsquashfs', '-cat', snapshot_real_path, "metadata/timestamp.chk"], text=True)
+            def read_timestamp_from_output(output: str):
+                try:
+                    timestamp = parse_strict_rfc_datetime(output.strip())
+                    print(f"TS: >>> {timestamp}")
+                    return timestamp
+                except Exception as e:
+                    print(e)
+                    return None
+            self.multistage_process.snapshot.date = read_timestamp_from_output(output=output)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during snapshot generation: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
-    def cleanup(self) -> bool:
-        if not super().cleanup():
-            return False
-        # Umount snapshot
-        if hasattr(self.multistage_process, 'squashfs_mount_path'):
-            umount_squashfs(self.multistage_process.squashfs_mount_path)
-        return True
 
 # ------------------------------------------------------------------------------
 # Helper functions.

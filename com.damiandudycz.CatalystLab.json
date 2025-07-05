@@ -5,18 +5,18 @@
     "sdk" : "org.gnome.Sdk",
     "command" : "catalystlab",
     "finish-args" : [
+        "--talk-name=org.freedesktop.Flatpak",
         "--share=network",
         "--share=ipc",
         "--socket=fallback-x11",
+        "--socket=wayland",
         "--device=dri",
 	"--device=kvm",
-        "--socket=wayland",
-        "--filesystem=xdg-run/catalystlab-root-helper:create",
         "--filesystem=host:ro",
-        "--filesystem=/tmp/catalystlab:create",
-        "--filesystem=/var/tmp/catalystlab:create",
         "--filesystem=home",
-        "--talk-name=org.freedesktop.Flatpak"
+        "--filesystem=xdg-run/catalystlab-root-helper:create",
+        "--filesystem=/tmp/catalystlab:create",
+        "--filesystem=/var/tmp/catalystlab:create"
     ],
     "cleanup" : [
         "/include",

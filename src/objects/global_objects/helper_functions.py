@@ -8,13 +8,22 @@ from datetime import datetime, timezone, timedelta
 
 @root_function
 def create_temp_workdir(prefix: str) -> str:
-    """Creates temp directory in /var/tmp/catalystlab, owned by the user."""
+    """Creates temp directory in /var/tmp/catalystlab, owned by the user.
+    Supports subdirectories inside prefix, e.g. 'toolset/tmp_'."""
     import tempfile
     import os
     base_dir = "/var/tmp/catalystlab"
-    os.makedirs(base_dir, exist_ok=True)
-    temp_dir = tempfile.mkdtemp(prefix=prefix, dir=base_dir)
-    os.chown(temp_dir, RootHelperServer.shared().uid, RootHelperServer.shared().uid)
+    # Split prefix into path components
+    if '/' in prefix:
+        *subdirs, final_prefix = prefix.rstrip('/').split('/')
+        dir_path = os.path.join(base_dir, *subdirs)
+    else:
+        final_prefix = prefix
+        dir_path = base_dir
+    os.makedirs(dir_path, exist_ok=True)
+    temp_dir = tempfile.mkdtemp(prefix=final_prefix, dir=dir_path)
+    uid = RootHelperServer.shared().uid
+    os.chown(temp_dir, uid, uid)
     return temp_dir
 
 @root_function
@@ -37,19 +46,16 @@ def delete_temp_workdir(path: str) -> bool:
         return False
 
 @root_function
-def mount_squashfs(squashfs_path: str) -> str:
+def mount_squashfs(squashfs_path: str, prefix: str) -> str:
     import os
     import subprocess
-    """Creates tmp directory and mounts squashfs file to it"""
-    mount_point = create_temp_workdir(prefix="toolset_squashfs_mount_")
-    subprocess.run(['mount', '-o', 'loop,ro', squashfs_path, mount_point], check=True)
+    """Creates tmp directory and extracts squashfs file to it"""
+    mount_point = create_temp_workdir(prefix=prefix)
+    subprocess.run(['unsquashfs', '-f', '-d', mount_point, squashfs_path], check=True)
     return mount_point
 
 @root_function
 def umount_squashfs(mount_point: str):
-    import os
-    import subprocess
-    subprocess.run(['umount', mount_point], check=True)
     delete_temp_workdir(path=mount_point)
 
 @root_function
