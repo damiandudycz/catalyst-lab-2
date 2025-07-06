@@ -6,7 +6,6 @@ from .repository_list_view import ItemRow
 from .event_bus import EventBus
 from .item_select_view import ItemSelectionViewEvent
 
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/components/item_select_expander_row/item_select_expander_row.ui')
 class ItemSelectionExpanderRow(Adw.ExpanderRow):
     __gtype_name__ = "ItemSelectionExpanderRow"
 

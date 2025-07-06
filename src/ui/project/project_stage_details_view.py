@@ -6,7 +6,7 @@ from .git_directory import GitDirectoryEvent
 from .project_stage import ProjectStageEvent
 from .repository_list_view import ItemRow
 from .project_stage_create_view import ProjectStageSeedSpecial
-#from .architecture import Architecture
+from .architecture import Architecture
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -27,6 +27,7 @@ class ProjectStageDetailsView(Gtk.Box):
     use_automatic_seed_checkbox = Gtk.Template.Child()
     use_none_seed_row = Gtk.Template.Child()
     use_none_seed_checkbox = Gtk.Template.Child()
+    profile_selection_view = Gtk.Template.Child()
 
     def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -41,6 +42,7 @@ class ProjectStageDetailsView(Gtk.Box):
         self.monitor_information_changes()
         self.load_seeds()
         self.load_targets()
+        self.load_profiles()
         self.setup_stage_details()
         self.load_configuration_rows()
         self.refresh_allow_download_seed()
@@ -152,6 +154,14 @@ class ProjectStageDetailsView(Gtk.Box):
             for target_row in target_rows:
                 GLib.idle_add(self.stage_target_row.add_row, target_row)
         threading.Thread(target=worker, daemon=True).start()
+
+    def load_profiles(self):
+        self.profile_selection_view.set_static_list(
+            sorted(
+                self.project_directory.get_snapshot().load_profiles(arch=self.project_directory.get_architecture()),
+                key=lambda profile: profile.path
+            )
+        )
 
     def load_releng_templates(self):
         if hasattr(self, 'template_rows'):

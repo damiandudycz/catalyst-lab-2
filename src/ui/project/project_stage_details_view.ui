@@ -118,6 +118,14 @@
                     </child>
                   </object>
                 </child>
+                <child>
+                  <object class="ItemSelectionExpanderRow" id="profile_selection_view">
+                    <property name="title">Profile</property>
+                    <property name="item_title_property_name">path</property>
+                    <signal name="is-item-selectable" handler="is_item_selectable"/>
+                    <signal name="is-item-usable" handler="is_item_usable"/>
+                  </object>
+                </child>
               </object>
             </child>
             <child>
