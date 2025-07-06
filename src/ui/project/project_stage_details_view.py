@@ -6,6 +6,7 @@ from .git_directory import GitDirectoryEvent
 from .project_stage import ProjectStageEvent
 from .repository_list_view import ItemRow
 from .project_stage_create_view import ProjectStageSeedSpecial
+#from .architecture import Architecture
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -33,6 +34,7 @@ class ProjectStageDetailsView(Gtk.Box):
         self.stage = stage
         self.content_navigation_view = content_navigation_view
         self.connect("realize", self.on_realize)
+#        print(self.project_directory.get_snapshot().load_profiles(arch=Architecture.amd64))
 
     def on_realize(self, widget):
         self.get_root().set_focus(None)
@@ -156,7 +158,11 @@ class ProjectStageDetailsView(Gtk.Box):
             for row in self.template_rows:
                 self.stage_releng_template_row.remove(row)
         def worker():
-            template_subpaths = load_releng_templates(releng_directory=self.project_directory.get_releng_directory(), stage_name=self.stage.target_name)
+            template_subpaths = load_releng_templates(
+                releng_directory=self.project_directory.get_releng_directory(),
+                stage_name=self.stage.target_name,
+                architecture=self.project_directory.get_architecture()
+            )
             group = [self.stage_releng_template_none_checkbox]
             self.template_rows = [
                 StageSelectionRow(

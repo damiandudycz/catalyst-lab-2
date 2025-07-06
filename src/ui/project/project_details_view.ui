@@ -97,15 +97,14 @@
                 <property name="hexpand">True</property>
                 <property name="vexpand">True</property>
                 <child>
-                  <object class="GtkBox">
-                    <property name="orientation">vertical</property>
-                    <property name="spacing">24</property>
+                  <object class="AdwPreferencesGroup">
                     <property name="margin-start">24</property>
                     <property name="margin-end">24</property>
                     <!-- <property name="margin-top">24</property> -->
                     <property name="margin-bottom">24</property>
                     <child>
-                      <object class="ItemSelectionView" id="toolset_selection_view">
+                      <object class="ItemSelectionExpanderRow" id="toolset_selection_view">
+                        <property name="title">Toolset</property>
                         <property name="item_class_name">Toolset</property>
                         <property name="item_icon">sledgehammer-svgrepo-com-symbolic</property>
                         <property name="item_title_property_name">name</property>
@@ -117,10 +116,8 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkSeparator"/>
-                    </child>
-                    <child>
-                      <object class="ItemSelectionView" id="releng_selection_view">
+                      <object class="ItemSelectionExpanderRow" id="releng_selection_view">
+                        <property name="title">Releng directory</property>
                         <property name="item_class_name">RelengDirectory</property>
                         <property name="item_icon">book-minimalistic-svgrepo-com-symbolic</property>
                         <property name="item_title_property_name">name</property>
@@ -132,10 +129,8 @@
                       </object>
                     </child>
                     <child>
-                      <object class="GtkSeparator"/>
-                    </child>
-                    <child>
-                      <object class="ItemSelectionView" id="snapshot_selection_view">
+                      <object class="ItemSelectionExpanderRow" id="snapshot_selection_view">
+                        <property name="title">Snapshot</property>
                         <property name="item_class_name">Snapshot</property>
                         <property name="item_icon">video-frame-svgrepo-com-symbolic</property>
                         <property name="item_title_property_name">name</property>
@@ -144,6 +139,15 @@
                         <signal name="is-item-selectable" handler="is_item_selectable"/>
                         <signal name="is-item-usable" handler="is_item_usable"/>
                         <signal name="setup-items-monitoring" handler="setup_items_monitoring"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="ItemSelectionExpanderRow" id="arch_selection_view">
+                        <property name="title">Architecture</property>
+                        <property name="item_icon">cursor-square-symbolic</property>
+                        <property name="item_title_property_name">name</property>
+                        <signal name="is-item-selectable" handler="is_item_selectable"/>
+                        <signal name="is-item-usable" handler="is_item_usable"/>
                       </object>
                     </child>
                   </object>

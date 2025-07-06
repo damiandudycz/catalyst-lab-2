@@ -71,7 +71,11 @@ class ProjectStageCreateView(Gtk.Box):
             def name(self) -> str:
                 return self.releng_template_subpath
         def worker():
-            template_subpaths = load_releng_templates(releng_directory=self.project_directory.get_releng_directory(), stage_name=self.spec_type_selection_view.selected_item.name)
+            template_subpaths = load_releng_templates(
+                releng_directory=self.project_directory.get_releng_directory(),
+                stage_name=self.spec_type_selection_view.selected_item.name,
+                architecture=self.project_directory.get_architecture()
+            )
             templates = [RelengTemplateContainer(releng_template_subpath=subpath) for subpath in template_subpaths]
             GLib.idle_add(self.releng_base_selection_view.set_static_list, templates)
         if self.spec_type_selection_view.selected_item is not None:

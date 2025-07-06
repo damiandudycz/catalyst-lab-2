@@ -138,6 +138,34 @@
           </object>
         </child>
 
+        <!-- Page 5: Architecture screen -->
+        <child>
+          <object class="GtkScrolledWindow" id="arch_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="ItemSelectionView" id="arch_selection_view">
+                    <property name="item_icon">cursor-square-symbolic</property>
+                    <property name="item_title_property_name">name</property>
+                    <signal name="is-item-selectable" handler="is_item_selectable"/>
+                    <signal name="is-item-usable" handler="is_item_usable"/>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
       </object>
     </child>
 

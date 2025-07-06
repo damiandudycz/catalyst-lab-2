@@ -7,6 +7,7 @@ from typing import Self, FrozenSet
 import os, subprocess, ast, uuid
 from enum import Enum, auto
 from .event_bus import EventBus, SharedEvent
+from .architecture import Architecture
 
 @dataclass
 class StageArguments:
@@ -215,7 +216,7 @@ def extract_frozenset_values(code_str: str) -> dict[str, list[str]]:
 # ------------------------------------------------------------------------------
 # Loading releng templates:
 
-def load_releng_templates(releng_directory: RelengDirectory, stage_name: str) -> list[str]:
+def load_releng_templates(releng_directory: RelengDirectory, stage_name: str, architecture: Architecture) -> list[str]:
     specs_path = os.path.join(releng_directory.directory_path(), "releases/specs")
     templates = []
     for root, _, files in os.walk(specs_path):
@@ -229,8 +230,9 @@ def load_releng_templates(releng_directory: RelengDirectory, stage_name: str) ->
                             line = line.strip()
                             if line.startswith("target:") and line.split(":", 1)[1].strip() == stage_name.replace('_', '-'):
                                 rel_path = os.path.relpath(full_path, specs_path)
-                                templates.append(rel_path)
-                                break
+                                if rel_path.startswith(architecture.releng_base_arch().value + "/"):
+                                    templates.append(rel_path)
+                                    break
                 except Exception as e:
                     print(f"Warning: Failed to read {full_path}: {e}")
     return templates

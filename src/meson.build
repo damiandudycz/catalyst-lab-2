@@ -90,6 +90,7 @@ catalystlab_sources = [
   'ui/components/repository_list/repository_list_view.py',
   'ui/components/root_command_output/root_command_output_view.py',
   'ui/components/item_select/item_select_view.py',
+  'ui/components/item_select_expander_row/item_select_expander_row.py',
   'ui/components/wizard/wizard_view.py',
   'ui/components/stages_tree_view.py',
   'ui/components/cl_toggle_group.py',

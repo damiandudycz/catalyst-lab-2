@@ -4,13 +4,11 @@ from enum import Enum, auto
 from .repository import Repository
 from .repository_list_view import ItemRow
 from .event_bus import EventBus
+from .item_select_view import ItemSelectionViewEvent
 
-class ItemSelectionViewEvent(Enum):
-    ITEM_CHANGED = auto() # Means selection was changed or currently selected state changed.
-
-@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/components/item_select/item_select_view.ui')
-class ItemSelectionView(Gtk.Box):
-    __gtype_name__ = "ItemSelectionView"
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/components/item_select_expander_row/item_select_expander_row.ui')
+class ItemSelectionExpanderRow(Adw.ExpanderRow):
+    __gtype_name__ = "ItemSelectionExpanderRow"
 
     __gsignals__ = {
         "is-item-selectable": (GObject.SignalFlags.RUN_FIRST, bool, (GObject.TYPE_PYOBJECT,)),
@@ -18,10 +16,8 @@ class ItemSelectionView(Gtk.Box):
         "setup-items-monitoring": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
     }
 
-    # View elements:
-    items_list = Gtk.Template.Child()
     # Properties:
-    title = GObject.Property(type=str, default=None) # TODO: Display
+    title = GObject.Property(type=str, default=None)
     item_class_name = GObject.Property(type=str, default=None)
     item_icon = GObject.Property(type=str, default=None)
     item_title_property_name = GObject.Property(type=str, default=None)
@@ -42,6 +38,7 @@ class ItemSelectionView(Gtk.Box):
         self._load_items()
 
     def on_realize(self, widget):
+        self.set_title(self.title if self.title else "")
         if self.item_class_name:
             self.item_class = globals().get(self.item_class_name)
             self.repository = getattr(Repository, self.item_class_name)
@@ -55,6 +52,7 @@ class ItemSelectionView(Gtk.Box):
     def select(self, item):
         self.selected_item = item
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+        self.display_selected_item()
 
     def refresh_items_state(self, data):
         """Call this from class using this view when monitoring_usable_changes triggers an update"""
@@ -66,6 +64,7 @@ class ItemSelectionView(Gtk.Box):
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     def _load_labels(self):
+        # TODO: Propertly handling adding/removind/hiding these labels when needed
         # No items label
         self.no_valid_entries_label = Gtk.Label(label=f"No valid items available")
         self.no_valid_entries_label.set_wrap(True)
@@ -75,7 +74,7 @@ class ItemSelectionView(Gtk.Box):
         self.no_valid_entries_label.set_margin_start(24)
         self.no_valid_entries_label.set_margin_end(24)
         self.no_valid_entries_label.add_css_class("dimmed")
-        self.items_list.add(self.no_valid_entries_label)
+        #self.add_row(self.no_valid_entries_label)
         # Is not usable label
         self.is_not_usable_label = Gtk.Label(label="This item is currently in use.")
         self.is_not_usable_label.set_wrap(True)
@@ -85,7 +84,7 @@ class ItemSelectionView(Gtk.Box):
         self.is_not_usable_label.set_margin_start(24)
         self.is_not_usable_label.set_margin_end(24)
         self.is_not_usable_label.add_css_class("dimmed")
-        self.items_list.add(self.is_not_usable_label)
+        #self.add_row(self.is_not_usable_label)
 
     def _load_items(self):
         if not hasattr(self, 'selected_item'):
@@ -100,11 +99,12 @@ class ItemSelectionView(Gtk.Box):
                 valid_items[0] if valid_items else None
             )
             self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+            self.display_selected_item()
         # Create rows
         items_check_buttons_group = []
         if hasattr(self, 'rows'):
             for row in self.rows:
-                self.items_list.remove(row)
+                self.remove(row)
         self.rows = []
         for item in self.items():
             row = ItemRow(
@@ -123,7 +123,7 @@ class ItemSelectionView(Gtk.Box):
             row.add_prefix(check_button)
             row.set_activatable_widget(check_button)
             row.set_sensitive(item in valid_items)
-            self.items_list.add(row)
+            self.add_row(row)
             self.rows.append(row)
         self.no_valid_entries_label.set_visible(not valid_items)
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
@@ -135,6 +135,7 @@ class ItemSelectionView(Gtk.Box):
         else:
             if self.selected_item == item:
                 self.selected_item = None
+        self.display_selected_item()
         # Schedule a single emission in the idle loop
         if not hasattr(self, '_emit_idle_id'):
             self._emit_idle_id = None
@@ -145,4 +146,7 @@ class ItemSelectionView(Gtk.Box):
         self._emit_idle_id = None
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         return False
+
+    def display_selected_item(self):
+        self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, "(Selected)") if self.selected_item else "(None)")
 

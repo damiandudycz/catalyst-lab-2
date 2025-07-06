@@ -10,6 +10,7 @@ from .project_stage_create_view import ProjectStageCreateView
 from .app_events import app_event_bus, AppEvents
 from .stages_tree_view import StagesTreeView, TreeNode
 from .project_stage_details_view import ProjectStageDetailsView
+from .architecture import Architecture
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_details_view.ui')
@@ -21,6 +22,7 @@ class ProjectDetailsView(Gtk.Box):
     toolset_selection_view = Gtk.Template.Child()
     releng_selection_view = Gtk.Template.Child()
     snapshot_selection_view = Gtk.Template.Child()
+    arch_selection_view = Gtk.Template.Child()
 
     def __init__(self, project_directory: ProjectDirectory, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -38,6 +40,8 @@ class ProjectDetailsView(Gtk.Box):
         self.toolset_selection_view.select(self.project_directory.get_toolset())
         self.releng_selection_view.select(self.project_directory.get_releng_directory())
         self.snapshot_selection_view.select(self.project_directory.get_snapshot())
+        self.arch_selection_view.select(self.project_directory.get_architecture())
+        self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
 
     def configuration_item_changed(self, container):
         match container:
@@ -55,6 +59,11 @@ class ProjectDetailsView(Gtk.Box):
                 self.project_directory.initialize_metadata().snapshot_id = (
                     self.snapshot_selection_view.selected_item.filename
                     if self.snapshot_selection_view.selected_item else None
+                )
+            case self.arch_selection_view:
+                self.project_directory.initialize_metadata().architecture = (
+                    self.arch_selection_view.selected_item
+                    if self.arch_selection_view.selected_item else None
                 )
         Repository.ProjectDirectory.save()
 
@@ -81,7 +90,8 @@ class ProjectDetailsView(Gtk.Box):
         for view in [
             self.toolset_selection_view,
             self.releng_selection_view,
-            self.snapshot_selection_view
+            self.snapshot_selection_view,
+            self.arch_selection_view
         ]:
             view.event_bus.subscribe(
                 ItemSelectionViewEvent.ITEM_CHANGED,
@@ -97,6 +107,8 @@ class ProjectDetailsView(Gtk.Box):
                 return True
             case self.snapshot_selection_view:
                 return True
+            case self.arch_selection_view:
+                return True
         return False
 
     @Gtk.Template.Callback()
@@ -107,6 +119,8 @@ class ProjectDetailsView(Gtk.Box):
             case self.releng_selection_view:
                 return True
             case self.snapshot_selection_view:
+                return True
+            case self.arch_selection_view:
                 return True
         return False
 

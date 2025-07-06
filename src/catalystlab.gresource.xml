@@ -16,6 +16,7 @@
     <file preprocess="xml-stripblanks">ui/components/repository_list/repository_list_view.ui</file>
     <file preprocess="xml-stripblanks">ui/components/root_command_output/root_command_output_view.ui</file>
     <file preprocess="xml-stripblanks">ui/components/item_select/item_select_view.ui</file>
+    <file preprocess="xml-stripblanks">ui/components/item_select_expander_row/item_select_expander_row.ui</file>
     <file preprocess="xml-stripblanks">ui/git_directory/git_directory_create_config_view.ui</file>
     <file preprocess="xml-stripblanks">ui/git_directory/git_directory_details_view.ui</file>
     <file preprocess="xml-stripblanks">ui/main_window/main_window_content.ui</file>

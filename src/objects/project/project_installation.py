@@ -6,6 +6,7 @@ from .toolset import Toolset
 from .releng_directory import RelengDirectory
 from .snapshot import Snapshot
 from .project_directory import ProjectConfiguration
+from .architecture import Architecture
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
     MultiStageProcessState, MultiStageProcessStageState
@@ -20,11 +21,13 @@ class ProjectInstallation(GitInstallation):
         source_config: GitDirectorySetupConfiguration,
         toolset: Toolset,
         releng_directory: RelengDirectory,
-        snapshot: Snapshot
+        snapshot: Snapshot,
+        architecture: Architecture
     ):
         self.toolset = toolset
         self.releng_directory = releng_directory
         self.snapshot = snapshot
+        self.architecture = architecture
         super().__init__(configuration=source_config)
 
     # Overwrite in subclassed
@@ -39,7 +42,8 @@ class ProjectInstallation(GitInstallation):
                 multistage_process=self,
                 toolset=self.toolset,
                 releng_directory=self.releng_directory,
-                snapshot=self.snapshot
+                snapshot=self.snapshot,
+                architecture=self.architecture
             )
         )
 
@@ -50,7 +54,8 @@ class ProjectInstallationStepSaveConfig(MultiStageProcessStage):
         multistage_process: MultiStageProcess,
         toolset: Toolset,
         releng_directory: RelengDirectory,
-        snapshot: Snapshot
+        snapshot: Snapshot,
+        architecture: Architecture
     ):
         super().__init__(
             name="Save configuration",
@@ -60,13 +65,15 @@ class ProjectInstallationStepSaveConfig(MultiStageProcessStage):
         self.toolset = toolset
         self.releng_directory = releng_directory
         self.snapshot = snapshot
+        self.architecture = architecture
     def start(self):
         super().start()
         try:
             self.multistage_process.directory.metadata = ProjectConfiguration(
                 toolset_id=self.toolset.uuid,
                 releng_directory_id=self.releng_directory.id,
-                snapshot_id=self.snapshot.filename
+                snapshot_id=self.snapshot.filename,
+                architecture=self.architecture
             )
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:

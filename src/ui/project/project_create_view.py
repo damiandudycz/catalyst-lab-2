@@ -9,6 +9,7 @@ from .toolset_application import ToolsetApplication
 from .toolset import ToolsetEvents
 from .wizard_view import WizardView
 from .item_select_view import ItemSelectionViewEvent
+from .architecture import Architecture
 import os
 
 class DefaultProjectDirContentBuilder(DefaultDirContentBuilder):
@@ -32,12 +33,15 @@ class ProjectCreateView(Gtk.Box):
     releng_selection_view = Gtk.Template.Child()
     snapshot_page = Gtk.Template.Child()
     snapshot_selection_view = Gtk.Template.Child()
+    arch_page = Gtk.Template.Child()
+    arch_selection_view = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: ProjectInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
         self.apps_requirements = [ToolsetApplication.CATALYST]
+        self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
         self.source_view.event_bus.subscribe(
             GitDirectoryCreateConfigViewEvent.CONFIGURATION_READY_CHANGED,
             self.config_ready_changed
@@ -54,6 +58,10 @@ class ProjectCreateView(Gtk.Box):
             ItemSelectionViewEvent.ITEM_CHANGED,
             self.snapshot_changed
         )
+        self.arch_selection_view.event_bus.subscribe(
+            ItemSelectionViewEvent.ITEM_CHANGED,
+            self.arch_changed
+        )
         self.connect("realize", self.on_realize)
 
     def config_ready_changed(self, data):
@@ -66,6 +74,9 @@ class ProjectCreateView(Gtk.Box):
         self.wizard_view._refresh_buttons_state()
 
     def snapshot_changed(self, data):
+        self.wizard_view._refresh_buttons_state()
+
+    def arch_changed(self, data):
         self.wizard_view._refresh_buttons_state()
 
     def on_realize(self, widget):
@@ -82,6 +93,8 @@ class ProjectCreateView(Gtk.Box):
                 return True
             case self.snapshot_selection_view:
                 return True
+            case self.arch_selection_view:
+                return True
         return False
 
     @Gtk.Template.Callback()
@@ -92,6 +105,8 @@ class ProjectCreateView(Gtk.Box):
             case self.releng_selection_view:
                 return True
             case self.snapshot_selection_view:
+                return True
+            case self.arch_selection_view:
                 return True
         return False
 
@@ -113,6 +128,8 @@ class ProjectCreateView(Gtk.Box):
                 pass
             case self.snapshot_selection_view:
                 pass
+            case self.arch_selection_view:
+                pass
 
     @Gtk.Template.Callback()
     def is_page_ready_to_continue(self, sender, page) -> bool:
@@ -129,6 +146,8 @@ class ProjectCreateView(Gtk.Box):
                 return self.releng_selection_view.selected_item is not None
             case self.snapshot_page:
                 return self.snapshot_selection_view.selected_item is not None
+            case self.arch_page:
+                return self.arch_selection_view.selected_item is not None
         return True
 
     @Gtk.Template.Callback()
@@ -137,7 +156,8 @@ class ProjectCreateView(Gtk.Box):
             source_config=self.source_view.get_configuration(default_dir_content_builder=DefaultProjectDirContentBuilder()),
             toolset=self.toolset_selection_view.selected_item,
             releng_directory=self.releng_selection_view.selected_item,
-            snapshot=self.snapshot_selection_view.selected_item
+            snapshot=self.snapshot_selection_view.selected_item,
+            architecture=self.arch_selection_view.selected_item
         )
 
     def _start_installation(
@@ -145,13 +165,15 @@ class ProjectCreateView(Gtk.Box):
         source_config: GitDirectorySetupConfiguration,
         toolset: Toolset,
         releng_directory: RelengDirectory,
-        snapshot: Snapshot
+        snapshot: Snapshot,
+        architecture: Architecture
     ):
         installation_in_progress = ProjectInstallation(
             source_config=source_config,
             toolset=toolset,
             releng_directory=releng_directory,
-            snapshot=snapshot
+            snapshot=snapshot,
+            architecture=architecture
         )
         installation_in_progress.start()
         self.wizard_view.set_installation(installation_in_progress)

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from .repository import Serializable, Repository
@@ -6,6 +7,8 @@ import os
 import subprocess
 import re
 from collections import defaultdict
+from .architecture import Architecture
+from typing import NamedTuple
 
 @dataclass
 class Snapshot(Serializable):
@@ -72,4 +75,16 @@ class Snapshot(Serializable):
             category: dict(sorted(packages.items()))
             for category, packages in sorted(nested_dict.items())
         }
+
+    def load_profiles(self, arch: Architecture) -> list[PortageProfile]:
+        profiles_contents = subprocess.check_output(['unsquashfs', '-cat', self.file_path(), "profiles/profiles.desc"], text=True)
+        return [
+            PortageProfile(parts[1], parts[2])
+            for line in profiles_contents.splitlines()
+            if (parts := line.split()) and parts[0] == arch.value and len(parts) >= 3
+        ]
+
+class PortageProfile(NamedTuple):
+    path: str
+    stability: str
 

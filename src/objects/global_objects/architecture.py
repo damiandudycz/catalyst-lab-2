@@ -1,3 +1,4 @@
+from __future__ import annotations
 import platform
 from enum import Enum
 
@@ -19,6 +20,9 @@ class Architecture(Enum):
     loong = "loong"         # LoongArch (e.g., Loongson)
     s390 = "s390"           # IBM S/390 (31-bit)
     s390x = "s390x"         # IBM S/390 (64-bit)
+
+    def releng_base_arch(self) -> RelengBaseArch | None:
+        return RelengBaseArch[self.name]
 
 class RelengBaseArch(Enum):
     """Basearch families used by releng templates. Value represents base directory in releng"""

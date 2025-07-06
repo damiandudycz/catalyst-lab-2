@@ -5,6 +5,7 @@ from .git_directory import GitDirectory, GitDirectoryEvent
 from .repository import Serializable, Repository
 from .project_stage import ProjectStage
 from .stages_tree_view import TreeNode
+from .architecture import Architecture
 import uuid, json, os
 
 @final
@@ -85,6 +86,11 @@ class ProjectDirectory(GitDirectory):
             return None
         return self._get_by_id(Repository.Snapshot.value, self.metadata.snapshot_id, 'filename')
 
+    def get_architecture(self) -> Architecture | None:
+        if self.metadata is None:
+            return None
+        return self.metadata.architecture
+
     # TODO: Maybe move this and some other methods to project manager?
     @classmethod
     def stage_directory_path_for_name(cls, name: str, project: ProjectDirectory) -> str:
@@ -109,12 +115,14 @@ class ProjectConfiguration(Serializable):
     toolset_id: uuid.UUID | None = None
     releng_directory_id: uuid.UUID | None = None
     snapshot_id: str | None = None
+    architecture: Architecture | None = None
 
     def serialize(self) -> dict:
         return {
             "toolset_id": str(self.toolset_id) if self.toolset_id else None,
             "releng_directory_id": str(self.releng_directory_id) if self.releng_directory_id else None,
             "snapshot_id": self.snapshot_id,
+            "architecture": self.architecture.value if self.architecture else None,
         }
 
     @classmethod
@@ -123,11 +131,13 @@ class ProjectConfiguration(Serializable):
             toolset_id = uuid.UUID(data["toolset_id"]) if data.get("toolset_id") else None
             releng_directory_id = uuid.UUID(data["releng_directory_id"]) if data.get("releng_directory_id") else None
             snapshot_id = data["snapshot_id"] if data.get("snapshot_id") else None
+            architecture = Architecture(data["architecture"]) if data.get("architecture") else None
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         return cls(
             toolset_id=toolset_id,
             releng_directory_id=releng_directory_id,
-            snapshot_id=snapshot_id
+            snapshot_id=snapshot_id,
+            architecture=architecture
         )
 
