@@ -102,6 +102,10 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             self.display_selected_item()
         # Create rows
         items_check_buttons_group = []
+
+        hidden_check_box = Gtk.CheckButton()
+        items_check_buttons_group.append(hidden_check_box)
+
         if hasattr(self, 'rows'):
             for row in self.rows:
                 self.remove(row)
@@ -146,8 +150,8 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         if button.get_active():
             self.selected_item = item
         else:
-            if self.selected_item == item:
-                self.selected_item = None
+            if len(self.rows) < 2:
+                button.set_active(True)
         self.display_selected_item()
         # Schedule a single emission in the idle loop
         if not hasattr(self, '_emit_idle_id'):
