@@ -80,12 +80,40 @@ class Snapshot(Serializable):
         # TODO: Needs additional mapping, doesnt work for example for ppc64le
         profiles_contents = subprocess.check_output(['unsquashfs', '-cat', self.file_path(), "profiles/profiles.desc"], text=True)
         return [
-            PortageProfile(parts[1], parts[2])
+            PortageProfile(path=parts[1], stability=parts[2], repo="gentoo")
             for line in profiles_contents.splitlines()
             if (parts := line.split()) and parts[0] == arch.value and len(parts) >= 3
         ]
 
-class PortageProfile(NamedTuple):
+class PortageProfile(Serializable):
     path: str
     stability: str
+    repo: str # gentoo by default
+
+    def __init__(self, path: str, stability: str, repo: str):
+        self.path = path
+        self.stability = stability
+        self.repo = repo
+
+    def __eq__(self, other):
+        if not isinstance(other, PortageProfile):
+            return NotImplemented
+        return self.path == other.path and self.repo == other.repo
+
+    def __hash__(self):
+        return hash((self.path, self.repo))
+
+    def serialize(self) -> dict:
+        return {
+            "path": self.path,
+            "stability": self.stability,
+            "repo": self.repo
+        }
+    @classmethod
+    def init_from(cls, data: dict) -> Self:
+        return cls(
+            path=data["path"],
+            stability=data["stability"],
+            repo=data["repo"]
+        )
 

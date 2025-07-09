@@ -8,6 +8,7 @@ import os, subprocess, ast, uuid
 from enum import Enum, auto
 from .event_bus import EventBus, SharedEvent
 from .architecture import Architecture
+from .snapshot import PortageProfile
 
 @dataclass
 class StageArguments:
@@ -21,12 +22,13 @@ class ProjectStage(Serializable):
 
     DOWNLOAD_SEED_ID = uuid.UUID("24245937-ef36-49c0-b467-1315ebe99fbe")
 
-    def __init__(self, id: uuid.UUID | None, parent_id: uuid.UUID | None, name: str, target_name: str, releng_template_name: str | None):
+    def __init__(self, id: uuid.UUID | None, parent_id: uuid.UUID | None, name: str, target_name: str, releng_template_name: str | None, profile: PortageProfile | None):
         self.id = id or uuid.uuid4()
         self.parent_id = parent_id
         self.name = name
         self.target_name = target_name
         self.releng_template_name = releng_template_name
+        self.profile = profile
         self.event_bus = EventBus[ProjectStageEvent]()
 
     def serialize(self) -> dict:
@@ -35,7 +37,8 @@ class ProjectStage(Serializable):
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "name": self.name,
             "target_name": self.target_name,
-            "releng_template_name": self.releng_template_name
+            "releng_template_name": self.releng_template_name,
+            "profile": self.profile.serialize() if self.profile else None
         }
 
     @property
@@ -50,6 +53,7 @@ class ProjectStage(Serializable):
             name = data["name"]
             target_name = data["target_name"]
             releng_template_name = data.get('releng_template_name')
+            profile = PortageProfile.init_from(data["profile"]) if data.get("profile") else None
         except KeyError:
             raise ValueError(f"Failed to parse {data}")
         return cls(
@@ -57,7 +61,8 @@ class ProjectStage(Serializable):
             parent_id = parent_id,
             name=name,
             target_name=target_name,
-            releng_template_name=releng_template_name
+            releng_template_name=releng_template_name,
+            profile=profile
         )
 
 # ------------------------------------------------------------------------------

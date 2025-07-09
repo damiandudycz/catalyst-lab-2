@@ -23,6 +23,9 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
     item_subtitle_property_name = GObject.Property(type=str, default=None)
     item_status_property_name = GObject.Property(type=str, default=None)
     autoselect_default = GObject.Property(type=bool, default=False)
+    display_none = GObject.Property(type=bool, default=False)
+    none_title = GObject.Property(type=str, default="None")
+    none_subtitle = GObject.Property(type=str, default=None)
 
     def __init__(self):
         super().__init__()
@@ -86,8 +89,6 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         #self.add_row(self.is_not_usable_label)
 
     def _load_items(self):
-        if not hasattr(self, 'selected_item'):
-            self.selected_item = None
         valid_items = [item for item in self.items() if self.emit("is-item-selectable", item)]
         # Monitor valid items for is_reserved changes
         self.emit("setup-items-monitoring", self.items())
@@ -104,6 +105,19 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         if hasattr(self, 'rows'):
             for row in self.rows:
                 self.remove(row)
+
+        if self.display_none and not hasattr(self, 'none_row'):
+            self.none_row = Adw.ActionRow(title=self.none_title, subtitle=self.none_subtitle)
+            check_button = Gtk.CheckButton()
+            check_button.set_active(self.selected_item == None)
+            check_button.connect("toggled", self._on_item_selected, None)
+            if items_check_buttons_group:
+                check_button.set_group(items_check_buttons_group[0])
+            items_check_buttons_group.append(check_button)
+            self.none_row.add_prefix(check_button)
+            self.none_row.set_activatable_widget(check_button)
+            self.add_row(self.none_row)
+
         self.rows = []
         for item in self.items():
             row = ItemRow(
@@ -147,5 +161,5 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         return False
 
     def display_selected_item(self):
-        self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, "(Selected)") if self.selected_item else "(None)")
+        self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, "(Selected)") if self.selected_item else f"({self.none_title})")
 

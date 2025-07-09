@@ -79,7 +79,7 @@ class ProjectStageInstallationStepCreate(MultiStageProcessStage):
         super().start()
         self.process_started = True
         try:
-            stage = ProjectStage(id=None, parent_id=self.parent_id, name=self.stage_name, target_name=self.target_name, releng_template_name=self.releng_template_name)
+            stage = ProjectStage(id=None, parent_id=self.parent_id, name=self.stage_name, target_name=self.target_name, releng_template_name=self.releng_template_name, profile=None)
             self.project_directory.install_stage(stage=stage)
             self.multistage_process.stage = stage
             self.complete(MultiStageProcessStageState.COMPLETED)

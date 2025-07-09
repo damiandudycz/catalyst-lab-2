@@ -7,6 +7,7 @@ from .project_stage import ProjectStageEvent
 from .repository_list_view import ItemRow
 from .project_stage_create_view import ProjectStageSeedSpecial
 from .architecture import Architecture
+from .item_select_view import ItemSelectionViewEvent
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -156,11 +157,16 @@ class ProjectStageDetailsView(Gtk.Box):
         threading.Thread(target=worker, daemon=True).start()
 
     def load_profiles(self):
+        self.profile_selection_view.select(self.stage.profile)
         self.profile_selection_view.set_static_list(
             sorted(
                 self.project_directory.get_snapshot().load_profiles(arch=self.project_directory.get_architecture()),
                 key=lambda profile: profile.path
             )
+        )
+        self.profile_selection_view.event_bus.subscribe(
+            ItemSelectionViewEvent.ITEM_CHANGED,
+            self.on_profile_selected
         )
 
     def load_releng_templates(self):
@@ -209,13 +215,15 @@ class ProjectStageDetailsView(Gtk.Box):
             self.stage_releng_template_row.set_subtitle(self.stage.releng_template_name or "(None)")
             self.load_configuration_rows()
 
+    def on_profile_selected(self, sender):
+        ProjectManager.shared().change_stage_profile(project=self.project_directory, stage=self.stage, profile=sender.selected_item)
+
     def load_configuration_rows(self):
         supported_arguments = load_catalyst_stage_arguments(toolset=self.project_directory.get_toolset(), target_name=self.stage.target_name)
         for arg_name in sorted(supported_arguments.valid):
             is_required = arg_name in supported_arguments.required
             row = Adw.ActionRow(title=arg_name)
             self.configuration_pref_group.add(row)
-            print(f"{arg_name}: {'required' if is_required else 'optional'}")
 
     @Gtk.Template.Callback()
     def on_use_automatic_seed_toggled(self, sender):
@@ -250,6 +258,20 @@ class ProjectStageDetailsView(Gtk.Box):
         else:
             matching_stage_name = next((stage.name for stage in self.project_directory.stages if stage.id == self.stage.parent_id), None)
             self.stage_seed_row.set_subtitle(matching_stage_name)
+
+    @Gtk.Template.Callback()
+    def is_item_selectable(self, sender, item) -> bool:
+        match sender:
+            case self.profile_selection_view:
+                return True
+        return False
+
+    @Gtk.Template.Callback()
+    def is_item_usable(self, sender, item) -> bool:
+        match sender:
+            case self.profile_selection_view:
+                return True
+        return False
 
 class StageSelectionRow(Adw.ActionRow):
     def __init__(self, object, title: str, subtitle: str | None, icon_name: str | None, group: list, checked: bool, on_selected):

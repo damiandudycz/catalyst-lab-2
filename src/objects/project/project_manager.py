@@ -4,6 +4,7 @@ from .repository import Repository
 from .project_directory import ProjectDirectory
 from .project_stage import ProjectStage, ProjectStageEvent
 from .git_directory import GitDirectoryEvent
+from .snapshot import PortageProfile
 import os, shutil, json, uuid
 
 @final
@@ -40,6 +41,10 @@ class ProjectManager(GitManager):
 
     def change_stage_releng_template(self, project: ProjectDirectory, stage: ProjectStage, releng_template_name: str):
         stage.releng_template_name = releng_template_name
+        self.save_stage(project=project, stage=stage)
+
+    def change_stage_profile(self, project: ProjectDirectory, stage: ProjectStage, profile: PortageProfile | None):
+        stage.profile = profile
         self.save_stage(project=project, stage=stage)
 
     def save_stage(self, project: ProjectDirectory, stage: ProjectStage):

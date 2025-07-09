@@ -122,6 +122,9 @@
                   <object class="ItemSelectionExpanderRow" id="profile_selection_view">
                     <property name="title">Profile</property>
                     <property name="item_title_property_name">path</property>
+                    <property name="display_none">True</property>
+                    <property name="none_title">Automatic</property>
+                    <property name="none_subtitle">Inherit profile from seed</property>
                     <signal name="is-item-selectable" handler="is_item_selectable"/>
                     <signal name="is-item-usable" handler="is_item_usable"/>
                   </object>
