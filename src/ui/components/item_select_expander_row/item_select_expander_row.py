@@ -32,6 +32,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         self.selected_item = None
         self.event_bus = EventBus[ItemSelectionViewEvent]()
         self._load_labels()
+        self._add_warning_icon()
         self.connect("realize", self.on_realize)
 
     def set_static_list(self, list: list):
@@ -48,6 +49,11 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
                 raise ValueError("Canno't use both static_list and item_class_name")
             self._load_items()
 
+    def _add_warning_icon(self):
+        self.warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
+        self.warning_icon.add_css_class("warning")
+        self.add_suffix(self.warning_icon)
+
     def items(self) -> list:
         return self.static_list if hasattr(self, 'static_list') else self.repository.value
 
@@ -55,6 +61,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         self.selected_item = item
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         self.display_selected_item()
+        self.determine_incorrect_selection()
 
     def refresh_items_state(self, data):
         """Call this from class using this view when monitoring_usable_changes triggers an update"""
@@ -147,6 +154,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             self.rows.append(row)
         self.no_valid_entries_label.set_visible(not valid_items)
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
+        self.determine_incorrect_selection()
 
     def _on_item_selected(self, button: Gtk.CheckButton, item: item):
         """Callback for when a row's checkbox is toggled."""
@@ -161,6 +169,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             self._emit_idle_id = None
         if self._emit_idle_id is None:
             self._emit_idle_id = GLib.idle_add(self._emit_selection_change)
+        self.determine_incorrect_selection()
 
     def _emit_selection_change(self):
         self._emit_idle_id = None
@@ -169,4 +178,11 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
 
     def display_selected_item(self):
         self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, self.selected_item if isinstance(self.selected_item, str) else "(Selected)") if self.selected_item else f"({self.none_title})")
+
+    def determine_incorrect_selection(self):
+        """If not available item is set as selected display warning."""
+        if hasattr(self, 'repository') or hasattr(self, 'static_list'):
+            item_not_found = self.selected_item not in self.items()
+            item_none = self.selected_item is None
+            self.warning_icon.set_visible(item_not_found and not(item_none and self.display_none))
 

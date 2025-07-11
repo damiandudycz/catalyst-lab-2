@@ -38,7 +38,11 @@ class RelengBaseArch(Enum):
     s390 = "s390/s390"
     s390x = "s390/s390x"
     sparc = "sparc"
-    # Missing: riscv, loong, m64k, alpha
+    # Missing in releng: riscv, loong, m64k, alpha
+    alpha = "alpha"
+    riscv = "riscv"
+    loong = "loong"
+    m64k = "m64k"
 
 # Mappings:
 _arch_mapping = {
