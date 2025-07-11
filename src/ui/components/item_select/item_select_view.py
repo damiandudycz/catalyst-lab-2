@@ -111,7 +111,7 @@ class ItemSelectionView(Gtk.Box):
             for row in self.rows:
                 self.items_list.remove(row)
         if hasattr(self, 'none_row') and self.none_row:
-            self.remove(self.none_row)
+            self.items_list.remove(self.none_row)
             del self.none_row
 
         if self.display_none and not hasattr(self, 'none_row'):

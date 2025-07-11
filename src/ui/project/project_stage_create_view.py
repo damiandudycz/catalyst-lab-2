@@ -19,10 +19,6 @@ from .item_select_view import ItemRow
 from enum import Enum, auto
 import os, threading, uuid
 
-class ProjectStageSeedSpecial(Enum):
-    NONE = auto()
-    DOWNLOAD = auto()
-
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_create_view.ui')
 class ProjectStageCreateView(Gtk.Box):
     __gtype_name__ = "ProjectStageCreateView"
@@ -31,15 +27,13 @@ class ProjectStageCreateView(Gtk.Box):
     wizard_view = Gtk.Template.Child()
     # Setup view elements:
     spec_type_page = Gtk.Template.Child()
-    spec_type_selection_view = Gtk.Template.Child()
     releng_base_page = Gtk.Template.Child()
     options_page = Gtk.Template.Child()
-    releng_base_selection_view = Gtk.Template.Child()
     stage_name_row = Gtk.Template.Child()
     name_used_label = Gtk.Template.Child()
-    seed_list_view = Gtk.Template.Child()
-    use_automatic_seed_row = Gtk.Template.Child()
-    use_automatic_seed_checkbox = Gtk.Template.Child()
+    spec_type_selection_view = Gtk.Template.Child()
+    releng_base_selection_view = Gtk.Template.Child()
+    seed_list_selection_view = Gtk.Template.Child()
 
     def __init__(self, project_directory: ProjectDirectory, installation_in_progress: ProjectInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -47,85 +41,72 @@ class ProjectStageCreateView(Gtk.Box):
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
         self.filename_is_free = False
-        self.selected_seed_is_correct = False
-        self.selected_seed: ProjectStageSeedSpecial | uuid.UUID | None = None
-        self.load_targets()
-        self.load_seed_list()
-        self.spec_type_selection_view.event_bus.subscribe(
-            ItemSelectionViewEvent.ITEM_CHANGED,
-            self.spec_type_changed
-        )
-        self.releng_base_selection_view.event_bus.subscribe(
-            ItemSelectionViewEvent.ITEM_CHANGED,
-            self.releng_base_changed
-        )
         self.connect("realize", self.on_realize)
-
-    def spec_type_changed(self, data):
-        self.wizard_view._refresh_buttons_state()
-        class RelengTemplateContainer:
-            def __init__(self, releng_template_subpath: str):
-                self.releng_template_subpath = releng_template_subpath
-            @property
-            def name(self) -> str:
-                return self.releng_template_subpath
-        def worker():
-            template_subpaths = load_releng_templates(
-                releng_directory=self.project_directory.get_releng_directory(),
-                stage_name=self.spec_type_selection_view.selected_item.name,
-                architecture=self.project_directory.get_architecture()
-            )
-            templates = [RelengTemplateContainer(releng_template_subpath=subpath) for subpath in template_subpaths]
-            GLib.idle_add(self.releng_base_selection_view.set_static_list, templates)
-        if self.spec_type_selection_view.selected_item is not None:
-            threading.Thread(target=worker, daemon=True).start()
-        can_select_download_seed = (
-            self.spec_type_selection_view.selected_item
-            and self.spec_type_selection_view.selected_item.target_name == 'stage1'
-        )
-        self.use_automatic_seed_row.set_activatable(can_select_download_seed)
-        self.use_automatic_seed_row.set_sensitive(can_select_download_seed)
-        self._update_default_stage_name()
-        self.check_if_seed_correct()
-
-    def releng_base_changed(self, data):
-        self.wizard_view._refresh_buttons_state()
-        self._update_default_stage_name()
 
     def on_realize(self, widget):
         self.wizard_view.content_navigation_view = self.content_navigation_view
         self.wizard_view._window = self._window
         self.wizard_view.set_installation(self.installation_in_progress)
+        self.load_targets()
+        self.load_releng_templates()
+        self.load_seed_list()
+        self.monitor_information_changes()
+
+    # Loading stage data
+    # --------------------------------------------------------------------------
 
     def load_targets(self):
-        class SpecTargetContainer:
-            """Helper class used to display elements in item_select_view."""
-            def __init__(self, target_name: str):
-                self.target_name = target_name
-            @property
-            def name(self) -> str:
-                return self.target_name
-        def worker():
-            target_names = load_catalyst_targets(toolset=self.project_directory.get_toolset())
-            targets = [SpecTargetContainer(target_name=name) for name in target_names]
-            GLib.idle_add(self.spec_type_selection_view.set_static_list, targets)
-        threading.Thread(target=worker, daemon=True).start()
+        values = load_catalyst_targets(toolset=self.project_directory.get_toolset())
+        self.spec_type_selection_view.select(None)
+        self.spec_type_selection_view.set_static_list(values)
+
+    def load_releng_templates(self):
+        template_subpaths = load_releng_templates(
+            releng_directory=self.project_directory.get_releng_directory(),
+            stage_name=self.spec_type_selection_view.selected_item,
+            architecture=self.project_directory.get_architecture()
+        ) if self.spec_type_selection_view.selected_item is not None else []
+        self.releng_base_selection_view.select(None)
+        self.releng_base_selection_view.set_static_list(template_subpaths)
 
     def load_seed_list(self):
-        for stage in self.project_directory.stages:
-            row = ItemRow(
-                item=stage,
-                item_title_property_name='name',
-                item_subtitle_property_name='short_details',
-                item_status_property_name=None,
-                item_icon=None
-            )
-            check_button = Gtk.CheckButton()
-            check_button.set_group(self.use_automatic_seed_checkbox)
-            check_button.connect("toggled", self._on_seed_item_selected, stage)
-            row.add_prefix(check_button)
-            row.set_activatable_widget(check_button)
-            self.seed_list_view.add(row)
+        available_stages = self.project_directory.stages[:]
+        is_stage_1 = self.spec_type_selection_view.selected_item and self.spec_type_selection_view.selected_item == "stage1"
+        if is_stage_1:
+            available_stages.insert(0, DownloadSeedStage())
+        values = available_stages
+        selected = available_stages[0] if is_stage_1 else None
+        self.seed_list_selection_view.select(selected)
+        self.seed_list_selection_view.set_static_list(values)
+
+    # Monitoring stage changes
+    # --------------------------------------------------------------------------
+
+    def monitor_information_changes(self):
+        """React to changes in UI and store them."""
+        subscriptions = [
+            (self.spec_type_selection_view.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_spec_type_changed),
+            (self.releng_base_selection_view.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_releng_base_changed),
+            (self.seed_list_selection_view.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_seed_selected),
+        ]
+        for bus, event, handler in subscriptions:
+            bus.subscribe(event, handler)
+
+    def on_spec_type_changed(self, data):
+        self.load_releng_templates()
+        self.load_seed_list()
+        self._update_default_stage_name()
+        self.wizard_view._refresh_buttons_state()
+
+    def on_releng_base_changed(self, data):
+        self._update_default_stage_name()
+        self.wizard_view._refresh_buttons_state()
+
+    def on_seed_selected(self, sender):
+        self.wizard_view._refresh_buttons_state()
+
+    # Handle UI
+    # --------------------------------------------------------------------------
 
     @Gtk.Template.Callback()
     def is_page_ready_to_continue(self, sender, page) -> bool:
@@ -135,7 +116,7 @@ class ProjectStageCreateView(Gtk.Box):
             case self.releng_base_page:
                 return True
             case self.options_page:
-                return self.filename_is_free and self.selected_seed_is_correct
+                return self.filename_is_free and self.seed_list_selection_view.selected_item
         return True
 
     @Gtk.Template.Callback()
@@ -145,6 +126,8 @@ class ProjectStageCreateView(Gtk.Box):
                 return True
             case self.releng_base_selection_view:
                 return True
+            case self.seed_list_selection_view:
+                return True
         return False
 
     @Gtk.Template.Callback()
@@ -153,6 +136,8 @@ class ProjectStageCreateView(Gtk.Box):
             case self.spec_type_selection_view:
                 return True
             case self.releng_base_selection_view:
+                return True
+            case self.seed_list_selection_view:
                 return True
         return False
 
@@ -165,6 +150,23 @@ class ProjectStageCreateView(Gtk.Box):
     def on_stage_name_changed(self, sender):
         self.check_filename_is_free()
 
+    @Gtk.Template.Callback()
+    def begin_installation(self, view):
+        self._start_installation(
+            project_directory=self.project_directory,
+            target_name=self.spec_type_selection_view.selected_item,
+            releng_template_name=(
+                self.releng_base_selection_view.selected_item
+                if self.releng_base_selection_view.selected_item
+                else None
+            ),
+            stage_name=self.stage_name_row.get_text(),
+            parent_id=self.seed_list_selection_view.selected_item.id
+        )
+
+    # Helper functions
+    # --------------------------------------------------------------------------
+
     def check_filename_is_free(self) -> bool:
         self.filename_is_free = ProjectManager.shared().is_stage_name_available(project=self.project_directory, name=self.stage_name_row.get_text())
         self.name_used_label.set_visible(not self.filename_is_free)
@@ -173,54 +175,10 @@ class ProjectStageCreateView(Gtk.Box):
 
     def _update_default_stage_name(self):
         if self.releng_base_selection_view.selected_item is not None:
-            self.stage_name_row.set_text(os.path.splitext(os.path.basename(self.releng_base_selection_view.selected_item.name))[0])
+            self.stage_name_row.set_text(os.path.splitext(os.path.basename(self.releng_base_selection_view.selected_item))[0])
         elif self.spec_type_selection_view.selected_item is not None:
-            self.stage_name_row.set_text(self.spec_type_selection_view.selected_item.name)
+            self.stage_name_row.set_text(self.spec_type_selection_view.selected_item)
         self.check_filename_is_free()
-
-    @Gtk.Template.Callback()
-    def on_use_automatic_seed_toggled(self, sender):
-        if sender.get_active():
-            self.selected_seed = ProjectStageSeedSpecial.DOWNLOAD
-            self.check_if_seed_correct()
-    @Gtk.Template.Callback()
-    def on_use_none_seed_toggled(self, sender):
-        if sender.get_active():
-            self.selected_seed = ProjectStageSeedSpecial.NONE
-            self.check_if_seed_correct()
-    def _on_seed_item_selected(self, sender, item):
-        if sender.get_active():
-            self.selected_seed = item.id
-            self.check_if_seed_correct()
-    def check_if_seed_correct(self) -> bool:
-        self.selected_seed_is_correct = (
-            self.selected_seed is not None
-            and not (
-                self.selected_seed == ProjectStageSeedSpecial.DOWNLOAD
-                and self.spec_type_selection_view.selected_item.target_name != "stage1"
-            )
-        )
-        self.wizard_view._refresh_buttons_state()
-        return self.selected_seed_is_correct
-
-    @Gtk.Template.Callback()
-    def begin_installation(self, view):
-        self._start_installation(
-            project_directory=self.project_directory,
-            target_name=self.spec_type_selection_view.selected_item.target_name,
-            releng_template_name=(
-                self.releng_base_selection_view.selected_item.releng_template_subpath
-                if self.releng_base_selection_view.selected_item
-                else None
-            ),
-            stage_name=self.stage_name_row.get_text(),
-            parent_id=(
-                None if self.selected_seed == ProjectStageSeedSpecial.NONE
-                else DownloadSeedStage.id if self.selected_seed == ProjectStageSeedSpecial.DOWNLOAD
-                else self.selected_seed if isinstance(self.selected_seed, uuid.UUID)
-                else None
-            )
-        )
 
     def _start_installation(
         self,

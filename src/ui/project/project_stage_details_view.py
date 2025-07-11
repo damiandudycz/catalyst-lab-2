@@ -6,7 +6,6 @@ from .project_manager import ProjectManager
 from .git_directory import GitDirectoryEvent
 from .project_stage import ProjectStageEvent
 from .repository_list_view import ItemRow
-from .project_stage_create_view import ProjectStageSeedSpecial
 from .architecture import Architecture
 from .item_select_view import ItemSelectionViewEvent
 from .project_stage import ProjectStage, DownloadSeedStage
@@ -131,7 +130,6 @@ class ProjectStageDetailsView(Gtk.Box):
         ProjectManager.shared().change_stage_profile(project=self.project_directory, stage=self.stage, profile=sender.selected_item)
 
     def on_seed_selected(self, sender):
-        print(sender.selected_item.id if sender.selected_item else None)
         ProjectManager.shared().change_stage_parent(project=self.project_directory, stage=self.stage, parent_id=sender.selected_item.id if sender.selected_item else None)
 
     def on_releng_template_selected(self, sender):
@@ -154,7 +152,7 @@ class ProjectStageDetailsView(Gtk.Box):
                 raise RuntimeError(f"Stage name {new_name} is not available")
             ProjectManager.shared().rename_stage(project=self.project_directory, stage=self.stage, name=new_name)
             self.get_root().set_focus(None)
-            self.setup_stage_details()
+            self.load_stage_details()
         except Exception as e:
             print(f"Error renaming stage: {e}")
             self.stage_name_row.add_css_class("error")
