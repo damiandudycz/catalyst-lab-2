@@ -32,7 +32,6 @@ class ProjectManager(GitManager):
 
     def change_stage_target(self, project: ProjectDirectory, stage: ProjectStage, target_name: str):
         stage.target_name = target_name
-        stage.releng_template_name = None
         self.save_stage(project=project, stage=stage)
 
     def change_stage_parent(self, project: ProjectDirectory, stage: ProjectStage, parent_id: uuid.UUID | None):

@@ -20,8 +20,6 @@ class ProjectStageEvent(Enum):
 
 class ProjectStage(Serializable):
 
-    DOWNLOAD_SEED_ID = uuid.UUID("24245937-ef36-49c0-b467-1315ebe99fbe")
-
     def __init__(self, id: uuid.UUID | None, parent_id: uuid.UUID | None, name: str, target_name: str, releng_template_name: str | None, profile: PortageProfile | None):
         self.id = id or uuid.uuid4()
         self.parent_id = parent_id
@@ -224,6 +222,7 @@ def extract_frozenset_values(code_str: str) -> dict[str, list[str]]:
 def load_releng_templates(releng_directory: RelengDirectory, stage_name: str, architecture: Architecture) -> list[str]:
     specs_path = os.path.join(releng_directory.directory_path(), "releases/specs")
     templates = []
+    prefix = architecture.releng_base_arch().value + "/"
     for root, _, files in os.walk(specs_path):
         for file in files:
             if file.endswith(".spec"):
@@ -235,10 +234,17 @@ def load_releng_templates(releng_directory: RelengDirectory, stage_name: str, ar
                             line = line.strip()
                             if line.startswith("target:") and line.split(":", 1)[1].strip() == stage_name.replace('_', '-'):
                                 rel_path = os.path.relpath(full_path, specs_path)
-                                if rel_path.startswith(architecture.releng_base_arch().value + "/"):
+                                if rel_path.startswith(prefix):
+                                    rel_path = rel_path.removeprefix(prefix)
                                     templates.append(rel_path)
                                     break
                 except Exception as e:
                     print(f"Warning: Failed to read {full_path}: {e}")
     return templates
 
+
+class DownloadSeedStage:
+    """Special meta stage used to tell catalyst lab that it should download seed automatically."""
+    id = uuid.UUID("24245937-ef36-49c0-b467-1315ebe99fbe")
+    name = "Download automatically"
+    target_name = "Try downloading seed tarball from gentoo.org"

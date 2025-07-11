@@ -12,7 +12,7 @@ from .item_select_view import ItemSelectionViewEvent
 from .toolset import Toolset
 from .releng_directory import RelengDirectory
 from .snapshot import Snapshot
-from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates
+from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates, DownloadSeedStage
 from .project_stage_installation import ProjectStageInstallation
 from .project_manager import ProjectManager
 from .item_select_view import ItemRow
@@ -35,7 +35,6 @@ class ProjectStageCreateView(Gtk.Box):
     releng_base_page = Gtk.Template.Child()
     options_page = Gtk.Template.Child()
     releng_base_selection_view = Gtk.Template.Child()
-    use_releng_template_checkbox = Gtk.Template.Child()
     stage_name_row = Gtk.Template.Child()
     name_used_label = Gtk.Template.Child()
     seed_list_view = Gtk.Template.Child()
@@ -129,18 +128,12 @@ class ProjectStageCreateView(Gtk.Box):
             self.seed_list_view.add(row)
 
     @Gtk.Template.Callback()
-    def on_use_releng_toggled(self, sender):
-        self.releng_base_selection_view.set_sensitive(sender.get_active())
-        self.wizard_view._refresh_buttons_state()
-        self._update_default_stage_name()
-
-    @Gtk.Template.Callback()
     def is_page_ready_to_continue(self, sender, page) -> bool:
         match page:
             case self.spec_type_page:
                 return self.spec_type_selection_view.selected_item is not None
             case self.releng_base_page:
-                return self.releng_base_selection_view.selected_item is not None or not self.use_releng_template_checkbox.get_active()
+                return True
             case self.options_page:
                 return self.filename_is_free and self.selected_seed_is_correct
         return True
@@ -179,7 +172,7 @@ class ProjectStageCreateView(Gtk.Box):
         return self.filename_is_free
 
     def _update_default_stage_name(self):
-        if self.releng_base_selection_view.selected_item is not None and self.use_releng_template_checkbox.get_active():
+        if self.releng_base_selection_view.selected_item is not None:
             self.stage_name_row.set_text(os.path.splitext(os.path.basename(self.releng_base_selection_view.selected_item.name))[0])
         elif self.spec_type_selection_view.selected_item is not None:
             self.stage_name_row.set_text(self.spec_type_selection_view.selected_item.name)
@@ -217,13 +210,13 @@ class ProjectStageCreateView(Gtk.Box):
             target_name=self.spec_type_selection_view.selected_item.target_name,
             releng_template_name=(
                 self.releng_base_selection_view.selected_item.releng_template_subpath
-                if self.releng_base_selection_view.selected_item and self.use_releng_template_checkbox.get_active()
+                if self.releng_base_selection_view.selected_item
                 else None
             ),
             stage_name=self.stage_name_row.get_text(),
             parent_id=(
                 None if self.selected_seed == ProjectStageSeedSpecial.NONE
-                else ProjectStage.DOWNLOAD_SEED_ID if self.selected_seed == ProjectStageSeedSpecial.DOWNLOAD
+                else DownloadSeedStage.id if self.selected_seed == ProjectStageSeedSpecial.DOWNLOAD
                 else self.selected_seed if isinstance(self.selected_seed, uuid.UUID)
                 else None
             )

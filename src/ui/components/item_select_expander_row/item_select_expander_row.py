@@ -109,6 +109,9 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         if hasattr(self, 'rows'):
             for row in self.rows:
                 self.remove(row)
+        if hasattr(self, 'none_row') and self.none_row:
+            self.remove(self.none_row)
+            del self.none_row
 
         if self.display_none and not hasattr(self, 'none_row'):
             self.none_row = Adw.ActionRow(title=self.none_title, subtitle=self.none_subtitle)
@@ -150,7 +153,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         if button.get_active():
             self.selected_item = item
         else:
-            if len(self.rows) < 2:
+            if len(self.rows) == 1 and not self.display_none or len(self.rows) == 0 and self.display_none:
                 button.set_active(True)
         self.display_selected_item()
         # Schedule a single emission in the idle loop
@@ -165,5 +168,5 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         return False
 
     def display_selected_item(self):
-        self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, "(Selected)") if self.selected_item else f"({self.none_title})")
+        self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, self.selected_item if isinstance(self.selected_item, str) else "(Selected)") if self.selected_item else f"({self.none_title})")
 
