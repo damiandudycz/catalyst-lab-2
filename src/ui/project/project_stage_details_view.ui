@@ -22,7 +22,7 @@
             <property name="orientation">vertical</property>
             <property name="spacing">24</property>
             <child>
-              <object class="AdwPreferencesGroup">
+              <object class="AdwPreferencesGroup" id="basic_config_pref_group">
                 <property name="title">Basic information</property>
                 <child>
                   <object class="AdwEntryRow" id="stage_name_row">
@@ -41,54 +41,26 @@
                     </style>
                   </object>
                 </child>
-                <child>
-                  <object class="AdwActionRow" id="stage_target_static_row">
-                    <property name="title">Target type</property>
-                  </object>
-                </child>
-                <child>
-                  <object class="ItemSelectionExpanderRow" id="stage_target_row">
-                    <property name="title">Target type</property>
-                    <signal name="is-item-selectable" handler="is_item_selectable"/>
-                    <signal name="is-item-usable" handler="is_item_usable"/>
-                  </object>
-                </child>
-                <child>
-                  <object class="ItemSelectionExpanderRow" id="stage_releng_template_row">
-                    <property name="title">Releng template</property>
-                    <property name="display_none">True</property>
-                    <property name="none_title">None</property>
-                    <property name="none_subtitle">Do not use Releng template</property>
-                    <signal name="is-item-selectable" handler="is_item_selectable"/>
-                    <signal name="is-item-usable" handler="is_item_usable"/>
-                  </object>
-                </child>
-                <child>
-                  <object class="ItemSelectionExpanderRow" id="stage_seed_row">
-                    <property name="title">Seed</property>
-                    <property name="item_title_property_name">name</property>
-                    <property name="item_subtitle_property_name">target_name</property>
-                    <signal name="is-item-selectable" handler="is_item_selectable"/>
-                    <signal name="is-item-usable" handler="is_item_usable"/>
-                  </object>
-                </child>
-                <child>
-                  <object class="ItemSelectionExpanderRow" id="profile_selection_row">
-                    <property name="title">Profile</property>
-                    <property name="item_title_property_name">path</property>
-                    <property name="item_subtitle_property_name">repo</property>
-                    <property name="display_none">True</property>
-                    <property name="none_title">Automatic</property>
-                    <property name="none_subtitle">Inherit profile from Releng template</property>
-                    <signal name="is-item-selectable" handler="is_item_selectable"/>
-                    <signal name="is-item-usable" handler="is_item_usable"/>
-                  </object>
-                </child>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="architecture_pref_group">
+                <property name="title">Architecture</property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="release_pref_group">
+                <property name="title">Release</property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="packages_pref_group">
+                <property name="title">Packages</property>
               </object>
             </child>
             <child>
               <object class="AdwPreferencesGroup" id="configuration_pref_group">
-                <property name="title">Configuration</property>
+                <property name="title">Other</property>
               </object>
             </child>
           </object>

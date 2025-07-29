@@ -85,6 +85,8 @@ class ProjectStageInstallationStepCreate(MultiStageProcessStage):
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during '{self.name}': {e}")
+            import traceback
+            traceback.print_exc()  # This prints the full stack trace to stderr
             self.complete(MultiStageProcessStageState.FAILED)
     def cleanup(self) -> bool:
         if not super().cleanup():

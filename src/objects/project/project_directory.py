@@ -54,7 +54,7 @@ class ProjectDirectory(GitDirectory):
         stage_nodes = {stage.id: TreeNode(value=stage) for stage in self.stages}
         roots = []
         for stage_id, node in stage_nodes.items():
-            parent_id = node.value.parent_id
+            parent_id = node.value.parent
             if parent_id and parent_id in stage_nodes:
                 stage_nodes[parent_id].children.append(node)
             else:

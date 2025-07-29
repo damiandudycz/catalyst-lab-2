@@ -1,29 +1,27 @@
+import threading
 from gi.repository import Gtk, Adw, GLib
 from dataclasses import dataclass
 from .project_directory import ProjectDirectory
-from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates, load_catalyst_stage_arguments
+from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates, load_catalyst_stage_arguments_options, load_catalyst_stage_arguments_details, StageArguments, StageArgumentDetails, StageArgumentTargetDetails, StageArgumentType
 from .project_manager import ProjectManager
 from .git_directory import GitDirectoryEvent
 from .project_stage import ProjectStageEvent
 from .repository_list_view import ItemRow
 from .architecture import Architecture
 from .item_select_view import ItemSelectionViewEvent
-from .project_stage import ProjectStage, DownloadSeedStage
-import threading
+from .project_stage import ProjectStage, StageArgumentOption
+from .item_select_expander_row import ItemSelectionExpanderRow
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
     __gtype_name__ = "ProjectStageDetailsView"
 
-    ALLOW_CHANGING_TARGET = False
-
     stage_name_row = Gtk.Template.Child()
     name_used_row = Gtk.Template.Child()
-    stage_seed_row = Gtk.Template.Child()
-    stage_target_static_row = Gtk.Template.Child()
-    stage_target_row = Gtk.Template.Child()
-    stage_releng_template_row = Gtk.Template.Child()
-    profile_selection_row = Gtk.Template.Child()
+    basic_config_pref_group = Gtk.Template.Child()
+    architecture_pref_group = Gtk.Template.Child()
+    release_pref_group = Gtk.Template.Child()
+    packages_pref_group = Gtk.Template.Child()
     configuration_pref_group = Gtk.Template.Child()
 
     def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, content_navigation_view: Adw.NavigationView | None = None):
@@ -36,10 +34,6 @@ class ProjectStageDetailsView(Gtk.Box):
     def on_realize(self, widget):
         self.get_root().set_focus(None)
         self.load_stage_details()
-        self.load_releng_templates()
-        self.load_seeds()
-        self.load_targets()
-        self.load_profiles()
         self.load_configuration_rows()
         self.monitor_information_changes()
 
@@ -48,59 +42,115 @@ class ProjectStageDetailsView(Gtk.Box):
 
     def load_stage_details(self):
         self.stage_name_row.set_text(self.stage.name)
-        self.stage_target_row.set_visible(ProjectStageDetailsView.ALLOW_CHANGING_TARGET)
-        self.stage_target_static_row.set_visible(not ProjectStageDetailsView.ALLOW_CHANGING_TARGET)
-        self.stage_target_static_row.set_subtitle(self.stage.target_name)
-
-    def load_seeds(self):
-        child_ids = self._get_descendant_ids()
-        available_stages = self.project_directory.stages[:]
-        download_seed_stage = DownloadSeedStage()
-        if self.stage.target_name == "stage1":
-            available_stages.insert(0, download_seed_stage)
-        values = [
-            stage for stage in available_stages
-            if stage.id not in child_ids and stage.id != self.stage.id
-        ]
-        selected = download_seed_stage if self.stage.parent_id == download_seed_stage.id else next(
-            (stage for stage in available_stages if stage.id == self.stage.parent_id),
-            None
-        )
-        self.stage_seed_row.select(selected)
-        self.stage_seed_row.set_static_list(values)
-
-    def load_targets(self):
-        values = load_catalyst_targets(toolset=self.project_directory.get_toolset())
-        selected = self.stage.target_name
-        self.stage_target_row.select(selected)
-        self.stage_target_row.set_static_list(values)
-
-    def load_profiles(self):
-        self.profile_selection_row.display_none = self.stage.releng_template_name is not None
-        values = sorted(
-            self.project_directory.get_snapshot().load_profiles(arch=self.project_directory.get_architecture()),
-            key=lambda profile: profile.path
-        )
-        selected = self.stage.profile
-        self.profile_selection_row.select(selected)
-        self.profile_selection_row.set_static_list(values)
-
-    def load_releng_templates(self):
-        values = load_releng_templates(
-            releng_directory=self.project_directory.get_releng_directory(),
-            stage_name=self.stage.target_name,
-            architecture=self.project_directory.get_architecture()
-        )
-        selected = self.stage.releng_template_name
-        self.stage_releng_template_row.select(selected)
-        self.stage_releng_template_row.set_static_list(values)
 
     def load_configuration_rows(self):
-        supported_arguments = load_catalyst_stage_arguments(toolset=self.project_directory.get_toolset(), target_name=self.stage.target_name)
-        for arg_name in sorted(supported_arguments.valid):
-            is_required = arg_name in supported_arguments.required
-            row = Adw.ActionRow(title=arg_name)
-            self.configuration_pref_group.add(row)
+        # Reset configuration rows
+        if hasattr(self, 'configuration_rows'):
+            for row in self.configuration_rows:
+                row.pref_group.remove(row)
+        self.configuration_rows = []
+        # Load arguments rows
+        arguments_details = load_catalyst_stage_arguments_details(
+            toolset=self.project_directory.get_toolset(),
+            target_name=StageArgumentDetails.target.get_from_stage(self.stage)
+        )
+        for name, arg in arguments_details.items():
+            group = self.pref_group_for_argument(argument=arg)
+            if group:
+                row = StageOptionExpanderRow(
+                    project_directory=self.project_directory,
+                    stage=self.stage,
+                    argument=arg,
+                    is_item_selectable_handler=self.is_config_option_selectable
+                )
+                row.pref_group = group
+                row.event_bus.subscribe(
+                    ItemSelectionViewEvent.ITEM_CHANGED,
+                    self.argument_changed,
+                    self
+                )
+                row.pref_group.add(row)
+                self.configuration_rows.append(row)
+
+    def can_change_argument(self, option: StageArgumentOption) -> bool:
+        match option.argument:
+            case (
+                StageArgumentDetails.target
+            ):
+                return False
+            case _:
+                return True
+
+    def pref_group_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesGroup | None:
+        if not argument.details:
+            return self.configuration_pref_group
+        match argument.details:
+            case (
+                StageArgumentDetails.name |
+                StageArgumentDetails.snapshot_treeish
+            ):
+                return None
+            case (
+                StageArgumentDetails.parent |
+                StageArgumentDetails.profile |
+                StageArgumentDetails.target |
+                StageArgumentDetails.releng_template
+            ):
+                return self.basic_config_pref_group
+            case (
+                StageArgumentDetails.subarch |
+                StageArgumentDetails.asflags |
+                StageArgumentDetails.cbuild |
+                StageArgumentDetails.cflags |
+                StageArgumentDetails.chost |
+                StageArgumentDetails.common_flags |
+                StageArgumentDetails.cxxflags |
+                StageArgumentDetails.fcflags |
+                StageArgumentDetails.fflags |
+                StageArgumentDetails.ldflags |
+                StageArgumentDetails.interpreter
+            ):
+                return self.architecture_pref_group
+            case (
+                StageArgumentDetails.rel_type |
+                StageArgumentDetails.version_stamp |
+                StageArgumentDetails.compression_mode
+            ):
+                return self.release_pref_group
+            case (
+                StageArgumentDetails.repos |
+                StageArgumentDetails.keep_repos |
+                StageArgumentDetails.binrepo_path |
+                StageArgumentDetails.pkgcache_path |
+                StageArgumentDetails.kerncache_path |
+                StageArgumentDetails.snapshot_treeish
+            ):
+                return self.packages_pref_group
+            case _:
+                return self.configuration_pref_group
+
+    def is_config_option_selectable(self, row, option):
+        return self.can_change_argument(option=option)
+
+    def argument_changed(self, row):
+        if row.argument.details.type == StageArgumentType.select:
+            ProjectManager.shared().change_stage_argument(
+                project=self.project_directory,
+                stage=self.stage,
+                argument=row.argument.details,
+                value=row.selected_item.value if row.selected_item else None
+            )
+        if row.argument.details.type == StageArgumentType.multiselect:
+            ProjectManager.shared().change_stage_argument(
+                project=self.project_directory,
+                stage=self.stage,
+                argument=row.argument.details,
+                value=[item.value for item in row.selected_items] if row.selected_items else None
+            )
+        # Reload other rows
+        for r in self.configuration_rows:
+            if r.argument != row.argument:
+                r.load_state()
 
     # Monitoring stage changes
     # --------------------------------------------------------------------------
@@ -108,11 +158,7 @@ class ProjectStageDetailsView(Gtk.Box):
     def monitor_information_changes(self):
         """React to changes in UI and store them."""
         subscriptions = [
-            (self.stage.event_bus, ProjectStageEvent.NAME_CHANGED, self.on_name_changed),
-            (self.stage_seed_row.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_seed_selected),
-            (self.profile_selection_row.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_profile_selected),
-            (self.stage_releng_template_row.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_releng_template_selected),
-            (self.stage_target_row.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_target_selected),
+            (self.stage.event_bus, ProjectStageEvent.NAME_CHANGED, self.on_name_changed)
         ]
         for bus, event, handler in subscriptions:
             bus.subscribe(event, handler)
@@ -120,22 +166,22 @@ class ProjectStageDetailsView(Gtk.Box):
     def on_name_changed(self, data):
         self._page.set_title(self.stage.name)
 
-    def on_target_selected(self, sender):
-        ProjectManager.shared().change_stage_target(project=self.project_directory, stage=self.stage, target_name=sender.selected_item)
-        self.load_releng_templates()
-        self.load_seeds()
-        self.load_configuration_rows()
+    #def on_target_selected(self, sender):
+    #    ProjectManager.shared().change_stage_target(project=self.project_directory, stage=self.stage, target_name=sender.selected_item)
+    #    self.load_releng_templates()
+    #    self.load_seeds()
+    #    self.load_configuration_rows()
 
-    def on_profile_selected(self, sender):
-        ProjectManager.shared().change_stage_profile(project=self.project_directory, stage=self.stage, profile=sender.selected_item)
+    #def on_profile_selected(self, sender):
+    #    ProjectManager.shared().change_stage_profile(project=self.project_directory, stage=self.stage, profile=sender.selected_item)
 
-    def on_seed_selected(self, sender):
-        ProjectManager.shared().change_stage_parent(project=self.project_directory, stage=self.stage, parent_id=sender.selected_item.id if sender.selected_item else None)
+    #def on_seed_selected(self, sender):
+    #    ProjectManager.shared().change_stage_parent(project=self.project_directory, stage=self.stage, parent_id=sender.selected_item.id if sender.selected_item else None)
 
-    def on_releng_template_selected(self, sender):
-        ProjectManager.shared().change_stage_releng_template(project=self.project_directory, stage=self.stage, releng_template_name=sender.selected_item)
-        self.load_profiles()
-        self.load_configuration_rows()
+    #def on_releng_template_selected(self, sender):
+    #    ProjectManager.shared().change_stage_releng_template(project=self.project_directory, stage=self.stage, releng_template_name=sender.selected_item)
+    #    self.load_profiles()
+    #    self.load_configuration_rows()
 
     # Handle UI
     # --------------------------------------------------------------------------
@@ -164,53 +210,37 @@ class ProjectStageDetailsView(Gtk.Box):
         self.name_used_row.set_visible(not is_name_available)
         self.stage_name_row.remove_css_class("error")
 
-    @Gtk.Template.Callback()
-    def is_item_selectable(self, sender, item) -> bool:
-        match sender:
-            case self.profile_selection_row:
-                return True
-            case self.stage_seed_row:
-                return True
-            case self.stage_releng_template_row:
-                return True
-            case self.stage_target_row:
-                return True
-        return False
-
-    @Gtk.Template.Callback()
-    def is_item_usable(self, sender, item) -> bool:
-        match sender:
-            case self.profile_selection_row:
-                return True
-            case self.stage_seed_row:
-                return True
-            case self.stage_releng_template_row:
-                return True
-            case self.stage_target_row:
-                return True
-        return False
-
     # Helper functions
     # --------------------------------------------------------------------------
 
-    def _get_descendant_ids(self) -> list[int]:
-        project_stages_tree = self.project_directory.stages_tree()
-        def find_node(nodes: list, target_id: int):
-            for node in nodes:
-                if node.value.id == target_id:
-                    return node
-                result = find_node(node.children, target_id)
-                if result:
-                    return result
-            return None
-        def collect_ids(node) -> list[int]:
-            ids = []
-            for child in node.children:
-                ids.append(child.value.id)
-                ids.extend(collect_ids(child))
-            return ids
-        root_node = find_node(project_stages_tree, self.stage.id)
-        if not root_node:
-            return []
-        return collect_ids(root_node)
+#    def pref_group_for_option(self, option) -> Adw.PreferencesGroup:
+
+class StageOptionExpanderRow(ItemSelectionExpanderRow):
+
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, argument: StageArgumentTargetDetails, is_item_selectable_handler):
+        super().__init__()
+        self.title = argument.display_name
+        self.item_title_property_name = 'display'
+        self.item_subtitle_property_name = 'subtitle'
+        self.argument = argument
+        self.project_directory = project_directory
+        self.stage = stage
+        self.display_none = not argument.required
+        self.allow_multiselect = argument.details.type == StageArgumentType.multiselect if argument.details else False
+        self.connect("is-item-selectable", is_item_selectable_handler)
+        self.load_state()
+
+    def load_state(self):
+        if self.argument.details and self.argument.details.type == StageArgumentType.select:
+            current_value = self.argument.details.get_from_stage(self.stage) # Mapped to object
+            options = load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument)
+            if options:
+                self.selected_item = next((item for item in options if item.value == current_value), None)
+                self.set_static_list(list=options)
+        if self.argument.details and self.argument.details.type == StageArgumentType.multiselect:
+            current_values = self.argument.details.get_from_stage(self.stage) # Mapped to object
+            options = load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument)
+            if options:
+                self.selected_items = [option for option in options if option.value in current_values] if current_values else []
+                self.set_static_list(list=options)
 

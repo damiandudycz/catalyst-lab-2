@@ -12,7 +12,7 @@ from .item_select_view import ItemSelectionViewEvent
 from .toolset import Toolset
 from .releng_directory import RelengDirectory
 from .snapshot import Snapshot
-from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates, DownloadSeedStage
+from .project_stage import ProjectStage, load_catalyst_targets, load_releng_templates
 from .project_stage_installation import ProjectStageInstallation
 from .project_manager import ProjectManager
 from .item_select_view import ItemRow
@@ -73,9 +73,11 @@ class ProjectStageCreateView(Gtk.Box):
         available_stages = self.project_directory.stages[:]
         is_stage_1 = self.spec_type_selection_view.selected_item and self.spec_type_selection_view.selected_item == "stage1"
         if is_stage_1:
-            available_stages.insert(0, DownloadSeedStage())
+            self.seed_list_selection_view.display_none = True
+            self.seed_list_selection_view.none_title = "Download automatically"
+            self.seed_list_selection_view.none_subtitle = "Downloads newest stage3 from gentoo for seed"
         values = available_stages
-        selected = available_stages[0] if is_stage_1 else None
+        selected = None
         self.seed_list_selection_view.select(selected)
         self.seed_list_selection_view.set_static_list(values)
 
@@ -116,7 +118,8 @@ class ProjectStageCreateView(Gtk.Box):
             case self.releng_base_page:
                 return True
             case self.options_page:
-                return self.filename_is_free and self.seed_list_selection_view.selected_item
+                is_stage_1 = self.spec_type_selection_view.selected_item and self.spec_type_selection_view.selected_item == "stage1"
+                return self.filename_is_free and (self.seed_list_selection_view.selected_item or is_stage_1)
         return True
 
     @Gtk.Template.Callback()

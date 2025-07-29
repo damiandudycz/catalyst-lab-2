@@ -26,10 +26,12 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
     display_none = GObject.Property(type=bool, default=False)
     none_title = GObject.Property(type=str, default="None")
     none_subtitle = GObject.Property(type=str, default=None)
+    allow_multiselect = GObject.Property(type=bool, default=False)
 
     def __init__(self):
         super().__init__()
         self.selected_item = None
+        self.selected_items = None
         self.event_bus = EventBus[ItemSelectionViewEvent]()
         self._load_labels()
         self._add_warning_icon()
@@ -59,6 +61,12 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
 
     def select(self, item):
         self.selected_item = item
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+        self.display_selected_item()
+        self.determine_incorrect_selection()
+
+    def multiselect(self, items):
+        self.selected_items = items
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         self.display_selected_item()
         self.determine_incorrect_selection()
@@ -120,12 +128,12 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             self.remove(self.none_row)
             del self.none_row
 
-        if self.display_none and not hasattr(self, 'none_row'):
+        if self.display_none and not hasattr(self, 'none_row') and not self.allow_multiselect:
             self.none_row = Adw.ActionRow(title=self.none_title, subtitle=self.none_subtitle)
             check_button = Gtk.CheckButton()
             check_button.set_active(self.selected_item == None)
             check_button.connect("toggled", self._on_item_selected, None)
-            if items_check_buttons_group:
+            if items_check_buttons_group and self.allow_multiselect == False:
                 check_button.set_group(items_check_buttons_group[0])
             items_check_buttons_group.append(check_button)
             self.none_row.add_prefix(check_button)
@@ -142,8 +150,11 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
                 item_icon=self.item_icon
             )
             check_button = Gtk.CheckButton()
-            check_button.set_active(item == self.selected_item)
-            if items_check_buttons_group:
+            if self.allow_multiselect:
+                check_button.set_active(item in self.selected_items if self.selected_items else False)
+            else:
+                check_button.set_active(item == self.selected_item)
+            if items_check_buttons_group and self.allow_multiselect == False:
                 check_button.set_group(items_check_buttons_group[0])
             check_button.connect("toggled", self._on_item_selected, item)
             items_check_buttons_group.append(check_button)
@@ -155,12 +166,18 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         self.no_valid_entries_label.set_visible(not valid_items)
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
         self.determine_incorrect_selection()
+        self.display_selected_item()
 
     def _on_item_selected(self, button: Gtk.CheckButton, item: item):
         """Callback for when a row's checkbox is toggled."""
         if button.get_active():
-            self.selected_item = item
+            if self.allow_multiselect:
+                self.selected_items.append(item)
+            else:
+                self.selected_item = item
         else:
+            if self.allow_multiselect:
+                self.selected_items.remove(item)
             if len(self.rows) == 1 and not self.display_none or len(self.rows) == 0 and self.display_none:
                 button.set_active(True)
         self.display_selected_item()
@@ -177,12 +194,19 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         return False
 
     def display_selected_item(self):
-        self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, self.selected_item if isinstance(self.selected_item, str) else "(Selected)") if self.selected_item else f"({self.none_title})")
+        if self.allow_multiselect:
+            self.set_subtitle(", ".join(item.display for item in self.selected_items) if self.selected_items else f"({self.none_title})")
+        else:
+            self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, self.selected_item if isinstance(self.selected_item, str) else "(Selected)") if self.selected_item else f"({self.none_title})")
 
     def determine_incorrect_selection(self):
         """If not available item is set as selected display warning."""
         if hasattr(self, 'repository') or hasattr(self, 'static_list'):
-            item_not_found = self.selected_item not in self.items()
-            item_none = self.selected_item is None
-            self.warning_icon.set_visible(item_not_found and not(item_none and self.display_none))
+            if self.allow_multiselect:
+                items_empty = not self.selected_items
+                self.warning_icon.set_visible(items_empty and not self.display_none)
+            else:
+                item_not_found = self.selected_item not in self.items()
+                item_none = self.selected_item is None
+                self.warning_icon.set_visible(item_not_found and not(item_none and self.display_none))
 
