@@ -30,7 +30,7 @@ class ProjectManager(GitManager):
         self.change_stage_argument(project=project, stage=stage, argument=StageArgumentDetails.name, value=name)
 
     def change_stage_argument(self, project: ProjectDirectory, stage: ProjectStage, argument: StageArgumentDetails, value: Any):
-        argument.set_in_stage(stage, value)
+        setattr(stage, argument.name, value)
         self.save_stage(project=project, stage=stage)
 
     def save_stage(self, project: ProjectDirectory, stage: ProjectStage):

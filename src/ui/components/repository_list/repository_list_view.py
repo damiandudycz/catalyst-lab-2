@@ -26,13 +26,14 @@ class RepositoryListView(Gtk.Box):
     items_container  = Gtk.Template.Child()
     preference_group = Gtk.Template.Child()
     # Properties:
-    title                        = GObject.Property(type=str, default=None)
-    item_class_name              = GObject.Property(type=str, default=None)
-    item_installation_class_name = GObject.Property(type=str, default=None)
-    item_icon                    = GObject.Property(type=str, default=None)
-    item_title_property_name     = GObject.Property(type=str, default=None)
-    item_subtitle_property_name  = GObject.Property(type=str, default=None)
-    item_status_property_name    = GObject.Property(type=str, default=None)
+    title                          = GObject.Property(type=str, default=None)
+    item_class_name                = GObject.Property(type=str, default=None)
+    item_installation_class_name   = GObject.Property(type=str, default=None)
+    item_icon                      = GObject.Property(type=str, default=None)
+    item_title_property_name       = GObject.Property(type=str, default=None)
+    item_subtitle_property_name    = GObject.Property(type=str, default=None)
+    item_status_property_name      = GObject.Property(type=str, default=None)
+    item_unsupported_property_name = GObject.Property(type=str, default=None)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -77,11 +78,12 @@ class RepositoryListView(Gtk.Box):
 
         for item in self.repository.value:
             item_row = ItemRow(
-                item                        = item,
-                item_title_property_name    = self.item_title_property_name,
-                item_subtitle_property_name = self.item_subtitle_property_name,
-                item_status_property_name   = self.item_status_property_name,
-                item_icon                   = self.item_icon
+                item                           = item,
+                item_title_property_name       = self.item_title_property_name,
+                item_subtitle_property_name    = self.item_subtitle_property_name,
+                item_status_property_name      = self.item_status_property_name,
+                item_unsupported_property_name = self.item_unsupported_property_name,
+                item_icon                      = self.item_icon
             )
             item_row.set_activatable(True)
             icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
@@ -119,6 +121,7 @@ class ItemRow(Adw.ActionRow):
         item_title_property_name,
         item_subtitle_property_name,
         item_status_property_name,
+        item_unsupported_property_name,
         item_icon
     ):
         super().__init__(
@@ -129,6 +132,13 @@ class ItemRow(Adw.ActionRow):
         self.item = item
         self.item_status_property_name = item_status_property_name
         self.item_subtitle_property_name = item_subtitle_property_name
+        self.item_unsupported_property_name = item_unsupported_property_name
+        # Unsupported status:
+        if self.item_unsupported_property_name:
+            if getattr(self.item, self.item_unsupported_property_name, False):
+                self.add_css_class('warning')
+            else:
+                self.remove_css_class('warning')
         # Status indicator
         self.status_indicator = StatusIndicator()
         self.status_indicator.set_margin_start(6)

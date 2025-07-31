@@ -27,6 +27,7 @@ class ItemSelectionView(Gtk.Box):
     item_title_property_name = GObject.Property(type=str, default=None)
     item_subtitle_property_name = GObject.Property(type=str, default=None)
     item_status_property_name = GObject.Property(type=str, default=None)
+    item_unsupported_property_name = GObject.Property(type=str, default=None)
     autoselect_default = GObject.Property(type=bool, default=False)
     display_none = GObject.Property(type=bool, default=False)
     none_title = GObject.Property(type=str, default="None")
@@ -133,6 +134,7 @@ class ItemSelectionView(Gtk.Box):
                 item_title_property_name=self.item_title_property_name,
                 item_subtitle_property_name=self.item_subtitle_property_name,
                 item_status_property_name=self.item_status_property_name,
+                item_unsupported_property_name=self.item_unsupported_property_name,
                 item_icon=self.item_icon
             )
             check_button = Gtk.CheckButton()

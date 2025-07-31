@@ -164,7 +164,7 @@ class ProjectStageCreateView(Gtk.Box):
                 else None
             ),
             stage_name=self.stage_name_row.get_text(),
-            parent_id=self.seed_list_selection_view.selected_item.id
+            parent_id=self.seed_list_selection_view.selected_item.id if self.seed_list_selection_view.selected_item else None
         )
 
     # Helper functions

@@ -22,6 +22,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
     item_title_property_name = GObject.Property(type=str, default=None)
     item_subtitle_property_name = GObject.Property(type=str, default=None)
     item_status_property_name = GObject.Property(type=str, default=None)
+    item_unsupported_property_name = GObject.Property(type=str, default=None)
     autoselect_default = GObject.Property(type=bool, default=False)
     display_none = GObject.Property(type=bool, default=False)
     none_title = GObject.Property(type=str, default="None")
@@ -147,6 +148,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
                 item_title_property_name=self.item_title_property_name,
                 item_subtitle_property_name=self.item_subtitle_property_name,
                 item_status_property_name=self.item_status_property_name,
+                item_unsupported_property_name=self.item_unsupported_property_name,
                 item_icon=self.item_icon
             )
             check_button = Gtk.CheckButton()
@@ -204,9 +206,18 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         if hasattr(self, 'repository') or hasattr(self, 'static_list'):
             if self.allow_multiselect:
                 items_empty = not self.selected_items
-                self.warning_icon.set_visible(items_empty and not self.display_none)
+                contains_unsupported_items = any(
+                    getattr(item, self.item_unsupported_property_name, False)
+                    for item in self.selected_items
+                    if item and self.item_unsupported_property_name
+                )
+                self.warning_icon.set_visible((items_empty and not self.display_none) or contains_unsupported_items)
             else:
                 item_not_found = self.selected_item not in self.items()
                 item_none = self.selected_item is None
-                self.warning_icon.set_visible(item_not_found and not(item_none and self.display_none))
+                item_unsupported = getattr(self.selected_item, self.item_unsupported_property_name, False) if self.selected_item and self.item_unsupported_property_name else False
+                self.warning_icon.set_visible(
+                    (item_not_found and not(item_none and self.display_none))
+                    or item_unsupported
+                )
 
