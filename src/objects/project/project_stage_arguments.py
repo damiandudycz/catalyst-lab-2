@@ -35,7 +35,7 @@ class StageArgumentType(Enum):
     raw_single_line = auto() # Raw with only one line of text
     select = auto() # Select one option from predefined list
     multiselect = auto() # Select multiple options from predefined list
-    boolean = auto # yes / no
+    boolean = auto() # yes / no
 
 class StageArgumentDetails(Enum):
     version_stamp = "version_stamp"
@@ -210,7 +210,10 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.snapshot_treeish: return StageArgumentType.select
             case StageArgumentDetails.compression_mode: return StageArgumentType.select
             case StageArgumentDetails.parent: return StageArgumentType.select
+            case StageArgumentDetails.subarch: return StageArgumentType.select
             case StageArgumentDetails.interpreter: return StageArgumentType.multiselect
             case StageArgumentDetails.repos: return StageArgumentType.multiselect
+            case StageArgumentDetails.update_seed: return StageArgumentType.boolean
+            case StageArgumentDetails.keep_repos: return StageArgumentType.boolean
             case _: return StageArgumentType.raw
 

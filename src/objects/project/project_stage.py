@@ -242,6 +242,13 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
             return [StageArgumentOption(raw=value, display=value.name, subtitle=None, value=value.id, argument=arg_details.details) for value in values]
     return None
 
+def load_catalyst_stage_arguments_options_for_boolean(arg_details: StageArgumentTargetDetails | None) -> list[StageArgumentOption] | None:
+    """Creates Yes/No StageArgumentOptions for given argument."""
+    return [
+        StageArgumentOption(raw=True, display="Yes", subtitle=None, value=True, argument=arg_details.details),
+        StageArgumentOption(raw=False, display="No", subtitle=None, value=False, argument=arg_details.details)
+    ]
+
 def load_catalyst_targets(toolset: Toolset) -> list[str]:
     """Loads the list of available targets as their paths inside squashfs file"""
 

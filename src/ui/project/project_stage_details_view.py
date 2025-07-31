@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from .project_directory import ProjectDirectory
 from .project_stage import (
     ProjectStage, load_catalyst_targets, load_releng_templates,
-    load_catalyst_stage_arguments_options,
+    load_catalyst_stage_arguments_options, load_catalyst_stage_arguments_options_for_boolean,
     load_catalyst_stage_arguments_details,
     ProjectStageEvent, ProjectStage
 )
@@ -156,6 +156,13 @@ class ProjectStageDetailsView(Gtk.Box):
                 argument=row.argument.details,
                 value=[item.value for item in row.selected_items] if row.selected_items else None
             )
+        if row.argument.details.type == StageArgumentType.boolean:
+            ProjectManager.shared().change_stage_argument(
+                project=self.project_directory,
+                stage=self.stage,
+                argument=row.argument.details,
+                value=row.selected_item.value if row.selected_item is not None else None
+            )
         # Reload other rows
         for r in self.configuration_rows:
             if r.argument != row.argument:
@@ -249,6 +256,16 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             unsupported_options = self.create_unsupported_options(missing_values=missing_values, argument=self.argument.details)
             options = options + unsupported_options
             self.selected_items = [option for option in options if option.value in current_values] if current_values else []
+            self.set_static_list(list=options)
+        if self.argument.details and self.argument.details.type == StageArgumentType.boolean:
+            current_value = getattr(self.stage, self.argument.details.name, None) # Mapped to object
+            options = load_catalyst_stage_arguments_options_for_boolean(arg_details=self.argument)
+            # Add entries for unsupported values
+            option_values = {opt.value for opt in options}
+            missing_values = [val for val in [current_value] if val not in option_values and val is not None]
+            unsupported_options = self.create_unsupported_options(missing_values=missing_values, argument=self.argument.details)
+            options = options + unsupported_options
+            self.selected_item = next((item for item in options if item.value == current_value), None)
             self.set_static_list(list=options)
 
     def create_unsupported_options(self, missing_values: list, argument: StageArgumentDetails) -> list[StageArgumentOption]:
