@@ -20,6 +20,7 @@ from .project_stage_arguments import (
 )
 from .project_stage_compression_mode import StageCompressionMode
 from .project_stage_argument_serialization import ProjectStageArgumentSerialization
+from .project_stage_automatic_option import StageAutomaticOption
 
 class ProjectStage(Serializable):
 
@@ -219,11 +220,7 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
             values = project_directory.get_snapshot().load_profiles(arch=project_directory.get_architecture())
             return [StageArgumentOption(raw=value.path, display=value.path, subtitle=value.repo, value=value, argument=arg_details.details) for value in values]
         case StageArgumentDetails.releng_template:
-            values = load_releng_templates(
-                releng_directory=project_directory.get_releng_directory(),
-                stage_name=stage.target,
-                architecture=project_directory.get_architecture()
-            )
+            values = load_releng_templates(releng_directory=project_directory.get_releng_directory(), stage_name=stage.target, architecture=project_directory.get_architecture())
             return [StageArgumentOption(raw=value, display=value, subtitle=None, value=value, argument=arg_details.details) for value in values]
         case StageArgumentDetails.snapshot_treeish:
             values = Repository.Snapshot.value
@@ -248,6 +245,30 @@ def load_catalyst_stage_arguments_options_for_boolean(arg_details: StageArgument
         StageArgumentOption(raw=True, display="Yes", subtitle=None, value=True, argument=arg_details.details),
         StageArgumentOption(raw=False, display="No", subtitle=None, value=False, argument=arg_details.details)
     ]
+
+def load_catalyst_stage_automatic_arguments_options(stage: ProjectStage, arg_details: StageArgumentTargetDetails | None) -> list[StageArgumentOption] | None:
+    """Creates additional inheriting options for given argument."""
+    if not arg_details:
+        return []
+    opt_parent = StageArgumentOption(raw=StageAutomaticOption.INHERIT_FROM_PARENT, display="Inherit from parent", subtitle="Set to the value used by parent stage", value=StageAutomaticOption.INHERIT_FROM_PARENT, argument=arg_details.details)
+    opt_releng = StageArgumentOption(raw=StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE, display="Inherit from Releng template", subtitle="Set to the value used by releng template", value=StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE, argument=arg_details.details)
+    opt_auto   = StageArgumentOption(raw=StageAutomaticOption.GENERATE_AUTOMATICALLY, display="Automatic", subtitle="Automatically set to correct value", value=StageAutomaticOption.GENERATE_AUTOMATICALLY, argument=arg_details.details)
+    if getattr(stage, StageArgumentDetails.parent.name, None) is None:
+        opt_parent.unsupported = True
+    if getattr(stage, StageArgumentDetails.releng_template.name, None) is None:
+        opt_releng.unsupported = True
+    match arg_details.details:
+        case StageArgumentDetails.profile:
+            return [option for option in [opt_parent, opt_releng] if option is not None]
+        case StageArgumentDetails.interpreter:
+            return [option for option in [opt_auto, opt_releng] if option is not None]
+        case StageArgumentDetails.compression_mode:
+            return [option for option in [opt_auto, opt_releng] if option is not None]
+        case StageArgumentDetails.repos:
+            return [option for option in [opt_parent, opt_releng] if option is not None]
+        case StageArgumentDetails.keep_repos:
+            return [option for option in [opt_releng] if option is not None]
+        case _: return []
 
 def load_catalyst_targets(toolset: Toolset) -> list[str]:
     """Loads the list of available targets as their paths inside squashfs file"""
@@ -333,5 +354,3 @@ def load_stage_possible_seeds(stage: ProjectStage, project_directory: ProjectDir
     )
     return values
 
-#Serializable.register(StageCompressionMode)
-# TODO: Try register UUID the same way

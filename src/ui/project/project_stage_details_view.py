@@ -5,7 +5,7 @@ from .project_directory import ProjectDirectory
 from .project_stage import (
     ProjectStage, load_catalyst_targets, load_releng_templates,
     load_catalyst_stage_arguments_options, load_catalyst_stage_arguments_options_for_boolean,
-    load_catalyst_stage_arguments_details,
+    load_catalyst_stage_arguments_details, load_catalyst_stage_automatic_arguments_options,
     ProjectStageEvent, ProjectStage
 )
 from .project_stage_arguments import (
@@ -20,6 +20,7 @@ from .architecture import Architecture
 from .item_select_view import ItemSelectionViewEvent
 from .project_stage import ProjectStage, StageArgumentOption
 from .item_select_expander_row import ItemSelectionExpanderRow
+from .project_stage_automatic_option import StageAutomaticOption
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
@@ -239,32 +240,35 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
     def load_state(self):
         if self.argument.details and self.argument.details.type == StageArgumentType.select:
             current_value = getattr(self.stage, self.argument.details.name, None) # Mapped to object
-            options = load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or []
+            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
+            options = automatic_options + (load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or [])
             # Add entries for unsupported values
             option_values = {opt.value for opt in options}
             missing_values = [val for val in [current_value] if val not in option_values and val is not None]
             unsupported_options = self.create_unsupported_options(missing_values=missing_values, argument=self.argument.details)
-            options = options + unsupported_options
+            options = unsupported_options + options
             self.selected_item = next((item for item in options if item.value == current_value), None)
             self.set_static_list(list=options)
         if self.argument.details and self.argument.details.type == StageArgumentType.multiselect:
             current_values = getattr(self.stage, self.argument.details.name, []) # Mapped to object
-            options = load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or []
+            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
+            options = automatic_options + (load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or [])
             # Add entries for unsupported values
             option_values = {opt.value for opt in options}
             missing_values = [val for val in current_values if val not in option_values and val is not None]
             unsupported_options = self.create_unsupported_options(missing_values=missing_values, argument=self.argument.details)
-            options = options + unsupported_options
+            options = unsupported_options + options
             self.selected_items = [option for option in options if option.value in current_values] if current_values else []
             self.set_static_list(list=options)
         if self.argument.details and self.argument.details.type == StageArgumentType.boolean:
             current_value = getattr(self.stage, self.argument.details.name, None) # Mapped to object
-            options = load_catalyst_stage_arguments_options_for_boolean(arg_details=self.argument)
+            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
+            options = automatic_options + load_catalyst_stage_arguments_options_for_boolean(arg_details=self.argument)
             # Add entries for unsupported values
             option_values = {opt.value for opt in options}
             missing_values = [val for val in [current_value] if val not in option_values and val is not None]
             unsupported_options = self.create_unsupported_options(missing_values=missing_values, argument=self.argument.details)
-            options = options + unsupported_options
+            options = unsupported_options + options
             self.selected_item = next((item for item in options if item.value == current_value), None)
             self.set_static_list(list=options)
 
@@ -276,7 +280,7 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             StageArgumentOption(
                 raw=value,
                 display="Unsupported value",
-                subtitle=value if isinstance(value, str) or isinstance(value, uuid.UUID) else "(unknown)",
+                subtitle=value if isinstance(value, str) or isinstance(value, uuid.UUID) else value.name if isinstance(value, StageAutomaticOption) else "(unknown)",
                 value=value,
                 argument=argument,
                 unsupported=True
