@@ -1,5 +1,5 @@
 from __future__ import annotations
-from gi.repository import Gtk, Gdk, GLib, GObject, Adw
+from gi.repository import Gtk, GLib, GObject, Adw
 from .multistage_process import (
     # Process
     MultiStageProcess,
@@ -192,17 +192,12 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         self.connect("notify::expanded", self._on_expanded_changed)
         frame = Gtk.Frame()
         frame.set_child(self.output_scrolled_window)
-        copy_button = Gtk.Button(label="Copy output")
-        copy_button.set_halign(Gtk.Align.END)
-        copy_button.add_css_class("flat")
-        copy_button.connect("clicked", self._on_copy_output_clicked)
         output_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         output_box.set_margin_top(8)
         output_box.set_margin_bottom(8)
         output_box.set_margin_start(12)
         output_box.set_margin_end(12)
         output_box.append(frame)
-        output_box.append(copy_button)
         output_row = Gtk.ListBoxRow()
         output_row.set_activatable(False)
         output_row.set_selectable(False)
@@ -273,9 +268,6 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
             return
         adjustment = self.output_scrolled_window.get_vadjustment()
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
-
-    def _on_copy_output_clicked(self, button):
-        Gdk.Display.get_default().get_clipboard().set("\n".join(self.step.output_lines))
 
     def _step_progress_changed(self, progress: float | None):
         self._update_status_label()
