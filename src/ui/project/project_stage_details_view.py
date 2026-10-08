@@ -336,7 +336,9 @@ class StageTextEntryRow(Adw.EntryRow):
 
     def on_apply(self, sender):
         self.value = self.get_text().strip() or None
-        self.set_text(self.value or "")
+        # Only rewrite when trimming changed something, as set_text makes AdwEntryRow show apply button again.
+        if self.get_text() != (self.value or ""):
+            self.set_text(self.value or "")
         self.update_warning()
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         if root := self.get_root():
