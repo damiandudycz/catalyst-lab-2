@@ -81,6 +81,7 @@ class StageArgumentDetails(Enum):
     source_subpath = "source_subpath"
     update_seed = "update_seed"
     update_seed_command = "update_seed_command"
+    rename_regexp = "rename_regexp"
     boot_kernel = 'boot/kernel'
     stage4_empty = 'stage4/empty'
     stage4_fsscript = 'stage4/fsscript'
@@ -179,6 +180,7 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.subarch: return "Subarch"
             case StageArgumentDetails.update_seed: return "Update seed"
             case StageArgumentDetails.update_seed_command: return "Update seed command"
+            case StageArgumentDetails.rename_regexp: return "Rename regexp"
             case StageArgumentDetails.boot_kernel: return "Boot / kernel"
             case StageArgumentDetails.stage4_empty: return "Empty"
             case StageArgumentDetails.stage4_fsscript: return "FS script"
@@ -299,6 +301,14 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
     StageArgumentDetails.portage_prefix: [_PARENT, _RELENG],
     StageArgumentDetails.update_seed: [_RELENG],
     StageArgumentDetails.update_seed_command: [_RELENG],
+    StageArgumentDetails.rename_regexp: [_RELENG],
+    StageArgumentDetails.install_mask: [_PARENT],
+    StageArgumentDetails.catalyst_use: [_PARENT],
+    StageArgumentDetails.cbuild: [_PARENT],
+    StageArgumentDetails.decompressor_search_order: [_PARENT],
+    StageArgumentDetails.hostuse: [_PARENT],
+    # Cache paths (pkgcache_path, kerncache_path) are not inherited, sharing cache between stages built with different
+    # flags could mix incompatible binaries.
     # Target specific (stage4/*, livecd/*, boot/kernel) are defined by releng templates.
     **{
         argument: [_RELENG]
@@ -337,6 +347,12 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
     StageArgumentDetails.portage_prefix: [_RELENG, _PARENT],
     StageArgumentDetails.update_seed: [_RELENG],
     StageArgumentDetails.update_seed_command: [_RELENG],
+    StageArgumentDetails.rename_regexp: [_RELENG],
+    StageArgumentDetails.install_mask: [_PARENT], # Resulting system should be consistent along the chain.
+    StageArgumentDetails.catalyst_use: [_PARENT],
+    StageArgumentDetails.cbuild: [_PARENT],
+    StageArgumentDetails.decompressor_search_order: [_PARENT],
+    # hostuse is usually set only for stage that needs it (stage1), no default.
     # Target specific:
     **{
         argument: [_RELENG]
