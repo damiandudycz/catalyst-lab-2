@@ -96,6 +96,7 @@ class MultiStageProcess(ABC):
                 MultiStageProcess.get_started_processes_by_class(self.__class__)
             )
         except Exception as e:
+            print(f"Failed to start {self.title}: {e}")
             self.cancel()
         finally:
             self._continue_process()

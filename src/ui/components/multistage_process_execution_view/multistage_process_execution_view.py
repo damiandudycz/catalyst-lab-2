@@ -27,10 +27,10 @@ class MultistageProcessExecutionView(Gtk.Box):
     def set_multistage_process(self, multistage_process: MultiStageProcess | None = None):
         """Call when multistage_process is started"""
         if self.multistage_process is not None:
-            raise("multistage_process already set")
+            raise RuntimeError("multistage_process already set")
         if multistage_process:
             if multistage_process.status == MultiStageProcessState.SETUP:
-                raise("multistage_process needs to be started before connecting")
+                raise RuntimeError("multistage_process needs to be started before connecting")
             self.multistage_process = multistage_process
             self.process_steps_list.set_title(title=multistage_process.title)
             self.progress_bar.set_fraction(multistage_process.progress)

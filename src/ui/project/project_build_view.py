@@ -5,6 +5,7 @@ from .project_build import StageBuildPlan, StageBuildMode, load_project_builds, 
 from .project_build_process import ProjectBuild
 from .root_helper_client import RootHelperClient
 from .multistage_process_execution_view import MultistageProcessExecutionView
+from .multistage_process import MultiStageProcessState
 
 class ProjectBuildView(Gtk.Box):
     """Selecting stages of project to build. Parents of selected stages are reused from previous builds when possible,
@@ -125,7 +126,10 @@ class ProjectBuildView(Gtk.Box):
         plan = self.plan
         self.start_button.set_sensitive(False)
         def start(authorization_keeper):
-            # Called from background thread.
+            # Called from background thread. Keeper is released when this callback returns, retain it until build
+            # is started on main thread and retains it by itself.
+            if authorization_keeper:
+                authorization_keeper.retain()
             GLib.idle_add(self._start_build, plan, authorization_keeper)
         RootHelperClient.shared().authorize_and_run(name="Build stages", callback=start)
 
@@ -133,8 +137,14 @@ class ProjectBuildView(Gtk.Box):
         self.start_button.set_sensitive(bool(plan.build_order()))
         if authorization_keeper is None:
             return False # Authorization cancelled.
-        build = ProjectBuild(project_directory=self.project_directory, plan=plan)
-        build.start(authorization_keeper=authorization_keeper)
+        try:
+            build = ProjectBuild(project_directory=self.project_directory, plan=plan)
+            build.start(authorization_keeper=authorization_keeper)
+        finally:
+            authorization_keeper.release()
+        if build.status == MultiStageProcessState.SETUP:
+            print("Failed to start build")
+            return False
         execution_view = MultistageProcessExecutionView()
         execution_view.set_multistage_process(multistage_process=build)
         self.content_navigation_view.push_view(execution_view, title=f"Building {self.project_directory.name}")
