@@ -275,26 +275,33 @@ _automatic_options_requiring_parent = {StageArgumentDetails.source_subpath}
 
 def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dict[str, StageAutomaticOption]:
     """Sets default automatic options (inherit from parent, releng template...) for arguments valid for stage target.
-    For every argument, first of its default options that is available for the stage is used.
-    Returns arguments that were set."""
-    from .project_stage_value_resolver import load_stage_releng_template_values
+    From default options of argument available for the stage (parent selected, releng template selected...), first one
+    that resolves to some value is used. If none of them does, first available is used anyway, as releng template or
+    parent can define the value later. Returns arguments that were set."""
+    from .project_stage_value_resolver import resolve_stage_argument, UNRESOLVED
     has_parent = getattr(stage, StageArgumentDetails.parent.name, None) is not None
-    template_values = load_stage_releng_template_values(project_directory=project_directory, stage=stage) or {}
+    has_template = bool(getattr(stage, StageArgumentDetails.releng_template.name, None))
     def is_available(argument: StageArgumentDetails, option: StageAutomaticOption) -> bool:
         match option:
             case StageAutomaticOption.INHERIT_FROM_PARENT:
                 return has_parent
             case StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE:
-                return argument.value in template_values # Only if template defines it.
+                return has_template # Even if template doesn't define it now, templates can define any argument.
             case StageAutomaticOption.GENERATE_AUTOMATICALLY:
                 return has_parent or argument not in _automatic_options_requiring_parent
         return False
+    def has_value(argument: StageArgumentDetails, option: StageAutomaticOption) -> bool:
+        if option == StageAutomaticOption.GENERATE_AUTOMATICALLY:
+            return True # Determined when building, even if not known yet.
+        value = resolve_stage_argument(project_directory, stage, argument.value, option=option)
+        return value is not UNRESOLVED and value not in (None, "", [])
     arguments = load_catalyst_stage_arguments_details(toolset=project_directory.get_toolset(), target_name=stage.target)
     applied = {}
     for name, argument in arguments.items():
         if argument.details is None or getattr(stage, argument.attribute_name, None) is not None:
             continue
-        option = next((option for option in argument.details.default_options if is_available(argument.details, option)), None)
+        available = [option for option in argument.details.default_options if is_available(argument.details, option)]
+        option = next((option for option in available if has_value(argument.details, option)), available[0] if available else None)
         if option is not None:
             setattr(stage, argument.attribute_name, option)
             applied[name] = option
