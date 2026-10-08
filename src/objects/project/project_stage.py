@@ -1,5 +1,6 @@
 from __future__ import annotations
-import os, subprocess, ast, uuid
+import os, subprocess, ast, uuid, tomllib
+from functools import lru_cache
 from .repository import Serializable
 from .toolset import Toolset, ToolsetApplication, ToolsetEnv
 from .root_helper_client import RootHelperClient
@@ -21,6 +22,7 @@ from .project_stage_arguments import (
 from .project_stage_compression_mode import StageCompressionMode
 from .project_stage_argument_serialization import ProjectStageArgumentSerialization
 from .project_stage_automatic_option import StageAutomaticOption
+from .project_stage_portage_confdir import portage_confdir_options, default_portage_confdir_sources
 
 class ProjectStage(Serializable):
 
@@ -216,8 +218,11 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
         case StageArgumentDetails.target:
             values = load_catalyst_targets(toolset=project_directory.get_toolset())
             return [StageArgumentOption(raw=value, display=value, subtitle=None, value=value, argument=arg_details.details) for value in values]
+        case StageArgumentDetails.portage_confdir:
+            return portage_confdir_options(project_directory=project_directory, stage=stage)
         case StageArgumentDetails.profile:
             values = project_directory.get_snapshot().load_profiles(arch=project_directory.get_architecture())
+            values += load_stage_overlay_profiles(project_directory=project_directory, stage=stage)
             return [StageArgumentOption(raw=value.path, display=value.path, subtitle=value.repo, value=value, argument=arg_details.details) for value in values]
         case StageArgumentDetails.releng_template:
             values = load_releng_templates(releng_directory=project_directory.get_releng_directory(), stage_name=stage.target, architecture=project_directory.get_architecture())
@@ -237,7 +242,22 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
         case StageArgumentDetails.parent:
             values = load_stage_possible_seeds(stage=stage, project_directory=project_directory)
             return [StageArgumentOption(raw=value, display=value.name, subtitle=None, value=value.id, argument=arg_details.details) for value in values]
+        case StageArgumentDetails.subarch:
+            values = load_catalyst_subarches(toolset=project_directory.get_toolset(), architecture=project_directory.get_architecture())
+            return [StageArgumentOption(raw=value.name, display=value.name, subtitle=value.chost or value.common_flags, value=value.name, argument=arg_details.details) for value in values]
     return None
+
+def load_stage_overlay_profiles(project_directory, stage: ProjectStage) -> list[PortageProfile]:
+    """Profiles defined by overlays used by stage (repos argument, following inheritance)."""
+    from .project_stage_value_resolver import resolve_stage_argument
+    overlay_ids = resolve_stage_argument(project_directory, stage, StageArgumentDetails.repos.value)
+    if not isinstance(overlay_ids, list):
+        return []
+    profiles = []
+    for overlay in Repository.OverlayDirectory.value:
+        if overlay.id in overlay_ids:
+            profiles += overlay.load_profiles(arch=project_directory.get_architecture())
+    return profiles
 
 def load_catalyst_stage_arguments_options_for_boolean(arg_details: StageArgumentTargetDetails | None) -> list[StageArgumentOption] | None:
     """Creates Yes/No StageArgumentOptions for given argument."""
@@ -257,18 +277,52 @@ def load_catalyst_stage_automatic_arguments_options(stage: ProjectStage, arg_det
         opt_parent.unsupported = True
     if getattr(stage, StageArgumentDetails.releng_template.name, None) is None:
         opt_releng.unsupported = True
-    match arg_details.details:
-        case StageArgumentDetails.profile:
-            return [option for option in [opt_parent, opt_releng] if option is not None]
-        case StageArgumentDetails.interpreter:
-            return [option for option in [opt_auto, opt_releng] if option is not None]
-        case StageArgumentDetails.compression_mode:
-            return [option for option in [opt_auto, opt_releng] if option is not None]
-        case StageArgumentDetails.repos:
-            return [option for option in [opt_parent, opt_releng] if option is not None]
-        case StageArgumentDetails.keep_repos:
-            return [option for option in [opt_releng] if option is not None]
-        case _: return []
+    if not arg_details.details:
+        return []
+    options = {
+        StageAutomaticOption.INHERIT_FROM_PARENT: opt_parent,
+        StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE: opt_releng,
+        StageAutomaticOption.GENERATE_AUTOMATICALLY: opt_auto,
+    }
+    return [options[automatic_option] for automatic_option in arg_details.details.automatic_options]
+
+def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dict[str, Any]:
+    """Sets default automatic options (inherit from parent, releng template...) for arguments valid for stage target.
+    From default options of argument available for the stage (parent selected, releng template selected...), first one
+    that resolves to some value is used. If none of them does, first available is used anyway, as releng template or
+    parent can define the value later. Returns arguments that were set."""
+    from .project_stage_value_resolver import resolve_stage_argument, UNRESOLVED
+    has_parent = getattr(stage, StageArgumentDetails.parent.name, None) is not None
+    has_template = bool(getattr(stage, StageArgumentDetails.releng_template.name, None))
+    def is_available(argument: StageArgumentDetails, option: StageAutomaticOption) -> bool:
+        match option:
+            case StageAutomaticOption.INHERIT_FROM_PARENT:
+                return has_parent
+            case StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE:
+                return has_template # Even if template doesn't define it now, templates can define any argument.
+            case StageAutomaticOption.GENERATE_AUTOMATICALLY:
+                return True
+        return False
+    def has_value(argument: StageArgumentDetails, option: StageAutomaticOption) -> bool:
+        if option == StageAutomaticOption.GENERATE_AUTOMATICALLY:
+            return True # Determined when building, even if not known yet.
+        value = resolve_stage_argument(project_directory, stage, argument.value, option=option)
+        return value is not UNRESOLVED and value not in (None, "", [])
+    arguments = load_catalyst_stage_arguments_details(toolset=project_directory.get_toolset(), target_name=stage.target)
+    applied = {}
+    for name, argument in arguments.items():
+        if argument.details is None or getattr(stage, argument.attribute_name, None) is not None:
+            continue
+        if argument.details == StageArgumentDetails.portage_confdir:
+            setattr(stage, argument.attribute_name, default_portage_confdir_sources(has_parent=has_parent))
+            applied[name] = getattr(stage, argument.attribute_name)
+            continue
+        available = [option for option in argument.details.default_options if is_available(argument.details, option)]
+        option = next((option for option in available if has_value(argument.details, option)), available[0] if available else None)
+        if option is not None:
+            setattr(stage, argument.attribute_name, option)
+            applied[name] = option
+    return applied
 
 def load_catalyst_targets(toolset: Toolset) -> list[str]:
     """Loads the list of available targets as their paths inside squashfs file"""
@@ -294,6 +348,56 @@ def load_catalyst_targets(toolset: Toolset) -> list[str]:
         if line.strip().endswith('.py') and os.path.basename(line) not in except_files
     ]
     return target_files
+
+@dataclass(frozen=True)
+class CatalystSubarch:
+    """Subarchitecture definition from catalyst arch/*.toml files."""
+    name: str
+    chost: str | None
+    common_flags: str | None
+
+def load_catalyst_subarches(toolset: Toolset | None, architecture: Architecture | None) -> list[CatalystSubarch]:
+    """Loads subarches available for given architecture from catalyst arch/*.toml files in toolset."""
+    if toolset is None or architecture is None:
+        return []
+    if toolset.get_app_install(ToolsetApplication.CATALYST) is None:
+        raise RuntimeError("This toolset does not have Catalyst installed.")
+    if toolset.env != ToolsetEnv.EXTERNAL:
+        raise RuntimeError("Currently only EXTERNAL toolsets are supported for this functionality.")
+    toolset_file_path = toolset.file_path()
+    arch_tables = _load_catalyst_arch_tables(toolset_file_path, os.path.getmtime(toolset_file_path))
+    subarches = []
+    for table in architecture.catalyst_arch_tables():
+        for name, values in arch_tables.get(table.name, {}).items():
+            chost = values.get("CHOST")
+            if table.chost_prefix and chost and not chost.startswith(table.chost_prefix):
+                continue
+            subarches.append(CatalystSubarch(name=name, chost=chost, common_flags=values.get("COMMON_FLAGS")))
+    return subarches
+
+@lru_cache(maxsize=8)
+def _load_catalyst_arch_tables(toolset_file_path: str, toolset_mtime: float) -> dict[str, dict[str, dict]]:
+    """Reads and merges all catalyst arch/*.toml files from toolset squashfs. Cached per toolset file version."""
+    catalyst_arch_path = "/usr/share/catalyst/arch"
+    output = subprocess.check_output(
+        ['unsquashfs', '-l', toolset_file_path, f"{catalyst_arch_path}/*.toml"],
+        text=True
+    )
+    tables: dict[str, dict[str, dict]] = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.endswith('.toml') or not line.startswith('squashfs-root/'):
+            continue
+        toml_path = line[len('squashfs-root/'):]
+        try:
+            content = subprocess.check_output(['unsquashfs', '-cat', toolset_file_path, toml_path], text=True)
+            for table_name, subarches in tomllib.loads(content).items():
+                if table_name == "setarch" or not isinstance(subarches, dict):
+                    continue
+                tables.setdefault(table_name, {}).update(subarches)
+        except (subprocess.CalledProcessError, tomllib.TOMLDecodeError) as e:
+            print(f"Warning: Failed to read {toml_path}: {e}")
+    return tables
 
 # ------------------------------------------------------------------------------
 # Loading releng templates:

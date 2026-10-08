@@ -31,7 +31,7 @@
         <child>
           <object class="AdwViewStackPage">
             <property name="title">Stages</property>
-            <property name="icon-name">clock-world-symbolic</property>
+            <property name="icon-name">checklist-minimalistic-svgrepo-com-symbolic</property>
             <property name="child">
               <object class="GtkScrolledWindow">
                 <property name="hscrollbar-policy">never</property>
@@ -89,7 +89,7 @@
         <child>
           <object class="AdwViewStackPage">
             <property name="title">Configuration</property>
-            <property name="icon-name">clock-world-symbolic</property>
+            <property name="icon-name">settings-svgrepo-com-symbolic</property>
             <property name="child">
               <object class="GtkScrolledWindow">
                 <property name="hscrollbar-policy">never</property>
@@ -162,7 +162,7 @@
         <child>
           <object class="AdwViewStackPage">
             <property name="title">Information</property>
-            <property name="icon-name">clock-world-symbolic</property>
+            <property name="icon-name">question-circle-svgrepo-com-symbolic</property>
             <property name="child">
               <object class="GtkScrolledWindow">
                 <property name="hscrollbar-policy">automatic</property>

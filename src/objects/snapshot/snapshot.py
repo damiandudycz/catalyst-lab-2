@@ -79,11 +79,15 @@ class Snapshot(Serializable):
     def load_profiles(self, arch: Architecture) -> list[PortageProfile]:
         # TODO: Needs additional mapping, doesnt work for example for ppc64le
         profiles_contents = subprocess.check_output(['unsquashfs', '-cat', self.file_path(), "profiles/profiles.desc"], text=True)
-        return [
-            PortageProfile(path=parts[1], stability=parts[2], repo="gentoo")
-            for line in profiles_contents.splitlines()
-            if (parts := line.split()) and parts[0] == arch.value and len(parts) >= 3
-        ]
+        return parse_profiles_desc(contents=profiles_contents, arch=arch, repo="gentoo")
+
+def parse_profiles_desc(contents: str, arch: Architecture, repo: str) -> list[PortageProfile]:
+    """Reads profiles of given arch from profiles.desc file contents (format: 'arch path stability')."""
+    return [
+        PortageProfile(path=parts[1], stability=parts[2], repo=repo)
+        for line in contents.splitlines()
+        if (parts := line.split()) and parts[0] == arch.value and len(parts) >= 3
+    ]
 
 class PortageProfile(Serializable):
     path: str

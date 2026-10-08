@@ -63,6 +63,21 @@
                 <property name="title">Other</property>
               </object>
             </child>
+            <child>
+              <object class="GtkButton" id="delete_button">
+                <property name="halign">center</property>
+                <style>
+                  <class name="destructive-action"/>
+                </style>
+                <child>
+                  <object class="AdwButtonContent">
+                    <property name="label">Delete stage</property>
+                    <property name="icon-name">trash-bin-trash-svgrepo-com-symbolic</property>
+                  </object>
+                </child>
+                <signal name="clicked" handler="on_delete_clicked"/>
+              </object>
+            </child>
           </object>
         </child>
       </object>

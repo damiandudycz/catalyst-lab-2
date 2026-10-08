@@ -224,9 +224,9 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
                 if self._cancel_event.is_set():
                     return
                 result = self.run_command_in_toolset(command=command)
-                self._update_progress((i + 1) / len(commands))
                 if not result:
                     raise RuntimeError(f"Command {command} failed")
+                self._update_progress((i + 1) / len(commands))
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error spawning temporary toolset: {e}")

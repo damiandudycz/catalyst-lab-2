@@ -6,7 +6,7 @@ from .toolset import Toolset
 from .releng_directory import RelengDirectory
 from .snapshot import Snapshot
 from .project_directory import ProjectDirectory, ProjectConfiguration
-from .project_stage import ProjectStage
+from .project_stage import ProjectStage, apply_default_stage_arguments
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
     MultiStageProcessState, MultiStageProcessStageState
@@ -80,6 +80,12 @@ class ProjectStageInstallationStepCreate(MultiStageProcessStage):
         self.process_started = True
         try:
             stage = ProjectStage(id=None, parent_id=self.parent_id, name=self.stage_name, target_name=self.target_name, releng_template_name=self.releng_template_name, profile=None)
+            try:
+                for name, option in apply_default_stage_arguments(project_directory=self.project_directory, stage=stage).items():
+                    self.log(f"{name}: {option.name if hasattr(option, 'name') else ', '.join(item.name for item in option)}")
+            except Exception as e:
+                # Stage can still be created and configured manually.
+                self.log(f"Failed to set default values: {e}")
             self.project_directory.install_stage(stage=stage)
             self.multistage_process.stage = stage
             self.complete(MultiStageProcessStageState.COMPLETED)

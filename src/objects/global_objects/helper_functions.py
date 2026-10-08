@@ -69,13 +69,25 @@ def extract(tarball: str, directory: str):
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     """Extracts an .xz tarball as root to preserve special files and ownership."""
+    import os
+    destination = os.path.abspath(directory)
+    def stage_filter(member: tarfile.TarInfo, dest_path: str) -> tarfile.TarInfo:
+        # Stage tarballs contain device nodes, absolute symlinks (resolved later inside chroot),
+        # ownership and setuid bits, which the default 'data' filter (Python 3.14+) rejects or strips.
+        # Keep them all, but don't allow member paths or hardlinks escaping the destination.
+        paths = [member.name] + ([member.linkname] if member.islnk() else [])
+        for path in paths:
+            target = os.path.normpath(os.path.join(destination, path))
+            if os.path.isabs(path) or os.path.commonpath([target, destination]) != destination:
+                raise tarfile.OutsideDestinationError(member, target)
+        return member
     with tarfile.open(tarball, mode='r:xz') as tar:
         total_size = sum(member.size for member in tar.getmembers())
         extracted_size = 0
         for member in tar.getmembers():
             if _cancel_event.is_set():
                 return
-            tar.extract(member, path=directory)
+            tar.extract(member, path=directory, filter=stage_filter)
             extracted_size += member.size
             progress = extracted_size / total_size if total_size else 0
             # This print must stay, it is used to receive progress by step implementation.

@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Self, FrozenSet
 from dataclasses import dataclass
 from enum import Enum, auto
+from .project_stage_automatic_option import StageAutomaticOption
 
 @dataclass
 class StageArguments:
@@ -20,6 +21,16 @@ class StageArgumentTargetDetails:
     def display_name(self) -> str:
         return self.details.display_name if self.details else self.name
 
+    @property
+    def attribute_name(self) -> str:
+        """Name of ProjectStage attribute that stores value of this argument."""
+        return self.details.name if self.details else self.name
+
+    @property
+    def type(self) -> StageArgumentType:
+        """Arguments not known to StageArgumentDetails are edited as single line text."""
+        return self.details.type if self.details else StageArgumentType.raw_single_line
+
 @dataclass
 class StageArgumentOption:
     """Used to display options in lists and allowing to select them."""
@@ -36,6 +47,7 @@ class StageArgumentType(Enum):
     select = auto() # Select one option from predefined list
     multiselect = auto() # Select multiple options from predefined list
     boolean = auto() # yes / no
+    string_list = auto() # List of values, edited one entry per line
 
 class StageArgumentDetails(Enum):
     version_stamp = "version_stamp"
@@ -69,6 +81,7 @@ class StageArgumentDetails(Enum):
     source_subpath = "source_subpath"
     update_seed = "update_seed"
     update_seed_command = "update_seed_command"
+    rename_regexp = "rename_regexp"
     boot_kernel = 'boot/kernel'
     stage4_empty = 'stage4/empty'
     stage4_fsscript = 'stage4/fsscript'
@@ -115,6 +128,17 @@ class StageArgumentDetails(Enum):
     releng_template = 'releng_template'
     # ...
 
+    @property
+    def automatic_options(self) -> list[StageAutomaticOption]:
+        """Automatic options (inheriting from parent, releng template...) allowed for this argument, in display order."""
+        return _automatic_options_mapping.get(self, [])
+
+    @property
+    def default_options(self) -> list[StageAutomaticOption]:
+        """Automatic options preferred as default value of new stage, in order of preference. First one available for
+        the stage is used (parent stage selected, releng template selected and defining this argument...)."""
+        return _default_options_mapping.get(self, [])
+
     @staticmethod
     def named(name: str) -> StageArgumentDetails | None:
         try:
@@ -156,6 +180,7 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.subarch: return "Subarch"
             case StageArgumentDetails.update_seed: return "Update seed"
             case StageArgumentDetails.update_seed_command: return "Update seed command"
+            case StageArgumentDetails.rename_regexp: return "Rename regexp"
             case StageArgumentDetails.boot_kernel: return "Boot / kernel"
             case StageArgumentDetails.stage4_empty: return "Empty"
             case StageArgumentDetails.stage4_fsscript: return "FS script"
@@ -213,7 +238,133 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.subarch: return StageArgumentType.select
             case StageArgumentDetails.interpreter: return StageArgumentType.multiselect
             case StageArgumentDetails.repos: return StageArgumentType.multiselect
+            case StageArgumentDetails.portage_confdir: return StageArgumentType.multiselect # Sources combined when building.
             case StageArgumentDetails.update_seed: return StageArgumentType.boolean
             case StageArgumentDetails.keep_repos: return StageArgumentType.boolean
-            case _: return StageArgumentType.raw
+            case (
+                StageArgumentDetails.hostuse |
+                StageArgumentDetails.catalyst_use |
+                StageArgumentDetails.install_mask |
+                StageArgumentDetails.decompressor_search_order |
+                StageArgumentDetails.boot_kernel |
+                StageArgumentDetails.stage4_empty |
+                StageArgumentDetails.stage4_groups |
+                StageArgumentDetails.stage4_packages |
+                StageArgumentDetails.stage4_rcadd |
+                StageArgumentDetails.stage4_rcdel |
+                StageArgumentDetails.stage4_rm |
+                StageArgumentDetails.stage4_unmerge |
+                StageArgumentDetails.stage4_use |
+                StageArgumentDetails.stage4_users |
+                StageArgumentDetails.livecd_packages |
+                StageArgumentDetails.livecd_use |
+                StageArgumentDetails.livecd_empty |
+                StageArgumentDetails.livecd_fsops |
+                StageArgumentDetails.livecd_modblacklist |
+                StageArgumentDetails.livecd_rcadd |
+                StageArgumentDetails.livecd_rcdel |
+                StageArgumentDetails.livecd_rm |
+                StageArgumentDetails.livecd_unmerge |
+                StageArgumentDetails.livecd_users
+            ): return StageArgumentType.string_list
+            case _: return StageArgumentType.raw_single_line
 
+
+# Automatic options allowed for arguments. Arguments not listed here can only be set directly.
+# Releng templates are spec files, which can define any argument, so inheriting from template is allowed wherever it
+# makes sense, not only for arguments used by current releng specs.
+_PARENT = StageAutomaticOption.INHERIT_FROM_PARENT
+_RELENG = StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE
+_AUTO = StageAutomaticOption.GENERATE_AUTOMATICALLY
+_automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]] = {
+    # Basic:
+    StageArgumentDetails.profile: [_PARENT, _RELENG],
+    # Architecture:
+    StageArgumentDetails.subarch: [_PARENT, _RELENG],
+    StageArgumentDetails.chost: [_PARENT, _RELENG],
+    StageArgumentDetails.cbuild: [_PARENT, _RELENG],
+    StageArgumentDetails.interpreter: [_AUTO, _RELENG],
+    StageArgumentDetails.asflags: [_PARENT, _RELENG],
+    StageArgumentDetails.cflags: [_PARENT, _RELENG],
+    StageArgumentDetails.common_flags: [_PARENT, _RELENG],
+    StageArgumentDetails.cxxflags: [_PARENT, _RELENG],
+    StageArgumentDetails.fcflags: [_PARENT, _RELENG],
+    StageArgumentDetails.fflags: [_PARENT, _RELENG],
+    StageArgumentDetails.ldflags: [_PARENT, _RELENG],
+    # Release:
+    StageArgumentDetails.rel_type: [_PARENT, _RELENG],
+    StageArgumentDetails.version_stamp: [_PARENT, _RELENG],
+    StageArgumentDetails.compression_mode: [_AUTO, _PARENT, _RELENG],
+    # Packages:
+    StageArgumentDetails.repos: [_PARENT, _RELENG],
+    StageArgumentDetails.keep_repos: [_PARENT, _RELENG],
+    StageArgumentDetails.binrepo_path: [_PARENT, _RELENG],
+    # Configuration:
+    StageArgumentDetails.source_subpath: [_AUTO], # Generated from parent stage output, hidden in UI.
+    StageArgumentDetails.portage_prefix: [_PARENT, _RELENG],
+    StageArgumentDetails.update_seed: [_PARENT, _RELENG],
+    StageArgumentDetails.update_seed_command: [_PARENT, _RELENG],
+    StageArgumentDetails.rename_regexp: [_RELENG],
+    StageArgumentDetails.install_mask: [_PARENT, _RELENG],
+    StageArgumentDetails.catalyst_use: [_PARENT, _RELENG],
+    StageArgumentDetails.decompressor_search_order: [_PARENT, _RELENG],
+    StageArgumentDetails.hostuse: [_PARENT, _RELENG],
+    # Cache paths are not inherited from parent, sharing cache between stages built with different flags could mix
+    # incompatible binaries. Template can still define them.
+    StageArgumentDetails.pkgcache_path: [_RELENG],
+    StageArgumentDetails.kerncache_path: [_RELENG],
+    # Target specific (stage4/*, livecd/*, boot/kernel) are defined by releng templates.
+    **{
+        argument: [_RELENG]
+        for argument in StageArgumentDetails
+        if argument.value.split("/")[0] in ("stage4", "livecd", "boot")
+    },
+}
+
+# Defaults for new stages, in order of preference. First one available for stage is used. Releng template is available
+# only when selected template defines the argument, so it's safe to list it for every argument it could define.
+# Values that must stay consistent along the stages chain (seed compatibility) prefer parent. Values describing given
+# build prefer releng template, which is chosen for it.
+_default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]] = {
+    # Basic:
+    StageArgumentDetails.profile: [_RELENG, _PARENT], # Template can use more specific profile than seed (eg. desktop).
+    # Architecture:
+    StageArgumentDetails.subarch: [_PARENT, _RELENG], # Toolchain needs to match the seed.
+    StageArgumentDetails.chost: [_PARENT, _RELENG],
+    StageArgumentDetails.cbuild: [_PARENT, _RELENG],
+    StageArgumentDetails.interpreter: [_RELENG, _AUTO],
+    StageArgumentDetails.asflags: [_RELENG, _PARENT], # Flags set by template are meant for this build.
+    StageArgumentDetails.cflags: [_RELENG, _PARENT],
+    StageArgumentDetails.common_flags: [_RELENG, _PARENT],
+    StageArgumentDetails.cxxflags: [_RELENG, _PARENT],
+    StageArgumentDetails.fcflags: [_RELENG, _PARENT],
+    StageArgumentDetails.fflags: [_RELENG, _PARENT],
+    StageArgumentDetails.ldflags: [_RELENG, _PARENT],
+    # Release:
+    StageArgumentDetails.rel_type: [_PARENT, _RELENG], # Whole chain is built in the same rel_type directory.
+    StageArgumentDetails.version_stamp: [_RELENG, _PARENT], # Variant of seed (eg. openrc) when template doesn't set it.
+    StageArgumentDetails.compression_mode: [_RELENG, _AUTO],
+    # Packages:
+    StageArgumentDetails.repos: [_PARENT, _RELENG],
+    StageArgumentDetails.keep_repos: [_PARENT, _RELENG],
+    StageArgumentDetails.binrepo_path: [_RELENG, _PARENT],
+    # Configuration:
+    StageArgumentDetails.source_subpath: [_AUTO],
+    # portage_confdir is combined from its own sources (project_stage_portage_confdir), defaults are set there.
+    StageArgumentDetails.portage_prefix: [_RELENG, _PARENT],
+    StageArgumentDetails.update_seed: [_RELENG, _PARENT],
+    StageArgumentDetails.update_seed_command: [_RELENG, _PARENT],
+    StageArgumentDetails.rename_regexp: [_RELENG],
+    StageArgumentDetails.install_mask: [_RELENG, _PARENT], # Resulting system should be consistent along the chain.
+    StageArgumentDetails.catalyst_use: [_RELENG, _PARENT],
+    StageArgumentDetails.decompressor_search_order: [_RELENG, _PARENT],
+    StageArgumentDetails.hostuse: [_RELENG], # Usually set only for stage that needs it (stage1).
+    StageArgumentDetails.pkgcache_path: [_RELENG],
+    StageArgumentDetails.kerncache_path: [_RELENG],
+    # Target specific:
+    **{
+        argument: [_RELENG]
+        for argument in StageArgumentDetails
+        if argument.value.split("/")[0] in ("stage4", "livecd", "boot")
+    },
+}
