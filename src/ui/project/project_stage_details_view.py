@@ -1,5 +1,5 @@
 import threading, uuid
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Gdk, Adw, GLib
 from dataclasses import dataclass
 from .project_directory import ProjectDirectory
 from .project_stage import (
@@ -20,6 +20,7 @@ from .architecture import Architecture
 from .item_select_view import ItemSelectionViewEvent
 from .project_stage import ProjectStage, StageArgumentOption
 from .item_select_expander_row import ItemSelectionExpanderRow
+from .event_bus import EventBus
 from .project_stage_automatic_option import StageAutomaticOption
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -67,12 +68,7 @@ class ProjectStageDetailsView(Gtk.Box):
         for name, arg in arguments_details.items():
             group = self.pref_group_for_argument(argument=arg)
             if group:
-                row = StageOptionExpanderRow(
-                    project_directory=self.project_directory,
-                    stage=self.stage,
-                    argument=arg,
-                    is_item_selectable_handler=self.is_config_option_selectable
-                )
+                row = self.create_row_for_argument(argument=arg)
                 row.pref_group = group
                 row.event_bus.subscribe(
                     ItemSelectionViewEvent.ITEM_CHANGED,
@@ -81,6 +77,20 @@ class ProjectStageDetailsView(Gtk.Box):
                 )
                 row.pref_group.add(row)
                 self.configuration_rows.append(row)
+
+    def create_row_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesRow:
+        match argument.type:
+            case StageArgumentType.select | StageArgumentType.multiselect | StageArgumentType.boolean:
+                return StageOptionExpanderRow(
+                    project_directory=self.project_directory,
+                    stage=self.stage,
+                    argument=argument,
+                    is_item_selectable_handler=self.is_config_option_selectable
+                )
+            case StageArgumentType.string_list | StageArgumentType.raw:
+                return StageTextListRow(stage=self.stage, argument=argument)
+            case _:
+                return StageTextEntryRow(stage=self.stage, argument=argument)
 
     def can_change_argument(self, option: StageArgumentOption) -> bool:
         match option.argument:
@@ -143,6 +153,15 @@ class ProjectStageDetailsView(Gtk.Box):
         return self.can_change_argument(option=option)
 
     def argument_changed(self, row):
+        if row.argument.type in (StageArgumentType.raw_single_line, StageArgumentType.string_list, StageArgumentType.raw):
+            ProjectManager.shared().change_stage_argument(
+                project=self.project_directory,
+                stage=self.stage,
+                argument=row.argument.details or row.argument.name,
+                value=row.value
+            )
+            # Text values don't affect other options, and reloading would discard unapplied edits.
+            return
         if row.argument.details.type == StageArgumentType.select:
             ProjectManager.shared().change_stage_argument(
                 project=self.project_directory,
@@ -164,9 +183,9 @@ class ProjectStageDetailsView(Gtk.Box):
                 argument=row.argument.details,
                 value=row.selected_item.value if row.selected_item is not None else None
             )
-        # Reload other rows
+        # Reload other option rows (text rows keep their own, possibly unapplied, content)
         for r in self.configuration_rows:
-            if r.argument != row.argument:
+            if r.argument != row.argument and isinstance(r, StageOptionExpanderRow):
                 r.load_state()
 
     # Monitoring stage changes
@@ -288,3 +307,149 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             for value in missing_values
         ]
 
+
+class StageTextEntryRow(Adw.EntryRow):
+    """Edits single line text arguments. Value is stored as str, or None when empty."""
+
+    def __init__(self, stage: ProjectStage, argument: StageArgumentTargetDetails):
+        super().__init__()
+        self.stage = stage
+        self.argument = argument
+        self.value = None
+        self.event_bus = EventBus[ItemSelectionViewEvent]()
+        self.set_title(argument.display_name)
+        self.set_show_apply_button(True)
+        self.warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
+        self.warning_icon.add_css_class("warning")
+        self.warning_icon.set_tooltip_text("This value is required")
+        self.add_suffix(self.warning_icon)
+        self.connect("apply", self.on_apply)
+        self.load_state()
+
+    def load_state(self):
+        current_value = getattr(self.stage, self.argument.attribute_name, None)
+        if isinstance(current_value, list):
+            current_value = " ".join(str(item) for item in current_value)
+        self.value = str(current_value) if current_value else None
+        self.set_text(self.value or "")
+        self.update_warning()
+
+    def on_apply(self, sender):
+        self.value = self.get_text().strip() or None
+        self.set_text(self.value or "")
+        self.update_warning()
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+        if root := self.get_root():
+            root.set_focus(None)
+
+    def update_warning(self):
+        self.warning_icon.set_visible(self.argument.required and not self.value)
+
+class StageTextListRow(Adw.ExpanderRow):
+    """Edits list arguments (packages, use, rcadd...) one entry per line. Value is stored as list[str], or None when empty."""
+
+    SUBTITLE_MAX_ITEMS = 3
+
+    def __init__(self, stage: ProjectStage, argument: StageArgumentTargetDetails):
+        super().__init__()
+        self.stage = stage
+        self.argument = argument
+        self.value = None
+        self.event_bus = EventBus[ItemSelectionViewEvent]()
+        self.set_title(argument.display_name)
+        self.warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
+        self.warning_icon.add_css_class("warning")
+        self.warning_icon.set_tooltip_text("This value is required")
+        self.add_suffix(self.warning_icon)
+        self._setup_editor()
+        self.load_state()
+
+    def _setup_editor(self):
+        self.text_view = Gtk.TextView()
+        self.text_view.set_monospace(True)
+        self.text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.text_view.set_accepts_tab(False)
+        self.text_view.set_top_margin(8)
+        self.text_view.set_bottom_margin(8)
+        self.text_view.set_left_margin(8)
+        self.text_view.set_right_margin(8)
+        self.text_view.set_size_request(-1, 96)
+        self.text_view.get_buffer().connect("changed", self.on_buffer_changed)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.text_view.add_controller(key_controller)
+        frame = Gtk.Frame()
+        frame.set_child(self.text_view)
+
+        hint_label = Gtk.Label(label="One entry per line. Ctrl+Enter to apply.")
+        hint_label.set_halign(Gtk.Align.START)
+        hint_label.set_hexpand(True)
+        hint_label.add_css_class("dimmed")
+        hint_label.add_css_class("caption")
+        self.revert_button = Gtk.Button(label="Revert")
+        self.revert_button.connect("clicked", lambda button: self.load_state())
+        self.apply_button = Gtk.Button(label="Apply")
+        self.apply_button.add_css_class("suggested-action")
+        self.apply_button.connect("clicked", lambda button: self.apply())
+        buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        buttons_box.append(hint_label)
+        buttons_box.append(self.revert_button)
+        buttons_box.append(self.apply_button)
+
+        editor_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        editor_box.set_margin_top(12)
+        editor_box.set_margin_bottom(12)
+        editor_box.set_margin_start(12)
+        editor_box.set_margin_end(12)
+        editor_box.append(frame)
+        editor_box.append(buttons_box)
+        editor_row = Gtk.ListBoxRow()
+        editor_row.set_activatable(False)
+        editor_row.set_selectable(False)
+        editor_row.set_child(editor_box)
+        self.add_row(editor_row)
+
+    def load_state(self):
+        current_value = getattr(self.stage, self.argument.attribute_name, None)
+        if isinstance(current_value, str):
+            current_value = current_value.splitlines()
+        self.value = [str(item) for item in current_value if str(item).strip()] if current_value else None
+        self.value = self.value or None
+        self.text_view.get_buffer().set_text("\n".join(self.value or []))
+        self.update_display()
+
+    def apply(self):
+        buffer = self.text_view.get_buffer()
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        self.value = [line.strip() for line in text.splitlines() if line.strip()] or None
+        buffer.set_text("\n".join(self.value or []))
+        self.update_display()
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+
+    def is_modified(self) -> bool:
+        buffer = self.text_view.get_buffer()
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        lines = [line.strip() for line in text.splitlines() if line.strip()] or None
+        return lines != self.value
+
+    def on_buffer_changed(self, buffer):
+        modified = self.is_modified()
+        self.apply_button.set_sensitive(modified)
+        self.revert_button.set_sensitive(modified)
+
+    def on_key_pressed(self, controller, keyval, keycode, state):
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.CONTROL_MASK:
+            self.apply()
+            return True
+        return False
+
+    def update_display(self):
+        if self.value:
+            shown = ", ".join(self.value[:self.SUBTITLE_MAX_ITEMS])
+            hidden_count = len(self.value) - self.SUBTITLE_MAX_ITEMS
+            subtitle = f"{shown} (+{hidden_count} more)" if hidden_count > 0 else shown
+        else:
+            subtitle = "(None)"
+        self.set_subtitle(GLib.markup_escape_text(subtitle))
+        self.warning_icon.set_visible(self.argument.required and not self.value)
+        self.on_buffer_changed(self.text_view.get_buffer())
