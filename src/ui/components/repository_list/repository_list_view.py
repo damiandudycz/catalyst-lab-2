@@ -37,6 +37,7 @@ class RepositoryListView(Gtk.Box):
     item_status_property_name      = GObject.Property(type=str, default=None)
     item_unsupported_property_name = GObject.Property(type=str, default=None)
     show_add_button                = GObject.Property(type=bool, default=True)
+    show_installations             = GObject.Property(type=bool, default=True) # Rows of started processes of item_installation_class.
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -97,7 +98,7 @@ class RepositoryListView(Gtk.Box):
             self.items_container.insert(item_row, 0)
             self._item_rows.append(item_row)
 
-        for installation in started_processes:
+        for installation in (started_processes if self.show_installations else []):
             installation_row = ItemInstallationRow(installation, self.item_icon)
             installation_row.connect(
                 "activated", self.on_installation_row_pressed

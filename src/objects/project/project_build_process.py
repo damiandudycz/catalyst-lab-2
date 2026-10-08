@@ -106,15 +106,26 @@ class ProjectBuild(MultiStageProcess):
         finally:
             if success:
                 MultiStageProcess.started_processes.remove(self)
-                MultiStageProcess.event_bus.emit(
-                    MultiStageProcessEvent.STARTED_PROCESSES_CHANGED,
-                    self.__class__,
-                    MultiStageProcess.get_started_processes_by_class(self.__class__)
-                )
+            # Failed builds stay in started processes (to see their output), but views showing running builds need
+            # to be refreshed in both cases.
+            MultiStageProcess.event_bus.emit(
+                MultiStageProcessEvent.STARTED_PROCESSES_CHANGED,
+                self.__class__,
+                MultiStageProcess.get_started_processes_by_class(self.__class__)
+            )
             self.complete_process(success=success)
 
     def complete_process(self, success: bool):
         pass
+
+def running_project_build(project_directory, timestamp: str | None = None) -> ProjectBuild | None:
+    """Build of project that is currently in progress, optionally only build started with given timestamp."""
+    return next((
+        build for build in MultiStageProcess.get_started_processes_by_class(ProjectBuild)
+        if build.project_directory.id == project_directory.id
+        and build.status == MultiStageProcessState.IN_PROGRESS
+        and (timestamp is None or build.timestamp == timestamp)
+    ), None)
 
 # ------------------------------------------------------------------------------
 # Build steps.

@@ -29,7 +29,9 @@
                 <property name="item_icon">box-minimalistic-svgrepo-com-symbolic</property>
                 <property name="item_title_property_name">name</property>
                 <property name="item_subtitle_property_name">builds_summary</property>
+                <property name="item_status_property_name">build_status_indicator_values</property>
                 <property name="show_add_button">False</property>
+                <property name="show_installations">False</property>
                 <signal name="item-row-pressed" handler="on_item_row_pressed"/>
                 <signal name="installation-row-pressed" handler="on_installation_row_pressed"/>
               </object>
@@ -41,7 +43,7 @@
 
             <child>
               <object class="GtkLabel">
-                <property name="label">Builds of project stages, stored in builds location. Select a project to see builds of its stages. Running builds are shown at the top.</property>
+                <property name="label">Builds of project stages, stored in builds location. Select a project to see builds of its stages. Projects being built are marked with blinking indicator.</property>
                 <property name="halign">center</property>
                 <property name="wrap">True</property>
                 <property name="justify">fill</property>

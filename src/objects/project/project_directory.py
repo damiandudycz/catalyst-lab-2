@@ -65,10 +65,19 @@ class ProjectDirectory(GitDirectory):
     def builds_summary(self) -> str:
         """Short description of project stage builds, eg. for builds list."""
         from .project_build import load_project_builds
+        from .project_build_process import running_project_build
         builds = load_project_builds(self)
-        if not builds:
-            return "No builds yet"
-        return f"{len(builds)} build{'s' if len(builds) != 1 else ''}, last {builds[0].date.strftime('%Y-%m-%d %H:%M')}"
+        summary = f"{len(builds)} build{'s' if len(builds) != 1 else ''}, last {builds[0].date.strftime('%Y-%m-%d %H:%M')}" if builds else "No builds yet"
+        return f"Building now · {summary}" if running_project_build(self) else summary
+
+    @property
+    def build_status_indicator_values(self):
+        """Blinking indicator while project is being built."""
+        from .project_build_process import running_project_build
+        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+        if running_project_build(self):
+            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
+        return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
 
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:
