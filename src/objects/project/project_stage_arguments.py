@@ -299,7 +299,7 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
     StageArgumentDetails.keep_repos: [_PARENT, _RELENG],
     StageArgumentDetails.binrepo_path: [_PARENT, _RELENG],
     # Configuration:
-    StageArgumentDetails.source_subpath: [_AUTO, _RELENG], # Automatic is generated from parent stage output.
+    StageArgumentDetails.source_subpath: [_AUTO], # Generated from parent stage output, hidden in UI.
     StageArgumentDetails.portage_confdir: [_PARENT, _RELENG],
     StageArgumentDetails.portage_prefix: [_PARENT, _RELENG],
     StageArgumentDetails.update_seed: [_PARENT, _RELENG],
@@ -349,7 +349,7 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
     StageArgumentDetails.keep_repos: [_PARENT, _RELENG],
     StageArgumentDetails.binrepo_path: [_RELENG, _PARENT],
     # Configuration:
-    StageArgumentDetails.source_subpath: [_AUTO, _RELENG], # Template value is used for stages without parent.
+    StageArgumentDetails.source_subpath: [_AUTO],
     StageArgumentDetails.portage_confdir: [_RELENG, _PARENT], # Template points to configuration for its target type.
     StageArgumentDetails.portage_prefix: [_RELENG, _PARENT],
     StageArgumentDetails.update_seed: [_RELENG, _PARENT],

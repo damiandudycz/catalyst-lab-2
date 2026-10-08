@@ -110,8 +110,11 @@ class ProjectStageDetailsView(Gtk.Box):
             return self.configuration_pref_group
         match argument.details:
             case (
+                # Hidden, set by CatalystLab: name has own row, snapshot is selected for project and source_subpath is
+                # generated from parent stage, as all stages of the tree are built by the app.
                 StageArgumentDetails.name |
-                StageArgumentDetails.snapshot_treeish
+                StageArgumentDetails.snapshot_treeish |
+                StageArgumentDetails.source_subpath
             ):
                 return None
             case (

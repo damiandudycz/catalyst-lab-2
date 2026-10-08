@@ -270,9 +270,6 @@ def load_catalyst_stage_automatic_arguments_options(stage: ProjectStage, arg_det
     }
     return [options[automatic_option] for automatic_option in arg_details.details.automatic_options]
 
-# Automatic options which can't be used without parent stage (generated from parent output).
-_automatic_options_requiring_parent = {StageArgumentDetails.source_subpath}
-
 def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dict[str, StageAutomaticOption]:
     """Sets default automatic options (inherit from parent, releng template...) for arguments valid for stage target.
     From default options of argument available for the stage (parent selected, releng template selected...), first one
@@ -288,7 +285,7 @@ def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dic
             case StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE:
                 return has_template # Even if template doesn't define it now, templates can define any argument.
             case StageAutomaticOption.GENERATE_AUTOMATICALLY:
-                return has_parent or argument not in _automatic_options_requiring_parent
+                return True
         return False
     def has_value(argument: StageArgumentDetails, option: StageAutomaticOption) -> bool:
         if option == StageAutomaticOption.GENERATE_AUTOMATICALLY:
