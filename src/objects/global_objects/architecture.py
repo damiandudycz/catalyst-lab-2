@@ -1,6 +1,7 @@
 from __future__ import annotations
 import platform
 from enum import Enum
+from typing import NamedTuple
 
 class Architecture(Enum):
     x86 = "x86"             # 32-bit Intel/AMD (i386, i686, etc.)
@@ -24,6 +25,10 @@ class Architecture(Enum):
     def releng_base_arch(self) -> RelengBaseArch | None:
         return RelengBaseArch[self.name]
 
+    def catalyst_arch_tables(self) -> list[CatalystArchTable]:
+        """Tables in catalyst arch/*.toml files containing subarches of this architecture."""
+        return _catalyst_arch_tables_mapping.get(self, [CatalystArchTable(name=self.value)])
+
 class RelengBaseArch(Enum):
     """Basearch families used by releng templates. Value represents base directory in releng"""
     x86 = "x86"
@@ -38,11 +43,16 @@ class RelengBaseArch(Enum):
     s390 = "s390/s390"
     s390x = "s390/s390x"
     sparc = "sparc"
-    # Missing in releng: riscv, loong, m64k, alpha
+    # Missing in releng: riscv, loong, m68k, alpha
     alpha = "alpha"
     riscv = "riscv"
     loong = "loong"
-    m64k = "m64k"
+    m68k = "m68k"
+
+class CatalystArchTable(NamedTuple):
+    """Top level table in catalyst arch/*.toml files, eg. [ppc64.power9]."""
+    name: str
+    chost_prefix: str | None = None # Use only subarches with matching CHOST, for tables shared by multiple architectures.
 
 # Mappings:
 _arch_mapping = {
@@ -74,6 +84,15 @@ _arch_mapping = {
     's390x': Architecture.s390x,
     'riscv64': Architecture.riscv,
     'riscv32': Architecture.riscv,
+}
+
+# Catalyst arch/*.toml tables containing subarches, for architectures where it's not just a table named as Architecture value.
+_catalyst_arch_tables_mapping: dict[Architecture, list[CatalystArchTable]] = {
+    Architecture.mips: [CatalystArchTable(name="mips"), CatalystArchTable(name="mips64")],
+    Architecture.sparc: [CatalystArchTable(name="sparc"), CatalystArchTable(name="sparc64")],
+    # ppc64 table contains both endians, separate them by CHOST.
+    Architecture.ppc64: [CatalystArchTable(name="ppc64", chost_prefix="powerpc64-")],
+    Architecture.ppc64le: [CatalystArchTable(name="ppc64", chost_prefix="powerpc64le-")],
 }
 
 # Set as a class-level constant.

@@ -20,6 +20,16 @@ class StageArgumentTargetDetails:
     def display_name(self) -> str:
         return self.details.display_name if self.details else self.name
 
+    @property
+    def attribute_name(self) -> str:
+        """Name of ProjectStage attribute that stores value of this argument."""
+        return self.details.name if self.details else self.name
+
+    @property
+    def type(self) -> StageArgumentType:
+        """Arguments not known to StageArgumentDetails are edited as single line text."""
+        return self.details.type if self.details else StageArgumentType.raw_single_line
+
 @dataclass
 class StageArgumentOption:
     """Used to display options in lists and allowing to select them."""
@@ -36,6 +46,7 @@ class StageArgumentType(Enum):
     select = auto() # Select one option from predefined list
     multiselect = auto() # Select multiple options from predefined list
     boolean = auto() # yes / no
+    string_list = auto() # List of values, edited one entry per line
 
 class StageArgumentDetails(Enum):
     version_stamp = "version_stamp"
@@ -215,5 +226,31 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.repos: return StageArgumentType.multiselect
             case StageArgumentDetails.update_seed: return StageArgumentType.boolean
             case StageArgumentDetails.keep_repos: return StageArgumentType.boolean
-            case _: return StageArgumentType.raw
+            case (
+                StageArgumentDetails.hostuse |
+                StageArgumentDetails.catalyst_use |
+                StageArgumentDetails.install_mask |
+                StageArgumentDetails.decompressor_search_order |
+                StageArgumentDetails.boot_kernel |
+                StageArgumentDetails.stage4_empty |
+                StageArgumentDetails.stage4_groups |
+                StageArgumentDetails.stage4_packages |
+                StageArgumentDetails.stage4_rcadd |
+                StageArgumentDetails.stage4_rcdel |
+                StageArgumentDetails.stage4_rm |
+                StageArgumentDetails.stage4_unmerge |
+                StageArgumentDetails.stage4_use |
+                StageArgumentDetails.stage4_users |
+                StageArgumentDetails.livecd_packages |
+                StageArgumentDetails.livecd_use |
+                StageArgumentDetails.livecd_empty |
+                StageArgumentDetails.livecd_fsops |
+                StageArgumentDetails.livecd_modblacklist |
+                StageArgumentDetails.livecd_rcadd |
+                StageArgumentDetails.livecd_rcdel |
+                StageArgumentDetails.livecd_rm |
+                StageArgumentDetails.livecd_unmerge |
+                StageArgumentDetails.livecd_users
+            ): return StageArgumentType.string_list
+            case _: return StageArgumentType.raw_single_line
 
