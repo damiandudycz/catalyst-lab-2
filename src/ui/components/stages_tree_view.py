@@ -3,9 +3,9 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GObject
 
 # Constants for spacing
-NODE_MARGIN_X = 24
-NODE_MARGIN_Y = 24 # Spacing WITHIN a branch
-ROOT_BRANCH_MARGIN_Y = 40 # Larger spacing BETWEEN root branches
+NODE_MARGIN_X = 32
+NODE_MARGIN_Y = 32 # Spacing WITHIN a branch
+ROOT_BRANCH_MARGIN_Y = 48 # Larger spacing BETWEEN root branches
 
 class TreeNode:
     def __init__(self, value):
@@ -29,6 +29,10 @@ class StagesTreeView(Gtk.Fixed):
         self.node_sizes = {}
         self.buttons = {}
         self.separators = []
+
+        # Space for shadows of cards in top and bottom rows.
+        self.set_margin_top(12)
+        self.set_margin_bottom(12)
 
         self.drawing_area = Gtk.DrawingArea()
         self.drawing_area.set_draw_func(self.draw_func)
@@ -88,10 +92,26 @@ class StagesTreeView(Gtk.Fixed):
             nodes_to_visit.extend(node.children)
         return all_nodes
 
+    def _create_node_button(self, node) -> Gtk.Button:
+        """Stage displayed as card, with name and target. Also used for measuring nodes, so sizes match."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=16, margin_end=16, margin_top=12, margin_bottom=12)
+        title = Gtk.Label(label=node.value.name, xalign=0)
+        title.add_css_class("heading")
+        box.append(title)
+        target = getattr(node.value, "target", None)
+        if target:
+            subtitle = Gtk.Label(label=target.replace("_", "-"), xalign=0)
+            subtitle.add_css_class("caption")
+            subtitle.add_css_class("dimmed")
+            box.append(subtitle)
+        button = Gtk.Button(child=box)
+        button.add_css_class("card")
+        return button
+
     def _measure_nodes(self):
         self.node_sizes = {}
         for node in self._get_all_nodes():
-            temp_button = Gtk.Button(label=node.value.name)
+            temp_button = self._create_node_button(node)
             min_size, nat_size = temp_button.get_preferred_size()
             self.node_sizes[node] = (nat_size.width, nat_size.height)
 
@@ -183,7 +203,7 @@ class StagesTreeView(Gtk.Fixed):
         self.drawing_area.set_size_request(total_width, total_height)
 
         for node, (x, y) in self.node_positions.items():
-            button = Gtk.Button(label=node.value.name)
+            button = self._create_node_button(node)
             button.connect("clicked", self.on_node_clicked, node)
             self.put(button, x, y)
             self.buttons[node] = button
