@@ -49,4 +49,9 @@ class WelcomeSection(Gtk.Box):
             AppSection.BuildsSection
         )
 
-
+    @Gtk.Template.Callback()
+    def on_environments_row_activated(self, _):
+        app_event_bus.emit(
+            AppEvents.OPEN_APP_SECTION,
+            AppSection.EnvironmentsSection
+        )

@@ -82,6 +82,15 @@
               </object>
             </child>
 
+            <child>
+              <object class="AdwActionRow">
+                <property name="title">Environments</property>
+                <property name="subtitle">Manage your build environments</property>
+                <property name="icon-name">toolbox-symbolic</property>
+                <property name="activatable">True</property>
+                <signal name="activated" handler="on_environments_row_activated"/>
+              </object>
+            </child>
 
           </object>
         </child>
