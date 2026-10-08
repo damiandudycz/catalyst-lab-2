@@ -270,45 +270,49 @@ class StageArgumentDetails(Enum):
 
 
 # Automatic options allowed for arguments. Arguments not listed here can only be set directly.
+# Releng templates are spec files, which can define any argument, so inheriting from template is allowed wherever it
+# makes sense, not only for arguments used by current releng specs.
 _PARENT = StageAutomaticOption.INHERIT_FROM_PARENT
 _RELENG = StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE
 _AUTO = StageAutomaticOption.GENERATE_AUTOMATICALLY
 _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]] = {
     # Basic:
     StageArgumentDetails.profile: [_PARENT, _RELENG],
-    # Architecture (needs to match parent seed):
+    # Architecture:
     StageArgumentDetails.subarch: [_PARENT, _RELENG],
     StageArgumentDetails.chost: [_PARENT, _RELENG],
+    StageArgumentDetails.cbuild: [_PARENT, _RELENG],
     StageArgumentDetails.interpreter: [_AUTO, _RELENG],
-    StageArgumentDetails.asflags: [_PARENT],
-    StageArgumentDetails.cflags: [_PARENT],
-    StageArgumentDetails.common_flags: [_PARENT],
-    StageArgumentDetails.cxxflags: [_PARENT],
-    StageArgumentDetails.fcflags: [_PARENT],
-    StageArgumentDetails.fflags: [_PARENT],
-    StageArgumentDetails.ldflags: [_PARENT],
+    StageArgumentDetails.asflags: [_PARENT, _RELENG],
+    StageArgumentDetails.cflags: [_PARENT, _RELENG],
+    StageArgumentDetails.common_flags: [_PARENT, _RELENG],
+    StageArgumentDetails.cxxflags: [_PARENT, _RELENG],
+    StageArgumentDetails.fcflags: [_PARENT, _RELENG],
+    StageArgumentDetails.fflags: [_PARENT, _RELENG],
+    StageArgumentDetails.ldflags: [_PARENT, _RELENG],
     # Release:
     StageArgumentDetails.rel_type: [_PARENT, _RELENG],
-    StageArgumentDetails.version_stamp: [_RELENG, _PARENT],
-    StageArgumentDetails.compression_mode: [_AUTO, _RELENG],
+    StageArgumentDetails.version_stamp: [_PARENT, _RELENG],
+    StageArgumentDetails.compression_mode: [_AUTO, _PARENT, _RELENG],
     # Packages:
     StageArgumentDetails.repos: [_PARENT, _RELENG],
     StageArgumentDetails.keep_repos: [_PARENT, _RELENG],
-    StageArgumentDetails.binrepo_path: [_RELENG],
+    StageArgumentDetails.binrepo_path: [_PARENT, _RELENG],
     # Configuration:
-    StageArgumentDetails.source_subpath: [_AUTO], # Generated from parent stage output.
+    StageArgumentDetails.source_subpath: [_AUTO, _RELENG], # Automatic is generated from parent stage output.
     StageArgumentDetails.portage_confdir: [_PARENT, _RELENG],
     StageArgumentDetails.portage_prefix: [_PARENT, _RELENG],
-    StageArgumentDetails.update_seed: [_RELENG],
-    StageArgumentDetails.update_seed_command: [_RELENG],
+    StageArgumentDetails.update_seed: [_PARENT, _RELENG],
+    StageArgumentDetails.update_seed_command: [_PARENT, _RELENG],
     StageArgumentDetails.rename_regexp: [_RELENG],
-    StageArgumentDetails.install_mask: [_PARENT],
-    StageArgumentDetails.catalyst_use: [_PARENT],
-    StageArgumentDetails.cbuild: [_PARENT],
-    StageArgumentDetails.decompressor_search_order: [_PARENT],
-    StageArgumentDetails.hostuse: [_PARENT],
-    # Cache paths (pkgcache_path, kerncache_path) are not inherited, sharing cache between stages built with different
-    # flags could mix incompatible binaries.
+    StageArgumentDetails.install_mask: [_PARENT, _RELENG],
+    StageArgumentDetails.catalyst_use: [_PARENT, _RELENG],
+    StageArgumentDetails.decompressor_search_order: [_PARENT, _RELENG],
+    StageArgumentDetails.hostuse: [_PARENT, _RELENG],
+    # Cache paths are not inherited from parent, sharing cache between stages built with different flags could mix
+    # incompatible binaries. Template can still define them.
+    StageArgumentDetails.pkgcache_path: [_RELENG],
+    StageArgumentDetails.kerncache_path: [_RELENG],
     # Target specific (stage4/*, livecd/*, boot/kernel) are defined by releng templates.
     **{
         argument: [_RELENG]
@@ -317,22 +321,25 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
     },
 }
 
-# Defaults for new stages, in order of preference. Values that must stay consistent along the stages chain (seed
-# compatibility) prefer parent. Values describing given build prefer releng template, which is chosen for it.
+# Defaults for new stages, in order of preference. First one available for stage is used. Releng template is available
+# only when selected template defines the argument, so it's safe to list it for every argument it could define.
+# Values that must stay consistent along the stages chain (seed compatibility) prefer parent. Values describing given
+# build prefer releng template, which is chosen for it.
 _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]] = {
     # Basic:
     StageArgumentDetails.profile: [_RELENG, _PARENT], # Template can use more specific profile than seed (eg. desktop).
     # Architecture:
-    StageArgumentDetails.subarch: [_PARENT, _RELENG],
+    StageArgumentDetails.subarch: [_PARENT, _RELENG], # Toolchain needs to match the seed.
     StageArgumentDetails.chost: [_PARENT, _RELENG],
-    StageArgumentDetails.interpreter: [_AUTO],
-    StageArgumentDetails.asflags: [_PARENT],
-    StageArgumentDetails.cflags: [_PARENT],
-    StageArgumentDetails.common_flags: [_PARENT],
-    StageArgumentDetails.cxxflags: [_PARENT],
-    StageArgumentDetails.fcflags: [_PARENT],
-    StageArgumentDetails.fflags: [_PARENT],
-    StageArgumentDetails.ldflags: [_PARENT],
+    StageArgumentDetails.cbuild: [_PARENT, _RELENG],
+    StageArgumentDetails.interpreter: [_RELENG, _AUTO],
+    StageArgumentDetails.asflags: [_RELENG, _PARENT], # Flags set by template are meant for this build.
+    StageArgumentDetails.cflags: [_RELENG, _PARENT],
+    StageArgumentDetails.common_flags: [_RELENG, _PARENT],
+    StageArgumentDetails.cxxflags: [_RELENG, _PARENT],
+    StageArgumentDetails.fcflags: [_RELENG, _PARENT],
+    StageArgumentDetails.fflags: [_RELENG, _PARENT],
+    StageArgumentDetails.ldflags: [_RELENG, _PARENT],
     # Release:
     StageArgumentDetails.rel_type: [_PARENT, _RELENG], # Whole chain is built in the same rel_type directory.
     StageArgumentDetails.version_stamp: [_RELENG, _PARENT], # Variant of seed (eg. openrc) when template doesn't set it.
@@ -340,19 +347,20 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
     # Packages:
     StageArgumentDetails.repos: [_PARENT, _RELENG],
     StageArgumentDetails.keep_repos: [_PARENT, _RELENG],
-    StageArgumentDetails.binrepo_path: [_RELENG],
+    StageArgumentDetails.binrepo_path: [_RELENG, _PARENT],
     # Configuration:
-    StageArgumentDetails.source_subpath: [_AUTO],
+    StageArgumentDetails.source_subpath: [_AUTO, _RELENG], # Template value is used for stages without parent.
     StageArgumentDetails.portage_confdir: [_RELENG, _PARENT], # Template points to configuration for its target type.
     StageArgumentDetails.portage_prefix: [_RELENG, _PARENT],
-    StageArgumentDetails.update_seed: [_RELENG],
-    StageArgumentDetails.update_seed_command: [_RELENG],
+    StageArgumentDetails.update_seed: [_RELENG, _PARENT],
+    StageArgumentDetails.update_seed_command: [_RELENG, _PARENT],
     StageArgumentDetails.rename_regexp: [_RELENG],
-    StageArgumentDetails.install_mask: [_PARENT], # Resulting system should be consistent along the chain.
-    StageArgumentDetails.catalyst_use: [_PARENT],
-    StageArgumentDetails.cbuild: [_PARENT],
-    StageArgumentDetails.decompressor_search_order: [_PARENT],
-    # hostuse is usually set only for stage that needs it (stage1), no default.
+    StageArgumentDetails.install_mask: [_RELENG, _PARENT], # Resulting system should be consistent along the chain.
+    StageArgumentDetails.catalyst_use: [_RELENG, _PARENT],
+    StageArgumentDetails.decompressor_search_order: [_RELENG, _PARENT],
+    StageArgumentDetails.hostuse: [_RELENG], # Usually set only for stage that needs it (stage1).
+    StageArgumentDetails.pkgcache_path: [_RELENG],
+    StageArgumentDetails.kerncache_path: [_RELENG],
     # Target specific:
     **{
         argument: [_RELENG]

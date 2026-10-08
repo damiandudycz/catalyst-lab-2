@@ -8,6 +8,12 @@ from .project_stage_compression_mode import StageCompressionMode
 from .snapshot import PortageProfile
 from .repository import Repository
 
+class _Unresolved:
+    """Value of automatic option that can't be determined before building (missing parent or template, no generator)."""
+    def __repr__(self):
+        return "UNRESOLVED"
+UNRESOLVED = _Unresolved()
+
 # ------------------------------------------------------------------------------
 # Resolving values of automatic options (inherit from parent, releng template...).
 # Values are resolved only for preview. Placeholders (@TIMESTAMP@, @REPO_DIR@...)
@@ -16,7 +22,8 @@ from .repository import Repository
 def resolve_stage_argument(project_directory, stage, argument_name: str, option: StageAutomaticOption | None = None, _visited: frozenset = frozenset()) -> Any | None:
     """Returns value that argument will have when stage is built, following automatic options through parent stages and
     releng template. If option is given, it's resolved instead of value stored in stage.
-    Returns None when value can't be determined (not set, missing parent or template, unsupported automatic option)."""
+    Returns None when value is empty (not set, or not defined by parent / template) and UNRESOLVED when it can't be
+    determined (missing parent or template, parents loop, automatic value not known before building)."""
     details = StageArgumentDetails.named(argument_name)
     value = option if option is not None else getattr(stage, details.name if details else argument_name, None)
     # Multiselect arguments (repos, interpreter) store selected automatic option as single item list.
@@ -25,19 +32,22 @@ def resolve_stage_argument(project_directory, stage, argument_name: str, option:
     if not isinstance(value, StageAutomaticOption):
         return value
     if stage.id in _visited:
-        return None # Parents loop.
+        return UNRESOLVED # Parents loop.
     visited = _visited | {stage.id}
     match value:
         case StageAutomaticOption.INHERIT_FROM_PARENT:
             parent = parent_stage(project_directory=project_directory, stage=stage)
-            return resolve_stage_argument(project_directory, parent, argument_name, _visited=visited) if parent else None
+            return resolve_stage_argument(project_directory, parent, argument_name, _visited=visited) if parent else UNRESOLVED
         case StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE:
             template_values = load_stage_releng_template_values(project_directory=project_directory, stage=stage)
-            return _convert_releng_value(details=details, value=template_values.get(argument_name)) if template_values else None
+            if template_values is None:
+                return UNRESOLVED
+            return _convert_releng_value(details=details, value=template_values.get(argument_name))
         case StageAutomaticOption.GENERATE_AUTOMATICALLY:
             generator = _automatic_value_generators.get(details)
-            return generator(project_directory, stage, visited) if generator else None
-    return None
+            value = generator(project_directory, stage, visited) if generator else None
+            return UNRESOLVED if value is None else value
+    return UNRESOLVED
 
 def parent_stage(project_directory, stage):
     parent_id = getattr(stage, StageArgumentDetails.parent.name, None)
@@ -117,7 +127,7 @@ def _convert_releng_value(details: StageArgumentDetails | None, value: str | lis
 
 def format_stage_argument_value(value: Any, max_items: int = 3) -> str | None:
     """Short text representation of resolved value for UI. Returns None for missing values."""
-    if value is None or value == [] or value == "":
+    if value is None or value is UNRESOLVED or value == [] or value == "":
         return None
     if isinstance(value, list):
         shown = [format_stage_argument_value(item) or "?" for item in value[:max_items]]
@@ -136,9 +146,13 @@ def format_stage_argument_value(value: Any, max_items: int = 3) -> str | None:
     return str(value)
 
 def resolved_stage_argument_display(project_directory, stage, argument_name: str, option: StageAutomaticOption) -> str | None:
-    """Text of value automatic option resolves to, or None if it can't be determined."""
+    """Text of value automatic option resolves to, "(None)" when it resolves to empty value, or None if it can't be
+    determined."""
     try:
-        return format_stage_argument_value(resolve_stage_argument(project_directory, stage, argument_name, option=option))
+        value = resolve_stage_argument(project_directory, stage, argument_name, option=option)
+        if value is UNRESOLVED:
+            return None
+        return format_stage_argument_value(value) or "(None)" # Same as empty selection in option rows.
     except Exception as e:
         print(f"Failed to resolve {argument_name} ({option.name}): {e}")
         return None
