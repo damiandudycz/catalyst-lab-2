@@ -370,11 +370,15 @@ mknod -m 666 "$DEV/full" c 1 7
 mknod -m 666 "$DEV/random" c 1 8
 mknod -m 666 "$DEV/urandom" c 1 9
 mknod -m 666 "$DEV/tty" c 5 0
-# Devices bound into toolset (loop devices for snapshot squashfs, kvm), with the same numbers as on host.
-for device in /dev/loop-control /dev/loop[0-9]* /dev/kvm; do
+# Devices bound into toolset (loop control, kvm), with the same numbers as on host.
+for device in /dev/loop-control /dev/kvm; do
     [ -e "$device" ] || continue
-    type=c; [ -b "$device" ] && type=b
-    mknod -m 660 "$DEV/$(basename "$device")" $type $((0x$(stat -c %t "$device"))) $((0x$(stat -c %T "$device")))
+    mknod -m 660 "$DEV/$(basename "$device")" c $((0x$(stat -c %t "$device"))) $((0x$(stat -c %T "$device")))
+done
+# Loop devices (block major 7). Catalyst gets free loop device from loop control, which can be created by kernel only
+# now (eg. when others are used by mounted toolset), so its node wouldn't exist in host /dev bound earlier.
+for number in $(seq 0 255); do
+    mknod -m 660 "$DEV/loop$number" b 7 $number
 done
 mkdir -p "$DEV/pts" "$DEV/shm"
 ln -s /proc/self/fd "$DEV/fd"
