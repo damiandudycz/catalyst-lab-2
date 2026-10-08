@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, json, uuid
+import os, json, uuid, shutil
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
@@ -69,6 +69,18 @@ class StageBuild:
         os.makedirs(self.path, exist_ok=True)
         with open(os.path.join(self.path, StageBuild.METADATA_FILE), "w", encoding="utf-8") as file:
             json.dump(self.serialize(), file, indent=4)
+
+    def delete(self):
+        """Removes build directory with its results. Directory of stage builds is removed too when it becomes empty."""
+        if not self.path:
+            return
+        path = os.path.realpath(self.path)
+        if not path.startswith(builds_location() + os.sep):
+            raise RuntimeError(f"Build directory {path} is outside of builds location")
+        shutil.rmtree(path)
+        stage_directory = os.path.dirname(path)
+        if os.path.isdir(stage_directory) and not os.listdir(stage_directory):
+            os.rmdir(stage_directory)
 
 def builds_location() -> str:
     return os.path.realpath(os.path.expanduser(Repository.Settings.value.builds_location))

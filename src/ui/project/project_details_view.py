@@ -8,11 +8,12 @@ from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
 from .project_stage_create_view import ProjectStageCreateView
 from .app_events import app_event_bus, AppEvents
-from .stages_tree_view import StagesTreeView, TreeNode
+from .stages_tree_view import StagesTreeView, TreeNode, StageNodeStatus
 from .project_stage_details_view import ProjectStageDetailsView
 from .project_build_view import ProjectBuildView
-from .project_build_process import ProjectBuild
-from .multistage_process import MultiStageProcess, MultiStageProcessState
+from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, running_project_build
+from .project_builds_view import ProjectBuildsView
+from .multistage_process import MultiStageProcess, MultiStageProcessState, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState
 from .architecture import Architecture
 import threading
 
@@ -21,6 +22,7 @@ class ProjectDetailsView(Gtk.Box):
     __gtype_name__ = "ProjectDetailsView"
 
     stages_tree_view = Gtk.Template.Child()
+    build_progress_row = Gtk.Template.Child()
     directory_details_view = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
     releng_selection_view = Gtk.Template.Child()
@@ -38,6 +40,10 @@ class ProjectDetailsView(Gtk.Box):
         self.monitor_information_changes()
         self.monitor_configuration_changes()
         self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
+        self._observed_build = None
+        self._build_refresh_scheduled = False
+        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._on_build_changed)
+        self._refresh_build_state()
 
     def get_configuration(self):
         self.toolset_selection_view.select(self.project_directory.get_toolset())
@@ -75,6 +81,36 @@ class ProjectDetailsView(Gtk.Box):
 
     def _update_stages(self, data):
         self.stages_tree_view.set_root_nodes(self.project_directory.stages_tree())
+
+    # Running build
+    # --------------------------------------------------------------------------
+
+    def _refresh_build_state(self):
+        """Shows states of stages in running build of this project and button to its progress."""
+        running_build = running_project_build(self.project_directory)
+        if running_build is not None and running_build is not self._observed_build:
+            self._observed_build = running_build
+            running_build.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._on_build_changed)
+            for step in running_build.stages:
+                step.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, self._on_build_changed)
+        self.build_progress_row.set_visible(running_build is not None)
+        statuses = {}
+        if running_build is not None:
+            for step in running_build.stages:
+                if isinstance(step, ProjectBuildStepBuildStage):
+                    statuses[step.stage.id] = _build_step_status(step)
+        self.stages_tree_view.set_statuses(statuses)
+
+    def _on_build_changed(self, *args):
+        # Several changes can come at once, refresh once.
+        if self._build_refresh_scheduled:
+            return
+        self._build_refresh_scheduled = True
+        def refresh():
+            self._build_refresh_scheduled = False
+            self._refresh_build_state()
+            return False
+        GLib.idle_add(refresh)
 
     def monitor_stages_changes(self):
         self.project_directory.event_bus.subscribe(
@@ -175,6 +211,18 @@ class ProjectDetailsView(Gtk.Box):
         app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=self.project_directory, installation_in_progress=build_in_progress), "Build stages", 640, 480)
 
     @Gtk.Template.Callback()
+    def on_build_progress_activated(self, sender):
+        if running_build := running_project_build(self.project_directory):
+            app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=self.project_directory, installation_in_progress=running_build), "Build stages", 640, 480)
+        else:
+            self._refresh_build_state()
+
+    @Gtk.Template.Callback()
+    def on_builds_activated(self, sender):
+        view = ProjectBuildsView(project_directory=self.project_directory, content_navigation_view=self.content_navigation_view)
+        self.content_navigation_view.push_view(view, title=f"{self.project_directory.name} builds")
+
+    @Gtk.Template.Callback()
     def on_stage_selected(self, sender, stage):
         if (
             self.project_directory.get_toolset() is None
@@ -197,3 +245,15 @@ class ProjectDetailsView(Gtk.Box):
         dialog.connect("response", lambda d, r: d.destroy())
         dialog.show()
 
+def _build_step_status(step: ProjectBuildStepBuildStage) -> StageNodeStatus:
+    match step.state:
+        case MultiStageProcessStageState.IN_PROGRESS:
+            return StageNodeStatus(title="Building", in_progress=True)
+        case MultiStageProcessStageState.COMPLETED:
+            return StageNodeStatus(title="Built", icon_name="check-square-svgrepo-com-symbolic", css_class="success")
+        case MultiStageProcessStageState.FAILED if step.build is None:
+            # Failed without starting, because stage it depends on failed.
+            return StageNodeStatus(title="Skipped", icon_name="square-svgrepo-com-symbolic", css_class="dimmed")
+        case MultiStageProcessStageState.FAILED:
+            return StageNodeStatus(title="Failed", icon_name="error-box-svgrepo-com-symbolic", css_class="error")
+    return StageNodeStatus(title="Scheduled", icon_name="clock-square-svgrepo-com-symbolic", css_class="dimmed")

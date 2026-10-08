@@ -70,13 +70,23 @@ class ProjectBuildsView(Gtk.Box):
                 entries = self._running_build_entries(running_build, run_builds)
             else:
                 entries = [(build.stage_name, build, _record_state(build)) for build in sorted(run_builds, key=lambda build: build.date)]
-            group = Adw.PreferencesGroup(
-                title=f"Started {_format_timestamp(timestamp, fallback=entries[0][1].date if entries and entries[0][1] else datetime.now())}",
-                description=_run_summary([state for _, _, state in entries])
-            )
+            is_running = running_build is not None and timestamp == running_build.timestamp
+            title = f"Started {_format_timestamp(timestamp, fallback=entries[0][1].date if entries and entries[0][1] else datetime.now())}"
+            group = Adw.PreferencesGroup(title=title, description=_run_summary([state for _, _, state in entries]))
+            if not is_running:
+                group.set_header_suffix(self._delete_button(
+                    tooltip="Remove builds",
+                    heading="Remove builds?",
+                    body=(
+                        f"All {len(run_builds)} builds started {title.removeprefix('Started ')} will be removed with their files. This can't be undone."
+                        if len(run_builds) > 1 else
+                        f"Build started {title.removeprefix('Started ')} will be removed with its files. This can't be undone."
+                    ),
+                    builds=run_builds
+                ))
             for stage_name, build, state in entries:
                 stage_removed = build is not None and build.stage_id not in stage_ids
-                group.add(self._build_row(stage_name, build, state, stage_removed, running_build if running_build and timestamp == running_build.timestamp else None))
+                group.add(self._build_row(stage_name, build, state, stage_removed, running_build if is_running else None))
             self._add_group(group)
 
     def _running_build_entries(self, running_build, run_builds: list) -> list[tuple]:
@@ -121,6 +131,13 @@ class ProjectBuildsView(Gtk.Box):
             button.add_css_class("flat")
             button.connect("clicked", lambda _, path=build.path: Gtk.FileLauncher.new(Gio.File.new_for_path(path)).launch(self.get_root(), None, None))
             row.add_suffix(button)
+        if build and not running_build:
+            row.add_suffix(self._delete_button(
+                tooltip="Remove build",
+                heading="Remove build?",
+                body=f"Build of \"{stage_name}\" will be removed with its files. This can't be undone.",
+                builds=[build]
+            ))
         if running_build:
             # Stages of running build open progress of whole build.
             row.set_activatable(True)
@@ -129,6 +146,33 @@ class ProjectBuildsView(Gtk.Box):
             arrow.add_css_class("dimmed")
             row.add_suffix(arrow)
         return row
+
+    # Removing builds
+    # --------------------------------------------------------------------------
+
+    def _delete_button(self, tooltip: str, heading: str, body: str, builds: list) -> Gtk.Button:
+        button = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text=tooltip, valign=Gtk.Align.CENTER)
+        button.add_css_class("flat")
+        button.connect("clicked", lambda _: self._confirm_delete(heading, body, builds))
+        return button
+
+    def _confirm_delete(self, heading: str, body: str, builds: list):
+        dialog = Adw.AlertDialog(heading=heading, body=body)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Remove")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda _, response: self._delete_builds(builds) if response == "delete" else None)
+        dialog.present(self.get_root())
+
+    def _delete_builds(self, builds: list):
+        for build in builds:
+            try:
+                build.delete()
+            except Exception as e:
+                print(f"Error removing build {build.path}: {e}")
+        self.load_builds()
 
     def _open_build_progress(self, running_build):
         app_event_bus.emit(

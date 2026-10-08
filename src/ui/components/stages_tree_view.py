@@ -3,12 +3,21 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, GObject, Adw
 import cairo
+from dataclasses import dataclass
 
 # Constants for spacing
 NODE_MARGIN_X = 32
 NODE_MARGIN_Y = 32 # Spacing WITHIN a branch
 ROOT_BRANCH_MARGIN_Y = 48 # Larger spacing BETWEEN root branches
 CONNECTOR_CORNER_RADIUS = 10 # Rounded corners of lines connecting parents with children
+
+@dataclass(frozen=True)
+class StageNodeStatus:
+    """Status shown on stage entry, for example state of stage in running build."""
+    title: str
+    icon_name: str | None = None
+    css_class: str | None = None
+    in_progress: bool = False # Shows spinner instead of icon.
 
 class TreeNode:
     def __init__(self, value):
@@ -32,6 +41,7 @@ class StagesTreeView(Gtk.Fixed):
         self.node_sizes = {}
         self.buttons = {}
         self.separators = []
+        self.statuses: dict = {} # Stage id -> StageNodeStatus.
 
         # Space for shadows of cards in top and bottom rows.
         self.set_margin_top(12)
@@ -46,6 +56,14 @@ class StagesTreeView(Gtk.Fixed):
 
     def set_root_nodes(self, root_nodes: list[TreeNode]):
         self.root_nodes = root_nodes
+        self._layout_tree()
+        self.drawing_area.queue_draw()
+
+    def set_statuses(self, statuses: dict):
+        """Statuses of stages by their id, displayed on stage entries."""
+        if statuses == self.statuses:
+            return
+        self.statuses = statuses
         self._layout_tree()
         self.drawing_area.queue_draw()
 
@@ -105,12 +123,26 @@ class StagesTreeView(Gtk.Fixed):
         """Stage displayed as list entry (boxed list with single row), with icon, name and target. Also used for
         measuring nodes, so sizes match."""
         target = getattr(node.value, "target", None) or ""
-        row = Adw.ActionRow(title=node.value.name, subtitle=target.replace("_", "-"), activatable=True)
+        status = self.statuses.get(getattr(node.value, "id", None))
+        subtitle = target.replace("_", "-")
+        if status:
+            subtitle = f"{subtitle} · {status.title}" if subtitle else status.title
+        row = Adw.ActionRow(title=node.value.name, subtitle=subtitle, activatable=True)
         row.set_use_markup(False)
         # Single line labels, wrapping labels would report minimal width and get squeezed in Gtk.Fixed.
         row.set_title_lines(1)
         row.set_subtitle_lines(1)
         row.add_prefix(Gtk.Image.new_from_icon_name(_target_icon(target)))
+        if status and status.in_progress:
+            spinner = Adw.Spinner(tooltip_text=status.title)
+            spinner.set_size_request(16, 16)
+            row.add_suffix(spinner)
+        elif status and status.icon_name:
+            icon = Gtk.Image.new_from_icon_name(status.icon_name)
+            icon.set_tooltip_text(status.title)
+            if status.css_class:
+                icon.add_css_class(status.css_class)
+            row.add_suffix(icon)
         list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         list_box.add_css_class("boxed-list")
         list_box.append(row)
