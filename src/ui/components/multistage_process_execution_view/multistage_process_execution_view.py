@@ -1,5 +1,5 @@
 from __future__ import annotations
-from gi.repository import Gtk, Gdk, GLib, Adw
+from gi.repository import Gtk, Gdk, GLib, GObject, Adw
 from .multistage_process import (
     # Process
     MultiStageProcess,
@@ -187,6 +187,23 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         # Step might have already failed before view was connected, show its output then.
         self.set_enable_expansion(bool(self.step.output_lines))
         self.set_expanded(self.step.state == MultiStageProcessStageState.FAILED and bool(self.step.output_lines))
+        self._bind_arrow_visibility()
+
+    def _bind_arrow_visibility(self):
+        """Show expander arrow only when there is output to expand."""
+        # AdwExpanderRow doesn't expose its arrow, find it by style class it uses.
+        def find_arrow(widget: Gtk.Widget) -> Gtk.Widget | None:
+            child = widget.get_first_child()
+            while child:
+                if isinstance(child, Gtk.Image) and child.has_css_class("expander-row-arrow"):
+                    return child
+                if found := find_arrow(child):
+                    return found
+                child = child.get_next_sibling()
+            return None
+        arrow = find_arrow(self)
+        if arrow:
+            self.bind_property("enable-expansion", arrow, "visible", GObject.BindingFlags.SYNC_CREATE)
 
     def _step_output_line_added(self, line: str):
         adjustment = self.output_scrolled_window.get_vadjustment()
