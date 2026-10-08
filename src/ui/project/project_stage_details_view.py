@@ -277,7 +277,12 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             self.selected_item = next((item for item in options if item.value == current_value), None)
             self.set_static_list(list=options)
         if self.argument.details and self.argument.details.type == StageArgumentType.multiselect:
-            current_values = getattr(self.stage, self.argument.details.name, []) # Mapped to object
+            current_values = getattr(self.stage, self.argument.details.name, None) # Mapped to object
+            # Stage can store None (all items deselected) or single value, show it as list.
+            if current_values is None:
+                current_values = []
+            elif not isinstance(current_values, list):
+                current_values = [current_values]
             automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
             options = automatic_options + (load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or [])
             # Add entries for unsupported values
