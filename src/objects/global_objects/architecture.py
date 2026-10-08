@@ -24,6 +24,14 @@ class Architecture(Enum):
     def releng_base_arch(self) -> RelengBaseArch | None:
         return RelengBaseArch[self.name]
 
+    def catalyst_arch_tables(self) -> tuple[str, ...]:
+        """Top level tables in catalyst arch/*.toml files containing subarches of this architecture."""
+        match self:
+            case Architecture.ppc64le: return ("ppc64",) # Shared with ppc64, filtered by CHOST
+            case Architecture.mips: return ("mips", "mips64")
+            case Architecture.sparc: return ("sparc", "sparc64")
+            case _: return (self.value,)
+
 class RelengBaseArch(Enum):
     """Basearch families used by releng templates. Value represents base directory in releng"""
     x86 = "x86"

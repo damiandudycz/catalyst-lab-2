@@ -1,5 +1,6 @@
 from __future__ import annotations
-import os, subprocess, ast, uuid
+import os, subprocess, ast, uuid, tomllib
+from functools import lru_cache
 from .repository import Serializable
 from .toolset import Toolset, ToolsetApplication, ToolsetEnv
 from .root_helper_client import RootHelperClient
@@ -237,6 +238,9 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
         case StageArgumentDetails.parent:
             values = load_stage_possible_seeds(stage=stage, project_directory=project_directory)
             return [StageArgumentOption(raw=value, display=value.name, subtitle=None, value=value.id, argument=arg_details.details) for value in values]
+        case StageArgumentDetails.subarch:
+            values = load_catalyst_subarches(toolset=project_directory.get_toolset(), architecture=project_directory.get_architecture())
+            return [StageArgumentOption(raw=value.name, display=value.name, subtitle=value.chost or value.common_flags, value=value.name, argument=arg_details.details) for value in values]
     return None
 
 def load_catalyst_stage_arguments_options_for_boolean(arg_details: StageArgumentTargetDetails | None) -> list[StageArgumentOption] | None:
@@ -294,6 +298,59 @@ def load_catalyst_targets(toolset: Toolset) -> list[str]:
         if line.strip().endswith('.py') and os.path.basename(line) not in except_files
     ]
     return target_files
+
+@dataclass(frozen=True)
+class CatalystSubarch:
+    """Subarchitecture definition from catalyst arch/*.toml files."""
+    name: str
+    chost: str | None
+    common_flags: str | None
+
+def load_catalyst_subarches(toolset: Toolset | None, architecture: Architecture | None) -> list[CatalystSubarch]:
+    """Loads subarches available for given architecture from catalyst arch/*.toml files in toolset."""
+    if toolset is None or architecture is None:
+        return []
+    if toolset.get_app_install(ToolsetApplication.CATALYST) is None:
+        raise RuntimeError("This toolset does not have Catalyst installed.")
+    if toolset.env != ToolsetEnv.EXTERNAL:
+        raise RuntimeError("Currently only EXTERNAL toolsets are supported for this functionality.")
+    toolset_file_path = toolset.file_path()
+    arch_tables = _load_catalyst_arch_tables(toolset_file_path, os.path.getmtime(toolset_file_path))
+    subarches = []
+    for table_name in architecture.catalyst_arch_tables():
+        for name, values in arch_tables.get(table_name, {}).items():
+            chost = values.get("CHOST")
+            # ppc64 table contains both endians, separate them by CHOST.
+            if table_name == "ppc64" and chost:
+                is_little_endian = chost.startswith("powerpc64le-")
+                if is_little_endian != (architecture == Architecture.ppc64le):
+                    continue
+            subarches.append(CatalystSubarch(name=name, chost=chost, common_flags=values.get("COMMON_FLAGS")))
+    return subarches
+
+@lru_cache(maxsize=8)
+def _load_catalyst_arch_tables(toolset_file_path: str, toolset_mtime: float) -> dict[str, dict[str, dict]]:
+    """Reads and merges all catalyst arch/*.toml files from toolset squashfs. Cached per toolset file version."""
+    catalyst_arch_path = "/usr/share/catalyst/arch"
+    output = subprocess.check_output(
+        ['unsquashfs', '-l', toolset_file_path, f"{catalyst_arch_path}/*.toml"],
+        text=True
+    )
+    tables: dict[str, dict[str, dict]] = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.endswith('.toml') or not line.startswith('squashfs-root/'):
+            continue
+        toml_path = line[len('squashfs-root/'):]
+        try:
+            content = subprocess.check_output(['unsquashfs', '-cat', toolset_file_path, toml_path], text=True)
+            for table_name, subarches in tomllib.loads(content).items():
+                if table_name == "setarch" or not isinstance(subarches, dict):
+                    continue
+                tables.setdefault(table_name, {}).update(subarches)
+        except (subprocess.CalledProcessError, tomllib.TOMLDecodeError) as e:
+            print(f"Warning: Failed to read {toml_path}: {e}")
+    return tables
 
 # ------------------------------------------------------------------------------
 # Loading releng templates:
