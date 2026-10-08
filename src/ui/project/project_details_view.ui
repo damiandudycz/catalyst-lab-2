@@ -88,17 +88,6 @@
                           <class name="joined-buttons"/>
                         </style>
                         <child>
-                          <object class="AdwButtonRow" id="build_row">
-                            <property name="title">Build stages</property>
-                            <property name="start-icon-name">sledgehammer-svgrepo-com-symbolic</property>
-                            <property name="activatable">True</property>
-                            <signal name="activated" handler="on_build_activated"/>
-                            <style>
-                              <class name="suggested-action"/>
-                            </style>
-                          </object>
-                        </child>
-                        <child>
                           <object class="AdwButtonRow" id="build_progress_row">
                             <property name="title">Show build progress</property>
                             <property name="start-icon-name">checklist-minimalistic-svgrepo-com-symbolic</property>
@@ -109,10 +98,21 @@
                         </child>
                         <child>
                           <object class="AdwButtonRow">
-                            <property name="title">Builds</property>
+                            <property name="title">Builds list</property>
                             <property name="start-icon-name">box-minimalistic-svgrepo-com-symbolic</property>
                             <property name="activatable">True</property>
                             <signal name="activated" handler="on_builds_activated"/>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwButtonRow" id="build_row">
+                            <property name="title">Create build</property>
+                            <property name="start-icon-name">sledgehammer-svgrepo-com-symbolic</property>
+                            <property name="activatable">True</property>
+                            <signal name="activated" handler="on_build_activated"/>
+                            <style>
+                              <class name="suggested-action"/>
+                            </style>
                           </object>
                         </child>
                       </object>
