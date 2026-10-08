@@ -13,7 +13,7 @@ from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
 from .toolset_application import ToolsetApplication, ToolsetApplicationInstall
-from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs, create_squashfs
+from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs, create_squashfs, loop_mount_squashfs, loop_umount_squashfs
 from .status_indicator import StatusIndicatorState, StatusIndicatorValues
 
 class ToolsetEvents(Enum):
@@ -32,6 +32,7 @@ class Toolset(Serializable):
         self.name = name
         self.metadata = metadata
         self.squashfs_binding_dir = squashfs_binding_dir # Directory used as toolset_root, mounted when setting up or spawning.
+        self.squashfs_loop_mounted = False # squashfs_binding_dir is read only loop mount of squashfs file (not extracted copy).
         match env:
             case ToolsetEnv.SYSTEM:
                 pass
@@ -141,12 +142,23 @@ class Toolset(Serializable):
 
             # Create squashfs mounting if needed.
             if self.file_path() and os.path.exists(self.file_path()):
-                self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.file_path(), prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.name)}/mount_")
+                prefix = f"toolsets/{Toolset.sanitized_name_for_name(name=self.name)}/mount_"
+                if store_changes:
+                    # Changes are written directly to toolset files and squashfs is rebuilt from them when unspawning,
+                    # so it needs writable copy.
+                    self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.file_path(), prefix=prefix)
+                    self.squashfs_loop_mounted = False
+                else:
+                    # Read only mount, writes go to overlays created below. Much faster than extracting.
+                    self.squashfs_binding_dir = loop_mount_squashfs(squashfs_path=self.file_path(), prefix=prefix)
+                    self.squashfs_loop_mounted = True
 
             resolved_toolset_root = str(Path(self.toolset_root()).resolve())
             if resolved_toolset_root == "/" and store_changes:
+                self._release_squashfs_binding_dir()
                 raise RuntimeError("Cannot use store_changes with host toolset")
             if not os.path.isdir(resolved_toolset_root):
+                self._release_squashfs_binding_dir()
                 raise RuntimeError(f"Toolset root directory not found: {resolved_toolset_root}")
 
             _system_bindings = [ # System.
@@ -298,6 +310,7 @@ class Toolset(Serializable):
                 try:
                     if work_dir:
                         delete_temp_workdir(path=work_dir)
+                    self._release_squashfs_binding_dir()
                 except Exception as e2:
                     error = ExceptionGroup("Multiple errors spawning environment", [error, e2])
                 raise error
@@ -342,6 +355,16 @@ class Toolset(Serializable):
                 print(e)
                 self.unspawn(rebuild_squashfs_if_needed=False)
 
+    def _release_squashfs_binding_dir(self):
+        """Unmounts or deletes squashfs contents prepared by spawn, used when spawning fails."""
+        if self.squashfs_binding_dir and self.file_path() and os.path.exists(self.file_path()):
+            if self.squashfs_loop_mounted:
+                loop_umount_squashfs(mount_point=self.squashfs_binding_dir)
+            else:
+                umount_squashfs(mount_point=self.squashfs_binding_dir)
+            self.squashfs_binding_dir = None
+            self.squashfs_loop_mounted = False
+
     def unspawn(self, rebuild_squashfs_if_needed: bool = True, clean_squashfs_binding_dir: bool = True):
         """Clear tmp folders."""
         with self.access_lock:
@@ -358,11 +381,15 @@ class Toolset(Serializable):
                     if os.path.isfile(self.file_path()+"_tmp"):
                         shutil.move(self.file_path()+"_tmp", self.file_path())
                 if self.squashfs_binding_dir and clean_squashfs_binding_dir:
-                    umount_squashfs(mount_point=self.squashfs_binding_dir)
+                    if self.squashfs_loop_mounted:
+                        loop_umount_squashfs(mount_point=self.squashfs_binding_dir)
+                    else:
+                        umount_squashfs(mount_point=self.squashfs_binding_dir)
                 if self.work_dir:
                     delete_temp_workdir(path=self.work_dir)
                 # Reset spawned settings:
                 self.squashfs_binding_dir = None
+                self.squashfs_loop_mounted = False
                 self.work_dir = None
                 self.hot_fixes = None
                 self.current_bindings = None

@@ -59,6 +59,31 @@ def umount_squashfs(mount_point: str):
     delete_temp_workdir(path=mount_point)
 
 @root_function
+def loop_mount_squashfs(squashfs_path: str, prefix: str) -> str:
+    """Mounts squashfs file read only in new tmp directory. Much faster than extracting it, files are decompressed
+    only when read. Changes need to be stored using overlays on top of it."""
+    import subprocess
+    mount_point = create_temp_workdir(prefix=prefix)
+    try:
+        subprocess.run(['mount', '-t', 'squashfs', '-o', 'ro,loop', squashfs_path, mount_point], check=True)
+    except Exception:
+        os.rmdir(mount_point)
+        raise
+    return mount_point
+
+@root_function
+def loop_umount_squashfs(mount_point: str):
+    """Unmounts squashfs mounted with loop_mount_squashfs and removes its mount point. Mount point is never deleted
+    recursively, so if unmounting fails, contents of squashfs are not touched."""
+    import subprocess
+    resolved_path = os.path.realpath(mount_point)
+    if not resolved_path.startswith("/var/tmp/catalystlab/"):
+        raise ValueError(f"Refusing to unmount path outside /var/tmp/catalystlab: {resolved_path}")
+    if os.path.ismount(resolved_path):
+        subprocess.run(['umount', resolved_path], check=True)
+    os.rmdir(resolved_path)
+
+@root_function
 def extract(tarball: str, directory: str):
     import tarfile
     import signal
