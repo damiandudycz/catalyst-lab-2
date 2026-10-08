@@ -147,6 +147,8 @@ class ProjectBuildView(Gtk.Box):
             return False
         execution_view = MultistageProcessExecutionView()
         execution_view.set_multistage_process(multistage_process=build)
+        if window := getattr(self, "_window", None):
+            execution_view._window = window # Finish closes build window.
         self.content_navigation_view.push_view(execution_view, title=f"Building {self.project_directory.name}")
         return False
 

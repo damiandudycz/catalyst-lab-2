@@ -165,8 +165,8 @@ class ProjectDetailsView(Gtk.Box):
         ):
             self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
             return
-        view = ProjectBuildView(project_directory=self.project_directory, content_navigation_view=self.content_navigation_view)
-        self.content_navigation_view.push_view(view, title="Build stages")
+        # Presented in new window, which gets its own navigation view for build progress.
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=self.project_directory), "Build stages", 640, 720)
 
     @Gtk.Template.Callback()
     def on_stage_selected(self, sender, stage):
