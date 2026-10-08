@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import os, socket, subprocess, uuid, time
+import os, re, socket, subprocess, uuid, time
 import threading, inspect, select, shutil
 from enum import Enum
 from typing import Any, Callable
@@ -184,20 +184,45 @@ class RootHelperClient:
         os.chmod(output_path, 0o700)
 
         # Provide bwrap in runtime dir, where toolset commands expect it.
-        # For flatpak install bundled bwrap, to make sure it supports required capabilities.
-        # Host system might have bwrap but with older version.
-        # When running directly on host, link host bwrap.
+        # Use host bwrap if it supports options used by toolsets, otherwise use bwrap bundled with flatpak.
+        # Root helper runs in host, so bundled bwrap needs to be copied out of flatpak.
         bwrap_output_path = os.path.join(runtime_dir, "bwrap")
         if os.path.lexists(bwrap_output_path):
             os.remove(bwrap_output_path)
-        if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
-            shutil.copy("/app/bin/bwrap", bwrap_output_path)
-        elif host_bwrap_path := shutil.which("bwrap"):
+        host_bwrap_path, host_bwrap_version = self.find_host_bwrap()
+        if host_bwrap_path and host_bwrap_version >= RootHelperClient.MIN_BWRAP_VERSION:
             os.symlink(host_bwrap_path, bwrap_output_path)
+        elif RuntimeEnv.current() == RuntimeEnv.FLATPAK:
+            shutil.copy("/app/bin/bwrap", bwrap_output_path)
         else:
-            print("Warning: bwrap not found in host system. Toolset environments will not work.")
+            min_version = ".".join(map(str, RootHelperClient.MIN_BWRAP_VERSION))
+            found = f"found {'.'.join(map(str, host_bwrap_version))}" if host_bwrap_path else "not found"
+            print(f"Warning: bwrap >= {min_version} is required by toolset environments ({found}).")
 
         return output_path
+
+    # Toolset bindings use --overlay-src and --overlay, which were added in bubblewrap 0.11.0.
+    MIN_BWRAP_VERSION = (0, 11, 0)
+
+    def find_host_bwrap(self) -> tuple[str | None, tuple[int, ...]]:
+        """Returns path and version of bwrap installed in host system, (None, ()) if not available."""
+        cmd_prefix = ["flatpak-spawn", "--host"] if RuntimeEnv.current() == RuntimeEnv.FLATPAK else []
+        try:
+            path = subprocess.run(
+                cmd_prefix + ["sh", "-c", "command -v bwrap"],
+                capture_output=True, text=True, timeout=10
+            ).stdout.strip()
+            if not path:
+                return None, ()
+            version_output = subprocess.run(
+                cmd_prefix + [path, "--version"],
+                capture_output=True, text=True, timeout=10
+            ).stdout # Format: "bubblewrap 0.11.2"
+            version = tuple(int(number) for number in re.findall(r"\d+", version_output)[:3])
+            return (path, version) if version else (None, ())
+        except Exception as e:
+            print(f"Failed to check host bwrap: {e}")
+            return None, ()
 
     def collect_root_function_sources(self) -> str:
         """Returns all registered root function sources as a single"""
