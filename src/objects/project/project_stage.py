@@ -219,6 +219,7 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
             return [StageArgumentOption(raw=value, display=value, subtitle=None, value=value, argument=arg_details.details) for value in values]
         case StageArgumentDetails.profile:
             values = project_directory.get_snapshot().load_profiles(arch=project_directory.get_architecture())
+            values += load_stage_overlay_profiles(project_directory=project_directory, stage=stage)
             return [StageArgumentOption(raw=value.path, display=value.path, subtitle=value.repo, value=value, argument=arg_details.details) for value in values]
         case StageArgumentDetails.releng_template:
             values = load_releng_templates(releng_directory=project_directory.get_releng_directory(), stage_name=stage.target, architecture=project_directory.get_architecture())
@@ -242,6 +243,18 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
             values = load_catalyst_subarches(toolset=project_directory.get_toolset(), architecture=project_directory.get_architecture())
             return [StageArgumentOption(raw=value.name, display=value.name, subtitle=value.chost or value.common_flags, value=value.name, argument=arg_details.details) for value in values]
     return None
+
+def load_stage_overlay_profiles(project_directory, stage: ProjectStage) -> list[PortageProfile]:
+    """Profiles defined by overlays used by stage (repos argument, following inheritance)."""
+    from .project_stage_value_resolver import resolve_stage_argument
+    overlay_ids = resolve_stage_argument(project_directory, stage, StageArgumentDetails.repos.value)
+    if not isinstance(overlay_ids, list):
+        return []
+    profiles = []
+    for overlay in Repository.OverlayDirectory.value:
+        if overlay.id in overlay_ids:
+            profiles += overlay.load_profiles(arch=project_directory.get_architecture())
+    return profiles
 
 def load_catalyst_stage_arguments_options_for_boolean(arg_details: StageArgumentTargetDetails | None) -> list[StageArgumentOption] | None:
     """Creates Yes/No StageArgumentOptions for given argument."""
