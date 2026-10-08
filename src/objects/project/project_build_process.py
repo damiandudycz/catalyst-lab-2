@@ -283,8 +283,11 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             for line in spec.splitlines():
                 self.log(f"  {line}")
             # Build:
+            build_script_path = os.path.join(work_directory, "build.sh")
+            with open(build_script_path, "w", encoding="utf-8") as file:
+                file.write(_catalyst_build_script(spec_path=process.container_path(spec_path)))
             # Command is passed in single quotes, path in double quotes allows spaces in stage name.
-            if not self.run_command_in_toolset(f'catalyst -f "{process.container_path(spec_path)}"'):
+            if not self.run_command_in_toolset(f'bash "{process.container_path(build_script_path)}"'):
                 self._run_diagnostics(spec=spec, work_directory=work_directory)
                 raise RuntimeError("Catalyst build failed")
             # Move results to stage build directory (catalyst writes them to builds/<rel_type>/):
@@ -351,6 +354,40 @@ echo "===== End of diagnostics ====="
 # ------------------------------------------------------------------------------
 # Helper functions.
 # ------------------------------------------------------------------------------
+
+def _catalyst_build_script(spec_path: str) -> str:
+    """Runs catalyst with /dev containing real device nodes. Catalyst bind mounts /dev into chroot without submounts,
+    but device nodes in toolset /dev are bind mounts made by bwrap, so chroot would get empty files instead (portage
+    fails with '/dev/null is not a character device'). Only standard nodes, loop devices and kvm are created."""
+    return f"""#!/bin/bash
+set -e
+DEV=/tmp/catalystlab-dev
+mkdir -p "$DEV"
+mount -t tmpfs -o mode=0755,nosuid catalystlab-dev "$DEV"
+mknod -m 666 "$DEV/null" c 1 3
+mknod -m 666 "$DEV/zero" c 1 5
+mknod -m 666 "$DEV/full" c 1 7
+mknod -m 666 "$DEV/random" c 1 8
+mknod -m 666 "$DEV/urandom" c 1 9
+mknod -m 666 "$DEV/tty" c 5 0
+# Devices bound into toolset (loop devices for snapshot squashfs, kvm), with the same numbers as on host.
+for device in /dev/loop-control /dev/loop[0-9]* /dev/kvm; do
+    [ -e "$device" ] || continue
+    type=c; [ -b "$device" ] && type=b
+    mknod -m 660 "$DEV/$(basename "$device")" $type $((0x$(stat -c %t "$device"))) $((0x$(stat -c %T "$device")))
+done
+mkdir -p "$DEV/pts" "$DEV/shm"
+ln -s /proc/self/fd "$DEV/fd"
+ln -s /proc/self/fd/0 "$DEV/stdin"
+ln -s /proc/self/fd/1 "$DEV/stdout"
+ln -s /proc/self/fd/2 "$DEV/stderr"
+ln -s pts/ptmx "$DEV/ptmx"
+mount --bind "$DEV" /dev
+mount -t devpts -o newinstance,ptmxmode=0666,mode=0620 devpts /dev/pts
+mount -t tmpfs -o mode=1777,nosuid,nodev shm /dev/shm
+set +e
+exec catalyst -f "{spec_path}"
+"""
 
 def _strip_archive_extension(path: str) -> str:
     for extension in STAGE_ARCHIVE_EXTENSIONS:
