@@ -171,7 +171,6 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         # itself while measuring lines.
         self._follow_output = True
         self._user_scroll_time = 0
-        self.output_end_mark = self.output_buffer.create_mark(None, self.output_buffer.get_end_iter(), False)
         adjustment = self.output_scrolled_window.get_vadjustment()
         adjustment.connect("value-changed", self._on_output_scrolled)
         adjustment.connect("changed", self._on_output_size_changed)
@@ -234,9 +233,6 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
     def _step_output_line_added(self, line: str):
         end_iter = self.output_buffer.get_end_iter()
         self.output_buffer.insert(end_iter, line if self.output_buffer.get_char_count() == 0 else "\n" + line)
-        if self._follow_output:
-            # Text view validates line heights lazily, let it scroll to end itself too.
-            GLib.idle_add(lambda: self.output_view.scroll_to_mark(self.output_end_mark, 0, False, 0, 1) and False)
         if not self.get_enable_expansion():
             # Enabling expansion also expands the row, keep it collapsed until user opens it.
             # Failed step stays expanded, as its first output line can be the failure reason.
@@ -268,7 +264,7 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
             self._follow_output = True
             self._scroll_output_to_end()
             # Text is laid out after row is revealed, scroll again once it's measured.
-            GLib.idle_add(lambda: self.output_view.scroll_to_mark(self.output_end_mark, 0, False, 0, 1) and False)
+            GLib.idle_add(lambda: self._scroll_output_to_end() and False)
 
     def _scroll_output_to_end(self):
         adjustment = self.output_scrolled_window.get_vadjustment()
