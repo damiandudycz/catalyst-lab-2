@@ -63,6 +63,8 @@ catalystlab_sources = [
   'objects/project/project_stage_value_resolver.py',
   'objects/project/project_stage_portage_confdir.py',
   'objects/project/project_build.py',
+  'objects/project/project_build_spec.py',
+  'objects/project/project_build_process.py',
   'objects/releng/releng_directory.py',
   'objects/releng/releng_installation.py',
   'objects/releng/releng_manager.py',

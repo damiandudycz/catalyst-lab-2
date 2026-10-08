@@ -2,6 +2,9 @@ from __future__ import annotations
 from gi.repository import Gtk, Adw, GLib
 from .project_directory import ProjectDirectory
 from .project_build import StageBuildPlan, StageBuildMode, load_project_builds, project_builds_directory
+from .project_build_process import ProjectBuild
+from .root_helper_client import RootHelperClient
+from .multistage_process_execution_view import MultistageProcessExecutionView
 
 class ProjectBuildView(Gtk.Box):
     """Selecting stages of project to build. Parents of selected stages are reused from previous builds when possible,
@@ -55,8 +58,7 @@ class ProjectBuildView(Gtk.Box):
         self.start_button = Gtk.Button(label="Start build", halign=Gtk.Align.CENTER, margin_top=12, margin_bottom=24)
         self.start_button.add_css_class("pill")
         self.start_button.add_css_class("suggested-action")
-        self.start_button.set_tooltip_text("Running builds is not implemented yet")
-        self.start_button.set_sensitive(False)
+        self.start_button.connect("clicked", self._on_start_clicked)
         self.append(self.start_button)
 
     def _stages_in_tree_order(self) -> list[tuple]:
@@ -114,6 +116,29 @@ class ProjectBuildView(Gtk.Box):
         self._updating = False
         order = self.plan.build_order()
         self.order_row.set_subtitle(GLib.markup_escape_text(" → ".join(stage.name for stage in order) if order else "Select stages to build"))
+        self.start_button.set_sensitive(bool(order))
+
+    # --------------------------------------------------------------------------
+    # Building:
+
+    def _on_start_clicked(self, button):
+        plan = self.plan
+        self.start_button.set_sensitive(False)
+        def start(authorization_keeper):
+            # Called from background thread.
+            GLib.idle_add(self._start_build, plan, authorization_keeper)
+        RootHelperClient.shared().authorize_and_run(name="Build stages", callback=start)
+
+    def _start_build(self, plan: StageBuildPlan, authorization_keeper):
+        self.start_button.set_sensitive(bool(plan.build_order()))
+        if authorization_keeper is None:
+            return False # Authorization cancelled.
+        build = ProjectBuild(project_directory=self.project_directory, plan=plan)
+        build.start(authorization_keeper=authorization_keeper)
+        execution_view = MultistageProcessExecutionView()
+        execution_view.set_multistage_process(multistage_process=build)
+        self.content_navigation_view.push_view(execution_view, title=f"Building {self.project_directory.name}")
+        return False
 
     def _entry_description(self, entry) -> str:
         names = ", ".join(stage.name for stage in entry.required_by)

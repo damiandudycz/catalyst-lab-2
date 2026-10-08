@@ -568,23 +568,24 @@ class BindMount:
 
 @root_function
 def _start_toolset_command(work_dir: str, fake_root: str, bind_options: list[str], command_to_run: str):
-    import subprocess
+    import subprocess, shlex
     #subprocess.run(["chown", "-R", "root:root", work_dir], check=True) # This could change the ownership of work_dir for root, but probably is not needed.
     run_dir = RootHelperServer.get_runtime_dir(uid=RootHelperServer.shared().uid, runtime_env_name="CL_SERVER_RUNTIME_DIR")
     bwrap_path = os.path.join(run_dir, "bwrap")
     cmd_bwrap = (
-        f"{bwrap_path} "
+        f"{shlex.quote(bwrap_path)} "
         "--die-with-parent "
         "--unshare-uts --unshare-ipc --unshare-pid --unshare-cgroup "
         "--hostname catalyst-lab "
-        "--bind " + fake_root + " / "
+        "--bind " + shlex.quote(fake_root) + " / "
         "--dev /dev "
         "--proc /proc "
         "--setenv HOME / "
         "--setenv LANG C.UTF-8 "
         "--setenv LC_ALL C.UTF-8 "
     )
-    arguments_string = " ".join(bind_options) + " bash -c '" + command_to_run + "'"
+    # Paths in bindings can contain spaces (eg. project names), quote them for shell.
+    arguments_string = " ".join(shlex.quote(option) for option in bind_options) + " bash -c '" + command_to_run + "'"
     exec_call = cmd_bwrap + arguments_string
     print(exec_call)
     try:

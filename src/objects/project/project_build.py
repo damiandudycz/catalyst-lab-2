@@ -8,7 +8,9 @@ from .project_stage_arguments import StageArgumentDetails
 
 # ------------------------------------------------------------------------------
 # Stage builds storage:
-# <builds_location>/<project>/<stage>/<timestamp>/build.json + build results.
+# <builds_location>/<project>/stages/<stage>/<timestamp>/build.json + build results.
+# <builds_location>/<project> is also used as catalyst builds directory when building, so it contains catalyst output
+# (moved to stage build directory after build), downloaded seeds (seeds/) and generated specs (work/).
 
 class StageBuildStatus(Enum):
     IN_PROGRESS = "in_progress"
@@ -25,6 +27,7 @@ class StageBuild:
     date: datetime = field(default_factory=datetime.now)
     id: uuid.UUID = field(default_factory=uuid.uuid4)
     path: str | None = None # Build directory, set when loaded or saved.
+    artifact: str | None = None # Filename of built stage archive, inside build directory.
 
     METADATA_FILE = "build.json"
 
@@ -41,6 +44,7 @@ class StageBuild:
             "timestamp": self.timestamp,
             "status": self.status.value,
             "date": self.date.isoformat(),
+            "artifact": self.artifact,
         }
 
     @classmethod
@@ -53,7 +57,12 @@ class StageBuild:
             status=StageBuildStatus(data["status"]),
             date=datetime.fromisoformat(data["date"]),
             path=path,
+            artifact=data.get("artifact"),
         )
+
+    @property
+    def artifact_path(self) -> str | None:
+        return os.path.join(self.path, self.artifact) if self.path and self.artifact else None
 
     def save(self, project_directory):
         self.path = self.path or os.path.join(stage_builds_directory(project_directory, self.stage_name), self.timestamp)
@@ -68,12 +77,12 @@ def project_builds_directory(project_directory) -> str:
     return os.path.join(builds_location(), project_directory.sanitized_name())
 
 def stage_builds_directory(project_directory, stage_name: str) -> str:
-    return os.path.join(project_builds_directory(project_directory), project_directory.sanitized_name_for_name(stage_name))
+    return os.path.join(project_builds_directory(project_directory), "stages", project_directory.sanitized_name_for_name(stage_name))
 
 def load_project_builds(project_directory) -> list[StageBuild]:
     """All builds of project stages, newest first. Builds are matched to stages by id, so renamed stages keep them."""
     builds = []
-    root = project_builds_directory(project_directory)
+    root = os.path.join(project_builds_directory(project_directory), "stages")
     if not os.path.isdir(root):
         return builds
     for stage_directory in os.scandir(root):
@@ -126,8 +135,11 @@ class StageBuildPlan:
                 self._resolve_ancestors(self.entries[stage_id].stage)
 
     def latest_build(self, stage) -> StageBuild | None:
-        """Latest build that can be used as seed."""
-        return next((build for build in self.builds if build.stage_id == stage.id and build.is_usable), None)
+        """Latest build that can be used as seed (completed, with its archive still present)."""
+        return next((
+            build for build in self.builds
+            if build.stage_id == stage.id and build.is_usable and build.artifact_path and os.path.isfile(build.artifact_path)
+        ), None)
 
     def latest_attempt(self, stage) -> StageBuild | None:
         """Latest build, including failed and unfinished ones."""

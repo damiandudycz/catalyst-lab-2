@@ -25,6 +25,11 @@ class Architecture(Enum):
     def releng_base_arch(self) -> RelengBaseArch | None:
         return RelengBaseArch[self.name]
 
+    def qemu_user_binary(self) -> str | None:
+        """Path of qemu user mode emulator for this architecture, used as catalyst interpreter."""
+        name = _qemu_user_names_mapping.get(self)
+        return f"/usr/bin/qemu-{name}" if name else None
+
     def catalyst_arch_tables(self) -> list[CatalystArchTable]:
         """Tables in catalyst arch/*.toml files containing subarches of this architecture."""
         return _catalyst_arch_tables_mapping.get(self, [CatalystArchTable(name=self.value)])
@@ -93,6 +98,25 @@ _catalyst_arch_tables_mapping: dict[Architecture, list[CatalystArchTable]] = {
     # ppc64 table contains both endians, separate them by CHOST.
     Architecture.ppc64: [CatalystArchTable(name="ppc64", chost_prefix="powerpc64-")],
     Architecture.ppc64le: [CatalystArchTable(name="ppc64", chost_prefix="powerpc64le-")],
+}
+
+# Names of qemu user mode emulators (qemu-<name>) for architectures.
+_qemu_user_names_mapping: dict[Architecture, str] = {
+    Architecture.x86: "i386",
+    Architecture.amd64: "x86_64",
+    Architecture.arm: "arm",
+    Architecture.arm64: "aarch64",
+    Architecture.hppa: "hppa",
+    Architecture.mips: "mips",
+    Architecture.ppc: "ppc",
+    Architecture.ppc64: "ppc64",
+    Architecture.ppc64le: "ppc64le",
+    Architecture.riscv: "riscv64",
+    Architecture.sparc: "sparc64",
+    Architecture.alpha: "alpha",
+    Architecture.m68k: "m68k",
+    Architecture.loong: "loongarch64",
+    Architecture.s390x: "s390x",
 }
 
 # Set as a class-level constant.
