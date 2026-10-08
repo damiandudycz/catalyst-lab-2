@@ -159,6 +159,9 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
                 raise RuntimeError(f"Toolset {toolset.name} is in use. Close its environment and try again.")
             self.reserved = True
             os.makedirs(self.multistage_process.builds_directory, exist_ok=True)
+            # Catalyst mounts snapshot squashfs with loop device. Loop device nodes are created by kernel in host /dev,
+            # so free ones are prepared before spawning and only they are made available in toolset.
+            self.loop_devices = prepare_loop_devices()
             for binding in self.required_bindings():
                 self.log(f"Binding {binding.host_path} -> {binding.mount_path}")
             toolset.spawn(additional_bindings=self.required_bindings())
@@ -183,6 +186,8 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
             mirrored.append(releng_directory.directory_path())
         mirrored += [overlay.directory_path() for overlay in Repository.OverlayDirectory.value]
         bindings += [BindMount(mount_path=path, host_path=path) for path in mirrored if os.path.isdir(path)]
+        # Loop devices for mounting snapshot (store_changes gives read-write device access).
+        bindings += [BindMount(mount_path=path, host_path=path, store_changes=True) for path in getattr(self, "loop_devices", [])]
         return bindings
     def cleanup(self) -> bool:
         if not super().cleanup():
@@ -318,6 +323,15 @@ def _strip_archive_extension(path: str) -> str:
 def _spec_values(spec: str) -> dict[str, str]:
     """Single line values of generated spec."""
     return {key.strip(): value.strip() for line in spec.splitlines() if ":" in line and not line.startswith("\t") for key, value in [line.split(":", 1)]}
+
+@root_function
+def prepare_loop_devices() -> list[str]:
+    """Makes sure there is unused loop device and returns loop control and loop devices paths."""
+    import subprocess, glob, re
+    # Finding first unused loop device creates its node if all existing ones are in use.
+    subprocess.run(["losetup", "--find"], check=True, stdout=subprocess.DEVNULL)
+    devices = sorted(glob.glob("/dev/loop[0-9]*"), key=lambda path: int(re.sub(r"\D", "", path)))
+    return (["/dev/loop-control"] if os.path.exists("/dev/loop-control") else []) + devices
 
 @root_function
 def move_stage_build_files(source_directory: str, name: str, destination_directory: str) -> list[str]:

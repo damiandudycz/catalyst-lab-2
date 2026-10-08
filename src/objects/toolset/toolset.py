@@ -272,8 +272,8 @@ class Toolset(Serializable):
                         os.makedirs(os.path.dirname(fake_symlink_path), exist_ok=True)
                         os.symlink(target, fake_symlink_path)
                         continue
-                    # Char devices:
-                    if stat.S_ISCHR(os.stat(resolved_host_path).st_mode):
+                    # Char and block devices (eg. /dev/kvm, /dev/loopN):
+                    if stat.S_ISCHR(os.stat(resolved_host_path).st_mode) or stat.S_ISBLK(os.stat(resolved_host_path).st_mode):
                         flag = "--dev-bind" if binding.store_changes else "--ro-bind"
                         bind_options.extend([flag, binding.host_path, binding.mount_path])
                         continue
