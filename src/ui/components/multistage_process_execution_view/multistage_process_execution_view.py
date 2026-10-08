@@ -190,6 +190,7 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", lambda *args: self._mark_user_scroll() or False)
         self.output_view.add_controller(key_controller)
+        self.connect("notify::expanded", self._on_expanded_changed)
         frame = Gtk.Frame()
         frame.set_child(self.output_scrolled_window)
         copy_button = Gtk.Button(label="Copy output")
@@ -260,6 +261,14 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         # Content grew (new lines, or row was expanded and laid out).
         if self._follow_output and not self._is_output_at_bottom():
             self._scroll_output_to_end()
+
+    def _on_expanded_changed(self, row, param):
+        # Show the latest output when step is expanded, and follow new lines again.
+        if self.get_expanded():
+            self._follow_output = True
+            self._scroll_output_to_end()
+            # Text is laid out after row is revealed, scroll again once it's measured.
+            GLib.idle_add(lambda: self.output_view.scroll_to_mark(self.output_end_mark, 0, False, 0, 1) and False)
 
     def _scroll_output_to_end(self):
         adjustment = self.output_scrolled_window.get_vadjustment()
