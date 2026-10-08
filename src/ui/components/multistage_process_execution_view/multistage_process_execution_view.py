@@ -167,10 +167,29 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         self.output_scrolled_window.set_child(self.output_view)
         # Keep output scrolled to the bottom while new lines arrive. Stop following when user
         # scrolls up, resume when user scrolls back to the bottom.
+        # Only user input changes following, as GtkTextView also moves scroll position by
+        # itself while measuring lines.
         self._follow_output = True
+        self._user_scroll_time = 0
+        self.output_end_mark = self.output_buffer.create_mark(None, self.output_buffer.get_end_iter(), False)
         adjustment = self.output_scrolled_window.get_vadjustment()
         adjustment.connect("value-changed", self._on_output_scrolled)
         adjustment.connect("changed", self._on_output_size_changed)
+        scroll_controller = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.KINETIC
+        )
+        scroll_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        scroll_controller.connect("scroll", lambda *args: self._mark_user_scroll() or False)
+        scroll_controller.connect("decelerate", lambda *args: self._mark_user_scroll())
+        self.output_scrolled_window.add_controller(scroll_controller)
+        scrollbar_drag = Gtk.GestureDrag()
+        scrollbar_drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        scrollbar_drag.connect("drag-begin", lambda *args: self._mark_user_scroll())
+        scrollbar_drag.connect("drag-update", lambda *args: self._mark_user_scroll())
+        self.output_scrolled_window.get_vscrollbar().add_controller(scrollbar_drag)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", lambda *args: self._mark_user_scroll() or False)
+        self.output_view.add_controller(key_controller)
         frame = Gtk.Frame()
         frame.set_child(self.output_scrolled_window)
         copy_button = Gtk.Button(label="Copy output")
@@ -214,6 +233,9 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
     def _step_output_line_added(self, line: str):
         end_iter = self.output_buffer.get_end_iter()
         self.output_buffer.insert(end_iter, line if self.output_buffer.get_char_count() == 0 else "\n" + line)
+        if self._follow_output:
+            # Text view validates line heights lazily, let it scroll to end itself too.
+            GLib.idle_add(lambda: self.output_view.scroll_to_mark(self.output_end_mark, 0, False, 0, 1) and False)
         if not self.get_enable_expansion():
             # Enabling expansion also expands the row, keep it collapsed until user opens it.
             # Failed step stays expanded, as its first output line can be the failure reason.
@@ -224,13 +246,24 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         adjustment = self.output_scrolled_window.get_vadjustment()
         return adjustment.get_value() >= adjustment.get_upper() - adjustment.get_page_size() - 1
 
+    def _mark_user_scroll(self):
+        self._user_scroll_time = GLib.get_monotonic_time()
+
     def _on_output_scrolled(self, adjustment: Gtk.Adjustment):
-        self._follow_output = self._is_output_at_bottom()
+        # Scroll position changes within a second after user input are made by user (including kinetic scrolling).
+        if GLib.get_monotonic_time() - self._user_scroll_time < 1_000_000:
+            self._follow_output = self._is_output_at_bottom()
+        elif self._follow_output and not self._is_output_at_bottom():
+            self._scroll_output_to_end()
 
     def _on_output_size_changed(self, adjustment: Gtk.Adjustment):
         # Content grew (new lines, or row was expanded and laid out).
         if self._follow_output and not self._is_output_at_bottom():
-            adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+            self._scroll_output_to_end()
+
+    def _scroll_output_to_end(self):
+        adjustment = self.output_scrolled_window.get_vadjustment()
+        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
 
     def _on_copy_output_clicked(self, button):
         Gdk.Display.get_default().get_clipboard().set("\n".join(self.step.output_lines))
