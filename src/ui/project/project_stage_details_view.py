@@ -271,6 +271,10 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             options = unsupported_options + options
             self.selected_item = next((item for item in options if item.value == current_value), None)
             self.set_static_list(list=options)
+        if not self.argument.details or self.argument.details.type in (StageArgumentType.raw, StageArgumentType.raw_single_line):
+            # Text arguments have no options list, warn only when required value is missing.
+            current_value = getattr(self.stage, self.argument.details.name if self.argument.details else self.argument.name, None)
+            self.warning_icon.set_visible(self.argument.required and not current_value)
 
     def create_unsupported_options(self, missing_values: list, argument: StageArgumentDetails) -> list[StageArgumentOption]:
         """Creates dummy entries for options that are currently set but not available in available options."""

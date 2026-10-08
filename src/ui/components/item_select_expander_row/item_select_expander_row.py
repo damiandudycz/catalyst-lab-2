@@ -55,6 +55,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
     def _add_warning_icon(self):
         self.warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
         self.warning_icon.add_css_class("warning")
+        self.warning_icon.set_visible(False) # Shown by determine_incorrect_selection once items are loaded.
         self.add_suffix(self.warning_icon)
 
     def items(self) -> list:
