@@ -9,6 +9,7 @@
     <file preprocess="xml-stripblanks">ui/app_sections/environments/environments_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/overlays/overlays_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/projects/projects_section.ui</file>
+    <file preprocess="xml-stripblanks">ui/app_sections/builds/builds_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/releng/releng_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/snapshots/snapshots_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/welcome/welcome_section.ui</file>

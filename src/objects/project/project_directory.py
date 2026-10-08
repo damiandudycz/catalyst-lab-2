@@ -61,6 +61,15 @@ class ProjectDirectory(GitDirectory):
                 roots.append(node)
         return roots
 
+    @property
+    def builds_summary(self) -> str:
+        """Short description of project stage builds, eg. for builds list."""
+        from .project_build import load_project_builds
+        builds = load_project_builds(self)
+        if not builds:
+            return "No builds yet"
+        return f"{len(builds)} build{'s' if len(builds) != 1 else ''}, last {builds[0].date.strftime('%Y-%m-%d %H:%M')}"
+
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:
             self.metadata = ProjectConfiguration()
