@@ -5,6 +5,7 @@ from typing import Any
 from .project_stage_arguments import StageArgumentDetails, StageArgumentType
 from .project_stage_automatic_option import StageAutomaticOption
 from .project_stage_compression_mode import StageCompressionMode
+from .project_stage_portage_confdir import StagePortageConfdirSource, PORTAGE_CONFDIR_SOURCES_ORDER
 from .snapshot import PortageProfile
 from .repository import Repository
 
@@ -129,6 +130,8 @@ def format_stage_argument_value(value: Any, max_items: int = 3) -> str | None:
     """Short text representation of resolved value for UI. Returns None for missing values."""
     if value is None or value is UNRESOLVED or value == [] or value == "":
         return None
+    if isinstance(value, list) and value and all(isinstance(item, StagePortageConfdirSource) for item in value):
+        value = sorted(value, key=PORTAGE_CONFDIR_SOURCES_ORDER.index) # In order sources are combined.
     if isinstance(value, list):
         shown = [format_stage_argument_value(item) or "?" for item in value[:max_items]]
         hidden_count = len(value) - max_items
@@ -139,6 +142,8 @@ def format_stage_argument_value(value: Any, max_items: int = 3) -> str | None:
         return value.path
     if isinstance(value, StageCompressionMode):
         return value.name
+    if isinstance(value, StagePortageConfdirSource):
+        return value.display_name
     if isinstance(value, uuid.UUID):
         # Repos are stored by overlay id.
         overlay = next((item for item in Repository.OverlayDirectory.value if item.id == value), None)

@@ -1,5 +1,5 @@
-import threading, uuid
-from gi.repository import Gtk, Gdk, Adw, GLib
+import threading, uuid, os
+from gi.repository import Gtk, Gdk, Adw, GLib, Gio
 from dataclasses import dataclass
 from .project_directory import ProjectDirectory
 from .project_stage import (
@@ -23,6 +23,7 @@ from .item_select_expander_row import ItemSelectionExpanderRow
 from .event_bus import EventBus
 from .project_stage_automatic_option import StageAutomaticOption
 from .project_stage_value_resolver import resolved_stage_argument_display
+from .project_stage_portage_confdir import StagePortageConfdirSource, stage_overlay_path
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
@@ -45,6 +46,8 @@ class ProjectStageDetailsView(Gtk.Box):
 
     def on_realize(self, widget):
         self.get_root().set_focus(None)
+        self._window_active_handler = self.get_root().connect("notify::is-active", self._on_window_active_changed)
+        self.connect("unrealize", self._on_unrealize)
         self.load_stage_details()
         self.load_configuration_rows()
         self.monitor_information_changes()
@@ -199,6 +202,18 @@ class ProjectStageDetailsView(Gtk.Box):
                 r.load_state()
             elif r.argument != row.argument and isinstance(r, StageTextSourceRow):
                 r.refresh_options() # Keeps possibly unapplied text, only updates availability of automatic options.
+
+    def _on_unrealize(self, widget):
+        if getattr(self, "_window_active_handler", None) and (root := self.get_root()):
+            root.disconnect(self._window_active_handler)
+            self._window_active_handler = None
+
+    def _on_window_active_changed(self, window, param):
+        # Overlay files could be edited outside of app, refresh their counts.
+        if window.is_active():
+            for row in getattr(self, "configuration_rows", []):
+                if isinstance(row, StageOptionExpanderRow) and row.argument.details == StageArgumentDetails.portage_confdir:
+                    row.load_state()
 
     # Monitoring stage changes
     # --------------------------------------------------------------------------
@@ -363,6 +378,23 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
                     self.resolved_values[option.value] = resolved
                     option.subtitle = GLib.markup_escape_text(resolved)
         super().set_static_list(list=list)
+        if self.argument.details == StageArgumentDetails.portage_confdir:
+            self._add_open_stage_overlay_button()
+
+    def _add_open_stage_overlay_button(self):
+        row = next((row for row in getattr(self, "rows", []) if row.item.value == StagePortageConfdirSource.STAGE_OVERLAY), None)
+        if row is None:
+            return
+        button = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Open stage overlay folder", valign=Gtk.Align.CENTER)
+        button.add_css_class("flat")
+        button.connect("clicked", self._on_open_stage_overlay_clicked)
+        row.add_suffix(button)
+
+    def _on_open_stage_overlay_clicked(self, button):
+        # Folder is created when needed and kept when overlay is disabled, to allow enabling it back.
+        path = stage_overlay_path(self.project_directory, self.stage)
+        os.makedirs(path, exist_ok=True)
+        Gtk.FileLauncher.new(Gio.File.new_for_path(path)).launch(self.get_root(), None, None)
 
     def display_selected_item(self):
         super().display_selected_item()

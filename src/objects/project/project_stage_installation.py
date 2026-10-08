@@ -82,7 +82,7 @@ class ProjectStageInstallationStepCreate(MultiStageProcessStage):
             stage = ProjectStage(id=None, parent_id=self.parent_id, name=self.stage_name, target_name=self.target_name, releng_template_name=self.releng_template_name, profile=None)
             try:
                 for name, option in apply_default_stage_arguments(project_directory=self.project_directory, stage=stage).items():
-                    self.log(f"{name}: {option.name}")
+                    self.log(f"{name}: {option.name if hasattr(option, 'name') else ', '.join(item.name for item in option)}")
             except Exception as e:
                 # Stage can still be created and configured manually.
                 self.log(f"Failed to set default values: {e}")

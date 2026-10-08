@@ -61,6 +61,7 @@ catalystlab_sources = [
   'objects/project/project_stage_argument_serialization.py',
   'objects/project/project_stage_automatic_option.py',
   'objects/project/project_stage_value_resolver.py',
+  'objects/project/project_stage_portage_confdir.py',
   'objects/releng/releng_directory.py',
   'objects/releng/releng_installation.py',
   'objects/releng/releng_manager.py',

@@ -22,6 +22,7 @@ from .project_stage_arguments import (
 from .project_stage_compression_mode import StageCompressionMode
 from .project_stage_argument_serialization import ProjectStageArgumentSerialization
 from .project_stage_automatic_option import StageAutomaticOption
+from .project_stage_portage_confdir import portage_confdir_options, default_portage_confdir_sources
 
 class ProjectStage(Serializable):
 
@@ -217,6 +218,8 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
         case StageArgumentDetails.target:
             values = load_catalyst_targets(toolset=project_directory.get_toolset())
             return [StageArgumentOption(raw=value, display=value, subtitle=None, value=value, argument=arg_details.details) for value in values]
+        case StageArgumentDetails.portage_confdir:
+            return portage_confdir_options(project_directory=project_directory, stage=stage)
         case StageArgumentDetails.profile:
             values = project_directory.get_snapshot().load_profiles(arch=project_directory.get_architecture())
             values += load_stage_overlay_profiles(project_directory=project_directory, stage=stage)
@@ -283,7 +286,7 @@ def load_catalyst_stage_automatic_arguments_options(stage: ProjectStage, arg_det
     }
     return [options[automatic_option] for automatic_option in arg_details.details.automatic_options]
 
-def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dict[str, StageAutomaticOption]:
+def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dict[str, Any]:
     """Sets default automatic options (inherit from parent, releng template...) for arguments valid for stage target.
     From default options of argument available for the stage (parent selected, releng template selected...), first one
     that resolves to some value is used. If none of them does, first available is used anyway, as releng template or
@@ -309,6 +312,10 @@ def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dic
     applied = {}
     for name, argument in arguments.items():
         if argument.details is None or getattr(stage, argument.attribute_name, None) is not None:
+            continue
+        if argument.details == StageArgumentDetails.portage_confdir:
+            setattr(stage, argument.attribute_name, default_portage_confdir_sources(has_parent=has_parent))
+            applied[name] = getattr(stage, argument.attribute_name)
             continue
         available = [option for option in argument.details.default_options if is_available(argument.details, option)]
         option = next((option for option in available if has_value(argument.details, option)), available[0] if available else None)

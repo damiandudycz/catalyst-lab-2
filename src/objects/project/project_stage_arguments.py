@@ -238,6 +238,7 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.subarch: return StageArgumentType.select
             case StageArgumentDetails.interpreter: return StageArgumentType.multiselect
             case StageArgumentDetails.repos: return StageArgumentType.multiselect
+            case StageArgumentDetails.portage_confdir: return StageArgumentType.multiselect # Sources combined when building.
             case StageArgumentDetails.update_seed: return StageArgumentType.boolean
             case StageArgumentDetails.keep_repos: return StageArgumentType.boolean
             case (
@@ -300,7 +301,6 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
     StageArgumentDetails.binrepo_path: [_PARENT, _RELENG],
     # Configuration:
     StageArgumentDetails.source_subpath: [_AUTO], # Generated from parent stage output, hidden in UI.
-    StageArgumentDetails.portage_confdir: [_PARENT, _RELENG],
     StageArgumentDetails.portage_prefix: [_PARENT, _RELENG],
     StageArgumentDetails.update_seed: [_PARENT, _RELENG],
     StageArgumentDetails.update_seed_command: [_PARENT, _RELENG],
@@ -350,7 +350,7 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
     StageArgumentDetails.binrepo_path: [_RELENG, _PARENT],
     # Configuration:
     StageArgumentDetails.source_subpath: [_AUTO],
-    StageArgumentDetails.portage_confdir: [_RELENG, _PARENT], # Template points to configuration for its target type.
+    # portage_confdir is combined from its own sources (project_stage_portage_confdir), defaults are set there.
     StageArgumentDetails.portage_prefix: [_RELENG, _PARENT],
     StageArgumentDetails.update_seed: [_RELENG, _PARENT],
     StageArgumentDetails.update_seed_command: [_RELENG, _PARENT],
