@@ -81,6 +81,7 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         if hasattr(view, "content_navigation_view"):
             # If view supports content_navigation_view (is section) embed it into new nav_view
             nav_view = Adw.NavigationView()
+            nav_view.show_root_access_button = False # Views pushed in dialogs don't show root access button.
             view.content_navigation_view = nav_view
             page = Adw.NavigationPage.new(toolbar_view, title)
             nav_view.push(page)

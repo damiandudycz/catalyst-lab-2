@@ -21,9 +21,11 @@ def _push_view(self, view: Gtk.Widget, title: str):
     toolbar_view.set_content(view)
     toolbar_view.add_top_bar(header)
     # Add the root access button to the header
-    # TODO: Make this optional depending on configuration. For example only show if parent shows it, plus disable it in dialogs.
-    root_access_button = RootAccessButton()
-    header.pack_end(root_access_button)
+    # Root access button is shown only in main window, not in views pushed in presented windows (dialogs).
+    # TODO: Make this optional depending on configuration.
+    if getattr(self, "show_root_access_button", True):
+        root_access_button = RootAccessButton()
+        header.pack_end(root_access_button)
     # Create a navigation page with title and child
     page = Adw.NavigationPage.new(toolbar_view, title)
     view._page = page # TODO: Check if this needs weakref
