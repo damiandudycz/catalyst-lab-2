@@ -285,6 +285,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             # Build:
             # Command is passed in single quotes, path in double quotes allows spaces in stage name.
             if not self.run_command_in_toolset(f'catalyst -f "{process.container_path(spec_path)}"'):
+                self._run_diagnostics(spec=spec, work_directory=work_directory)
                 raise RuntimeError("Catalyst build failed")
             # Move results to stage build directory (catalyst writes them to builds/<rel_type>/):
             values = _spec_values(spec)
@@ -309,6 +310,43 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                 except Exception as save_error:
                     print(f"Failed to save build status: {save_error}")
             self.complete(MultiStageProcessStageState.FAILED)
+
+    def _run_diagnostics(self, spec: str, work_directory: str):
+        """Collects details about chroot left by failed catalyst build. Catalyst hides errors of some scripts
+        (eg. stage1 build.py), this runs the same checks with errors visible."""
+        try:
+            process = self.multistage_process
+            values = _spec_values(spec)
+            chroot = f"/var/tmp/catalyst/tmp/{values['rel_type']}/{values['target']}-{values['subarch']}-{values['version_stamp']}"
+            snapshot = f"{CATALYST_SNAPSHOTS_PATH}/gentoo-{values['snapshot_treeish']}.sqfs"
+            profile = values.get("profile", "")
+            script = f"""#!/bin/bash
+CHROOT="{chroot}"
+REPO="$CHROOT/var/db/repos/gentoo"
+echo "===== Diagnostics of failed build ====="
+echo "--- chroot: $CHROOT"; ls "$CHROOT" | head -30
+echo "--- make.profile:"; ls -l "$CHROOT/etc/portage/make.profile"
+echo "--- make.conf:"; cat "$CHROOT/etc/portage/make.conf"
+echo "--- /etc/portage:"; find "$CHROOT/etc/portage" -maxdepth 3 | head -60
+echo "--- repos.conf:"; cat "$CHROOT"/etc/portage/repos.conf/* 2>&1 | head -20
+echo "--- mounts in chroot:"; grep "$CHROOT" /proc/mounts
+mkdir -p "$REPO"
+echo "--- mounting snapshot {snapshot}:"; mount -o ro,loop "{snapshot}" "$REPO" && echo "mounted"
+mount --bind /proc "$CHROOT/proc"
+echo "--- repo profiles:"; ls "$REPO/profiles" | head -20
+echo "--- profile {profile}:"; ls "$REPO/profiles/{profile}"
+echo "--- portage in chroot:"
+chroot "$CHROOT" /bin/bash -c 'for module in /usr/lib/python3*/site-packages/portage/__init__.py; do interpreter=$(echo $module | cut -d/ -f4); echo "using $interpreter"; $interpreter -c "import portage; print(portage.settings.profiles)"; $interpreter /tmp/build.py; echo "build.py exit code: $?"; done'
+umount "$CHROOT/proc"
+umount "$REPO"
+echo "===== End of diagnostics ====="
+"""
+            script_path = os.path.join(work_directory, "diagnostics.sh")
+            with open(script_path, "w", encoding="utf-8") as file:
+                file.write(script)
+            self.run_command_in_toolset(f'bash "{process.container_path(script_path)}"')
+        except Exception as e:
+            self.log(f"Failed to run diagnostics: {e}")
 
 # ------------------------------------------------------------------------------
 # Helper functions.
