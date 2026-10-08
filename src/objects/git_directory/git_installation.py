@@ -143,6 +143,8 @@ class GitInstallationStepClone(MultiStageProcessStage):
                 if match:
                     percent = int(match.group(1))
                     self._update_progress(percent / 100)
+                elif "%" not in line: # Skip repeated progress lines
+                    self.log(line.rstrip())
             process.wait()
             if process.returncode != 0:
                 raise subprocess.CalledProcessError(

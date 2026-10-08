@@ -5,7 +5,7 @@ from typing import final
 from enum import Enum, auto
 from abc import ABC, abstractmethod
 from .event_bus import EventBus
-from .root_helper_client import AuthorizationKeeper
+from .root_helper_client import AuthorizationKeeper, ServerCall, ServerCallEvents
 
 # ------------------------------------------------------------------------------
 # Process/Stage state:
@@ -45,6 +45,7 @@ class MultiStageProcessStageEvent(Enum):
     """Events produced by single steps."""
     STATE_CHANGED = auto()
     PROGRESS_CHANGED = auto()
+    OUTPUT_LINE_ADDED = auto()
 
 # ------------------------------------------------------------------------------
 # MultiStageProcess base class:
@@ -188,6 +189,25 @@ class MultiStageProcessStage(ABC):
         self.progress: float | None = None
         self.event_bus = EventBus[MultiStageProcessStageEvent]()
         self._cancel_event = threading.Event()
+        self.output_lines: list[str] = [] # Output of commands executed by this stage, displayed in execution view.
+        self._server_call: ServerCall | None = None
+    @property
+    def server_call(self) -> ServerCall | None:
+        return self._server_call
+    @server_call.setter
+    def server_call(self, server_call: ServerCall | None):
+        """Output of every server call assigned here is collected in output_lines."""
+        if server_call is not None and server_call is not self._server_call:
+            with server_call.output_lock:
+                # Lines produced before assignment are copied, next ones arrive through event.
+                for line in server_call.output:
+                    self.log(line)
+                server_call.event_bus.subscribe(ServerCallEvents.NEW_OUTPUT_LINE, self.log)
+        self._server_call = server_call
+    def log(self, line: str):
+        """Adds line to stage output. Can be used directly by stages running local processes."""
+        self.output_lines.append(line)
+        self.event_bus.emit(MultiStageProcessStageEvent.OUTPUT_LINE_ADDED, line)
     @abstractmethod
     def start(self):
         self._cancel_event.clear()

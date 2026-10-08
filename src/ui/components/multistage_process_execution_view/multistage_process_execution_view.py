@@ -1,5 +1,5 @@
 from __future__ import annotations
-from gi.repository import Gtk, GLib, Adw
+from gi.repository import Gtk, Gdk, GLib, Adw
 from .multistage_process import (
     # Process
     MultiStageProcess,
@@ -119,12 +119,14 @@ class MultistageProcessExecutionView(Gtk.Box):
             case MultiStageProcessState.FAILED:
                 display_status(text="Installation failed.", style="error")
 
-class MultiStageProcessStageRow(Adw.ActionRow):
+class MultiStageProcessStageRow(Adw.ExpanderRow):
+    """Displays stage state. Can be expanded to show output of commands executed by stage."""
 
     def __init__(self, step: MultiStageProcessStage, owner: MultistageProcessExecutionView):
         super().__init__(title=step.name, subtitle=step.description)
         self.step = step
         self.owner = owner
+        self._setup_output_view()
         self.progress_label = Gtk.Label()
         self.progress_label.add_css_class("dim-label")
         self.progress_label.add_css_class("caption")
@@ -140,12 +142,78 @@ class MultiStageProcessStageRow(Adw.ActionRow):
             MultiStageProcessStageEvent.PROGRESS_CHANGED,
             self._step_progress_changed
         )
+        step.event_bus.subscribe(
+            MultiStageProcessStageEvent.OUTPUT_LINE_ADDED,
+            self._step_output_line_added
+        )
+
+    def _setup_output_view(self):
+        self.output_view = Gtk.TextView()
+        self.output_view.set_editable(False)
+        self.output_view.set_cursor_visible(False)
+        self.output_view.set_monospace(True)
+        self.output_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.output_view.set_top_margin(8)
+        self.output_view.set_bottom_margin(8)
+        self.output_view.set_left_margin(8)
+        self.output_view.set_right_margin(8)
+        self.output_view.add_css_class("transparent-bg")
+        self.output_buffer = self.output_view.get_buffer()
+        self.output_buffer.set_text("\n".join(self.step.output_lines))
+        self.output_scrolled_window = Gtk.ScrolledWindow()
+        self.output_scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.output_scrolled_window.set_min_content_height(240)
+        self.output_scrolled_window.set_max_content_height(240)
+        self.output_scrolled_window.set_child(self.output_view)
+        frame = Gtk.Frame()
+        frame.set_child(self.output_scrolled_window)
+        copy_button = Gtk.Button(label="Copy output")
+        copy_button.set_halign(Gtk.Align.END)
+        copy_button.add_css_class("flat")
+        copy_button.connect("clicked", self._on_copy_output_clicked)
+        output_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        output_box.set_margin_top(8)
+        output_box.set_margin_bottom(8)
+        output_box.set_margin_start(12)
+        output_box.set_margin_end(12)
+        output_box.append(frame)
+        output_box.append(copy_button)
+        output_row = Gtk.ListBoxRow()
+        output_row.set_activatable(False)
+        output_row.set_selectable(False)
+        output_row.set_child(output_box)
+        self.add_row(output_row)
+        # Allow expanding only when there is some output to show.
+        self.set_enable_expansion(bool(self.step.output_lines))
+
+    def _step_output_line_added(self, line: str):
+        adjustment = self.output_scrolled_window.get_vadjustment()
+        # Follow new output, unless user scrolled up to read previous lines.
+        follow = adjustment.get_value() >= adjustment.get_upper() - adjustment.get_page_size() - 1
+        end_iter = self.output_buffer.get_end_iter()
+        self.output_buffer.insert(end_iter, line if self.output_buffer.get_char_count() == 0 else "\n" + line)
+        if not self.get_enable_expansion():
+            # Enabling expansion also expands the row, keep it collapsed until user opens it.
+            self.set_enable_expansion(True)
+            self.set_expanded(False)
+        if follow:
+            GLib.idle_add(self._scroll_output_to_bottom)
+
+    def _scroll_output_to_bottom(self):
+        adjustment = self.output_scrolled_window.get_vadjustment()
+        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+        return False
+
+    def _on_copy_output_clicked(self, button):
+        Gdk.Display.get_default().get_clipboard().set("\n".join(self.step.output_lines))
 
     def _step_progress_changed(self, progress: float | None):
         self._update_status_label()
 
     def _step_state_changed(self, state: MultiStageProcessStageState):
         self.set_sensitive(state != MultiStageProcessStageState.SCHEDULED)
+        if state == MultiStageProcessStageState.FAILED and self.step.output_lines:
+            self.set_expanded(True) # Show what went wrong.
         self._set_status_icon(state=state)
         self.owner._scroll_to_installation_step_row(self)
         self._update_status_label()

@@ -434,6 +434,9 @@ class RootHelperClient:
                         print(f"[Server process]: Warning: Exception while sending ACK: {e}")
 
                 print(f"<<< [{request.function_name} {server_response.code.name}] {server_response.response}")
+                if server_response.code != ServerResponseStatusCode.OK:
+                    # Make failure reason visible to output observers.
+                    call.output_append(f"[{server_response.code.name}] {server_response.response or ''}".rstrip())
                 if completion_handler:
                     result = server_response if raw else server_response.response
                     completion_handler(result)
