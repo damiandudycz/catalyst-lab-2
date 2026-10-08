@@ -22,6 +22,7 @@ class ProjectDetailsView(Gtk.Box):
     __gtype_name__ = "ProjectDetailsView"
 
     stages_tree_view = Gtk.Template.Child()
+    build_row = Gtk.Template.Child()
     build_progress_row = Gtk.Template.Child()
     directory_details_view = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
@@ -40,7 +41,7 @@ class ProjectDetailsView(Gtk.Box):
         self.monitor_information_changes()
         self.monitor_configuration_changes()
         self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
-        self._observed_build = None
+        self._observed_builds: set[int] = set() # Ids of builds whose changes are observed.
         self._build_refresh_scheduled = False
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._on_build_changed)
         self._refresh_build_state()
@@ -87,12 +88,17 @@ class ProjectDetailsView(Gtk.Box):
 
     def _refresh_build_state(self):
         """Shows states of stages in running build of this project and button to its progress."""
+        running_builds = _running_builds()
+        for build in running_builds:
+            if id(build) not in self._observed_builds:
+                self._observed_builds.add(id(build))
+                build.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._on_build_changed)
+                for step in build.stages:
+                    step.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, self._on_build_changed)
         running_build = running_project_build(self.project_directory)
-        if running_build is not None and running_build is not self._observed_build:
-            self._observed_build = running_build
-            running_build.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._on_build_changed)
-            for step in running_build.stages:
-                step.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, self._on_build_changed)
+        # Only one build can run at a time, also for different projects.
+        self.build_row.set_visible(not running_builds)
+        self.build_row.set_sensitive(not running_builds)
         self.build_progress_row.set_visible(running_build is not None)
         statuses = {}
         if running_build is not None:
@@ -203,12 +209,10 @@ class ProjectDetailsView(Gtk.Box):
         ):
             self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
             return
-        # Running build of this project is opened again instead of starting new one.
-        build_in_progress = next((
-            build for build in MultiStageProcess.get_started_processes_by_class(ProjectBuild)
-            if build.project_directory is self.project_directory and build.status == MultiStageProcessState.IN_PROGRESS
-        ), None)
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=self.project_directory, installation_in_progress=build_in_progress), "Build stages", 640, 480)
+        if _running_builds():
+            self._refresh_build_state()
+            return
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=self.project_directory), "Build stages", 640, 480)
 
     @Gtk.Template.Callback()
     def on_build_progress_activated(self, sender):
@@ -244,6 +248,13 @@ class ProjectDetailsView(Gtk.Box):
         )
         dialog.connect("response", lambda d, r: d.destroy())
         dialog.show()
+
+def _running_builds() -> list[ProjectBuild]:
+    """Builds in progress, of all projects."""
+    return [
+        build for build in MultiStageProcess.get_started_processes_by_class(ProjectBuild)
+        if build.status == MultiStageProcessState.IN_PROGRESS
+    ]
 
 def _build_step_status(step: ProjectBuildStepBuildStage) -> StageNodeStatus:
     match step.state:

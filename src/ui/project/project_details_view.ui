@@ -77,7 +77,7 @@
                           </object>
                         </child>
                         <child>
-                          <object class="AdwButtonRow">
+                          <object class="AdwButtonRow" id="build_row">
                             <property name="title">Build stages</property>
                             <property name="start-icon-name">sledgehammer-svgrepo-com-symbolic</property>
                             <property name="activatable">True</property>
