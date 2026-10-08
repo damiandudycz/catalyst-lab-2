@@ -19,6 +19,9 @@ def resolve_stage_argument(project_directory, stage, argument_name: str, option:
     Returns None when value can't be determined (not set, missing parent or template, unsupported automatic option)."""
     details = StageArgumentDetails.named(argument_name)
     value = option if option is not None else getattr(stage, details.name if details else argument_name, None)
+    # Multiselect arguments (repos, interpreter) store selected automatic option as single item list.
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], StageAutomaticOption):
+        value = value[0]
     if not isinstance(value, StageAutomaticOption):
         return value
     if stage.id in _visited:
