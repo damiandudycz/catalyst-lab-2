@@ -63,7 +63,6 @@
                         <property name="selection-mode">none</property>
                         <style>
                           <class name="boxed-list"/>
-                          <class name="joined-buttons"/>
                         </style>
                         <child>
                           <object class="AdwButtonRow">
@@ -76,6 +75,18 @@
                             </style>
                           </object>
                         </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkListBox">
+                        <property name="margin-start">24</property>
+                        <property name="margin-end">24</property>
+                        <property name="margin-bottom">12</property>
+                        <property name="selection-mode">none</property>
+                        <style>
+                          <class name="boxed-list"/>
+                          <class name="joined-buttons"/>
+                        </style>
                         <child>
                           <object class="AdwButtonRow" id="build_row">
                             <property name="title">Build stages</property>
