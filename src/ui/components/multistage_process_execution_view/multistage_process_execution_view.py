@@ -267,6 +267,10 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
             GLib.idle_add(lambda: self._scroll_output_to_end() and False)
 
     def _scroll_output_to_end(self):
+        # GtkTextView (GTK 4.20) crashes when scrolled before it's realized (collapsed step).
+        # Once it's shown, size change of adjustment scrolls it to the end.
+        if not self.output_view.get_realized():
+            return
         adjustment = self.output_scrolled_window.get_vadjustment()
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
 
