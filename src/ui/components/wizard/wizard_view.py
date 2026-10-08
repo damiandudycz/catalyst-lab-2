@@ -33,6 +33,8 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         # Carousel:
         self.carousel = Adw.Carousel()
         self.carousel.set_vexpand(True)
+        # Pages are changed only with Back / Next buttons, scrolling and swiping could skip pages that are not ready.
+        self.carousel.set_interactive(False)
         self.setup_view.append(self.carousel)
         # Bottom bar:
         self._setup_bottom_bar()
