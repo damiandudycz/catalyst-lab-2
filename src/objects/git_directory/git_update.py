@@ -55,14 +55,17 @@ class GitUpdateStepUpdate(MultiStageProcessStage):
         )
         self.directory = directory
     def run_git_command(self, repo_path: str, args):
+        self.log(f"$ git {' '.join(args)}")
         result = subprocess.run(
             ["git"] + args,
             cwd=repo_path,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
-            check=True
+            universal_newlines=True
         )
+        for line in (result.stdout + result.stderr).splitlines():
+            self.log(line)
+        result.check_returncode()
         return result.stdout.strip()
     def start(self):
         super().start()

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import threading
+import sys, threading
 from gi.repository import GLib
 from typing import final
 from enum import Enum, auto
@@ -227,6 +227,12 @@ class MultiStageProcessStage(ABC):
         """Call this when step finishes."""
         if self._cancel_event.is_set():
             return
+        if state == MultiStageProcessStageState.FAILED:
+            # Steps report failures from their except blocks, so the exception being handled
+            # is the reason of failure. Add it to output, to make it visible in UI.
+            error = sys.exc_info()[1]
+            if error is not None:
+                self.log(f"Error: {error}" if str(error) else f"Error: {type(error).__name__}")
         self._update_state(state=state)
         if self.state == MultiStageProcessStageState.COMPLETED:
            self._update_progress(1.0)

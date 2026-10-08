@@ -184,7 +184,9 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         output_row.set_child(output_box)
         self.add_row(output_row)
         # Allow expanding only when there is some output to show.
+        # Step might have already failed before view was connected, show its output then.
         self.set_enable_expansion(bool(self.step.output_lines))
+        self.set_expanded(self.step.state == MultiStageProcessStageState.FAILED and bool(self.step.output_lines))
 
     def _step_output_line_added(self, line: str):
         adjustment = self.output_scrolled_window.get_vadjustment()
@@ -194,8 +196,9 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         self.output_buffer.insert(end_iter, line if self.output_buffer.get_char_count() == 0 else "\n" + line)
         if not self.get_enable_expansion():
             # Enabling expansion also expands the row, keep it collapsed until user opens it.
+            # Failed step stays expanded, as its first output line can be the failure reason.
             self.set_enable_expansion(True)
-            self.set_expanded(False)
+            self.set_expanded(self.step.state == MultiStageProcessStageState.FAILED)
         if follow:
             GLib.idle_add(self._scroll_output_to_bottom)
 

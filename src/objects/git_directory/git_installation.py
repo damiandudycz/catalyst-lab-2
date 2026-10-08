@@ -318,6 +318,19 @@ class GitInstallationStepSetupRepository(MultiStageProcessStage):
             description="Creates empty GIT repository if not present",
             multistage_process=multistage_process
         )
+    def run_logged_command(self, cmd: list[str]):
+        """Runs command, adding its output to stage output."""
+        self.log("$ " + " ".join(cmd))
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+        for line in result.stdout.splitlines():
+            self.log(line)
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, result.args, output=result.stdout)
     def start(self):
         super().start()
         try:
@@ -330,21 +343,14 @@ class GitInstallationStepSetupRepository(MultiStageProcessStage):
                     ["git", "-C", path, "add", "."]
                 ]
                 for cmd in commands:
-                    result = subprocess.run(
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True
-                    )
-                    if result.returncode != 0:
-                        raise subprocess.CalledProcessError(result.returncode, result.args, output=result.stdout)
+                    self.run_logged_command(cmd)
                 # Commit:
                 if subprocess.run(
                     ["git", "-C", path, "status", "--porcelain"],
                     stdout=subprocess.PIPE,
                     text=True
                 ).stdout.strip():
-                    subprocess.run(["git", "-C", path, "commit", "-m", "Initial commit"], check=True)
+                    self.run_logged_command(["git", "-C", path, "commit", "-m", "Initial commit"])
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during local Git init: {e}")
