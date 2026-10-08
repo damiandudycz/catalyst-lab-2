@@ -11,6 +11,8 @@ from .app_events import app_event_bus, AppEvents
 from .stages_tree_view import StagesTreeView, TreeNode
 from .project_stage_details_view import ProjectStageDetailsView
 from .project_build_view import ProjectBuildView
+from .project_build_process import ProjectBuild
+from .multistage_process import MultiStageProcess, MultiStageProcessState
 from .architecture import Architecture
 import threading
 
@@ -165,8 +167,12 @@ class ProjectDetailsView(Gtk.Box):
         ):
             self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
             return
-        # Presented in new window, which gets its own navigation view for build progress.
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=self.project_directory), "Build stages", 640, 720)
+        # Running build of this project is opened again instead of starting new one.
+        build_in_progress = next((
+            build for build in MultiStageProcess.get_started_processes_by_class(ProjectBuild)
+            if build.project_directory is self.project_directory and build.status == MultiStageProcessState.IN_PROGRESS
+        ), None)
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=self.project_directory, installation_in_progress=build_in_progress), "Build stages", 640, 480)
 
     @Gtk.Template.Callback()
     def on_stage_selected(self, sender, stage):
