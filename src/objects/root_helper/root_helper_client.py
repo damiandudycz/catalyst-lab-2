@@ -183,12 +183,19 @@ class RootHelperClient:
         # Make the script executable
         os.chmod(output_path, 0o700)
 
-        # Install bundled bwrap if running as flatpak.
-        # This is used to make sure bwrap supports required capabilities.
+        # Provide bwrap in runtime dir, where toolset commands expect it.
+        # For flatpak install bundled bwrap, to make sure it supports required capabilities.
         # Host system might have bwrap but with older version.
+        # When running directly on host, link host bwrap.
+        bwrap_output_path = os.path.join(runtime_dir, "bwrap")
+        if os.path.lexists(bwrap_output_path):
+            os.remove(bwrap_output_path)
         if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
-            bwrap_output_path = os.path.join(runtime_dir, "bwrap")
             shutil.copy("/app/bin/bwrap", bwrap_output_path)
+        elif host_bwrap_path := shutil.which("bwrap"):
+            os.symlink(host_bwrap_path, bwrap_output_path)
+        else:
+            print("Warning: bwrap not found in host system. Toolset environments will not work.")
 
         return output_path
 
