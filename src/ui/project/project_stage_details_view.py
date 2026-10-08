@@ -236,6 +236,33 @@ class ProjectStageDetailsView(Gtk.Box):
             self.stage_name_row.grab_focus()
 
     @Gtk.Template.Callback()
+    def on_delete_clicked(self, sender):
+        detached_stages = ProjectManager.shared().stages_using_parent(project=self.project_directory, stage=self.stage)
+        body = f"Stage \"{self.stage.name}\" will be removed from the project. This can't be undone."
+        if detached_stages:
+            names = ", ".join(f"\"{stage.name}\"" for stage in detached_stages)
+            body += f"\n\nIt is used as parent by {names}. Their parent will be cleared, and values they inherit from it will need to be set again."
+        dialog = Adw.AlertDialog(heading="Delete stage?", body=body)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", self.on_delete_response)
+        dialog.present(self.get_root())
+
+    def on_delete_response(self, dialog, response: str):
+        if response != "delete":
+            return
+        try:
+            ProjectManager.shared().remove_stage(project=self.project_directory, stage=self.stage)
+        except Exception as e:
+            print(f"Error deleting stage: {e}")
+            return
+        if self.content_navigation_view:
+            self.content_navigation_view.pop()
+
+    @Gtk.Template.Callback()
     def on_stage_name_changed(self, sender):
         is_name_available = ProjectManager.shared().is_stage_name_available(
             project=self.project_directory,
