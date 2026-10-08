@@ -22,6 +22,7 @@ from .project_stage import ProjectStage, StageArgumentOption
 from .item_select_expander_row import ItemSelectionExpanderRow
 from .event_bus import EventBus
 from .project_stage_automatic_option import StageAutomaticOption
+from .project_stage_value_resolver import resolved_stage_argument_display
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
@@ -88,8 +89,10 @@ class ProjectStageDetailsView(Gtk.Box):
                     is_item_selectable_handler=self.is_config_option_selectable
                 )
             case StageArgumentType.string_list | StageArgumentType.raw:
-                return StageTextListRow(stage=self.stage, argument=argument)
+                return StageTextListRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
             case _:
+                if argument.details and argument.details.automatic_options:
+                    return StageTextEntrySourceRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
                 return StageTextEntryRow(stage=self.stage, argument=argument)
 
     def can_change_argument(self, option: StageArgumentOption) -> bool:
@@ -160,7 +163,10 @@ class ProjectStageDetailsView(Gtk.Box):
                 argument=row.argument.details or row.argument.name,
                 value=row.value
             )
-            # Text values don't affect other options, and reloading would discard unapplied edits.
+            # Reloading option rows would discard unapplied edits of text rows, refresh only resolved values.
+            for r in self.configuration_rows:
+                if r.argument != row.argument and isinstance(r, StageTextSourceRow):
+                    r.refresh_options()
             return
         if row.argument.details.type == StageArgumentType.select:
             ProjectManager.shared().change_stage_argument(
@@ -187,6 +193,8 @@ class ProjectStageDetailsView(Gtk.Box):
         for r in self.configuration_rows:
             if r.argument != row.argument and isinstance(r, StageOptionExpanderRow):
                 r.load_state()
+            elif r.argument != row.argument and isinstance(r, StageTextSourceRow):
+                r.refresh_options() # Keeps possibly unapplied text, only updates availability of automatic options.
 
     # Monitoring stage changes
     # --------------------------------------------------------------------------
@@ -307,6 +315,26 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             for value in missing_values
         ]
 
+    def set_static_list(self, list: list):
+        # Show values automatic options resolve to (inherit from parent, releng template...) when they can be determined.
+        self.resolved_values: dict[StageAutomaticOption, str] = {}
+        for option in list:
+            if isinstance(option.value, StageAutomaticOption) and not option.unsupported:
+                if resolved := resolved_stage_argument_display(self.project_directory, self.stage, self.argument.name, option.value):
+                    self.resolved_values[option.value] = resolved
+                    option.subtitle = GLib.markup_escape_text(resolved)
+        super().set_static_list(list=list)
+
+    def display_selected_item(self):
+        super().display_selected_item()
+        selected = (self.selected_items or []) if self.allow_multiselect else ([self.selected_item] if self.selected_item else [])
+        if any(isinstance(item.value, StageAutomaticOption) for item in selected):
+            self.set_subtitle(", ".join(GLib.markup_escape_text(self._item_display(item)) for item in selected))
+
+    def _item_display(self, item: StageArgumentOption) -> str:
+        resolved = getattr(self, "resolved_values", {}).get(item.value) if isinstance(item.value, StageAutomaticOption) else None
+        return f"{item.display}: {resolved}" if resolved else item.display
+
 
 class StageTextEntryRow(Adw.EntryRow):
     """Edits single line text arguments. Value is stored as str, or None when empty."""
@@ -347,26 +375,177 @@ class StageTextEntryRow(Adw.EntryRow):
     def update_warning(self):
         self.warning_icon.set_visible(self.argument.required and not self.value)
 
-class StageTextListRow(Adw.ExpanderRow):
-    """Edits list arguments (packages, use, rcadd...) one entry per line. Value is stored as list[str], or None when empty."""
+class StageTextSourceRow(Adw.ExpanderRow):
+    """Base for text arguments edited inside expander row. If argument allows automatic options (inherit from parent,
+    releng template...), they can be selected instead of custom value edited by subclass editor.
+    Value is StageAutomaticOption, custom value, or None when empty."""
 
-    SUBTITLE_MAX_ITEMS = 3
-
-    def __init__(self, stage: ProjectStage, argument: StageArgumentTargetDetails):
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, argument: StageArgumentTargetDetails):
         super().__init__()
+        self.project_directory = project_directory
         self.stage = stage
         self.argument = argument
         self.value = None
+        self.resolved_values: dict[StageAutomaticOption, str] = {}
+        self._loading = False
         self.event_bus = EventBus[ItemSelectionViewEvent]()
         self.set_title(argument.display_name)
         self.warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
         self.warning_icon.add_css_class("warning")
-        self.warning_icon.set_tooltip_text("This value is required")
         self.add_suffix(self.warning_icon)
-        self._setup_editor()
+        self._setup_sources()
+        self.editor_row = self._create_editor_row()
+        self.add_row(self.editor_row)
         self.load_state()
 
-    def _setup_editor(self):
+    # Sources:
+
+    def _setup_sources(self):
+        """Adds rows to select automatic option or custom value. Without automatic options only custom value is used."""
+        self.automatic_options: list[StageArgumentOption] = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument) or []
+        self.source_rows: dict[StageAutomaticOption | None, Adw.ActionRow] = {}
+        self.source_check_buttons: dict[StageAutomaticOption | None, Gtk.CheckButton] = {}
+        if not self.automatic_options:
+            return
+        group: Gtk.CheckButton | None = None
+        for option in self.automatic_options + [None]: # None stands for custom value.
+            row = Adw.ActionRow(title=option.display if option else "Custom value")
+            check_button = Gtk.CheckButton()
+            if group:
+                check_button.set_group(group)
+            else:
+                group = check_button
+            check_button.connect("toggled", self._on_source_toggled, option.value if option else None)
+            row.add_prefix(check_button)
+            row.set_activatable_widget(check_button)
+            self.add_row(row)
+            self.source_rows[option.value if option else None] = row
+            self.source_check_buttons[option.value if option else None] = check_button
+        self._update_source_subtitles()
+
+    def refresh_options(self):
+        """Updates availability of automatic options, which depends on other arguments (parent, releng template)."""
+        if not self.automatic_options:
+            return
+        self.automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument) or []
+        self._update_source_subtitles()
+        self.update_display()
+
+    def _update_source_subtitles(self):
+        """Shows values automatic options resolve to (inherit from parent, releng template...) when they can be determined."""
+        self.resolved_values = {}
+        for option in self.automatic_options:
+            resolved = None if option.unsupported else resolved_stage_argument_display(self.project_directory, self.stage, self.argument.name, option.value)
+            if resolved:
+                self.resolved_values[option.value] = resolved
+            subtitle = "Not available for this stage" if option.unsupported else (resolved or option.subtitle or "")
+            self.source_rows[option.value].set_subtitle(GLib.markup_escape_text(subtitle))
+
+    def _on_source_toggled(self, button: Gtk.CheckButton, source: StageAutomaticOption | None):
+        if self._loading or not button.get_active():
+            return
+        self.value = source if source is not None else self.get_editor_value()
+        self.update_display()
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+
+    def is_custom(self) -> bool:
+        return not isinstance(self.value, StageAutomaticOption)
+
+    # State:
+
+    def load_state(self):
+        current_value = getattr(self.stage, self.argument.attribute_name, None)
+        self._loading = True
+        if isinstance(current_value, StageAutomaticOption):
+            self.value = current_value
+            self.set_editor_value(None)
+        else:
+            self.value = self.normalized_custom_value(current_value)
+            self.set_editor_value(self.value)
+        source = self.value if isinstance(self.value, StageAutomaticOption) else None
+        if check_button := self.source_check_buttons.get(source):
+            check_button.set_active(True)
+        self._loading = False
+        self.update_display()
+
+    def apply_custom_value(self):
+        """Call from editor when custom value is applied."""
+        self.value = self.get_editor_value()
+        self.set_editor_value(self.value)
+        self.update_display()
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+
+    def update_display(self):
+        self.editor_row.set_visible(self.is_custom())
+        automatic_option = next((option for option in self.automatic_options if option.value == self.value), None)
+        if self.is_custom():
+            subtitle = self.custom_value_display(self.value) if self.value else "(None)"
+            show_warning = self.argument.required and not self.value
+            warning = "This value is required"
+        else:
+            resolved = self.resolved_values.get(self.value)
+            subtitle = (f"{automatic_option.display}: {resolved}" if resolved else automatic_option.display) if automatic_option else f"Unsupported value: {self.value.name}"
+            show_warning = automatic_option is None or automatic_option.unsupported
+            warning = "Selected option is not available for this stage"
+        self.set_subtitle(GLib.markup_escape_text(subtitle))
+        self.warning_icon.set_visible(show_warning)
+        self.warning_icon.set_tooltip_text(warning)
+
+    # Subclass editor interface:
+
+    def _create_editor_row(self) -> Gtk.ListBoxRow:
+        raise NotImplementedError
+
+    def get_editor_value(self):
+        """Returns custom value currently entered in editor, normalized."""
+        raise NotImplementedError
+
+    def set_editor_value(self, value):
+        raise NotImplementedError
+
+    def normalized_custom_value(self, value):
+        """Converts stored value to custom value format used by editor."""
+        raise NotImplementedError
+
+    def custom_value_display(self, value) -> str:
+        raise NotImplementedError
+
+class StageTextEntrySourceRow(StageTextSourceRow):
+    """Edits single line text arguments that also allow automatic options. Custom value is stored as str."""
+
+    def _create_editor_row(self) -> Gtk.ListBoxRow:
+        self.entry_row = Adw.EntryRow(title="Value")
+        self.entry_row.set_show_apply_button(True)
+        self.entry_row.connect("apply", self.on_apply)
+        return self.entry_row
+
+    def on_apply(self, sender):
+        self.apply_custom_value()
+        if root := self.get_root():
+            root.set_focus(None)
+
+    def get_editor_value(self):
+        return self.entry_row.get_text().strip() or None
+
+    def set_editor_value(self, value):
+        # Only rewrite when text differs, as set_text makes AdwEntryRow show apply button again.
+        if self.entry_row.get_text() != (value or ""):
+            self.entry_row.set_text(value or "")
+
+    def normalized_custom_value(self, value):
+        if isinstance(value, list):
+            value = " ".join(str(item) for item in value)
+        return str(value) if value else None
+
+    def custom_value_display(self, value) -> str:
+        return value
+
+class StageTextListRow(StageTextSourceRow):
+    """Edits list arguments (packages, use, rcadd...) one entry per line. Custom value is stored as list[str]."""
+
+    SUBTITLE_MAX_ITEMS = 3
+
+    def _create_editor_row(self) -> Gtk.ListBoxRow:
         self.text_view = Gtk.TextView()
         self.text_view.set_monospace(True)
         self.text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
@@ -389,10 +568,10 @@ class StageTextListRow(Adw.ExpanderRow):
         hint_label.add_css_class("dimmed")
         hint_label.add_css_class("caption")
         self.revert_button = Gtk.Button(label="Revert")
-        self.revert_button.connect("clicked", lambda button: self.load_state())
+        self.revert_button.connect("clicked", lambda button: self.set_editor_value(self.value if self.is_custom() else None))
         self.apply_button = Gtk.Button(label="Apply")
         self.apply_button.add_css_class("suggested-action")
-        self.apply_button.connect("clicked", lambda button: self.apply())
+        self.apply_button.connect("clicked", lambda button: self.apply_custom_value())
         buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         buttons_box.append(hint_label)
         buttons_box.append(self.revert_button)
@@ -409,30 +588,28 @@ class StageTextListRow(Adw.ExpanderRow):
         editor_row.set_activatable(False)
         editor_row.set_selectable(False)
         editor_row.set_child(editor_box)
-        self.add_row(editor_row)
+        return editor_row
 
-    def load_state(self):
-        current_value = getattr(self.stage, self.argument.attribute_name, None)
-        if isinstance(current_value, str):
-            current_value = current_value.splitlines()
-        self.value = [str(item) for item in current_value if str(item).strip()] if current_value else None
-        self.value = self.value or None
-        self.text_view.get_buffer().set_text("\n".join(self.value or []))
-        self.update_display()
-
-    def apply(self):
+    def get_editor_value(self):
         buffer = self.text_view.get_buffer()
         text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
-        self.value = [line.strip() for line in text.splitlines() if line.strip()] or None
-        buffer.set_text("\n".join(self.value or []))
-        self.update_display()
-        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+        return [line.strip() for line in text.splitlines() if line.strip()] or None
+
+    def set_editor_value(self, value):
+        self.text_view.get_buffer().set_text("\n".join(value or []))
+
+    def normalized_custom_value(self, value):
+        if isinstance(value, str):
+            value = value.splitlines()
+        return [str(item) for item in value if str(item).strip()] or None if value else None
+
+    def custom_value_display(self, value) -> str:
+        shown = ", ".join(value[:self.SUBTITLE_MAX_ITEMS])
+        hidden_count = len(value) - self.SUBTITLE_MAX_ITEMS
+        return f"{shown} (+{hidden_count} more)" if hidden_count > 0 else shown
 
     def is_modified(self) -> bool:
-        buffer = self.text_view.get_buffer()
-        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
-        lines = [line.strip() for line in text.splitlines() if line.strip()] or None
-        return lines != self.value
+        return self.get_editor_value() != (self.value if self.is_custom() else None)
 
     def on_buffer_changed(self, buffer):
         modified = self.is_modified()
@@ -441,17 +618,10 @@ class StageTextListRow(Adw.ExpanderRow):
 
     def on_key_pressed(self, controller, keyval, keycode, state):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.CONTROL_MASK:
-            self.apply()
+            self.apply_custom_value()
             return True
         return False
 
     def update_display(self):
-        if self.value:
-            shown = ", ".join(self.value[:self.SUBTITLE_MAX_ITEMS])
-            hidden_count = len(self.value) - self.SUBTITLE_MAX_ITEMS
-            subtitle = f"{shown} (+{hidden_count} more)" if hidden_count > 0 else shown
-        else:
-            subtitle = "(None)"
-        self.set_subtitle(GLib.markup_escape_text(subtitle))
-        self.warning_icon.set_visible(self.argument.required and not self.value)
+        super().update_display()
         self.on_buffer_changed(self.text_view.get_buffer())

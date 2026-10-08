@@ -261,18 +261,14 @@ def load_catalyst_stage_automatic_arguments_options(stage: ProjectStage, arg_det
         opt_parent.unsupported = True
     if getattr(stage, StageArgumentDetails.releng_template.name, None) is None:
         opt_releng.unsupported = True
-    match arg_details.details:
-        case StageArgumentDetails.profile:
-            return [option for option in [opt_parent, opt_releng] if option is not None]
-        case StageArgumentDetails.interpreter:
-            return [option for option in [opt_auto, opt_releng] if option is not None]
-        case StageArgumentDetails.compression_mode:
-            return [option for option in [opt_auto, opt_releng] if option is not None]
-        case StageArgumentDetails.repos:
-            return [option for option in [opt_parent, opt_releng] if option is not None]
-        case StageArgumentDetails.keep_repos:
-            return [option for option in [opt_releng] if option is not None]
-        case _: return []
+    if not arg_details.details:
+        return []
+    options = {
+        StageAutomaticOption.INHERIT_FROM_PARENT: opt_parent,
+        StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE: opt_releng,
+        StageAutomaticOption.GENERATE_AUTOMATICALLY: opt_auto,
+    }
+    return [options[automatic_option] for automatic_option in arg_details.details.automatic_options]
 
 def load_catalyst_targets(toolset: Toolset) -> list[str]:
     """Loads the list of available targets as their paths inside squashfs file"""
