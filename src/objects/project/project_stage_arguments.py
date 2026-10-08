@@ -132,6 +132,12 @@ class StageArgumentDetails(Enum):
         """Automatic options (inheriting from parent, releng template...) allowed for this argument, in display order."""
         return _automatic_options_mapping.get(self, [])
 
+    @property
+    def default_options(self) -> list[StageAutomaticOption]:
+        """Automatic options preferred as default value of new stage, in order of preference. First one available for
+        the stage is used (parent stage selected, releng template selected and defining this argument...)."""
+        return _default_options_mapping.get(self, [])
+
     @staticmethod
     def named(name: str) -> StageArgumentDetails | None:
         try:
@@ -281,7 +287,7 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
     StageArgumentDetails.ldflags: [_PARENT],
     # Release:
     StageArgumentDetails.rel_type: [_PARENT, _RELENG],
-    StageArgumentDetails.version_stamp: [_RELENG],
+    StageArgumentDetails.version_stamp: [_RELENG, _PARENT],
     StageArgumentDetails.compression_mode: [_AUTO, _RELENG],
     # Packages:
     StageArgumentDetails.repos: [_PARENT, _RELENG],
@@ -294,6 +300,44 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
     StageArgumentDetails.update_seed: [_RELENG],
     StageArgumentDetails.update_seed_command: [_RELENG],
     # Target specific (stage4/*, livecd/*, boot/kernel) are defined by releng templates.
+    **{
+        argument: [_RELENG]
+        for argument in StageArgumentDetails
+        if argument.value.split("/")[0] in ("stage4", "livecd", "boot")
+    },
+}
+
+# Defaults for new stages, in order of preference. Values that must stay consistent along the stages chain (seed
+# compatibility) prefer parent. Values describing given build prefer releng template, which is chosen for it.
+_default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]] = {
+    # Basic:
+    StageArgumentDetails.profile: [_RELENG, _PARENT], # Template can use more specific profile than seed (eg. desktop).
+    # Architecture:
+    StageArgumentDetails.subarch: [_PARENT, _RELENG],
+    StageArgumentDetails.chost: [_PARENT, _RELENG],
+    StageArgumentDetails.interpreter: [_AUTO],
+    StageArgumentDetails.asflags: [_PARENT],
+    StageArgumentDetails.cflags: [_PARENT],
+    StageArgumentDetails.common_flags: [_PARENT],
+    StageArgumentDetails.cxxflags: [_PARENT],
+    StageArgumentDetails.fcflags: [_PARENT],
+    StageArgumentDetails.fflags: [_PARENT],
+    StageArgumentDetails.ldflags: [_PARENT],
+    # Release:
+    StageArgumentDetails.rel_type: [_PARENT, _RELENG], # Whole chain is built in the same rel_type directory.
+    StageArgumentDetails.version_stamp: [_RELENG, _PARENT], # Variant of seed (eg. openrc) when template doesn't set it.
+    StageArgumentDetails.compression_mode: [_RELENG, _AUTO],
+    # Packages:
+    StageArgumentDetails.repos: [_PARENT, _RELENG],
+    StageArgumentDetails.keep_repos: [_PARENT, _RELENG],
+    StageArgumentDetails.binrepo_path: [_RELENG],
+    # Configuration:
+    StageArgumentDetails.source_subpath: [_AUTO],
+    StageArgumentDetails.portage_confdir: [_RELENG, _PARENT], # Template points to configuration for its target type.
+    StageArgumentDetails.portage_prefix: [_RELENG, _PARENT],
+    StageArgumentDetails.update_seed: [_RELENG],
+    StageArgumentDetails.update_seed_command: [_RELENG],
+    # Target specific:
     **{
         argument: [_RELENG]
         for argument in StageArgumentDetails

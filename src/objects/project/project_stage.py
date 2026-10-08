@@ -270,6 +270,36 @@ def load_catalyst_stage_automatic_arguments_options(stage: ProjectStage, arg_det
     }
     return [options[automatic_option] for automatic_option in arg_details.details.automatic_options]
 
+# Automatic options which can't be used without parent stage (generated from parent output).
+_automatic_options_requiring_parent = {StageArgumentDetails.source_subpath}
+
+def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dict[str, StageAutomaticOption]:
+    """Sets default automatic options (inherit from parent, releng template...) for arguments valid for stage target.
+    For every argument, first of its default options that is available for the stage is used.
+    Returns arguments that were set."""
+    from .project_stage_value_resolver import load_stage_releng_template_values
+    has_parent = getattr(stage, StageArgumentDetails.parent.name, None) is not None
+    template_values = load_stage_releng_template_values(project_directory=project_directory, stage=stage) or {}
+    def is_available(argument: StageArgumentDetails, option: StageAutomaticOption) -> bool:
+        match option:
+            case StageAutomaticOption.INHERIT_FROM_PARENT:
+                return has_parent
+            case StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE:
+                return argument.value in template_values # Only if template defines it.
+            case StageAutomaticOption.GENERATE_AUTOMATICALLY:
+                return has_parent or argument not in _automatic_options_requiring_parent
+        return False
+    arguments = load_catalyst_stage_arguments_details(toolset=project_directory.get_toolset(), target_name=stage.target)
+    applied = {}
+    for name, argument in arguments.items():
+        if argument.details is None or getattr(stage, argument.attribute_name, None) is not None:
+            continue
+        option = next((option for option in argument.details.default_options if is_available(argument.details, option)), None)
+        if option is not None:
+            setattr(stage, argument.attribute_name, option)
+            applied[name] = option
+    return applied
+
 def load_catalyst_targets(toolset: Toolset) -> list[str]:
     """Loads the list of available targets as their paths inside squashfs file"""
 
