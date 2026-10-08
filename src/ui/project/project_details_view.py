@@ -10,6 +10,7 @@ from .project_stage_create_view import ProjectStageCreateView
 from .app_events import app_event_bus, AppEvents
 from .stages_tree_view import StagesTreeView, TreeNode
 from .project_stage_details_view import ProjectStageDetailsView
+from .project_build_view import ProjectBuildView
 from .architecture import Architecture
 import threading
 
@@ -154,6 +155,18 @@ class ProjectDetailsView(Gtk.Box):
             self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
             return
         app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectStageCreateView(project_directory=self.project_directory), "New Stage", 640, 480)
+
+    @Gtk.Template.Callback()
+    def on_build_activated(self, sender):
+        if (
+            self.project_directory.get_toolset() is None
+            or self.project_directory.get_releng_directory() is None
+            or self.project_directory.get_snapshot() is None
+        ):
+            self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
+            return
+        view = ProjectBuildView(project_directory=self.project_directory, content_navigation_view=self.content_navigation_view)
+        self.content_navigation_view.push_view(view, title="Build stages")
 
     @Gtk.Template.Callback()
     def on_stage_selected(self, sender, stage):
