@@ -91,7 +91,8 @@ class ProjectStageDetailsView(Gtk.Box):
             case StageArgumentType.string_list | StageArgumentType.raw:
                 return StageTextListRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
             case _:
-                if argument.details and argument.details.automatic_options:
+                # Stored automatic option is shown as unsupported value even if argument doesn't allow any.
+                if (argument.details and argument.details.automatic_options) or isinstance(getattr(self.stage, argument.attribute_name, None), StageAutomaticOption):
                     return StageTextEntrySourceRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
                 return StageTextEntryRow(stage=self.stage, argument=argument)
 
@@ -248,6 +249,22 @@ class ProjectStageDetailsView(Gtk.Box):
 
 #    def pref_group_for_option(self, option) -> Adw.PreferencesGroup:
 
+def create_unsupported_options(missing_values: list, argument: StageArgumentDetails | None) -> list[StageArgumentOption]:
+    """Creates dummy entries for options that are currently set but not available in available options."""
+    if not missing_values:
+        return []
+    return [
+        StageArgumentOption(
+            raw=value,
+            display="Unsupported value",
+            subtitle=value if isinstance(value, str) or isinstance(value, uuid.UUID) else value.name if isinstance(value, StageAutomaticOption) else "(unknown)",
+            value=value,
+            argument=argument,
+            unsupported=True
+        )
+        for value in missing_values
+    ]
+
 class StageOptionExpanderRow(ItemSelectionExpanderRow):
 
     def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, argument: StageArgumentTargetDetails, is_item_selectable_handler):
@@ -305,20 +322,7 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             self.set_static_list(list=options)
 
     def create_unsupported_options(self, missing_values: list, argument: StageArgumentDetails) -> list[StageArgumentOption]:
-        """Creates dummy entries for options that are currently set but not available in available options."""
-        if not missing_values:
-            return []
-        return [
-            StageArgumentOption(
-                raw=value,
-                display="Unsupported value",
-                subtitle=value if isinstance(value, str) or isinstance(value, uuid.UUID) else value.name if isinstance(value, StageAutomaticOption) else "(unknown)",
-                value=value,
-                argument=argument,
-                unsupported=True
-            )
-            for value in missing_values
-        ]
+        return create_unsupported_options(missing_values=missing_values, argument=argument)
 
     def set_static_list(self, list: list):
         # Show values automatic options resolve to (inherit from parent, releng template...) when they can be determined.
@@ -408,13 +412,25 @@ class StageTextSourceRow(Adw.ExpanderRow):
     def _setup_sources(self):
         """Adds rows to select automatic option or custom value. Without automatic options only custom value is used."""
         self.automatic_options: list[StageArgumentOption] = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument) or []
+        # Add entries for unsupported values (automatic option stored, but not allowed for this argument)
+        current_value = getattr(self.stage, self.argument.attribute_name, None)
+        missing_values = [current_value] if isinstance(current_value, StageAutomaticOption) and current_value not in {option.value for option in self.automatic_options} else []
+        self.unsupported_options = create_unsupported_options(missing_values=missing_values, argument=self.argument.details)
         self.source_rows: dict[StageAutomaticOption | None, Adw.ActionRow] = {}
         self.source_check_buttons: dict[StageAutomaticOption | None, Gtk.CheckButton] = {}
-        if not self.automatic_options:
+        if not self.automatic_options and not self.unsupported_options:
             return
         group: Gtk.CheckButton | None = None
-        for option in self.automatic_options + [None]: # None stands for custom value.
-            row = Adw.ActionRow(title=option.display if option else "Custom value")
+        for option in self.unsupported_options + self.automatic_options + [None]: # None stands for custom value.
+            # Same rows as in option lists (eg. Profile), so unavailable options look the same.
+            row = ItemRow(
+                item=option,
+                item_title_property_name='display',
+                item_subtitle_property_name='subtitle',
+                item_status_property_name=None,
+                item_unsupported_property_name='unsupported',
+                item_icon=None
+            ) if option else Adw.ActionRow(title="Custom value")
             check_button = Gtk.CheckButton()
             if group:
                 check_button.set_group(group)
@@ -430,7 +446,7 @@ class StageTextSourceRow(Adw.ExpanderRow):
 
     def refresh_options(self):
         """Updates availability of automatic options, which depends on other arguments (parent, releng template)."""
-        if not self.automatic_options:
+        if not self.source_rows:
             return
         self.automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument) or []
         self._update_source_subtitles()
@@ -443,8 +459,13 @@ class StageTextSourceRow(Adw.ExpanderRow):
             resolved = None if option.unsupported else resolved_stage_argument_display(self.project_directory, self.stage, self.argument.name, option.value)
             if resolved:
                 self.resolved_values[option.value] = resolved
-            subtitle = "Not available for this stage" if option.unsupported else (resolved or option.subtitle or "")
-            self.source_rows[option.value].set_subtitle(GLib.markup_escape_text(subtitle))
+            row = self.source_rows[option.value]
+            row.set_subtitle(GLib.markup_escape_text(resolved or option.subtitle or ""))
+            # Availability can change after creating row (parent or releng template changed).
+            if option.unsupported:
+                row.add_css_class('warning')
+            else:
+                row.remove_css_class('warning')
 
     def _on_source_toggled(self, button: Gtk.CheckButton, source: StageAutomaticOption | None):
         if self._loading or not button.get_active():
@@ -482,7 +503,7 @@ class StageTextSourceRow(Adw.ExpanderRow):
 
     def update_display(self):
         self.editor_row.set_visible(self.is_custom())
-        automatic_option = next((option for option in self.automatic_options if option.value == self.value), None)
+        automatic_option = next((option for option in self.unsupported_options + self.automatic_options if option.value == self.value), None)
         if self.is_custom():
             subtitle = self.custom_value_display(self.value) if self.value else "(None)"
             show_warning = self.argument.required and not self.value
