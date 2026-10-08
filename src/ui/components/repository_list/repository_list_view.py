@@ -27,6 +27,7 @@ class RepositoryListView(Gtk.Box):
     items_container  = Gtk.Template.Child()
     preference_group = Gtk.Template.Child()
     add_item_container = Gtk.Template.Child()
+    add_item_row = Gtk.Template.Child()
     # Properties:
     title                          = GObject.Property(type=str, default=None)
     item_class_name                = GObject.Property(type=str, default=None)
@@ -37,6 +38,7 @@ class RepositoryListView(Gtk.Box):
     item_status_property_name      = GObject.Property(type=str, default=None)
     item_unsupported_property_name = GObject.Property(type=str, default=None)
     show_add_button                = GObject.Property(type=bool, default=True)
+    add_button_title               = GObject.Property(type=str, default="Add item")
     show_installations             = GObject.Property(type=bool, default=True) # Rows of started processes of item_installation_class.
 
     def __init__(self, **kwargs):
@@ -46,6 +48,7 @@ class RepositoryListView(Gtk.Box):
     def on_realize(self, widget):
         self.preference_group.set_title(self.title)
         self.add_item_container.set_visible(self.show_add_button)
+        self.add_item_row.set_title(self.add_button_title)
         self.item_class = globals().get(self.item_class_name)
         self.item_installation_class = globals().get(self.item_installation_class_name)
         self.repository = getattr(Repository, self.item_class_name)

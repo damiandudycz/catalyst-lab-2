@@ -26,6 +26,7 @@
               <object class="RepositoryListView">
                 <property name="title">Portage overlays</property>
                 <property name="item_class_name">OverlayDirectory</property>
+                <property name="add_button_title">Add overlay</property>
                 <property name="item_installation_class_name">OverlayInstallation</property>
                 <property name="item_icon">layers-minimalistic-svgrepo-com-symbolic</property>
                 <property name="item_title_property_name">name</property>

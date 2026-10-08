@@ -26,6 +26,7 @@
               <object class="RepositoryListView">
                 <property name="title">Toolsets</property>
                 <property name="item_class_name">Toolset</property>
+                <property name="add_button_title">Add toolset</property>
                 <property name="item_installation_class_name">ToolsetInstallation</property>
                 <property name="item_icon">toolbox-symbolic</property>
                 <property name="item_title_property_name">name</property>

@@ -28,7 +28,7 @@
           <class name="boxed-list"/>
         </style>
         <child>
-          <object class="AdwButtonRow">
+          <object class="AdwButtonRow" id="add_item_row">
             <property name="title">Add item</property>
             <property name="start-icon-name">list-add-symbolic</property>
             <property name="activatable">True</property>

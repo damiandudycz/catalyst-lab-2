@@ -26,6 +26,7 @@
               <object class="RepositoryListView">
                 <property name="title">Snapshots</property>
                 <property name="item_class_name">Snapshot</property>
+                <property name="add_button_title">Add snapshot</property>
                 <property name="item_installation_class_name">SnapshotInstallation</property>
                 <property name="item_icon">video-frame-svgrepo-com-symbolic</property>
                 <property name="item_title_property_name">name</property>
