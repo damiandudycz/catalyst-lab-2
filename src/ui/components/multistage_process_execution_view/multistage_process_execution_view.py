@@ -165,6 +165,12 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         self.output_scrolled_window.set_min_content_height(240)
         self.output_scrolled_window.set_max_content_height(240)
         self.output_scrolled_window.set_child(self.output_view)
+        # Keep output scrolled to the bottom while new lines arrive. Stop following when user
+        # scrolls up, resume when user scrolls back to the bottom.
+        self._follow_output = True
+        adjustment = self.output_scrolled_window.get_vadjustment()
+        adjustment.connect("value-changed", self._on_output_scrolled)
+        adjustment.connect("changed", self._on_output_size_changed)
         frame = Gtk.Frame()
         frame.set_child(self.output_scrolled_window)
         copy_button = Gtk.Button(label="Copy output")
@@ -206,9 +212,6 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
             self.bind_property("enable-expansion", arrow, "visible", GObject.BindingFlags.SYNC_CREATE)
 
     def _step_output_line_added(self, line: str):
-        adjustment = self.output_scrolled_window.get_vadjustment()
-        # Follow new output, unless user scrolled up to read previous lines.
-        follow = adjustment.get_value() >= adjustment.get_upper() - adjustment.get_page_size() - 1
         end_iter = self.output_buffer.get_end_iter()
         self.output_buffer.insert(end_iter, line if self.output_buffer.get_char_count() == 0 else "\n" + line)
         if not self.get_enable_expansion():
@@ -216,13 +219,18 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
             # Failed step stays expanded, as its first output line can be the failure reason.
             self.set_enable_expansion(True)
             self.set_expanded(self.step.state == MultiStageProcessStageState.FAILED)
-        if follow:
-            GLib.idle_add(self._scroll_output_to_bottom)
 
-    def _scroll_output_to_bottom(self):
+    def _is_output_at_bottom(self) -> bool:
         adjustment = self.output_scrolled_window.get_vadjustment()
-        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
-        return False
+        return adjustment.get_value() >= adjustment.get_upper() - adjustment.get_page_size() - 1
+
+    def _on_output_scrolled(self, adjustment: Gtk.Adjustment):
+        self._follow_output = self._is_output_at_bottom()
+
+    def _on_output_size_changed(self, adjustment: Gtk.Adjustment):
+        # Content grew (new lines, or row was expanded and laid out).
+        if self._follow_output and not self._is_output_at_bottom():
+            adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
 
     def _on_copy_output_clicked(self, button):
         Gdk.Display.get_default().get_clipboard().set("\n".join(self.step.output_lines))
