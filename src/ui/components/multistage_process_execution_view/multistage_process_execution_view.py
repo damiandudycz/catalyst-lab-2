@@ -1,5 +1,5 @@
 from __future__ import annotations
-from gi.repository import Gtk, GLib, GObject, Adw
+from gi.repository import Gtk, GLib, Adw
 from .multistage_process import (
     # Process
     MultiStageProcess,
@@ -119,19 +119,22 @@ class MultistageProcessExecutionView(Gtk.Box):
             case MultiStageProcessState.FAILED:
                 display_status(text="Installation failed.", style="error")
 
-class MultiStageProcessStageRow(Adw.ExpanderRow):
-    """Displays stage state. Can be expanded to show output of commands executed by stage."""
+class MultiStageProcessStageRow(Adw.ActionRow):
+    """Displays stage state. Can be activated to open output of commands executed by stage."""
 
     def __init__(self, step: MultiStageProcessStage, owner: MultistageProcessExecutionView):
         super().__init__(title=step.name, subtitle=step.description)
         self.step = step
         self.owner = owner
-        self._setup_output_view()
         self.progress_label = Gtk.Label()
         self.progress_label.add_css_class("dim-label")
         self.progress_label.add_css_class("caption")
         self._update_status_label()
         self.add_suffix(self.progress_label)
+        self.output_arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
+        self.add_suffix(self.output_arrow)
+        self.connect("activated", self._on_activated)
+        self._update_output_available()
         self.set_sensitive(step.state != MultiStageProcessStageState.SCHEDULED)
         self._set_status_icon(state=step.state)
         step.event_bus.subscribe(
@@ -147,135 +150,28 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
             self._step_output_line_added
         )
 
-    def _setup_output_view(self):
-        self.output_view = Gtk.TextView()
-        self.output_view.set_editable(False)
-        self.output_view.set_cursor_visible(False)
-        self.output_view.set_monospace(True)
-        self.output_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self.output_view.set_top_margin(8)
-        self.output_view.set_bottom_margin(8)
-        self.output_view.set_left_margin(8)
-        self.output_view.set_right_margin(8)
-        self.output_view.add_css_class("transparent-bg")
-        self.output_buffer = self.output_view.get_buffer()
-        self.output_buffer.set_text("\n".join(self.step.output_lines))
-        self.output_scrolled_window = Gtk.ScrolledWindow()
-        self.output_scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        self.output_scrolled_window.set_min_content_height(240)
-        self.output_scrolled_window.set_max_content_height(240)
-        self.output_scrolled_window.set_child(self.output_view)
-        # Keep output scrolled to the bottom while new lines arrive. Stop following when user
-        # scrolls up, resume when user scrolls back to the bottom.
-        # Only user input changes following, as GtkTextView also moves scroll position by
-        # itself while measuring lines.
-        self._follow_output = True
-        self._user_scroll_time = 0
-        adjustment = self.output_scrolled_window.get_vadjustment()
-        adjustment.connect("value-changed", self._on_output_scrolled)
-        adjustment.connect("changed", self._on_output_size_changed)
-        scroll_controller = Gtk.EventControllerScroll.new(
-            Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.KINETIC
-        )
-        scroll_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        scroll_controller.connect("scroll", lambda *args: self._mark_user_scroll() or False)
-        scroll_controller.connect("decelerate", lambda *args: self._mark_user_scroll())
-        self.output_scrolled_window.add_controller(scroll_controller)
-        scrollbar_drag = Gtk.GestureDrag()
-        scrollbar_drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        scrollbar_drag.connect("drag-begin", lambda *args: self._mark_user_scroll())
-        scrollbar_drag.connect("drag-update", lambda *args: self._mark_user_scroll())
-        self.output_scrolled_window.get_vscrollbar().add_controller(scrollbar_drag)
-        key_controller = Gtk.EventControllerKey()
-        key_controller.connect("key-pressed", lambda *args: self._mark_user_scroll() or False)
-        self.output_view.add_controller(key_controller)
-        self.connect("notify::expanded", self._on_expanded_changed)
-        frame = Gtk.Frame()
-        frame.set_child(self.output_scrolled_window)
-        output_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        output_box.set_margin_top(8)
-        output_box.set_margin_bottom(8)
-        output_box.set_margin_start(12)
-        output_box.set_margin_end(12)
-        output_box.append(frame)
-        output_row = Gtk.ListBoxRow()
-        output_row.set_activatable(False)
-        output_row.set_selectable(False)
-        output_row.set_child(output_box)
-        self.add_row(output_row)
-        # Allow expanding only when there is some output to show.
-        # Step might have already failed before view was connected, show its output then.
-        self.set_enable_expansion(bool(self.step.output_lines))
-        self.set_expanded(self.step.state == MultiStageProcessStageState.FAILED and bool(self.step.output_lines))
-        self._bind_arrow_visibility()
+    def _update_output_available(self):
+        """Allow opening output only when there is some output to show."""
+        has_output = bool(self.step.output_lines)
+        self.set_activatable(has_output)
+        self.output_arrow.set_visible(has_output)
 
-    def _bind_arrow_visibility(self):
-        """Show expander arrow only when there is output to expand."""
-        # AdwExpanderRow doesn't expose its arrow, find it by style class it uses.
-        def find_arrow(widget: Gtk.Widget) -> Gtk.Widget | None:
-            child = widget.get_first_child()
-            while child:
-                if isinstance(child, Gtk.Image) and child.has_css_class("expander-row-arrow"):
-                    return child
-                if found := find_arrow(child):
-                    return found
-                child = child.get_next_sibling()
-            return None
-        arrow = find_arrow(self)
-        if arrow:
-            self.bind_property("enable-expansion", arrow, "visible", GObject.BindingFlags.SYNC_CREATE)
+    def _on_activated(self, row):
+        navigation_view = getattr(self.owner, "content_navigation_view", None) or self.get_ancestor(Adw.NavigationView)
+        if navigation_view is None:
+            print("Warning: No navigation view to show step output in.")
+            return
+        navigation_view.push_view(MultiStageProcessStageOutputView(step=self.step), title=self.step.name)
 
     def _step_output_line_added(self, line: str):
-        end_iter = self.output_buffer.get_end_iter()
-        self.output_buffer.insert(end_iter, line if self.output_buffer.get_char_count() == 0 else "\n" + line)
-        if not self.get_enable_expansion():
-            # Enabling expansion also expands the row, keep it collapsed until user opens it.
-            # Failed step stays expanded, as its first output line can be the failure reason.
-            self.set_enable_expansion(True)
-            self.set_expanded(self.step.state == MultiStageProcessStageState.FAILED)
-
-    def _is_output_at_bottom(self) -> bool:
-        adjustment = self.output_scrolled_window.get_vadjustment()
-        return adjustment.get_value() >= adjustment.get_upper() - adjustment.get_page_size() - 1
-
-    def _mark_user_scroll(self):
-        self._user_scroll_time = GLib.get_monotonic_time()
-
-    def _on_output_scrolled(self, adjustment: Gtk.Adjustment):
-        # Scroll position changes within a second after user input are made by user (including kinetic scrolling).
-        if GLib.get_monotonic_time() - self._user_scroll_time < 1_000_000:
-            self._follow_output = self._is_output_at_bottom()
-        elif self._follow_output and not self._is_output_at_bottom():
-            self._scroll_output_to_end()
-
-    def _on_output_size_changed(self, adjustment: Gtk.Adjustment):
-        # Content grew (new lines, or row was expanded and laid out).
-        if self._follow_output and not self._is_output_at_bottom():
-            self._scroll_output_to_end()
-
-    def _on_expanded_changed(self, row, param):
-        # Show the latest output when step is expanded, and follow new lines again.
-        if self.get_expanded():
-            self._follow_output = True
-            self._scroll_output_to_end()
-            # Text is laid out after row is revealed, scroll again once it's measured.
-            GLib.idle_add(lambda: self._scroll_output_to_end() and False)
-
-    def _scroll_output_to_end(self):
-        # GtkTextView (GTK 4.20) crashes when scrolled before it's realized (collapsed step).
-        # Once it's shown, size change of adjustment scrolls it to the end.
-        if not self.output_view.get_realized():
-            return
-        adjustment = self.output_scrolled_window.get_vadjustment()
-        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+        if not self.get_activatable():
+            self._update_output_available()
 
     def _step_progress_changed(self, progress: float | None):
         self._update_status_label()
 
     def _step_state_changed(self, state: MultiStageProcessStageState):
         self.set_sensitive(state != MultiStageProcessStageState.SCHEDULED)
-        if state == MultiStageProcessStageState.FAILED and self.step.output_lines:
-            self.set_expanded(True) # Show what went wrong.
         self._set_status_icon(state=state)
         self.owner._scroll_to_installation_step_row(self)
         self._update_status_label()
@@ -310,3 +206,88 @@ class MultiStageProcessStageRow(Adw.ExpanderRow):
         if style:
             self.status_icon.add_css_class(style)
 
+class MultiStageProcessStageOutputView(Gtk.Box):
+    """Displays output of commands executed by stage. Pushed when stage row is activated."""
+
+    def __init__(self, step: MultiStageProcessStage):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.step = step
+        self.output_view = Gtk.TextView()
+        self.output_view.set_editable(False)
+        self.output_view.set_cursor_visible(False)
+        self.output_view.set_monospace(True)
+        self.output_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.output_view.set_top_margin(12)
+        self.output_view.set_bottom_margin(12)
+        self.output_view.set_left_margin(12)
+        self.output_view.set_right_margin(12)
+        self.output_view.add_css_class("transparent-bg")
+        self.output_buffer = self.output_view.get_buffer()
+        self.output_buffer.set_text("\n".join(self.step.output_lines))
+        self.output_scrolled_window = Gtk.ScrolledWindow()
+        self.output_scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self.output_scrolled_window.set_hexpand(True)
+        self.output_scrolled_window.set_vexpand(True)
+        self.output_scrolled_window.set_child(self.output_view)
+        self.append(self.output_scrolled_window)
+        # Keep output scrolled to the bottom while new lines arrive. Stop following when user
+        # scrolls up, resume when user scrolls back to the bottom.
+        # Only user input changes following, as GtkTextView also moves scroll position by
+        # itself while measuring lines.
+        self._follow_output = True
+        self._user_scroll_time = 0
+        adjustment = self.output_scrolled_window.get_vadjustment()
+        adjustment.connect("value-changed", self._on_output_scrolled)
+        adjustment.connect("changed", self._on_output_size_changed)
+        scroll_controller = Gtk.EventControllerScroll.new(
+            Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.KINETIC
+        )
+        scroll_controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        scroll_controller.connect("scroll", lambda *args: self._mark_user_scroll() or False)
+        scroll_controller.connect("decelerate", lambda *args: self._mark_user_scroll())
+        self.output_scrolled_window.add_controller(scroll_controller)
+        scrollbar_drag = Gtk.GestureDrag()
+        scrollbar_drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        scrollbar_drag.connect("drag-begin", lambda *args: self._mark_user_scroll())
+        scrollbar_drag.connect("drag-update", lambda *args: self._mark_user_scroll())
+        self.output_scrolled_window.get_vscrollbar().add_controller(scrollbar_drag)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", lambda *args: self._mark_user_scroll() or False)
+        self.output_view.add_controller(key_controller)
+        # Show the latest output when view is shown. Text is laid out after it's mapped, so scroll again once it's measured.
+        self.output_view.connect("map", lambda *args: GLib.idle_add(lambda: self._scroll_output_to_end() and False))
+        step.event_bus.subscribe(
+            MultiStageProcessStageEvent.OUTPUT_LINE_ADDED,
+            self._step_output_line_added
+        )
+
+    def _step_output_line_added(self, line: str):
+        end_iter = self.output_buffer.get_end_iter()
+        self.output_buffer.insert(end_iter, line if self.output_buffer.get_char_count() == 0 else "\n" + line)
+
+    def _is_output_at_bottom(self) -> bool:
+        adjustment = self.output_scrolled_window.get_vadjustment()
+        return adjustment.get_value() >= adjustment.get_upper() - adjustment.get_page_size() - 1
+
+    def _mark_user_scroll(self):
+        self._user_scroll_time = GLib.get_monotonic_time()
+
+    def _on_output_scrolled(self, adjustment: Gtk.Adjustment):
+        # Scroll position changes within a second after user input are made by user (including kinetic scrolling).
+        if GLib.get_monotonic_time() - self._user_scroll_time < 1_000_000:
+            self._follow_output = self._is_output_at_bottom()
+        elif self._follow_output and not self._is_output_at_bottom():
+            self._scroll_output_to_end()
+
+    def _on_output_size_changed(self, adjustment: Gtk.Adjustment):
+        # Content grew (new lines, or view was laid out).
+        if self._follow_output and not self._is_output_at_bottom():
+            self._scroll_output_to_end()
+
+    def _scroll_output_to_end(self):
+        # GtkTextView (GTK 4.20) crashes when scrolled before it's realized.
+        # Once it's shown, size change of adjustment scrolls it to the end.
+        if not self.output_view.get_realized():
+            return
+        adjustment = self.output_scrolled_window.get_vadjustment()
+        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
