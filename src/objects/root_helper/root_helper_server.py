@@ -616,9 +616,12 @@ class PipeWriter:
 class OutputCapture:
     @staticmethod
     def run_function_with_streaming_output(job: Job, func, args, kwargs) -> Any | None:
-        result_queue = multiprocessing.Queue()
-        output_queue = multiprocessing.Queue()
-        job.process = multiprocessing.Process(
+        # Root functions rely on state inherited from server process (eg. RootHelperServer.shared()),
+        # so they need "fork". Python 3.14 changed default start method on Linux to "forkserver".
+        mp_context = multiprocessing.get_context("fork")
+        result_queue = mp_context.Queue()
+        output_queue = mp_context.Queue()
+        job.process = mp_context.Process(
             target=OutputCapture._run_and_capture_streams,
             args=(func, args, kwargs, output_queue, result_queue)
         )
