@@ -21,7 +21,8 @@ class ItemSelectionView(Gtk.Box):
     # View elements:
     items_list = Gtk.Template.Child()
     # Properties:
-    title = GObject.Property(type=str, default=None) # TODO: Display
+    title = GObject.Property(type=str, default=None)
+    description = GObject.Property(type=str, default=None)
     item_class_name = GObject.Property(type=str, default=None)
     item_icon = GObject.Property(type=str, default=None)
     item_title_property_name = GObject.Property(type=str, default=None)
@@ -46,6 +47,8 @@ class ItemSelectionView(Gtk.Box):
         self._load_items()
 
     def on_realize(self, widget):
+        self.items_list.set_title(GLib.markup_escape_text(self.title) if self.title else "")
+        self.items_list.set_description(self.description or None)
         if self.item_class_name:
             self.item_class = globals().get(self.item_class_name)
             self.repository = getattr(Repository, self.item_class_name)

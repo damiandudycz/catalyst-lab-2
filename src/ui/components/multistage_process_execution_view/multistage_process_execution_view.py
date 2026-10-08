@@ -115,9 +115,9 @@ class MultistageProcessExecutionView(Gtk.Box):
             self._scroll_to_installation_steps_bottom()
         match stage:
             case MultiStageProcessState.COMPLETED:
-                display_status(text="Installation completed successfully.", style="success")
+                display_status(text="Completed successfully.", style="success")
             case MultiStageProcessState.FAILED:
-                display_status(text="Installation failed.", style="error")
+                display_status(text="Failed. Open failed steps to see their output.", style="error")
 
 class MultiStageProcessStageRow(Adw.ActionRow):
     """Displays stage state. Can be activated to open output of commands executed by stage."""

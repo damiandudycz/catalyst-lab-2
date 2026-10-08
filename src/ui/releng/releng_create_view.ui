@@ -15,8 +15,9 @@
         <signal name="begin-installation" handler="begin_installation"/>
         <property name="show_welcome_screen">True</property>
         <property name="welcome_screen_icon_name">book-minimalistic-svgrepo-com-symbolic</property>
-        <property name="welcome_screen_title">Create Releng directory</property>
-        <property name="welcome_screen_description">bla bla bla</property>
+        <property name="welcome_screen_title">Create Releng Directory</property>
+        <property name="welcome_screen_description">Clone the Gentoo Release Engineering repository, or your fork of it, from Git. Its spec templates and portage configuration are used as defaults for project stages.</property>
+        <property name="install_button_label">Create directory</property>
 
         <!-- Page 1: Config screen -->
         <child>

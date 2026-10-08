@@ -27,7 +27,7 @@
                 <property name="title">Toolsets</property>
                 <property name="item_class_name">Toolset</property>
                 <property name="item_installation_class_name">ToolsetInstallation</property>
-                <property name="item_icon">sledgehammer-svgrepo-com-symbolic</property>
+                <property name="item_icon">toolbox-symbolic</property>
                 <property name="item_title_property_name">name</property>
                 <property name="item_subtitle_property_name">short_details</property>
                 <property name="item_status_property_name">status_indicator_values</property>
@@ -43,7 +43,7 @@
 
             <child>
               <object class="GtkLabel">
-                <property name="label">Toolset environments are essentially Gentoo-based systems equipped with the necessary tools and configurations for building new Gentoo stage files. These environments can either be the host system itself (if running Gentoo) or isolated external environments packaged in a .squashfs file.</property>
+                <property name="label">Toolsets are isolated Gentoo environments with tools needed to build stages, like Catalyst and QEMU. Each toolset is created from an official stage3 image and stored as a .squashfs file.</property>
                 <property name="halign">center</property>
                 <property name="wrap">True</property>
                 <property name="justify">fill</property>

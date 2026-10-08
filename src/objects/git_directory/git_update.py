@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 # ------------------------------------------------------------------------------
 
 class GitUpdate(MultiStageProcess, ABC):
-    """Handles the GIT directory update lifecycle."""
+    """Handles the Git directory update lifecycle."""
 
     # Overwrite in subclassed
     @classmethod
@@ -23,7 +23,7 @@ class GitUpdate(MultiStageProcess, ABC):
 
     def __init__(self, directory: GitDirectory):
         self.directory = directory
-        super().__init__(title="GIT directory update")
+        super().__init__(title="Git directory update")
 
     def setup_stages(self):
         self.stages.append(
@@ -49,7 +49,7 @@ class GitUpdateStepUpdate(MultiStageProcessStage):
         multistage_process: MultiStageProcess
     ):
         super().__init__(
-            name="Update GIT directory",
+            name="Update Git directory",
             description="Fetch latest changes from git and rebase",
             multistage_process=multistage_process
         )
@@ -88,7 +88,7 @@ class GitUpdateStepUpdate(MultiStageProcessStage):
             self.directory.update_logs(wait=True)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
-            print(f"Error during GIT directory update: {e}")
+            print(f"Error during Git directory update: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
     def cleanup(self) -> bool:
         if not super().cleanup():

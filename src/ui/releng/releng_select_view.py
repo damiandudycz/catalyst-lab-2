@@ -28,7 +28,7 @@ class RelengSelectionView(Gtk.Box):
         self.selected_releng_directory = next((releng_directory for releng_directory in result), None)
         self.event_bus.emit(RelengSelectionViewEvent.SELECTION_CHANGED, self)
         if not result:
-            error_label = Gtk.Label(label="You need to create a Releng directory. Go to Releng section to create such directory.")
+            error_label = Gtk.Label(label="There are no Releng directories yet. Create one in the Releng section.")
             error_label.set_wrap(True)
             error_label.set_halign(Gtk.Align.CENTER)
             error_label.set_margin_top(12)

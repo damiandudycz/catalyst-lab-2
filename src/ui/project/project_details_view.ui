@@ -128,7 +128,7 @@
                       <object class="ItemSelectionExpanderRow" id="toolset_selection_view">
                         <property name="title">Toolset</property>
                         <property name="item_class_name">Toolset</property>
-                        <property name="item_icon">sledgehammer-svgrepo-com-symbolic</property>
+                        <property name="item_icon">toolbox-symbolic</property>
                         <property name="item_title_property_name">name</property>
                         <property name="item_subtitle_property_name">short_details</property>
                         <property name="item_status_property_name">status_indicator_values</property>

@@ -16,7 +16,8 @@
         <property name="show_welcome_screen">True</property>
         <property name="welcome_screen_icon_name">notes-minimalistic-svgrepo-com-symbolic</property>
         <property name="welcome_screen_title">Create Project</property>
-        <property name="welcome_screen_description">bla bla bla</property>
+        <property name="welcome_screen_description">A project contains a tree of stages built together. Select the toolset, Releng directory, snapshot and architecture used to build them. All of them can be changed later.</property>
+        <property name="install_button_label">Create project</property>
 
         <!-- Page 1: Config screen -->
         <child>
@@ -56,8 +57,10 @@
                 <property name="spacing">12</property>
                 <child>
                   <object class="ItemSelectionView" id="toolset_selection_view">
+                    <property name="title">Toolset</property>
+                    <property name="description">Toolset with Catalyst installed, used to build stages of this project.</property>
                     <property name="item_class_name">Toolset</property>
-                    <property name="item_icon">sledgehammer-svgrepo-com-symbolic</property>
+                    <property name="item_icon">toolbox-symbolic</property>
                     <property name="item_title_property_name">name</property>
                     <property name="item_subtitle_property_name">short_details</property>
                     <property name="item_status_property_name">status_indicator_values</property>
@@ -89,6 +92,8 @@
                 <property name="spacing">12</property>
                 <child>
                   <object class="ItemSelectionView" id="releng_selection_view">
+                    <property name="title">Releng directory</property>
+                    <property name="description">Its spec templates and portage configuration are used as defaults for stages.</property>
                     <property name="item_class_name">RelengDirectory</property>
                     <property name="item_icon">book-minimalistic-svgrepo-com-symbolic</property>
                     <property name="item_title_property_name">name</property>
@@ -122,6 +127,8 @@
                 <property name="spacing">12</property>
                 <child>
                   <object class="ItemSelectionView" id="snapshot_selection_view">
+                    <property name="title">Snapshot</property>
+                    <property name="description">Snapshot of the Gentoo ebuild repository used to build stages.</property>
                     <property name="item_class_name">Snapshot</property>
                     <property name="item_icon">video-frame-svgrepo-com-symbolic</property>
                     <property name="item_title_property_name">name</property>
@@ -155,6 +162,8 @@
                 <property name="spacing">12</property>
                 <child>
                   <object class="ItemSelectionView" id="arch_selection_view">
+                    <property name="title">Architecture</property>
+                    <property name="description">Architecture of built stages. Stages of architectures that host can't run natively are built with QEMU emulation.</property>
                     <property name="item_icon">cursor-square-symbolic</property>
                     <property name="item_title_property_name">name</property>
                     <signal name="is-item-selectable" handler="is_item_selectable"/>

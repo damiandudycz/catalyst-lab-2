@@ -9,7 +9,7 @@
   <template class="ItemSelectionView" parent="GtkBox">
     <child>
       <object class="AdwPreferencesGroup" id="items_list">
-        <property name="title">Select entry</property>
+        
       </object>
     </child>
 

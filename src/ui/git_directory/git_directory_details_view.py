@@ -202,7 +202,7 @@ class GitDirectoryDetailsView(Gtk.Box):
         is_name_available = self.manager_class.shared().is_name_available(name=new_name)
         try:
             if not is_name_available:
-                raise RuntimeError(f"GIT directory name {new_name} is not available")
+                raise RuntimeError(f"Git directory name {new_name} is not available")
             self.manager_class.shared().rename_directory(directory=self.git_directory, name=new_name)
             self.get_root().set_focus(None)
             self.setup_git_directory_details()
@@ -259,5 +259,5 @@ class GitDirectoryDetailsView(Gtk.Box):
     def show_update(self, update: GitUpdate):
         update_view = MultistageProcessExecutionView()
         update_view.set_multistage_process(multistage_process=update)
-        self.content_navigation_view.push_view(update_view, title="Updating GIT repository")
+        self.content_navigation_view.push_view(update_view, title="Updating Git repository")
 

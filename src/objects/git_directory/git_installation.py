@@ -23,7 +23,7 @@ class GitDirectorySource(Enum):
     def name(self) -> str:
         match self:
             case GitDirectorySource.GIT_REPOSITORY:
-                return "GIT repository"
+                return "Git repository"
             case GitDirectorySource.LOCAL_DIRECTORY:
                 return "Local directory"
             case GitDirectorySource.CREATE_NEW:
@@ -49,7 +49,7 @@ class GitInstallation(MultiStageProcess, ABC):
 
     def __init__(self, configuration: GitDirectorySetupConfiguration):
         self.configuration = configuration
-        super().__init__(title="GIT directory installation")
+        super().__init__(title="Git directory installation")
 
     def name(self) -> str:
         return self.configuration.name
@@ -108,8 +108,8 @@ class GitInstallationStepClone(MultiStageProcessStage):
         multistage_process: MultiStageProcess
     ):
         super().__init__(
-            name="Clone GIT repository",
-            description="Clones GIT repository",
+            name="Clone Git repository",
+            description="Clones Git repository",
             multistage_process=multistage_process
         )
         self.dir_name = dir_name
@@ -314,8 +314,8 @@ class GitInstallationStepInitLocal(MultiStageProcessStage):
 class GitInstallationStepSetupRepository(MultiStageProcessStage):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(
-            name="Configure GIT repository",
-            description="Creates empty GIT repository if not present",
+            name="Configure Git repository",
+            description="Creates empty Git repository if not present",
             multistage_process=multistage_process
         )
     def run_logged_command(self, cmd: list[str]):
@@ -359,7 +359,7 @@ class GitInstallationStepSetupRepository(MultiStageProcessStage):
 class GitInstallationStepAnalyzeRepository(MultiStageProcessStage):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(
-            name="Analyze GIT repository",
+            name="Analyze Git repository",
             description="Reads state and logs of git repository",
             multistage_process=multistage_process
         )

@@ -43,7 +43,7 @@
 
             <child>
               <object class="GtkLabel">
-                <property name="label">Toolset environments are essentially Gentoo-based systems equipped with the necessary tools and configurations for building new Gentoo stage files. These environments can either be the host system itself (if running Gentoo) or isolated external environments packaged in a .squashfs file.</property>
+                <property name="label">Portage overlays are additional ebuild repositories, kept as Git directories. They can be added to project stages as repos, and their profiles can be used by stages.</property>
                 <property name="halign">center</property>
                 <property name="wrap">True</property>
                 <property name="justify">fill</property>

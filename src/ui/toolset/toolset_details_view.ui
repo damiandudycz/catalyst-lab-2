@@ -38,7 +38,7 @@
                 </child>
                 <child>
                   <object class="AdwActionRow" id="name_used_row">
-                    <property name="title">This directory name is already used.</property>
+                    <property name="title">This toolset name is already used.</property>
                     <style>
                       <class name="caption-heading"/>
                       <class name="error"/>

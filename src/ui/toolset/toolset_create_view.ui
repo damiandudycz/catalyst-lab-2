@@ -14,9 +14,10 @@
         <signal name="is-page-ready-to-continue" handler="is_page_ready_to_continue"/>
         <signal name="begin-installation" handler="begin_installation"/>
         <property name="show_welcome_screen">True</property>
-        <property name="welcome_screen_icon_name">sledgehammer-svgrepo-com-symbolic</property>
-        <property name="welcome_screen_title">Create new toolset</property>
-        <property name="welcome_screen_description">bla bla bla</property>
+        <property name="welcome_screen_icon_name">toolbox-symbolic</property>
+        <property name="welcome_screen_title">Create Toolset</property>
+        <property name="welcome_screen_description">A toolset is an isolated Gentoo environment used to run Catalyst. It is created from an official stage3 image, with selected tools installed, and stored as a .squashfs file.</property>
+        <property name="install_button_label">Install toolset</property>
 
         <!-- Page 1: Stages screen -->
         <child>
@@ -77,7 +78,7 @@
                     </child>
                     <child>
                       <object class="AdwEntryRow" id="environment_name_row">
-                        <property name="title">Environment name</property>
+                        <property name="title">Toolset name</property>
                         <property name="show-apply-button">True</property>
                         <property name="text"></property>
                         <signal name="apply" handler="on_environment_name_activate"/>
@@ -86,7 +87,7 @@
                     </child>
                     <child>
                       <object class="GtkLabel" id="name_used_label">
-                        <property name="label">This environment name is already used.</property>
+                        <property name="label">This toolset name is already used.</property>
                         <property name="halign">center</property>
                         <property name="wrap">True</property>
                         <property name="justify">fill</property>
