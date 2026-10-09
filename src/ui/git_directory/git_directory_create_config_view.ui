@@ -23,6 +23,12 @@
           </object>
         </child>
         <child>
+          <object class="GtkBox" id="template_container">
+            <property name="orientation">vertical</property>
+            <property name="visible">False</property>
+          </object>
+        </child>
+        <child>
           <object class="AdwPreferencesGroup" id="options_group">
             <property name="title">Options</property>
             <child>

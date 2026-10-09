@@ -4,7 +4,9 @@ from .multistage_process import MultiStageProcessState
 from .project_installation import ProjectInstallation
 from .git_directory_create_config_view import GitDirectoryCreateConfigViewEvent
 from .git_directory_default_content_builder import DefaultDirContentBuilder
-from .git_installation import GitDirectorySetupConfiguration
+from .git_installation import GitDirectorySetupConfiguration, GitDirectorySource
+from .project_template import ProjectTemplateSelection
+from .project_template_views import ProjectTemplateChooser, ProjectTemplateOptionsView
 from .toolset_application import ToolsetApplication
 from .toolset import ToolsetEvents
 from .wizard_view import WizardView
@@ -27,6 +29,8 @@ class ProjectCreateView(Gtk.Box):
     # Setup view elements:
     source_page = Gtk.Template.Child()
     source_view = Gtk.Template.Child()
+    template_page = Gtk.Template.Child()
+    template_options_container = Gtk.Template.Child()
     toolset_page = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
     releng_page = Gtk.Template.Child()
@@ -42,6 +46,13 @@ class ProjectCreateView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         self.apps_requirements = [ToolsetApplication.CATALYST]
         self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
+        # Templates: chooser in source page, options of selected template in next page.
+        self.template_chooser = ProjectTemplateChooser()
+        self.template_options_view = ProjectTemplateOptionsView()
+        self.template_options_container.append(self.template_options_view)
+        self.template_chooser.on_changed = self.template_changed
+        self.template_options_view.on_changed = self.template_options_changed
+        self.source_view.set_template_chooser(self.template_chooser)
         self.source_view.event_bus.subscribe(
             GitDirectoryCreateConfigViewEvent.CONFIGURATION_READY_CHANGED,
             self.config_ready_changed
@@ -65,7 +76,25 @@ class ProjectCreateView(Gtk.Box):
         self.connect("realize", self.on_realize)
 
     def config_ready_changed(self, data):
+        self._update_pages()
         self.wizard_view._refresh_buttons_state()
+
+    def template_changed(self):
+        self.template_options_view.set_template(self.template_chooser.selected_template)
+        self._update_pages()
+
+    def template_options_changed(self):
+        self.wizard_view._refresh_buttons_state()
+
+    @property
+    def _uses_template(self) -> bool:
+        return getattr(self.source_view, "selected_source", None) == GitDirectorySource.TEMPLATE
+
+    def _update_pages(self):
+        """Template options page is shown for template source, architecture page unless template selects it."""
+        template = self.template_chooser.selected_template if self._uses_template else None
+        self.wizard_view.set_page_visible(self.template_page, self._uses_template)
+        self.wizard_view.set_page_visible(self.arch_page, template is None or template.architecture_variable is None)
 
     def toolset_changed(self, data):
         self.wizard_view._refresh_buttons_state()
@@ -83,6 +112,7 @@ class ProjectCreateView(Gtk.Box):
         self.wizard_view.content_navigation_view = self.content_navigation_view
         self.wizard_view._window = self._window
         self.wizard_view.set_installation(self.installation_in_progress)
+        self._update_pages()
 
     @Gtk.Template.Callback()
     def is_item_selectable(self, sender, item) -> bool:
@@ -136,6 +166,8 @@ class ProjectCreateView(Gtk.Box):
         match page:
             case self.source_page:
                 return self.source_view.configuration_ready
+            case self.template_page:
+                return self.template_options_view.generated is not None
             case self.toolset_page:
                 return (
                     self.toolset_selection_view.selected_item is not None
@@ -152,12 +184,23 @@ class ProjectCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
+        template_selection = None
+        architecture = self.arch_selection_view.selected_item
+        if self._uses_template:
+            template_selection = ProjectTemplateSelection(
+                template=self.template_chooser.selected_template,
+                selected=dict(self.template_options_view.selected)
+            )
+            architecture = self.template_options_view.generated.architecture or architecture
         self._start_installation(
-            source_config=self.source_view.get_configuration(default_dir_content_builder=DefaultProjectDirContentBuilder()),
+            source_config=self.source_view.get_configuration(
+                default_dir_content_builder=DefaultProjectDirContentBuilder(),
+                template_selection=template_selection
+            ),
             toolset=self.toolset_selection_view.selected_item,
             releng_directory=self.releng_selection_view.selected_item,
             snapshot=self.snapshot_selection_view.selected_item,
-            architecture=self.arch_selection_view.selected_item
+            architecture=architecture
         )
 
     def _start_installation(

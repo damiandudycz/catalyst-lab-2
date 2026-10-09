@@ -1,0 +1,73 @@
+format = 1
+name = "Gentoo release"
+description = "Stages built like official Gentoo releases: stage1, stage3, stage4 and minimal installation ISO, using releng spec templates."
+
+[[variables]]
+id = "architecture"
+title = "Architecture"
+type = "architecture"
+default = "amd64"
+options = [
+    { value = "amd64", title = "amd64" },
+    { value = "arm64", title = "arm64" },
+    { value = "ppc64", title = "ppc64" },
+]
+
+[[variables]]
+id = "init"
+title = "Init system"
+default = "openrc"
+options = [
+    { value = "openrc", title = "OpenRC" },
+    { value = "systemd", title = "systemd" },
+]
+
+[[variables]]
+id = "iso"
+title = "Installation ISO"
+description = "Minimal installation ISO, built from OpenRC stage3 like official releases."
+type = "boolean"
+default = true
+when = "init == 'openrc' and architecture in ['amd64', 'arm64']"
+
+[values]
+stage4_packages = "{{ ['app-admin/sudo', 'app-portage/gentoolkit', 'net-misc/chrony'] + (['app-admin/sysklogd', 'net-misc/dhcpcd'] if init == 'openrc' else []) }}"
+stage4_services = "{{ ['sysklogd|default', 'dhcpcd|default', 'chronyd|default', 'sshd|default'] if init == 'openrc' else [] }}"
+
+[[stages]]
+id = "stage1"
+name = "stage1-{{ init }}"
+target = "stage1"
+releng_template = "stage1-{{ init }}-23.spec"
+
+[[stages]]
+id = "stage3"
+parent = "stage1"
+name = "stage3-{{ init }}"
+target = "stage3"
+releng_template = "stage3-{{ init }}-23.spec"
+
+[[stages]]
+id = "stage4"
+parent = "stage3"
+name = "stage4-{{ init }}"
+target = "stage4"
+[stages.arguments]
+stage4_packages = "{{ stage4_packages }}"
+stage4_rcadd = "{{ stage4_services }}"
+
+[[stages]]
+id = "livecd-stage1"
+parent = "stage3"
+name = "livecd-stage1"
+target = "livecd_stage1"
+releng_template = "installcd-stage1.spec"
+when = "iso"
+
+[[stages]]
+id = "livecd-stage2"
+parent = "livecd-stage1"
+name = "livecd-stage2"
+target = "livecd_stage2"
+releng_template = "installcd-stage2-minimal.spec"
+when = "iso"

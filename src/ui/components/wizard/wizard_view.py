@@ -44,6 +44,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         # State:
         self.current_page = 0
         self.pages: [Gtk.Widget] = []#[self.welcome_page] # More pages added later
+        self._all_pages: [Gtk.Widget] = [] # Also hidden pages, in order of adding (keeps them alive while hidden).
         # Signals:
         self.carousel.connect('page-changed', self.on_page_changed)
         self.connect("realize", self.on_realize)
@@ -146,15 +147,33 @@ class WizardView(Adw.Bin, Gtk.Buildable):
             self.welcome_page = child
             self.carousel.prepend(child)
             self.pages.insert(0, child)
+            self._all_pages.insert(0, child)
         else:
             self.carousel.append(child)
             self.pages.append(child)
+            self._all_pages.append(child)
         self._refresh_buttons_state()
 
     def remove_page(self, page: Gtk.Widget):
         """Removes page that is not needed (eg. on given system)."""
         self.carousel.remove(page)
         self.pages.remove(page)
+        if page in self._all_pages:
+            self._all_pages.remove(page)
+        self._refresh_buttons_state()
+
+    def set_page_visible(self, page: Gtk.Widget, visible: bool):
+        """Shows or hides page that is needed only for some selections on previous pages. Pages after current one
+        should be changed only, hidden page keeps its position between other pages."""
+        if visible == (page in self.pages) or page not in self._all_pages:
+            return
+        if visible:
+            position = sum(1 for other in self._all_pages[:self._all_pages.index(page)] if other in self.pages)
+            self.carousel.insert(page, position)
+            self.pages.insert(position, page)
+        else:
+            self.carousel.remove(page)
+            self.pages.remove(page)
         self._refresh_buttons_state()
 
     # --------------------------------------------------------------------------

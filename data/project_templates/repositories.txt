@@ -1,0 +1,5 @@
+# Git repositories with project templates, offered when creating project from template.
+# Each line has repository URL, optionally followed by title. Repository has template.toml in its root, with the
+# same format as templates in this directory (see src/objects/project/project_template.py).
+#
+# https://github.com/example/catalystlab-template-example.git Example template

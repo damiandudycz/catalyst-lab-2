@@ -33,4 +33,7 @@ test('Validate schema file',
      compile_schemas,
      args: ['--strict', '--dry-run', meson.current_source_dir()])
 
+# Project templates included in app (share/catalystlab/project_templates).
+install_subdir('project_templates', install_dir: get_option('datadir') / meson.project_name())
+
 subdir('icons')

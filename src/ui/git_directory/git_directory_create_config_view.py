@@ -26,6 +26,7 @@ class GitDirectoryCreateConfigView(Gtk.Box):
     directory_local_directory_button = Gtk.Template.Child()
     directory_url_row = Gtk.Template.Child()
     name_used_label = Gtk.Template.Child()
+    template_container = Gtk.Template.Child()
 
     manager_class_name = GObject.Property(type=str, default=None)
     available_sources = GObject.Property(type=str, default=None)
@@ -41,7 +42,33 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         super().__init__()
         self.event_bus = EventBus[GitDirectoryCreateConfigViewEvent]()
         self.configuration_ready = False
+        self.template_chooser = None
+        self._suggested_directory_name = None
         self.connect("realize", self.on_realize)
+
+    def set_template_chooser(self, template_chooser: Gtk.Widget):
+        """Widget selecting template for TEMPLATE source (eg. ProjectTemplateChooser). It has selected_template
+        (with name) and calls on_changed when selection changes."""
+        self.template_chooser = template_chooser
+        self.template_container.append(template_chooser)
+        previous_on_changed = template_chooser.on_changed
+        def on_changed():
+            template = template_chooser.selected_template
+            if template is not None:
+                self.suggest_directory_name(template.name)
+            self.check_if_configuration_ready()
+            if previous_on_changed:
+                previous_on_changed()
+        template_chooser.on_changed = on_changed
+
+    def suggest_directory_name(self, name: str):
+        """Sets directory name, unless user entered own name."""
+        if not self.allow_changing_directory_name:
+            return
+        current = self.directory_name_row.get_text()
+        if current in ("", self.default_directory_name, self._suggested_directory_name):
+            self._suggested_directory_name = name
+            self.directory_name_row.set_text(name)
 
     def on_realize(self, widget):
         self.manager_class = globals().get(self.manager_class_name)
@@ -59,7 +86,7 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         self.directory_name_row.set_sensitive(self.allow_changing_directory_name)
         self.check_if_configuration_ready()
 
-    def get_configuration(self, default_dir_content_builder: DefaultDirContentBuilder | None = None) -> GitDirectorySetupConfiguration:
+    def get_configuration(self, default_dir_content_builder: DefaultDirContentBuilder | None = None, template_selection=None) -> GitDirectorySetupConfiguration:
         match self.selected_source:
             case GitDirectorySource.GIT_REPOSITORY:
                 data = self.directory_url_row.get_text()
@@ -67,6 +94,8 @@ class GitDirectoryCreateConfigView(Gtk.Box):
                 data = self.selected_local_directory
             case GitDirectorySource.CREATE_NEW:
                 data = default_dir_content_builder
+            case GitDirectorySource.TEMPLATE:
+                data = template_selection
         return GitDirectorySetupConfiguration(
             source=self.selected_source,
             name=self.directory_name_row.get_text(),
@@ -101,6 +130,7 @@ class GitDirectoryCreateConfigView(Gtk.Box):
     def _update_source_rows(self):
         self.directory_local_directory_row.set_visible(self.selected_source == GitDirectorySource.LOCAL_DIRECTORY)
         self.directory_url_row.set_visible(self.selected_source == GitDirectorySource.GIT_REPOSITORY)
+        self.template_container.set_visible(self.selected_source == GitDirectorySource.TEMPLATE)
 
     def check_filename_is_free(self) -> bool:
         self.filename_is_free = self.manager_class.shared().is_name_available(name=self.directory_name_row.get_text())
@@ -115,6 +145,8 @@ class GitDirectoryCreateConfigView(Gtk.Box):
                 self.source_is_configured = self.selected_local_directory
             case GitDirectorySource.CREATE_NEW:
                 self.source_is_configured = True
+            case GitDirectorySource.TEMPLATE:
+                self.source_is_configured = self.template_chooser is not None and self.template_chooser.selected_template is not None
         return self.source_is_configured
 
     def check_if_configuration_ready(self) -> bool:
