@@ -360,6 +360,22 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
         super().__init__(name=f"Build {stage.name}", description=f"Builds {stage.target.replace('_', '-')} with catalyst", multistage_process=multistage_process)
         self.stage = stage
         self.build: StageBuild | None = None
+        self._log_file = None
+    def log(self, line: str):
+        """Output is also saved as build.log in build directory, to keep it after app is closed."""
+        super().log(line)
+        if self.build and self.build.path:
+            try:
+                if self._log_file is None:
+                    self._log_file = open(os.path.join(self.build.path, "build.log"), "a", encoding="utf-8", buffering=1)
+                self._log_file.write(line + "\n")
+            except OSError as e:
+                print(f"Failed to write build log: {e}")
+    def complete(self, state: MultiStageProcessStageState):
+        super().complete(state) # Can log reason of failure.
+        if self._log_file:
+            self._log_file.close()
+            self._log_file = None
     def start(self):
         super().start()
         process = self.multistage_process
