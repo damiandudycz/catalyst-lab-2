@@ -50,8 +50,8 @@ class WelcomeSection(Gtk.Box):
         )
 
     @Gtk.Template.Callback()
-    def on_environments_row_activated(self, _):
+    def on_deploy_row_activated(self, _):
         app_event_bus.emit(
             AppEvents.OPEN_APP_SECTION,
-            AppSection.EnvironmentsSection
+            AppSection.DeploySection
         )
