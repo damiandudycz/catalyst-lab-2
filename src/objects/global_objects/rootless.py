@@ -217,7 +217,7 @@ echo "Machine is ready: $(. /etc/os-release; echo $PRETTY_NAME), kernel $(uname 
         return None if success else (lines[-1] if lines else "Machine check failed")
 
     def start(self, script: str, namespace: bool = False) -> ExecutorProcess:
-        from .lima import limactl_path
+        from .lima import limactl_path, lima_environment
         self.machine.ensure_running()
         token = uuid.uuid4().hex
         pid_file = f"/tmp/catalystlab-{token}.pid"
@@ -231,11 +231,12 @@ echo "Machine is ready: $(. /etc/os-release; echo $PRETTY_NAME), kernel $(uname 
         process = subprocess.Popen(
             [limactl_path(), "shell", "--workdir", "/", self.machine.instance_name, "setsid", "-w", "bash", "-c", bootstrap],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
-            text=True, errors="replace", bufsize=1
+            text=True, errors="replace", bufsize=1, env=lima_environment()
         )
         def terminate_remote():
             subprocess.run([limactl_path(), "shell", self.machine.instance_name, "sh", "-c",
-                            f"[ -f {pid_file} ] && kill -TERM -- -$(cat {pid_file}); rm -f {pid_file}"], capture_output=True, timeout=30)
+                            f"[ -f {pid_file} ] && kill -TERM -- -$(cat {pid_file}); rm -f {pid_file}"],
+                           capture_output=True, timeout=30, env=lima_environment())
         return ExecutorProcess(process, on_terminate=terminate_remote)
 
     def run(self, script: str, output_handler, process_holder: list | None = None, namespace: bool = False) -> bool:

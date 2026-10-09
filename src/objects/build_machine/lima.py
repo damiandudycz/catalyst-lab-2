@@ -16,6 +16,14 @@ LIMA_TEMPLATE = "template:_images/alpine-3.23"
 # folders can't store owners and are case insensitive on macOS.
 MACHINE_DATA_DIRECTORY = "/var/lib/catalystlab"
 
+def lima_environment() -> dict:
+    """Environment of limactl. Lima directory is in real home of user (not $HOME, which can be changed, eg. for tests),
+    as paths of its sockets are limited to 104 characters."""
+    import pwd
+    environment = dict(os.environ)
+    environment.setdefault("LIMA_HOME", os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".lima"))
+    return environment
+
 def limactl_path() -> str | None:
     return shutil.which("limactl") or next((path for path in _LIMACTL_LOCATIONS if os.access(path, os.X_OK)), None)
 
@@ -31,7 +39,7 @@ def list_instances() -> dict[str, dict]:
     if path is None:
         return {}
     try:
-        output = subprocess.run([path, "list", "--json"], capture_output=True, text=True, timeout=30).stdout
+        output = subprocess.run([path, "list", "--json"], capture_output=True, text=True, timeout=30, env=lima_environment()).stdout
     except Exception as e:
         print(f"Failed to list Lima instances: {e}")
         return {}
@@ -51,7 +59,8 @@ def run_limactl(arguments: list[str], output_handler, process_holder: list | Non
         raise RuntimeError(lima_unavailable_reason())
     output_handler(f"$ limactl {' '.join(arguments)}")
     process = subprocess.Popen([path, *arguments, "--tty=false"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               stdin=subprocess.DEVNULL, text=True, errors="replace", bufsize=1, start_new_session=True)
+                               stdin=subprocess.DEVNULL, text=True, errors="replace", bufsize=1, start_new_session=True,
+                               env=lima_environment())
     if process_holder is not None:
         process_holder.append(process)
     for line in process.stdout:
