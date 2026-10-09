@@ -1,7 +1,7 @@
 {
     "id" : "com.damiandudycz.CatalystLab",
     "runtime" : "org.gnome.Platform",
-    "runtime-version" : "48",
+    "runtime-version" : "51",
     "sdk" : "org.gnome.Sdk",
     "command" : "catalystlab",
     "finish-args" : [
@@ -11,7 +11,7 @@
         "--socket=fallback-x11",
         "--socket=wayland",
         "--device=dri",
-	"--device=kvm",
+        "--device=kvm",
         "--filesystem=host:ro",
         "--filesystem=home",
         "--filesystem=xdg-run/catalystlab-root-helper:create",
@@ -30,20 +30,30 @@
         "*.a"
     ],
     "modules" : [
-    	"dependencies/python3-requests.json",
-	"dependencies/squashfs-tools.json",
-	"dependencies/bwrap.json",
+        "dependencies/python3-requests.json",
+        "dependencies/squashfs-tools.json",
+        "dependencies/bwrap.json",
         {
             "name" : "catalystlab",
             "builddir" : true,
             "buildsystem" : "meson",
-            "config-opts" : ["--libdir=lib"],
-            "build-commands": [],
+            "config-opts" : [
+                "--libdir=lib"
+            ],
             "sources" : [
                 {
-                    "type" : "git",
-                    "branch" : "main",
-                    "url" : "https://github.com/damiandudycz/catalyst-lab-2"
+                    "type" : "dir",
+                    "path" : "../..",
+                    "skip" : [
+                        ".git",
+                        ".build",
+                        ".build-flatpak",
+                        ".build-macos",
+                        ".build-macos-app",
+                        ".flatpak-builder",
+                        ".claude",
+                        "dist"
+                    ]
                 }
             ]
         }

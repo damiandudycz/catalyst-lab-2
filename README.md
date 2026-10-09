@@ -118,8 +118,15 @@ The deploy wizard handles:
 ### Linux: Flatpak
 
 ```bash
-flatpak-builder --user --install --force-clean .flatpak-build com.damiandudycz.CatalystLab.json
+packaging/flatpak/build.sh --install
 ```
+
+Builds the Flatpak from this checkout with `flatpak-builder` (GNOME runtime 51 from Flathub) and installs it for your
+user. Run it with `flatpak run com.damiandudycz.CatalystLab`.
+- bubblewrap, squashfs-tools and Python packages are downloaded as pinned sources and built into the Flatpak.
+- Options:
+  - `--bundle` creates `dist/CatalystLab.flatpak`, which can be installed on other computers;
+  - `--clean` starts from scratch.
 
 ### Linux: directly on the host
 
@@ -150,13 +157,22 @@ tools and Lima, so it runs on Macs without Homebrew.
 
 ### Running from the checkout
 
-- **Linux:** use GNOME Builder, the Flatpak manifest or `install.sh`.
+- **Linux:** use GNOME Builder with `packaging/flatpak/com.damiandudycz.CatalystLab.json`,
+  `packaging/flatpak/build.sh` or `install.sh`.
 - **macOS:**
   ```bash
   brew install gtk4 libadwaita pygobject3 meson ninja squashfs lima
   ./run-macos.sh
   ```
   It uses your real Catalyst Lab folder and settings. Build files are kept in `.build-macos`.
+
+### Updating Flatpak dependencies
+
+- **Python packages:** `packaging/flatpak/update-python-dependencies.sh` regenerates
+  `packaging/flatpak/dependencies/python3-requests.json` with the newest versions, using `flatpak-pip-generator.py`
+  from [flatpak-builder-tools](https://github.com/flatpak/flatpak-builder-tools).
+- **bubblewrap and squashfs-tools:** update the release URL and `sha256` in their files in
+  `packaging/flatpak/dependencies/`.
 
 ### Project layout
 
@@ -165,8 +181,8 @@ tools and Lima, so it runs on Macs without Homebrew.
 | `src/objects/` | Model and logic: projects, builds, toolsets, virtual machines, snapshots, deploy, root helper |
 | `src/ui/` | Views (`.py` + `.ui` templates) and app sections |
 | `data/` | Icons, desktop file, metainfo and GSettings schema |
+| `packaging/flatpak/` | Flatpak manifest, its modules (bubblewrap, squashfs-tools, Python packages) and build scripts |
 | `packaging/macos/` | macOS application bundle |
-| `dependencies/` | Flatpak modules (bwrap, squashfs-tools, Python packages) |
 
 ### Window structure
 

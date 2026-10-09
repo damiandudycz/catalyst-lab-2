@@ -4,3 +4,6 @@ __pycache__/
 .build-macos/
 .build-macos-app/
 dist/
+.build/
+.build-flatpak/
+.flatpak-builder/
