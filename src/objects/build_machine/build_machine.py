@@ -14,6 +14,8 @@ class BuildMachine:
     STATUS_RUNNING = "Running"
     STATUS_STOPPED = "Stopped"
     STATUS_MISSING = "Missing"
+    STATUS_STARTING = "Starting"   # Displayed while machine is being started or stopped by app.
+    STATUS_STOPPING = "Stopping"
 
     # Delay before stopping unused machine, so it's not restarted between consecutive commands of operation.
     IDLE_STOP_SECONDS = 90
@@ -61,7 +63,15 @@ class BuildMachine:
             self.refresh_status()
         return self._status
 
-    def refresh_status(self):
+    def _set_status(self, status: str):
+        if status != self._status:
+            self._status = status
+            self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    def refresh_status(self, during_transition: bool = False):
+        """Reads status from Lima. While app starts or stops machine, its Starting or Stopping status is kept."""
+        if self._status in (self.STATUS_STARTING, self.STATUS_STOPPING) and not during_transition:
+            return
         instance = list_instances(self.lima_home).get(self.instance_name)
         status = instance.get("status", self.STATUS_STOPPED) if instance else self.STATUS_MISSING
         if status != self._status:
@@ -141,8 +151,11 @@ class BuildMachine:
             if self.status == self.STATUS_MISSING:
                 raise RuntimeError(f"Virtual machine {self.name} doesn't exist anymore")
             output_handler(f"Starting virtual machine {self.name}...")
-            success = run_limactl(["start", self.instance_name], output_handler, process_holder, home=self.lima_home)
-            self.refresh_status()
+            self._set_status(self.STATUS_STARTING)
+            try:
+                success = run_limactl(["start", self.instance_name], output_handler, process_holder, home=self.lima_home)
+            finally:
+                self.refresh_status(during_transition=True)
             if success and self.is_running and automatically:
                 with self._usage_lock:
                     self._started_automatically = True
@@ -155,8 +168,11 @@ class BuildMachine:
                 self._stop_timer.cancel()
                 self._stop_timer = None
         with self._lock:
-            success = run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home)
-            self.refresh_status()
+            self._set_status(self.STATUS_STOPPING)
+            try:
+                success = run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home)
+            finally:
+                self.refresh_status(during_transition=True)
             return success
 
     def ensure_running(self, output_handler=print, process_holder: list | None = None):

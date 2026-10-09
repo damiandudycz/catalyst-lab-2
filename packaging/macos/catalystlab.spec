@@ -39,6 +39,9 @@ a = Analysis(
         },
     },
     excludes=["tkinter"],
+    # Sources are kept next to compiled modules: app sends source of some functions to virtual machines and root
+    # helper (inspect.getsource).
+    module_collection_mode={"catalystlab": "pyz+py"},
 )
 pyz = PYZ(a.pure)
 exe = EXE(

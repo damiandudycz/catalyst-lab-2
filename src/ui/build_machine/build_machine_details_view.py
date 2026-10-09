@@ -134,7 +134,7 @@ class BuildMachineDetailsView(Gtk.Box):
         running = status == BuildMachine.STATUS_RUNNING
         stopped = status == BuildMachine.STATUS_STOPPED
         # Status
-        self.spinner.set_visible(self.working is not None or status is None)
+        self.spinner.set_visible(self.working is not None or status in (None, BuildMachine.STATUS_STARTING, BuildMachine.STATUS_STOPPING))
         self.tag_state.set_label(self.working or status or "Checking")
         for style in ("success", "error"):
             self.tag_state.remove_css_class(style)
