@@ -296,7 +296,11 @@ class GitDirectory(Serializable, ABC):
         if wait:
             thread.join()
 
-    def commit_changes(self, wait: bool = False):
+    DEFAULT_COMMIT_MESSAGE = "Save changes"
+
+    def commit_changes(self, message: str | None = None, wait: bool = False):
+        """Commits all changes of directory, with given message (default one when empty)."""
+        message = (message or "").strip() or self.DEFAULT_COMMIT_MESSAGE
         def worker():
             try:
                 subprocess.run(
@@ -305,7 +309,7 @@ class GitDirectory(Serializable, ABC):
                     check=True
                 )
                 subprocess.run(
-                    ["git", "commit", "-m", "Save changes"],
+                    ["git", "commit", "-m", message],
                     cwd=self.directory_path(),
                     check=True
                 )

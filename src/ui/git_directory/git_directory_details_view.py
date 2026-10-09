@@ -51,6 +51,12 @@ class GitDirectoryDetailsView(Gtk.Box):
         self.git_directory = git_directory
         self.manager_class = manager_class
         self.update_class = update_class
+        # Actions of Save changes menu are inserted before view is added to window. Inserted later (when realized),
+        # menu items don't find them and stay disabled.
+        self._changes_action_group = Gio.SimpleActionGroup()
+        self._add_changes_action("save_changes", self.save_changes)
+        self._add_changes_action("discard_changes", self.discard_changes)
+        self.insert_action_group("changes", self._changes_action_group)
         self.connect("realize", self.on_realize)
 
     def setup(self, git_directory: GitDirectory, content_navigation_view: Adw.NavigationView | None = None):
@@ -64,10 +70,6 @@ class GitDirectoryDetailsView(Gtk.Box):
             self.manager_class = globals().get(self.manager_class_name)
         if self.update_class_name and self.update_class is None:
             self.update_class = globals().get(self.update_class_name)
-        self._changes_action_group = Gio.SimpleActionGroup()
-        self._add_changes_action("save_changes", self.save_changes)
-        self._add_changes_action("discard_changes", self.discard_changes)
-        self.insert_action_group("changes", self._changes_action_group)
         self.setup_git_directory_details()
         self.setup_git_directory_logs()
         self.load_update_state()
@@ -223,10 +225,27 @@ class GitDirectoryDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_save_changes_clicked(self, sender):
-        self.git_directory.commit_changes()
+        self.ask_commit_message()
 
     def save_changes(self, action, param):
-        self.git_directory.commit_changes()
+        self.ask_commit_message()
+
+    def ask_commit_message(self):
+        """Dialog with commit message of saved changes."""
+        entry = Gtk.Entry(placeholder_text=self.git_directory.DEFAULT_COMMIT_MESSAGE, activates_default=True)
+        dialog = Adw.AlertDialog(heading="Save changes", body="Describe the changes, they are committed to Git repository of this directory.",
+                                 extra_child=entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Save")
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("save")
+        dialog.set_close_response("cancel")
+        def on_response(dialog, response):
+            if response == "save":
+                self.git_directory.commit_changes(message=entry.get_text())
+        dialog.connect("response", on_response)
+        dialog.present(self.get_root())
+        entry.grab_focus()
 
     def discard_changes(self, action, param):
         self.git_directory.discard_changes()
