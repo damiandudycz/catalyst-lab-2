@@ -36,6 +36,10 @@ catalystlab_sources = [
   'objects/global_objects/event_bus.py',
   'objects/global_objects/helper_functions.py',
   'objects/global_objects/rootless.py',
+  'objects/build_machine/lima.py',
+  'objects/build_machine/build_machine.py',
+  'objects/build_machine/build_machine_manager.py',
+  'objects/build_machine/build_machine_installation.py',
   'objects/global_objects/modules_scanner.py',
   'objects/global_objects/multistage_process.py',
   'objects/global_objects/repositories.py',
@@ -123,6 +127,8 @@ catalystlab_sources = [
   'ui/snapshot/snapshot_create_view.py',
   'ui/snapshot/snapshot_details_view.py',
   'ui/toolset/toolset_create_view.py',
+  'ui/build_machine/build_machine_create_view.py',
+  'ui/build_machine/build_machine_details_view.py',
   'ui/toolset/toolset_details_view.py',
 ]
 

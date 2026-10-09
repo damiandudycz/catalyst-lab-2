@@ -54,8 +54,12 @@ class SnapshotManager:
         Repository.Snapshot.value.append(snapshot)
 
     def remove_snapshot(self, snapshot: Snapshot):
-        from .rootless import remove_extracted_squashfs
+        from .rootless import remove_extracted_squashfs, MachineExecutor
         remove_extracted_squashfs(snapshot.file_path(), kind="snapshots")
+        # Snapshots are extracted in machines that built with them, running ones are cleaned too.
+        for machine in Repository.BuildMachine.value:
+            if machine.is_running:
+                remove_extracted_squashfs(snapshot.file_path(), kind="snapshots", executor=MachineExecutor(machine))
         if os.path.isfile(snapshot.file_path()):
             os.remove(snapshot.file_path())
         Repository.Snapshot.value.remove(snapshot)

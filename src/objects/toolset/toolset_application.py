@@ -91,14 +91,8 @@ ToolsetApplication.LINUX_HEADERS = ToolsetApplication(
         ),
 )
 def toolset_additional_analysis_qemu(app: ToolsetApplication, toolset: 'Toolset', metadata: dict[str, Any]):
-    from .toolset import Toolset
-    bin_directory = Path(toolset.toolset_root()) / "bin"
-    qemu_systems = Emulation.get_all_qemu_systems()
-    found_qemu_binaries = []
-    for qemu_binary in qemu_systems:
-        binary_path = bin_directory / qemu_binary
-        if binary_path.is_file():
-            found_qemu_binaries.append(qemu_binary)
+    binaries = {name for name, kind in toolset.list_toolset_directory("bin") or [] if kind == "file"}
+    found_qemu_binaries = [qemu_binary for qemu_binary in Emulation.get_all_qemu_systems() if qemu_binary in binaries]
     metadata.setdefault(app.package, {})["interpreters"] = found_qemu_binaries
 
 ToolsetApplication.QEMU = ToolsetApplication(

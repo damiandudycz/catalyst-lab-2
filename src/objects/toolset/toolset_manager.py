@@ -54,7 +54,8 @@ class ToolsetManager:
 
     def remove_toolset(self, toolset: Toolset):
         from .rootless import remove_extracted_squashfs
-        remove_extracted_squashfs(toolset.file_path(), kind="toolsets")
+        if toolset.machine is None or toolset.machine.is_running: # Stopped machine is not started only to clean up.
+            remove_extracted_squashfs(toolset.file_path(), kind="toolsets", executor=toolset.executor)
         if os.path.isfile(toolset.file_path()):
             os.remove(toolset.file_path())
         Repository.Toolset.value.remove(toolset)
@@ -70,7 +71,8 @@ class ToolsetManager:
             raise RuntimeError(f"Toolset name {name} is not available")
         new_path = Toolset.file_path_for_name(name=name)
         from .rootless import remove_extracted_squashfs
-        remove_extracted_squashfs(toolset.file_path(), kind="toolsets") # Extracted again for new file name when needed.
+        if toolset.machine is None or toolset.machine.is_running: # Extracted again for new file name when needed.
+            remove_extracted_squashfs(toolset.file_path(), kind="toolsets", executor=toolset.executor)
         shutil.move(toolset.file_path(), new_path)
         toolset.name = name
         Repository.Toolset.save()

@@ -68,11 +68,11 @@ from catalyst.main import main
 main(sys.argv[1:])
 '''
 
-def stage_build_session_script(toolset_path: str, bindings: list[tuple[str, str]], command: str,
+def stage_build_session_script(executor, toolset_path: str, bindings: list[tuple[str, str]], command: str,
                                diagnostics_command: str | None = None) -> str:
     """Script running command in toolset root (overlay over extracted toolset, changes are discarded), with host
     folders bound at given paths (host path, path in toolset). Diagnostics command runs after failure."""
-    session = os.path.join(sessions_directory(), f"build-{uuid.uuid4().hex}")
+    session = os.path.join(sessions_directory(executor), f"build-{uuid.uuid4().hex}")
     q = shlex.quote
     binds = "\n".join(f"bind {q(host)} {q(target)}" for host, target in bindings)
     diagnostics = f'[ $status != 0 ] && chroot "$ROOT" /usr/bin/env -i HOME=/tmp TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin {diagnostics_command} < /dev/null' if diagnostics_command else ""

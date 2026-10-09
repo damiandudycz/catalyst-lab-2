@@ -13,9 +13,7 @@ from .toolset import BindMount
 from .toolset_env_builder import ToolsetEnvBuilder
 from .project_stage_arguments import StageArgumentDetails
 from .project_stage_cache import CACHE_ARGUMENTS, stage_cache_path
-from .rootless import (
-    rootless_unsupported_reason, extracted_squashfs, remove_stale_sessions, distfiles_directory, run_in_namespace
-)
+from .rootless import extracted_squashfs, remove_stale_sessions, distfiles_directory
 from .project_build_rootless import stage_build_session_script, CATALYST_WRAPPER
 from .project_build import StageBuild, StageBuildStatus, StageBuildPlan, project_builds_directory, stage_builds_directory
 from .project_build_spec import (
@@ -47,8 +45,11 @@ class ProjectBuild(MultiStageProcess):
         self.failed_stage_ids: set = set()
         # Builds run without root privileges in user namespace when system supports it, otherwise in toolset spawned
         # by root helper.
-        self.rootless_unsupported_reason = rootless_unsupported_reason()
-        self.rootless = self.rootless_unsupported_reason is None
+        # Builds of toolsets linked to virtual machine run in that machine (always without root privileges).
+        self.machine = self.toolset.machine if self.toolset else None
+        self.executor = self.toolset.executor if self.toolset else None
+        self.rootless_unsupported_reason = self.executor.unsupported_reason() if self.executor and not self.machine else None
+        self.rootless = self.machine is not None or self.rootless_unsupported_reason is None
         self.rootless_toolset_path: str | None = None # Extracted toolset and snapshot, set when preparing toolset.
         self.rootless_snapshot_path: str | None = None
         super().__init__(title=f"Building {project_directory.name}")
@@ -86,11 +87,29 @@ class ProjectBuild(MultiStageProcess):
         return paths
 
     def stage_cache_paths(self, stage) -> dict:
-        """Host folders of enabled caches of stage, by argument."""
-        return {
+        """Folders of enabled caches of stage, by argument. Automatic caches of machine builds are on disk of machine
+        (shared folders can't store owners of files that portage sets), at the same path relative to rootless directory."""
+        paths = {
             argument: path for argument in CACHE_ARGUMENTS
             if (path := stage_cache_path(self.project_directory, stage, argument))
         }
+        if self.machine:
+            builds_location = os.path.dirname(self.builds_directory)
+            paths = {
+                argument: os.path.join(self.executor.rootless_directory(), "caches", os.path.relpath(path, builds_location))
+                if path.startswith(self.builds_directory + os.sep) else path
+                for argument, path in paths.items()
+            }
+        return paths
+
+    def make_directories(self, paths: list[str]):
+        """Creates directories, ones in rootless directory of machine are created in machine."""
+        machine_paths = [path for path in paths if self.machine and path.startswith(self.executor.rootless_directory() + os.sep)]
+        for path in paths:
+            if path not in machine_paths:
+                os.makedirs(path, exist_ok=True)
+        if machine_paths:
+            self.executor.filesystem({"mkdir": machine_paths})
 
     def seed_subpath(self, stage) -> str | None:
         """Seed of stage, relative to builds directory, without extension (as catalyst expects source_subpath)."""
@@ -230,18 +249,21 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
     def _prepare_rootless(self):
         """Extracts toolset and snapshot (once for every version of their files), used by stage builds."""
         process = self.multistage_process
-        self.log("Building without root privileges, in user namespace")
-        remove_stale_sessions(self.log, self.namespace_processes)
+        executor = process.executor
+        if process.machine:
+            self.log(f"Building in virtual machine {process.machine.name}, without root privileges")
+            process.machine.ensure_running(self.log, self.namespace_processes)
+        else:
+            self.log("Building without root privileges, in user namespace")
+        remove_stale_sessions(self.log, self.namespace_processes, executor=executor)
         process.rootless_toolset_path = extracted_squashfs(
-            process.toolset.file_path(), "toolsets", self.log, self.namespace_processes, check_path="bin/bash")
+            process.toolset.file_path(), "toolsets", self.log, self.namespace_processes, check_path="bin/bash", executor=executor)
         snapshot = process.project_directory.get_snapshot()
         if snapshot is None:
             raise RuntimeError("Project has no snapshot")
         process.rootless_snapshot_path = extracted_squashfs(
-            snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles")
-        os.makedirs(distfiles_directory(), exist_ok=True)
-        for path in process.mirrored_paths():
-            os.makedirs(path, exist_ok=True)
+            snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles", executor=executor)
+        process.make_directories([distfiles_directory(executor)] + process.mirrored_paths())
     def required_bindings(self) -> list[BindMount]:
         process = self.multistage_process
         bindings = [
@@ -338,8 +360,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             portage_path = os.path.join(work_directory, "portage")
             has_confdir = generate_portage_confdir(project, self.stage, portage_path)
             cache_paths = process.stage_cache_paths(self.stage)
-            for path in cache_paths.values():
-                os.makedirs(path, exist_ok=True)
+            process.make_directories(list(cache_paths.values()))
             spec = generate_stage_spec(project, self.stage, StageSpecContext(
                 timestamp=process.timestamp,
                 source_subpath=source_subpath,
@@ -408,16 +429,17 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
         bindings = [
             (process.builds_directory, CATALYST_BUILDS_PATH),
             (process.rootless_snapshot_path, f"{CATALYST_SNAPSHOTS_PATH}/gentoo-{snapshot_treeish(process.project_directory)}.sqfs"),
-            (distfiles_directory(), "/var/cache/distfiles"),
+            (distfiles_directory(process.executor), "/var/cache/distfiles"),
         ] + [(path, path) for path in process.mirrored_paths()]
         script = stage_build_session_script(
+            executor=process.executor,
             toolset_path=process.rootless_toolset_path,
             bindings=bindings,
             command=f'bash "{process.container_path(build_script_path)}"',
             diagnostics_command=f'bash "{process.container_path(diagnostics_path)}"' if diagnostics_path else None,
         )
         self.log(f"$ bash {process.container_path(build_script_path)}")
-        return run_in_namespace(script, self.log, self.namespace_processes)
+        return process.executor.run_in_namespace(script, self.log, self.namespace_processes)
 
     def _run_diagnostics(self, spec: str, work_directory: str):
         """Collects details about chroot left by failed catalyst build. Catalyst hides errors of some scripts

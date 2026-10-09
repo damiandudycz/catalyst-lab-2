@@ -7,7 +7,8 @@ from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .repository import Repository
 from .toolset import Toolset, ToolsetEnv
 from .helper_functions import create_work_directory, delete_work_directory, create_squashfs, extract
-from .rootless import rootless_toolset_unsupported_reason, extract_tarball
+from .rootless import rootless_toolset_unsupported_reason, extract_tarball, executor_for_machine, remove_in_namespace
+from .rootless import create_work_directory as create_rootless_work_directory
 from .toolset_manager import ToolsetManager
 
 from .multistage_process import (
@@ -22,14 +23,17 @@ from .multistage_process import (
 @final
 class ToolsetInstallation(MultiStageProcess):
     """Handles the full toolset installation lifecycle."""
-    def __init__(self, alias: str, stage_url: ParseResult, allow_binpkgs: bool, apps_selection: list[ToolsetApplicationSelection]):
+    def __init__(self, alias: str, stage_url: ParseResult, allow_binpkgs: bool, apps_selection: list[ToolsetApplicationSelection], machine=None):
         self.alias = alias
         self.stage_url = stage_url
         self.allow_binpkgs = allow_binpkgs
         self.apps_selection = apps_selection
         self._process_selected_apps()
-        # Toolset is installed without root privileges (in user namespace) when system supports it.
-        self.rootless = rootless_toolset_unsupported_reason() is None
+        # Toolset is installed in virtual machine when given, or on this computer. It's installed without root
+        # privileges (in user namespace) in machines and when this computer supports it.
+        self.machine = machine
+        self.executor = executor_for_machine(machine)
+        self.rootless = machine is not None or rootless_toolset_unsupported_reason() is None
         super().__init__(title="Toolset installation")
 
     def setup_stages(self):
@@ -134,8 +138,11 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
             total_size = int(response.headers.get('content-length', 0))
             downloaded = 0
             chunk_size = 1024 * 1024 # 1MB chunks.
-            os.makedirs('/tmp/catalystlab', exist_ok=True)
-            with tempfile.NamedTemporaryFile(delete=False, dir='/tmp/catalystlab') as tmp_file:
+            # Machines see only shared folders of Catalyst Lab.
+            downloads_directory = os.path.join(os.path.dirname(os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location))), ".downloads") \
+                if self.multistage_process.machine else '/tmp/catalystlab'
+            os.makedirs(downloads_directory, exist_ok=True)
+            with tempfile.NamedTemporaryFile(delete=False, dir=downloads_directory) as tmp_file:
                 self.multistage_process.tmp_stage_file = tmp_file
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if self._cancel_event.is_set():
@@ -168,9 +175,11 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            self.multistage_process.tmp_stage_extract_dir = create_work_directory(
-                prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/setup_",
-                rootless=self.multistage_process.rootless)
+            prefix = f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/setup_"
+            if self.multistage_process.machine:
+                self.multistage_process.tmp_stage_extract_dir = create_rootless_work_directory(prefix=prefix, executor=self.multistage_process.executor)
+            else:
+                self.multistage_process.tmp_stage_extract_dir = create_work_directory(prefix=prefix, rootless=self.multistage_process.rootless)
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -190,7 +199,8 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
                     tarball=self.multistage_process.tmp_stage_file.name,
                     directory=self.multistage_process.tmp_stage_extract_dir,
                     output_handler=output_handler,
-                    process_holder=self.namespace_processes
+                    process_holder=self.namespace_processes,
+                    executor=self.multistage_process.executor
                 )
             else:
                 self.server_call = extract._async_raw(
@@ -211,7 +221,10 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
         if not super().cleanup():
             return False
         if hasattr(self.multistage_process, "tmp_stage_extract_dir") and self.multistage_process.tmp_stage_extract_dir:
-            delete_work_directory(self.multistage_process.tmp_stage_extract_dir)
+            if self.multistage_process.machine:
+                remove_in_namespace([self.multistage_process.tmp_stage_extract_dir], print, executor=self.multistage_process.executor)
+            else:
+                delete_work_directory(self.multistage_process.tmp_stage_extract_dir)
             return True
         return False
 
@@ -223,7 +236,8 @@ class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
         super().start()
         try:
             toolset_name = self.multistage_process.name()
-            self.multistage_process.toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_binding_dir=self.multistage_process.tmp_stage_extract_dir)
+            self.multistage_process.toolset = Toolset(ToolsetEnv.EXTERNAL, uuid.uuid4(), toolset_name, squashfs_binding_dir=self.multistage_process.tmp_stage_extract_dir,
+                machine_id=self.multistage_process.machine.id if self.multistage_process.machine else None)
             now = int(time.time())
             self.multistage_process.toolset.metadata['date_created'] = now
             self.multistage_process.toolset.metadata['date_updated'] = now
@@ -296,17 +310,16 @@ class ToolsetInstallationStepInstallApp(ToolsetInstallationStep):
                 if match:
                     n, m = map(int, match.groups())
                     return n / m
-            if self.app_selection.version.config:
-                for config in self.app_selection.version.config:
-                    if self._cancel_event.is_set():
-                        return
-                    insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app_selection.app.name, toolset_root=self.multistage_process.toolset.toolset_root())
-            for patch_file in self.app_selection.patches:
-                file_input_stream = patch_file.read()
-                file_info = file_input_stream.query_info("standard::size", None)
-                file_size = file_info.get_size()
-                patch_content = file_input_stream.read_bytes(file_size, None).get_data().decode()
-                insert_portage_patch(patch_content=patch_content, patch_filename=patch_file.get_basename(), app_package=self.app_selection.app.package, toolset_root=self.multistage_process.toolset.toolset_root())
+            files = {
+                portage_config_path(config.directory, self.app_selection.app.name): "".join(entry + "\n" for entry in config.entries)
+                for config in (self.app_selection.version.config or [])
+            }
+            files.update({
+                portage_patch_path(self.app_selection.app.package, patch_file.get_basename()): read_patch_content(patch_file)
+                for patch_file in self.app_selection.patches
+            })
+            if files:
+                self.multistage_process.toolset.write_portage_files(files)
             flags = "--getbinpkg --deep --update --changed-use" if self.multistage_process.allow_binpkgs else "--deep --update --changed-use"
             result = self.run_command_in_toolset(command=f"emerge {flags} {self.app_selection.app.package}", progress_handler=progress_handler)
             self.complete(MultiStageProcessStageState.COMPLETED if result else MultiStageProcessStageState.FAILED)
@@ -336,20 +349,19 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            self.toolset_squashfs_dir = create_work_directory(
-                prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/compress_",
-                rootless=self.multistage_process.rootless)
-            self.toolset_squashfs_file = os.path.join(self.toolset_squashfs_dir, "toolset.squashfs")
-            self.squashfs_process = create_squashfs(source_directory=self.multistage_process.toolset.toolset_root(), output_file=self.toolset_squashfs_file)
+            # Packed next to final file (toolsets folder is shared with machines), moved when finished.
+            file_path = self.multistage_process.toolset.file_path()
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            self.toolset_squashfs_file = file_path + ".tmp"
+            self.squashfs_process = self.multistage_process.toolset.create_squashfs(output_file=self.toolset_squashfs_file)
             for line in self.squashfs_process.stdout:
                 line = line.strip()
                 if line.isdigit():
                     percent = int(line)
                     self._update_progress(percent / 100.0)
-            self.squashfs_process.wait()
+            if self.squashfs_process.wait() != 0:
+                raise RuntimeError("Failed to create squashfs file")
             self.squashfs_process = None
-            file_path = self.multistage_process.toolset.file_path()
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
             shutil.move(self.toolset_squashfs_file, file_path)
             self.multistage_process.toolset.unspawn(rebuild_squashfs_if_needed=False, clean_squashfs_binding_dir=False) # Need to unspawn now, to prevent issues with unmounting after squashfs_file was set
             self.complete(MultiStageProcessStageState.COMPLETED)
@@ -360,12 +372,11 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
         if not super().cleanup():
             return False
         if self.state != MultiStageProcessStageState.COMPLETED:
-            if self.toolset_squashfs_file and os.path.isfile(self.toolset_squashfs_file):
+            if getattr(self, "toolset_squashfs_file", None) and os.path.isfile(self.toolset_squashfs_file):
                 os.remove(self.toolset_squashfs_file)
-            if os.path.isfile(self.multistage_process.toolset.file_path):
-                os.remove(self.multistage_process.toolset.file_path)
-        if self.toolset_squashfs_dir:
-            delete_work_directory(path=self.toolset_squashfs_dir)
+            if os.path.isfile(self.multistage_process.toolset.file_path()):
+                os.remove(self.multistage_process.toolset.file_path())
+        return True
     def cancel(self):
         super().cancel()
         proc = self.squashfs_process
@@ -378,23 +389,24 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
         self.squashfs_process = None
 
 @root_function
-def insert_portage_config(config_dir: str, config_entries: list[str], app_name: str, toolset_root: str):
-    portage_dir = os.path.join(toolset_root, "etc", "portage", config_dir)
-    os.makedirs(portage_dir, exist_ok=True)
-    filename = app_name.replace("/", "_")
-    config_file_path = os.path.join(portage_dir, filename)
-    with open(config_file_path, "w") as f:
-        for line in config_entries:
-            f.write(line + "\n")
+def insert_portage_file(relative_path: str, content: str, toolset_root: str):
+    """Writes file in /etc/portage of toolset."""
+    path = os.path.join(toolset_root, "etc", "portage", relative_path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
 
-@root_function
-def insert_portage_patch(patch_content: str, patch_filename: str, app_package: str, toolset_root: str):
-    portage_dir = os.path.join(toolset_root, "etc", "portage", "patches", app_package)
-    os.makedirs(portage_dir, exist_ok=True)
-    patch_file_path = os.path.join(portage_dir, patch_filename)
-    with open(patch_file_path, "w", encoding="utf-8") as f:
-        f.write(patch_content)
+insert_portage_file = local_for_rootless_paths(insert_portage_file, path_argument="toolset_root")
 
-insert_portage_config = local_for_rootless_paths(insert_portage_config, path_argument="toolset_root")
-insert_portage_patch = local_for_rootless_paths(insert_portage_patch, path_argument="toolset_root")
+def portage_config_path(config_dir: str, app_name: str) -> str:
+    """Path of app configuration file, relative to /etc/portage."""
+    return os.path.join(config_dir, app_name.replace("/", "_"))
 
+def portage_patch_path(app_package: str, patch_filename: str) -> str:
+    """Path of app patch, relative to /etc/portage."""
+    return os.path.join("patches", app_package, patch_filename)
+
+def read_patch_content(patch_file) -> str:
+    file_input_stream = patch_file.read()
+    file_size = file_input_stream.query_info("standard::size", None).get_size()
+    return file_input_stream.read_bytes(file_size, None).get_data().decode()
