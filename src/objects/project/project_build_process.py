@@ -14,7 +14,7 @@ from .toolset_env_builder import ToolsetEnvBuilder
 from .project_stage_arguments import StageArgumentDetails
 from .project_stage_cache import CACHE_ARGUMENTS, stage_cache_path
 from .rootless import extracted_squashfs, remove_stale_sessions, distfiles_directory
-from .project_build_rootless import stage_build_session_script, CATALYST_WRAPPER
+from .project_build_rootless import stage_build_session_script, save_interrupted_caches, CATALYST_WRAPPER
 from .project_build import StageBuild, StageBuildStatus, StageBuildPlan, project_builds_directory, stage_builds_directory
 from .project_build_spec import (
     StageSpecContext, generate_stage_spec, generate_portage_confdir, generate_root_overlay, seed_name_prefix, select_seed_url, snapshot_treeish
@@ -300,6 +300,11 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         if self.spawned:
             toolset.unspawn(rebuild_squashfs_if_needed=False)
         if getattr(self, "workspace_acquired", False):
+            # Working space is deleted with caches changed by cancelled build, they are saved first.
+            try:
+                save_interrupted_caches(self.multistage_process.executor, self.log)
+            except Exception as e:
+                self.log(f"Failed to save caches: {e}")
             self.multistage_process.machine.release_workspace(self.log)
         if self.reserved:
             toolset.release()

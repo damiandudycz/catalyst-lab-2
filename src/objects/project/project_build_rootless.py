@@ -5,6 +5,16 @@ from .rootless import sessions_directory
 # ------------------------------------------------------------------------------
 # Building stage.
 
+# Copies changes of synced cache (upper layer of its overlay) to saved cache: new and changed files, and deletions
+# (whiteouts, character devices). Hidden files are skipped, they are unfinished files of interrupted builds.
+_SAVE_CACHE_CHANGES = r'''save_cache_changes() {
+    upper=$1; saved=$2
+    mkdir -p "$saved"
+    ( cd "$upper" && find . -type c ) | while read -r path; do rm -rf -- "$saved/$path"; done
+    ( cd "$upper" && find . \( -type f -o -type l \) ! -name '.*' -print0 | xargs -0 -r cp -a --no-preserve=ownership --parents -t "$saved" ) \
+        || echo "Failed to save cache $saved"
+}'''
+
 # Runs catalyst with mounts adjusted for user namespace. Catalyst itself is not modified.
 CATALYST_WRAPPER = '''import os, shutil, subprocess, sys
 import libmount
@@ -73,7 +83,8 @@ def stage_build_session_script(executor, toolset_path: str, bindings: list[tuple
     """Script running command in toolset root (overlay over extracted toolset, changes are discarded), with host
     folders bound at given paths (host path, path in toolset). Diagnostics command runs after failure.
     Synced caches (saved path, path used by build) are mounted at used path as overlay over saved path, and changes
-    are copied back after build (also when it fails, to keep downloaded files). Saved caches are plain files."""
+    are copied back after build (also when it fails, to keep downloaded files). Saved caches are plain files.
+    When build is interrupted, changes stay in session and are saved by save_interrupted_caches."""
     session = os.path.join(sessions_directory(executor), f"build-{uuid.uuid4().hex}")
     q = shlex.quote
     binds = "\n".join(f"bind {q(host)} {q(target)}" for host, target in bindings)
@@ -82,6 +93,7 @@ def stage_build_session_script(executor, toolset_path: str, bindings: list[tuple
     caches = list(enumerate(synced_caches or []))
     sync_in = "\n".join(
         f'mkdir -p {q(saved)} {q(used)} "$SESSION/caches/{index}/upper" "$SESSION/caches/{index}/work" && '
+        f'echo {q(saved)} > "$SESSION/caches/{index}/saved" && '
         f'mount -t overlay overlay -o lowerdir={q(saved)},upperdir="$SESSION/caches/{index}/upper",workdir="$SESSION/caches/{index}/work" {q(used)} '
         f'|| {{ echo "Failed to use cache {saved}"; exit 1; }}'
         for index, (saved, used) in caches)
@@ -96,16 +108,16 @@ cleanup() {{
     cd /
     umount -R -l "$ROOT" 2>/dev/null
     # Mounts are on merged root, upper and work contain only files of this session.
-    rm -rf --one-file-system "$UPPER" "$WORK" "$SESSION/caches"
+    rm -rf --one-file-system "$UPPER" "$WORK"
+    # Changes of caches are kept until they are saved.
+    [ -n "${{CACHES_SAVED:-}}" ] && rm -rf --one-file-system "$SESSION/caches"
     rmdir "$ROOT" "$SESSION" 2>/dev/null
 }}
 trap cleanup EXIT
+{_SAVE_CACHE_CHANGES}
 save_cache() {{
-    upper=$1; used=$2; saved=$3
-    umount "$used"
-    ( cd "$upper" && find . -type c ) | while read -r path; do rm -rf -- "$saved/$path"; done
-    ( cd "$upper" && find . \\( -type f -o -type l \\) -print0 | xargs -0 -r cp -a --no-preserve=ownership --parents -t "$saved" ) \
-        || echo "Failed to save cache $saved"
+    umount "$2"
+    save_cache_changes "$1" "$3"
 }}
 mkdir -p "$ROOT" "$UPPER" "$WORK" || exit 1
 mount -t overlay overlay -o lowerdir={q(toolset_path)},upperdir="$UPPER",workdir="$WORK" "$ROOT" || exit 1
@@ -121,6 +133,24 @@ bind() {{
 chroot "$ROOT" /usr/bin/env -i HOME=/tmp TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin {command} < /dev/null
 status=$?
 {sync_out}
+CACHES_SAVED=1
 {diagnostics}
 exit $status
 """
+
+def save_interrupted_caches(executor, output_handler, process_holder: list | None = None) -> bool:
+    """Saves changes of synced caches left by interrupted builds (eg. cancelled), which didn't copy them back, and
+    removes their sessions. Packages and sources they downloaded or built are kept this way."""
+    q = shlex.quote
+    sessions = q(sessions_directory(executor))
+    script = f"""
+{_SAVE_CACHE_CHANGES}
+for manifest in {sessions}/build-*/caches/*/saved; do
+    [ -f "$manifest" ] || continue
+    directory=$(dirname "$manifest"); saved=$(cat "$manifest")
+    echo "Saving cache of interrupted build: $saved"
+    save_cache_changes "$directory/upper" "$saved"
+done
+rm -rf --one-file-system {sessions}/build-*
+"""
+    return executor.run_in_namespace(script, output_handler, process_holder)
