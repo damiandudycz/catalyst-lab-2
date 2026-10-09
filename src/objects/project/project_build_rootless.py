@@ -72,17 +72,22 @@ def stage_build_session_script(executor, toolset_path: str, bindings: list[tuple
                                diagnostics_command: str | None = None, synced_caches: list[tuple[str, str]] | None = None) -> str:
     """Script running command in toolset root (overlay over extracted toolset, changes are discarded), with host
     folders bound at given paths (host path, path in toolset). Diagnostics command runs after failure.
-    Synced caches (saved path, path used by build) are copied to used path before build, and their new files back to
-    saved path after it (also when it fails, to keep downloaded files). Saved caches are plain files, without owners."""
+    Synced caches (saved path, path used by build) are mounted at used path as overlay over saved path, and changes
+    are copied back after build (also when it fails, to keep downloaded files). Saved caches are plain files."""
     session = os.path.join(sessions_directory(executor), f"build-{uuid.uuid4().hex}")
     q = shlex.quote
     binds = "\n".join(f"bind {q(host)} {q(target)}" for host, target in bindings)
+    # Saved caches are lower layer of overlay (read from shared folder without copying), changes go to upper layer in
+    # session and are copied back after build: new and changed files, and deletions (whiteouts, character devices).
+    caches = list(enumerate(synced_caches or []))
     sync_in = "\n".join(
-        f'mkdir -p {q(saved)} {q(used)} && cp -an --no-preserve=ownership {q(saved)}/. {q(used)}/ || echo "Failed to restore cache {saved}"'
-        for saved, used in synced_caches or [])
+        f'mkdir -p {q(saved)} {q(used)} "$SESSION/caches/{index}/upper" "$SESSION/caches/{index}/work" && '
+        f'mount -t overlay overlay -o lowerdir={q(saved)},upperdir="$SESSION/caches/{index}/upper",workdir="$SESSION/caches/{index}/work" {q(used)} '
+        f'|| {{ echo "Failed to use cache {saved}"; exit 1; }}'
+        for index, (saved, used) in caches)
     sync_out = "\n".join(
-        f'cp -an --no-preserve=ownership {q(used)}/. {q(saved)}/ 2>/dev/null || echo "Failed to save cache {saved}"'
-        for saved, used in synced_caches or [])
+        f'save_cache "$SESSION/caches/{index}/upper" {q(used)} {q(saved)}'
+        for index, (saved, used) in caches)
     diagnostics = f'[ $status != 0 ] && chroot "$ROOT" /usr/bin/env -i HOME=/tmp TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin {diagnostics_command} < /dev/null' if diagnostics_command else ""
     return f"""set -u
 SESSION={q(session)}
@@ -91,10 +96,17 @@ cleanup() {{
     cd /
     umount -R -l "$ROOT" 2>/dev/null
     # Mounts are on merged root, upper and work contain only files of this session.
-    rm -rf --one-file-system "$UPPER" "$WORK"
+    rm -rf --one-file-system "$UPPER" "$WORK" "$SESSION/caches"
     rmdir "$ROOT" "$SESSION" 2>/dev/null
 }}
 trap cleanup EXIT
+save_cache() {{
+    upper=$1; used=$2; saved=$3
+    umount "$used"
+    ( cd "$upper" && find . -type c ) | while read -r path; do rm -rf -- "$saved/$path"; done
+    ( cd "$upper" && find . \\( -type f -o -type l \\) -print0 | xargs -0 -r cp -a --no-preserve=ownership --parents -t "$saved" ) \
+        || echo "Failed to save cache $saved"
+}}
 mkdir -p "$ROOT" "$UPPER" "$WORK" || exit 1
 mount -t overlay overlay -o lowerdir={q(toolset_path)},upperdir="$UPPER",workdir="$WORK" "$ROOT" || exit 1
 mount --rbind /dev "$ROOT/dev" || exit 1

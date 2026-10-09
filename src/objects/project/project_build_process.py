@@ -94,9 +94,10 @@ class ProjectBuild(MultiStageProcess):
             if (path := stage_cache_path(self.project_directory, stage, argument))
         }
         if self.machine:
-            builds_location = os.path.dirname(self.builds_directory)
+            # Project id instead of name, paths in spec can't contain spaces.
+            project_caches = os.path.join(self.executor.rootless_directory(), "caches", self.project_directory.id.hex)
             paths = {
-                argument: os.path.join(self.executor.rootless_directory(), "caches", os.path.relpath(path, builds_location))
+                argument: os.path.join(project_caches, os.path.relpath(path, self.builds_directory))
                 if path.startswith(self.builds_directory + os.sep) else path
                 for argument, path in paths.items()
             }
