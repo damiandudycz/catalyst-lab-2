@@ -201,7 +201,6 @@
                 <child>
                   <object class="AdwPreferencesGroup">
                     <property name="title">System</property>
-                    <property name="description">Root password is required to log in to installed system.</property>
                     <child>
                       <object class="AdwEntryRow" id="hostname_row">
                         <property name="title">Hostname</property>
@@ -209,33 +208,9 @@
                       </object>
                     </child>
                     <child>
-                      <object class="AdwPasswordEntryRow" id="root_password_row">
-                        <property name="title">Root password</property>
-                        <signal name="changed" handler="on_system_changed"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwPasswordEntryRow" id="root_password_confirm_row">
-                        <property name="title">Confirm root password</property>
-                        <signal name="changed" handler="on_system_changed"/>
-                      </object>
-                    </child>
-                    <child>
                       <object class="AdwSwitchRow" id="ssh_row">
                         <property name="title">Enable SSH server</property>
                         <property name="subtitle">Starts sshd on boot, when stage contains it</property>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-                <child>
-                  <object class="AdwPreferencesGroup">
-                    <property name="title">Boot</property>
-                    <child>
-                      <object class="AdwSwitchRow" id="bootloader_row">
-                        <property name="title">Install bootloader</property>
-                        <property name="subtitle">Installs GRUB, when stage contains it (sys-boot/grub). Stage needs a kernel to boot.</property>
-                        <property name="active">True</property>
                       </object>
                     </child>
                     <child>
@@ -251,6 +226,130 @@
                     <property name="wrap">True</property>
                     <style>
                       <class name="error"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 4: Users -->
+        <child>
+          <object class="GtkScrolledWindow" id="users_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Root</property>
+                    <property name="description">Root password is required, root account of stage is locked.</property>
+                    <child>
+                      <object class="AdwPasswordEntryRow" id="root_password_row">
+                        <property name="title">Root password</property>
+                        <signal name="changed" handler="on_users_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPasswordEntryRow" id="root_password_confirm_row">
+                        <property name="title">Confirm root password</property>
+                        <signal name="changed" handler="on_users_changed"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup" id="users_group">
+                    <property name="title">Users</property>
+                    <property name="description">Groups not existing in stage are skipped.</property>
+                    <property name="header-suffix">
+                      <object class="GtkButton">
+                        <property name="child">
+                          <object class="AdwButtonContent">
+                            <property name="icon-name">list-add-symbolic</property>
+                            <property name="label">Add user</property>
+                          </object>
+                        </property>
+                        <signal name="clicked" handler="on_add_user_clicked"/>
+                        <style>
+                          <class name="flat"/>
+                        </style>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="users_status_label">
+                    <property name="visible">False</property>
+                    <property name="wrap">True</property>
+                    <style>
+                      <class name="error"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 5: Boot -->
+        <child>
+          <object class="GtkScrolledWindow" id="boot_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Boot</property>
+                    <child>
+                      <object class="AdwActionRow" id="stage_contents_row">
+                        <property name="title">Stage contents</property>
+                        <property name="subtitle">Checking stage archive...</property>
+                        <child type="suffix">
+                          <object class="AdwSpinner" id="stage_contents_spinner"/>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwComboRow" id="bootloader_row">
+                        <property name="title">Bootloader</property>
+                        <signal name="notify::selected" handler="on_boot_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="kernel_row">
+                        <property name="title">Install kernel</property>
+                        <property name="subtitle">Stage has no kernel. Installs distribution kernel (sys-kernel/gentoo-kernel-bin)</property>
+                        <property name="visible">False</property>
+                        <signal name="notify::active" handler="on_boot_changed"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="boot_info_label">
+                    <property name="wrap">True</property>
+                    <property name="xalign">0</property>
+                    <style>
+                      <class name="dimmed"/>
                     </style>
                   </object>
                 </child>

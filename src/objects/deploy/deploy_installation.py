@@ -1,9 +1,10 @@
 from __future__ import annotations
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
 from .ssh_connection import SSHConnection, quote
-from .deploy_target import TargetMachine, PartitionPlan, grub_target
+from .deploy_target import TargetMachine, PartitionPlan
+from .deploy_boot import Bootloader, StageContents, packages_script, bootloader_script, grub_platform
 
 # ------------------------------------------------------------------------------
 # Deploying stage build (stage3/stage4 tarball) to machine booted from Gentoo LiveCD, through SSH: disk is
@@ -13,11 +14,28 @@ from .deploy_target import TargetMachine, PartitionPlan, grub_target
 MOUNT_POINT = "/mnt/gentoo"
 
 @dataclass
+class DeployUser:
+    name: str
+    password: str
+    full_name: str = ""
+    groups: list[str] = field(default_factory=list)
+
+    @property
+    def gecos(self) -> str:
+        """Comment field of account (fields are separated with commas, entries with colons)."""
+        return self.full_name.replace(",", " ").replace(":", " ").strip()
+
+# Groups suggested for new users.
+DEFAULT_USER_GROUPS = ["wheel", "audio", "video", "usb", "users"]
+
+@dataclass
 class DeploySystemSettings:
     hostname: str | None = None
     root_password: str | None = None
+    users: list[DeployUser] = field(default_factory=list)
     enable_ssh: bool = False
-    install_bootloader: bool = True
+    bootloader: Bootloader = Bootloader.NONE
+    install_kernel: bool = False # Distribution kernel, when stage has none.
     reboot: bool = False
 
 def tar_extract_command(artifact: str) -> str:
@@ -34,13 +52,14 @@ class DeployInstallation(MultiStageProcess):
     """Installs stage build on disk of machine connected through SSH."""
 
     def __init__(self, build, project_name: str, connection: SSHConnection, machine: TargetMachine, plan: PartitionPlan,
-                 settings: DeploySystemSettings):
+                 settings: DeploySystemSettings, contents: StageContents):
         self.build = build
         self.project_name = project_name
         self.connection = connection
         self.machine = machine
         self.plan = plan
         self.settings = settings
+        self.contents = contents
         self.mounted = False
         super().__init__(title="Deploy")
 
@@ -51,12 +70,25 @@ class DeployInstallation(MultiStageProcess):
         self.stages.append(DeployStepMount(multistage_process=self))
         self.stages.append(DeployStepExtract(multistage_process=self))
         self.stages.append(DeployStepConfigure(multistage_process=self))
-        if self.settings.install_bootloader:
+        if self.packages:
+            self.stages.append(DeployStepPackages(multistage_process=self))
+        if self.settings.bootloader != Bootloader.NONE:
             self.stages.append(DeployStepBootloader(multistage_process=self))
         self.stages.append(DeployStepFinish(multistage_process=self))
 
     def name(self) -> str:
         return f"{self.build.stage_name} on {self.connection.host}"
+
+    @property
+    def packages(self) -> list[str]:
+        """Packages installed from Gentoo repository: bootloader missing in stage, and kernel."""
+        packages = []
+        bootloader = self.settings.bootloader
+        if bootloader != Bootloader.NONE and bootloader not in self.contents.bootloaders:
+            packages.append(bootloader.package(self.contents.init))
+        if self.settings.install_kernel:
+            packages.append("sys-kernel/gentoo-kernel-bin")
+        return packages
 
     def complete_process(self, success: bool):
         # Partitions stay mounted after failure, so their files can be checked. Connection is closed.
@@ -138,7 +170,7 @@ class DeployStepExtract(DeployStep):
 
 class DeployStepConfigure(DeployStep):
     def __init__(self, multistage_process):
-        super().__init__(name="Configure system", description="Sets filesystems table, hostname, root password and services", multistage_process=multistage_process)
+        super().__init__(name="Configure system", description="Sets filesystems table, hostname, users and services", multistage_process=multistage_process)
     def run(self):
         process = self.multistage_process
         settings = process.settings
@@ -167,42 +199,52 @@ class DeployStepConfigure(DeployStep):
                 '    echo "Warning: SSH server is not installed in stage"',
                 'fi',
             ]
+        for user in settings.users:
+            # Groups missing in stage are skipped.
+            groups = " ".join(quote(group) for group in user.groups)
+            script += [
+                f'GROUPS_LIST=""; for group in {groups}; do if grep -q "^$group:" "$ROOT/etc/group"; then GROUPS_LIST="$GROUPS_LIST${{GROUPS_LIST:+,}}$group"; else echo "Group $group doesn\'t exist, skipped"; fi; done',
+                f'chroot "$ROOT" useradd -m -s /bin/bash -c {quote(user.gecos)} ${{GROUPS_LIST:+-G "$GROUPS_LIST"}} {quote(user.name)}',
+                f"echo {quote(user.name + ':' + user.password)} | chroot \"$ROOT\" chpasswd",
+                f'echo "User {user.name} created${{GROUPS_LIST:+, groups $GROUPS_LIST}}"',
+            ]
         # Stage3 doesn't contain kernel, system can't boot without it.
-        script += [
-            'if ls "$ROOT"/boot/vmlinu* "$ROOT"/boot/kernel* "$ROOT"/boot/Image* > /dev/null 2>&1; then',
-            '    echo "Kernel: $(cd "$ROOT/boot" && ls vmlinu* kernel* Image* 2>/dev/null | tr \'\\n\' \' \')"',
-            'else',
-            '    echo "Warning: stage doesn\'t contain kernel in /boot, install one before booting (eg. sys-kernel/gentoo-kernel-bin)"',
-            'fi',
-        ]
+        if not settings.install_kernel:
+            script += [
+                'if ls "$ROOT"/boot/vmlinu* "$ROOT"/boot/kernel* "$ROOT"/boot/Image* > /dev/null 2>&1; then',
+                '    echo "Kernel: $(cd "$ROOT/boot" && ls vmlinu* kernel* Image* 2>/dev/null | tr \'\\n\' \' \')"',
+                'else',
+                '    echo "Warning: stage doesn\'t contain kernel in /boot, install one before booting (eg. sys-kernel/gentoo-kernel-bin)"',
+                'fi',
+            ]
         self.remote("\n".join(script) + "\n", "Failed to configure system")
+
+class DeployStepPackages(DeployStep):
+    def __init__(self, multistage_process):
+        super().__init__(name="Install packages", description="Installs packages missing in stage from Gentoo repository", multistage_process=multistage_process)
+    def run(self):
+        process = self.multistage_process
+        platform = grub_platform(process.machine.architecture, process.machine.uefi) if "sys-boot/grub" in process.packages else None
+        script = f"ROOT={MOUNT_POINT}\n" + packages_script(process.packages, platform, process.contents.init)
+        self.remote(script, "Failed to install packages, machine needs internet connection")
 
 class DeployStepBootloader(DeployStep):
     def __init__(self, multistage_process):
-        super().__init__(name="Install bootloader", description="Installs GRUB, when stage contains it", multistage_process=multistage_process)
+        bootloader = multistage_process.settings.bootloader
+        super().__init__(name="Install bootloader", description=f"Installs and configures {bootloader.display_name}", multistage_process=multistage_process)
     def run(self):
         process = self.multistage_process
-        target = grub_target(process.machine.architecture, process.machine.uefi)
-        if target is None:
-            self.log(f"GRUB is not supported on {process.machine.architecture} with {'UEFI' if process.machine.uefi else 'BIOS'} firmware, bootloader was not installed")
-            return
-        if process.machine.uefi:
-            install = f"grub-install --target={target} --efi-directory=/efi --bootloader-id=Gentoo"
-        else:
-            install = f"grub-install --target={target} {quote(process.plan.disk.path)}"
-        self.remote(f"""set -e
-ROOT={MOUNT_POINT}
-if [ ! -x "$ROOT/usr/sbin/grub-install" ] && [ ! -x "$ROOT/usr/bin/grub-install" ]; then
-    echo "GRUB is not installed in stage (sys-boot/grub), bootloader was not installed"
-    exit 0
-fi
-mount --types proc /proc "$ROOT/proc"
-mount --rbind /sys "$ROOT/sys" && mount --make-rslave "$ROOT/sys"
-mount --rbind /dev "$ROOT/dev" && mount --make-rslave "$ROOT/dev"
-trap 'umount -l "$ROOT/dev" "$ROOT/sys" "$ROOT/proc" 2>/dev/null' EXIT
-chroot "$ROOT" {install}
-chroot "$ROOT" grub-mkconfig -o /boot/grub/grub.cfg
-""", "Failed to install bootloader")
+        plan = process.plan
+        efi_index = next((index for index, partition in enumerate(plan.partitions, start=1) if partition.mount_point == "/efi"), None)
+        root_index = next(index for index, partition in enumerate(plan.partitions, start=1) if partition.mount_point == "/")
+        script = bootloader_script(
+            process.settings.bootloader, process.machine.architecture, process.machine.uefi, plan.disk.path,
+            root_device=plan.partition_device(root_index),
+            efi_device=plan.partition_device(efi_index) if efi_index else None,
+        )
+        if script is None:
+            raise RuntimeError(f"{process.settings.bootloader.display_name} is not supported on this machine")
+        self.remote(f"ROOT={MOUNT_POINT}\n" + script, "Failed to install bootloader")
 
 class DeployStepFinish(DeployStep):
     def __init__(self, multistage_process):

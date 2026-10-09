@@ -42,6 +42,7 @@ catalystlab_sources = [
   'objects/build_machine/build_machine_installation.py',
   'objects/deploy/ssh_connection.py',
   'objects/deploy/deploy_target.py',
+  'objects/deploy/deploy_boot.py',
   'objects/deploy/deploy_installation.py',
   'objects/global_objects/modules_scanner.py',
   'objects/global_objects/multistage_process.py',

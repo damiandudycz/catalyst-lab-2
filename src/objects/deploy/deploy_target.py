@@ -230,10 +230,3 @@ sfdisk -l {disk}
         tools = ["wipefs", "sfdisk", "blkid", "tar"]
         tools += [partition.format_command.split()[0] for partition in self.partitions if partition.format_command]
         return tools
-
-def grub_target(architecture: str, uefi: bool) -> str | None:
-    """GRUB platform for machine architecture."""
-    if not uefi:
-        return "i386-pc" if architecture in ("x86_64", "i686", "i586", "i486") else None
-    return {"x86_64": "x86_64-efi", "i686": "i386-efi", "aarch64": "arm64-efi", "riscv64": "riscv64-efi",
-            "armv7l": "arm-efi"}.get(architecture)
