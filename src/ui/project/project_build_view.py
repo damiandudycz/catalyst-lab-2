@@ -165,6 +165,12 @@ class ProjectBuildView(Gtk.Box):
     def begin_installation(self, view):
         plan = self.plan
         toolset = self.project_directory.get_toolset()
+        # Toolset or its virtual machine could become busy while wizard was open.
+        if busy_reason := (toolset.busy_reason if toolset else "Project has no toolset"):
+            dialog = Adw.AlertDialog(heading="Can't start build", body=busy_reason)
+            dialog.add_response("ok", "OK")
+            dialog.present(self.get_root())
+            return
         if (toolset and toolset.machine) or rootless_unsupported_reason() is None:
             # Builds run in user namespace, root privileges are not needed.
             self._start_installation(plan, None, rootless=True)

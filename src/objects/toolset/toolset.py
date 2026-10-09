@@ -131,6 +131,22 @@ class Toolset(Serializable):
         return executor_for_machine(self.machine)
 
     @property
+    def busy_reason(self) -> str | None:
+        """Why toolset can't be used for new operation now (build, update...), or None when it's free."""
+        if self.is_reserved:
+            return f"Toolset {self.name} is used by another operation"
+        if self.spawned:
+            return f"Environment of toolset {self.name} is open, close it first"
+        if self.machine_id and self.machine is None:
+            return f"Virtual machine of toolset {self.name} was removed"
+        machine = self.machine
+        if machine and machine._status in (machine.STATUS_STARTING, machine.STATUS_STOPPING):
+            return f"Virtual machine {machine.name} is {machine._status.lower()}"
+        if machine and machine._status == machine.STATUS_MISSING:
+            return f"Virtual machine {machine.name} doesn't exist"
+        return None
+
+    @property
     def runs_on_name(self) -> str:
         machine = self.machine
         return machine.name if machine else "This computer"

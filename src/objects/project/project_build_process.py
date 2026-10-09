@@ -264,8 +264,10 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
             toolset = self.multistage_process.toolset
             if toolset is None:
                 raise RuntimeError("Project has no toolset")
-            if toolset.spawned or not toolset.reserve():
-                raise RuntimeError(f"Toolset {toolset.name} is in use. Close its environment and try again.")
+            if reason := toolset.busy_reason:
+                raise RuntimeError(reason)
+            if not toolset.reserve():
+                raise RuntimeError(f"Toolset {toolset.name} is used by another operation")
             self.reserved = True
             os.makedirs(self.multistage_process.builds_directory, exist_ok=True)
             if self.multistage_process.rootless:
