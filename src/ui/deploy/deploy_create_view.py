@@ -9,7 +9,7 @@ from .deploy_system import (
 )
 from .deploy_target import (
     TargetMachine, TargetFilesystem, PartitionPlan, PartitionSpec, PartitionType, GIB, MIB, format_size,
-    architecture_supported, default_layout
+    architecture_supported, default_layout, PartitionTable
 )
 from .ssh_connection import SSHConnection
 
@@ -33,6 +33,7 @@ class DeployCreateView(Gtk.Box):
     disks_group = Gtk.Template.Child()
     partitions_group = Gtk.Template.Child()
     partitions_status_label = Gtk.Template.Child()
+    table_row = Gtk.Template.Child()
     system_page = Gtk.Template.Child()
     hostname_row = Gtk.Template.Child()
     ssh_row = Gtk.Template.Child()
@@ -242,20 +243,32 @@ class DeployCreateView(Gtk.Box):
     def _on_disk_toggled(self, check: Gtk.CheckButton, disk):
         if check.get_active():
             self.selected_disk = disk
-            self.layout = default_layout(disk, self.machine.uefi, self.machine.memory, self.machine.architecture)
+            self.layout = self._default_layout()
             self._load_partition_rows()
 
     def _plan(self) -> PartitionPlan | None:
         if self.selected_disk is None or self.machine is None:
             return None
-        return PartitionPlan(disk=self.selected_disk, uefi=self.machine.uefi, layout=self.layout)
+        return PartitionPlan(disk=self.selected_disk, uefi=self.machine.uefi, layout=self.layout, table=self._table())
+
+    def _table(self) -> PartitionTable:
+        return list(PartitionTable)[self.table_row.get_selected()]
+
+    def _default_layout(self) -> list[PartitionSpec]:
+        return default_layout(self.selected_disk, self.machine.uefi, self.machine.memory, self.machine.architecture, self._table())
+
+    @Gtk.Template.Callback()
+    def on_table_changed(self, row, param):
+        if self.selected_disk and self.machine:
+            self.layout = self._default_layout()
+            self._load_partition_rows()
 
     # Partitions
 
     @Gtk.Template.Callback()
     def on_default_layout_clicked(self, button):
         if self.selected_disk and self.machine:
-            self.layout = default_layout(self.selected_disk, self.machine.uefi, self.machine.memory, self.machine.architecture)
+            self.layout = self._default_layout()
             self._load_partition_rows()
 
     @Gtk.Template.Callback()
@@ -283,6 +296,7 @@ class DeployCreateView(Gtk.Box):
         self.partition_rows = []
         enabled = self.selected_disk is not None
         self.partitions_group.get_header_suffix().set_sensitive(enabled)
+        self.table_row.set_sensitive(enabled)
         for index, spec in enumerate(self.layout):
             row = PartitionRow(spec, on_changed=self._update_partitions, on_move=self._move_partition, on_remove=self._remove_partition)
             row.set_expanded(index == expand)
@@ -300,7 +314,7 @@ class DeployCreateView(Gtk.Box):
         for index, row in enumerate(self.partition_rows, start=1):
             row.update(plan.partition_device(index), plan.size_of(row.spec), first=index == 1, last=index == len(self.partition_rows))
         free = plan.remaining_size if all(spec.size for spec in self.layout) else 0
-        description = f"New GPT partition table on {plan.disk.path}, {format_size(plan.usable_size)}"
+        description = f"New {plan.table.display_name} partition table on {plan.disk.path}, {format_size(plan.usable_size)}"
         if free > 0:
             description += f", {format_size(free)} not used"
         self.partitions_group.set_description(description)

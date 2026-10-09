@@ -118,8 +118,19 @@ def architecture_supported(build_architecture: str | None, machine_architecture:
     return None if supported is None else machine_architecture in supported
 
 # ------------------------------------------------------------------------------
-# Partitioning: new GPT partition table with partitions defined by user, in order. Last partition can use
-# remaining space of disk.
+# Partitioning: new partition table (GPT or MBR) with partitions defined by user, in order. Last partition can
+# use remaining space of disk. MBR tables have only primary partitions (up to 4).
+
+class PartitionTable(Enum):
+    GPT = "gpt"
+    MBR = "dos"
+
+    @property
+    def display_name(self) -> str:
+        return {PartitionTable.GPT: "GPT", PartitionTable.MBR: "MBR (DOS)"}[self]
+
+MBR_MAX_PARTITIONS = 4
+MBR_MAX_SIZE = 2 * 1024 * GIB
 
 class PartitionType(Enum):
     EFI = "efi"
@@ -140,6 +151,10 @@ class PartitionType(Enum):
             PartitionType.LINUX: "0FC63DAF-8483-4772-8E79-3D69D7984743",
             PartitionType.SWAP: "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F",
         }[self]
+
+    @property
+    def mbr_type(self) -> str | None:
+        return {PartitionType.EFI: "ef", PartitionType.LINUX: "83", PartitionType.SWAP: "82"}.get(self)
 
 class TargetFilesystem(Enum):
     EXT4 = "ext4"
@@ -192,23 +207,27 @@ class TargetPartition:
 
 _MOUNT_POINT = re.compile(r"^/([A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*)?$")
 
-def default_layout(disk: TargetDisk, uefi: bool, memory: int, architecture: str) -> list[PartitionSpec]:
-    """EFI system (UEFI) or BIOS boot partition (x86 BIOS), /boot, swap (size of memory, up to 8 GiB), root and
-    /home. Small disks get no /home, root uses remaining space then."""
+def default_layout(disk: TargetDisk, uefi: bool, memory: int, architecture: str,
+                   table: PartitionTable = PartitionTable.GPT) -> list[PartitionSpec]:
+    """EFI system (UEFI) or BIOS boot partition (x86 BIOS with GPT), /boot, swap (size of memory, up to 8 GiB), root
+    and /home. Small disks, and MBR tables without space for more partitions, get no /home, root uses remaining space
+    then."""
     layout = []
     if uefi:
         layout.append(PartitionSpec(PartitionType.EFI, 1 * GIB, mount_point="/efi"))
-    elif architecture in ("x86_64", "i686", "i586", "i486"):
+    elif architecture in ("x86_64", "i686", "i586", "i486") and table == PartitionTable.GPT:
         layout.append(PartitionSpec(PartitionType.BIOS_BOOT, 1 * MIB))
     layout.append(PartitionSpec(PartitionType.LINUX, 1 * GIB, TargetFilesystem.EXT4, "/boot"))
     swap = min(8 * GIB, max(1 * GIB, round(memory / GIB) * GIB)) if memory else 2 * GIB
-    available = disk.size - sum(partition.size for partition in layout) - 8 * MIB
+    disk_size = min(disk.size, MBR_MAX_SIZE) if table == PartitionTable.MBR else disk.size
+    available = disk_size - sum(partition.size for partition in layout) - 8 * MIB
     if available - swap < 24 * GIB:
         swap = 0 if available < 16 * GIB else min(swap, 2 * GIB)
     if swap:
         layout.append(PartitionSpec(PartitionType.SWAP, swap))
     available -= swap
-    if available >= 96 * GIB:
+    free_slots = MBR_MAX_PARTITIONS - len(layout) if table == PartitionTable.MBR else None
+    if available >= 96 * GIB and (free_slots is None or free_slots >= 2):
         # Root gets 30% of space (between 48 and 256 GiB), the rest is for /home.
         root = min(256 * GIB, max(48 * GIB, int(available * 0.3) // GIB * GIB))
         layout.append(PartitionSpec(PartitionType.LINUX, root, TargetFilesystem.EXT4, "/"))
@@ -222,6 +241,7 @@ class PartitionPlan:
     disk: TargetDisk
     uefi: bool
     layout: list[PartitionSpec] = field(default_factory=list)
+    table: PartitionTable = PartitionTable.GPT
 
     @property
     def partitions(self) -> list[TargetPartition]:
@@ -236,7 +256,8 @@ class PartitionPlan:
             else:
                 command = None
             mount_point = spec.mount_point if spec.type in (PartitionType.LINUX, PartitionType.EFI) else None
-            partitions.append(TargetPartition(spec.label, spec.size, spec.type.gpt_type, mount_point, fstab_type, command, spec))
+            partition_type = spec.type.gpt_type if self.table == PartitionTable.GPT else spec.type.mbr_type
+            partitions.append(TargetPartition(spec.label, spec.size, partition_type, mount_point, fstab_type, command, spec))
         return partitions
 
     @property
@@ -245,8 +266,9 @@ class PartitionPlan:
 
     @property
     def usable_size(self) -> int:
-        """Disk size without GPT and alignment."""
-        return self.disk.size - 4 * MIB
+        """Disk size without partition table and alignment. MBR addresses only first 2 TiB."""
+        size = min(self.disk.size, MBR_MAX_SIZE) if self.table == PartitionTable.MBR else self.disk.size
+        return size - 4 * MIB
 
     @property
     def remaining_size(self) -> int:
@@ -291,11 +313,19 @@ class PartitionPlan:
             return "Only one EFI system partition can be created"
         if any(spec.size and spec.size < 64 * MIB for spec in efi):
             return "EFI system partition needs at least 64 MiB"
+        if self.table == PartitionTable.MBR:
+            if len(self.layout) > MBR_MAX_PARTITIONS:
+                return f"MBR table can have up to {MBR_MAX_PARTITIONS} partitions, use GPT for more"
+            if any(spec.type == PartitionType.BIOS_BOOT for spec in self.layout):
+                return "BIOS boot partition is used only with GPT"
         return None
 
     def warnings(self, architecture: str) -> list[str]:
         warnings = []
-        if not self.uefi and architecture in ("x86_64", "i686", "i586", "i486") and not any(spec.type == PartitionType.BIOS_BOOT for spec in self.layout):
+        if self.table == PartitionTable.MBR and self.disk.size > MBR_MAX_SIZE:
+            warnings.append(f"MBR uses only first {format_size(MBR_MAX_SIZE)} of disk")
+        if (self.table == PartitionTable.GPT and not self.uefi and architecture in ("x86_64", "i686", "i586", "i486")
+                and not any(spec.type == PartitionType.BIOS_BOOT for spec in self.layout)):
             warnings.append("GRUB on BIOS machine needs BIOS boot partition")
         root = next((spec for spec in self.layout if spec.mount_point == "/" and spec.type == PartitionType.LINUX), None)
         if root and self.size_of(root) < 16 * GIB:
@@ -308,10 +338,22 @@ class PartitionPlan:
         return f"{self.disk.path}{separator}{index}"
 
     def sfdisk_script(self) -> str:
-        lines = ["label: gpt"]
-        for partition in self.partitions:
-            size = f"size={partition.size // MIB}MiB, " if partition.size else ""
-            lines.append(f"{size}type={partition.type}, name=\"{partition.name}\"")
+        lines = [f"label: {self.table.value}"]
+        # On MBR, partition with /boot (or root) is marked active, older BIOSes boot only from it.
+        bootable = None
+        if self.table == PartitionTable.MBR:
+            bootable = self.index_of(lambda spec: spec.mount_point == "/boot") or self.index_of(lambda spec: spec.mount_point == "/")
+        for index, partition in enumerate(self.partitions, start=1):
+            size = partition.size
+            if size is None and self.table == PartitionTable.MBR and self.disk.size > MBR_MAX_SIZE:
+                size = self.remaining_size # Remaining space would reach past addressable part of disk.
+            fields = [f"size={size // MIB}MiB"] if size else []
+            fields.append(f"type={partition.type}")
+            if self.table == PartitionTable.GPT:
+                fields.append(f'name="{partition.name}"')
+            if index == bootable:
+                fields.append("bootable")
+            lines.append(", ".join(fields))
         return "\n".join(lines) + "\n"
 
     # Scripts run on machine:

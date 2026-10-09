@@ -125,6 +125,21 @@
                 <child>
                   <object class="AdwPreferencesGroup" id="partitions_group">
                     <property name="title">Partitions</property>
+                    <child>
+                      <object class="AdwComboRow" id="table_row">
+                        <property name="title">Partition table</property>
+                        <property name="subtitle">Changing it applies default layout</property>
+                        <property name="model">
+                          <object class="GtkStringList">
+                            <items>
+                              <item>GPT</item>
+                              <item>MBR (DOS)</item>
+                            </items>
+                          </object>
+                        </property>
+                        <signal name="notify::selected" handler="on_table_changed"/>
+                      </object>
+                    </child>
                     <property name="header-suffix">
                       <object class="GtkBox">
                         <property name="spacing">6</property>
