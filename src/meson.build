@@ -40,6 +40,9 @@ catalystlab_sources = [
   'objects/build_machine/build_machine.py',
   'objects/build_machine/build_machine_manager.py',
   'objects/build_machine/build_machine_installation.py',
+  'objects/deploy/ssh_connection.py',
+  'objects/deploy/deploy_target.py',
+  'objects/deploy/deploy_installation.py',
   'objects/global_objects/modules_scanner.py',
   'objects/global_objects/multistage_process.py',
   'objects/global_objects/repositories.py',
@@ -92,6 +95,7 @@ catalystlab_sources = [
   'ui/app_sections/about/about_section.py',
   'ui/app_sections/bugs/bugs_section.py',
   'ui/app_sections/builds/builds_section.py',
+  'ui/app_sections/deploy/deploy_section.py',
   'ui/app_sections/environments/environments_section.py',
   'ui/app_sections/help/help_section.py',
   'ui/app_sections/overlays/overlays_section.py',
@@ -129,6 +133,7 @@ catalystlab_sources = [
   'ui/toolset/toolset_create_view.py',
   'ui/build_machine/build_machine_create_view.py',
   'ui/build_machine/build_machine_details_view.py',
+  'ui/deploy/deploy_create_view.py',
   'ui/toolset/toolset_details_view.py',
 ]
 

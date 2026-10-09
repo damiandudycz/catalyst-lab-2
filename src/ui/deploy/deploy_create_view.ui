@@ -1,0 +1,265 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+
+  <!-- Libraries -->
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="Adw" version="1.0"/>
+
+  <!-- Template -->
+  <template class="DeployCreateView" parent="GtkBox">
+    <child>
+      <object class="WizardView" id="wizard_view">
+        <signal name="is-page-ready-to-continue" handler="is_page_ready_to_continue"/>
+        <signal name="begin-installation" handler="begin_installation"/>
+        <property name="show_welcome_screen">True</property>
+        <property name="welcome_screen_icon_name">deploy-symbolic</property>
+        <property name="welcome_screen_title">Deploy Build</property>
+        <property name="welcome_screen_description">Installs stage on disk of another machine. Boot that machine from Gentoo LiveCD and allow SSH connections to it, Catalyst Lab partitions its disk, installs the stage and configures the system.</property>
+        <property name="install_button_label">Deploy</property>
+
+        <!-- Page 1: Connection -->
+        <child>
+          <object class="GtkScrolledWindow" id="connection_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Connection</property>
+                    <property name="description">On the machine booted from Gentoo LiveCD set root password with passwd, start SSH server with rc-service sshd start and check its address with ip address.</property>
+                    <child>
+                      <object class="AdwEntryRow" id="host_row">
+                        <property name="title">Address</property>
+                        <signal name="changed" handler="on_connection_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="port_row">
+                        <property name="title">Port</property>
+                        <property name="text">22</property>
+                        <property name="input-purpose">digits</property>
+                        <signal name="changed" handler="on_connection_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="user_row">
+                        <property name="title">User</property>
+                        <property name="text">root</property>
+                        <signal name="changed" handler="on_connection_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPasswordEntryRow" id="password_row">
+                        <property name="title">Password</property>
+                        <signal name="changed" handler="on_connection_changed"/>
+                        <signal name="entry-activated" handler="on_connect_clicked"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="connect_button">
+                    <property name="label">Connect</property>
+                    <property name="halign">center</property>
+                    <signal name="clicked" handler="on_connect_clicked"/>
+                    <style>
+                      <class name="pill"/>
+                      <class name="suggested-action"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup" id="machine_group">
+                    <property name="title">Machine</property>
+                    <property name="visible">False</property>
+                    <child>
+                      <object class="AdwActionRow" id="machine_row">
+                        <property name="title">Connected</property>
+                        <property name="icon-name">check-circle-svgrepo-com-symbolic</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="connection_status_label">
+                    <property name="visible">False</property>
+                    <property name="wrap">True</property>
+                    <property name="justify">center</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 2: Disk -->
+        <child>
+          <object class="GtkScrolledWindow" id="disk_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="AdwPreferencesGroup" id="disks_group">
+                    <property name="title">Disk</property>
+                    <property name="description">All data on selected disk will be erased.</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Partitioning</property>
+                    <child>
+                      <object class="AdwComboRow" id="filesystem_row">
+                        <property name="title">Root filesystem</property>
+                        <property name="model">
+                          <object class="GtkStringList">
+                            <items>
+                              <item>ext4</item>
+                              <item>xfs</item>
+                              <item>btrfs</item>
+                            </items>
+                          </object>
+                        </property>
+                        <signal name="notify::selected" handler="on_partitioning_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSpinRow" id="swap_row">
+                        <property name="title">Swap</property>
+                        <property name="subtitle">GiB, 0 for none</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">0</property>
+                            <property name="upper">256</property>
+                            <property name="step-increment">1</property>
+                            <property name="page-increment">4</property>
+                          </object>
+                        </property>
+                        <signal name="notify::value" handler="on_partitioning_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSpinRow" id="efi_row">
+                        <property name="title">EFI system partition</property>
+                        <property name="subtitle">MiB, holds bootloader</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">256</property>
+                            <property name="upper">4096</property>
+                            <property name="value">1024</property>
+                            <property name="step-increment">256</property>
+                            <property name="page-increment">512</property>
+                          </object>
+                        </property>
+                        <signal name="notify::value" handler="on_partitioning_changed"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup" id="partitions_group">
+                    <property name="title">Partitions</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 3: System -->
+        <child>
+          <object class="GtkScrolledWindow" id="system_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">System</property>
+                    <property name="description">Root password is required to log in to installed system.</property>
+                    <child>
+                      <object class="AdwEntryRow" id="hostname_row">
+                        <property name="title">Hostname</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPasswordEntryRow" id="root_password_row">
+                        <property name="title">Root password</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwPasswordEntryRow" id="root_password_confirm_row">
+                        <property name="title">Confirm root password</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="ssh_row">
+                        <property name="title">Enable SSH server</property>
+                        <property name="subtitle">Starts sshd on boot, when stage contains it</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Boot</property>
+                    <child>
+                      <object class="AdwSwitchRow" id="bootloader_row">
+                        <property name="title">Install bootloader</property>
+                        <property name="subtitle">Installs GRUB, when stage contains it (sys-boot/grub). Stage needs a kernel to boot.</property>
+                        <property name="active">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwSwitchRow" id="reboot_row">
+                        <property name="title">Reboot when finished</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="system_status_label">
+                    <property name="visible">False</property>
+                    <property name="wrap">True</property>
+                    <style>
+                      <class name="error"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+      </object>
+    </child>
+  </template>
+</interface>

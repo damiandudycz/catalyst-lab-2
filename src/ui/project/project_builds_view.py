@@ -10,6 +10,8 @@ from .project_build_view import ProjectBuildView
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState
 from .app_events import app_event_bus, AppEvents
 from .helper_functions import get_file_size_string
+from .deploy_installation import is_deployable
+from .deploy_create_view import DeployCreateView
 
 class BuildRowState(Enum):
     """State of stage in build run, as displayed."""
@@ -126,6 +128,12 @@ class ProjectBuildsView(Gtk.Box):
         if css_class := _state_css_class(state):
             icon.add_css_class(css_class)
         row.add_prefix(icon)
+        if build and not running_build and is_deployable(self.project_directory, build):
+            button = Gtk.Button(icon_name="deploy-symbolic", tooltip_text="Deploy on another machine", valign=Gtk.Align.CENTER)
+            button.add_css_class("flat")
+            button.connect("clicked", lambda _, build=build: app_event_bus.emit(
+                AppEvents.PRESENT_VIEW, DeployCreateView(project_directory=self.project_directory, build=build), "Deploy build", 640, 560))
+            row.add_suffix(button)
         if build and build.path and os.path.isdir(build.path):
             button = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Open build folder", valign=Gtk.Align.CENTER)
             button.add_css_class("flat")
