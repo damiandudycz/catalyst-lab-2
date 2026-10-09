@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, re, shutil, uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .repository import Repository
 from .snapshot import PortageProfile
 from .project_stage import load_catalyst_stage_arguments_details
@@ -25,6 +25,7 @@ class StageSpecContext:
     timestamp: str          # Replaces @TIMESTAMP@.
     source_subpath: str     # Seed, relative to catalyst builds directory.
     portage_confdir: str | None # Generated portage configuration, as seen by catalyst.
+    cache_paths: dict = field(default_factory=dict) # Enabled caches (pkgcache_path, kerncache_path), as seen by catalyst.
 
 def snapshot_treeish(project_directory) -> str | None:
     """Catalyst finds snapshot as snapshots/gentoo-<treeish>.sqfs."""
@@ -70,6 +71,8 @@ def _argument_value(project_directory, stage, name: str, argument, context: Stag
             return snapshot_treeish(project_directory)
         case StageArgumentDetails.portage_confdir:
             return context.portage_confdir
+        case StageArgumentDetails.pkgcache_path | StageArgumentDetails.kerncache_path:
+            return context.cache_paths.get(argument.details)
     value = resolve_stage_argument(project_directory, stage, name)
     if value is UNRESOLVED and _is_automatic(project_directory, stage, argument):
         value = _automatic_value(project_directory, argument)

@@ -12,6 +12,7 @@ from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .toolset import BindMount
 from .toolset_env_builder import ToolsetEnvBuilder
 from .project_stage_arguments import StageArgumentDetails
+from .project_stage_cache import CACHE_ARGUMENTS, stage_cache_path
 from .project_build import StageBuild, StageBuildStatus, StageBuildPlan, project_builds_directory, stage_builds_directory
 from .project_build_spec import (
     StageSpecContext, generate_stage_spec, generate_portage_confdir, seed_name_prefix, select_seed_url
@@ -53,8 +54,17 @@ class ProjectBuild(MultiStageProcess):
             self.stages.append(ProjectBuildStepBuildStage(stage=stage, multistage_process=self))
 
     def container_path(self, host_path: str) -> str:
-        """Path inside toolset of file in project builds directory."""
+        """Path inside toolset of file in project builds directory. Other paths are mounted at the same location."""
+        if host_path != self.builds_directory and not host_path.startswith(self.builds_directory + os.sep):
+            return host_path
         return os.path.join(CATALYST_BUILDS_PATH, os.path.relpath(host_path, self.builds_directory))
+
+    def stage_cache_paths(self, stage) -> dict:
+        """Host folders of enabled caches of stage, by argument."""
+        return {
+            argument: path for argument in CACHE_ARGUMENTS
+            if (path := stage_cache_path(self.project_directory, stage, argument))
+        }
 
     def seed_subpath(self, stage) -> str | None:
         """Seed of stage, relative to builds directory, without extension (as catalyst expects source_subpath)."""
@@ -197,6 +207,12 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
             mirrored.append(releng_directory.directory_path())
         mirrored += [overlay.directory_path() for overlay in Repository.OverlayDirectory.value]
         bindings += [BindMount(mount_path=path, host_path=path) for path in mirrored if os.path.isdir(path)]
+        # Caches in folders selected by user (automatic ones are in builds directory).
+        cache_paths = {
+            path for stage in process.plan.build_order() for path in process.stage_cache_paths(stage).values()
+            if process.container_path(path) == path
+        }
+        bindings += [BindMount(mount_path=path, host_path=path, store_changes=True, create_if_missing=True) for path in sorted(cache_paths)]
         # Loop devices for mounting snapshot (store_changes gives read-write device access).
         bindings += [BindMount(mount_path=path, host_path=path, store_changes=True) for path in getattr(self, "loop_devices", [])]
         return bindings
@@ -282,10 +298,14 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             os.makedirs(work_directory)
             portage_path = os.path.join(work_directory, "portage")
             has_confdir = generate_portage_confdir(project, self.stage, portage_path)
+            cache_paths = process.stage_cache_paths(self.stage)
+            for path in cache_paths.values():
+                os.makedirs(path, exist_ok=True)
             spec = generate_stage_spec(project, self.stage, StageSpecContext(
                 timestamp=process.timestamp,
                 source_subpath=source_subpath,
                 portage_confdir=process.container_path(portage_path) if has_confdir else None,
+                cache_paths={argument: process.container_path(path) for argument, path in cache_paths.items()},
             ))
             spec_path = os.path.join(work_directory, "stage.spec")
             with open(spec_path, "w", encoding="utf-8") as file:
@@ -296,7 +316,11 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             # Build:
             build_script_path = os.path.join(work_directory, "build.sh")
             with open(build_script_path, "w", encoding="utf-8") as file:
-                file.write(_catalyst_build_script(spec_path=process.container_path(spec_path)))
+                file.write(_catalyst_build_script(
+                    spec_path=process.container_path(spec_path),
+                    config_path=process.container_path(os.path.join(work_directory, "catalyst.conf")),
+                    caches={_catalyst_cache_options[argument] for argument in cache_paths},
+                ))
             # Command is passed in single quotes, path in double quotes allows spaces in stage name.
             if not self.run_command_in_toolset(f'bash "{process.container_path(build_script_path)}"'):
                 self._run_diagnostics(spec=spec, work_directory=work_directory)
@@ -366,11 +390,42 @@ echo "===== End of diagnostics ====="
 # Helper functions.
 # ------------------------------------------------------------------------------
 
-def _catalyst_build_script(spec_path: str) -> str:
+# Catalyst options enabling caches.
+_catalyst_cache_options = {
+    StageArgumentDetails.pkgcache_path: "pkgcache",
+    StageArgumentDetails.kerncache_path: "kerncache",
+}
+
+def _catalyst_build_script(spec_path: str, config_path: str, caches: set[str]) -> str:
     """Runs catalyst with /dev containing real device nodes. Catalyst bind mounts /dev into chroot without submounts,
     but device nodes in toolset /dev are bind mounts made by bwrap, so chroot would get empty files instead (portage
-    fails with '/dev/null is not a character device'). Only standard nodes, loop devices and kvm are created."""
+    fails with '/dev/null is not a character device'). Only standard nodes, loop devices and kvm are created.
+    Catalyst uses configuration of toolset, with cache options enabled only for caches used by stage."""
+    enabled = " ".join(sorted(caches))
+    disabled = " ".join(sorted(set(_catalyst_cache_options.values()) - caches))
     return f"""#!/bin/bash
+# Catalyst configuration with cache options matching stage settings. Configuration of older catalyst (not TOML) is
+# used unchanged.
+CONFIG_ARGS=()
+if python3 - "{config_path}" "{enabled}" "{disabled}" <<'PYTHON'
+import json, sys, tomllib
+path, enabled, disabled = sys.argv[1], sys.argv[2].split(), sys.argv[3].split()
+with open("/etc/catalyst/catalyst.conf", "rb") as file:
+    config = tomllib.load(file)
+if any(isinstance(value, dict) for value in config.values()):
+    sys.exit("Unsupported catalyst.conf structure")
+options = [option for option in config.get("options", []) if option not in disabled]
+config["options"] = options + [option for option in enabled if option not in options]
+with open(path, "w") as file:
+    for key, value in config.items():
+        file.write(f"{{key}} = {{json.dumps(value)}}\\n")
+print("Catalyst options: " + ", ".join(config["options"]))
+PYTHON
+then
+    CONFIG_ARGS=(-c "{config_path}")
+else
+    echo "Using toolset catalyst.conf without changes"
+fi
 set -e
 DEV=/tmp/catalystlab-dev
 mkdir -p "$DEV"
@@ -401,7 +456,7 @@ mount --bind "$DEV" /dev
 mount -t devpts -o newinstance,ptmxmode=0666,mode=0620 devpts /dev/pts
 mount -t tmpfs -o mode=1777,nosuid,nodev shm /dev/shm
 set +e
-exec catalyst -f "{spec_path}"
+exec catalyst "${{CONFIG_ARGS[@]}}" -f "{spec_path}"
 """
 
 def _strip_archive_extension(path: str) -> str:

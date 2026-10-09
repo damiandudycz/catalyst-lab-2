@@ -24,6 +24,7 @@ from .event_bus import EventBus
 from .project_stage_automatic_option import StageAutomaticOption
 from .project_stage_value_resolver import resolved_stage_argument_display
 from .project_stage_portage_confdir import StagePortageConfdirSource, stage_overlay_path
+from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
@@ -83,6 +84,8 @@ class ProjectStageDetailsView(Gtk.Box):
                 self.configuration_rows.append(row)
 
     def create_row_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesRow:
+        if argument.details in CACHE_ARGUMENTS:
+            return StageCacheRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
         match argument.type:
             case StageArgumentType.select | StageArgumentType.multiselect | StageArgumentType.boolean:
                 return StageOptionExpanderRow(
@@ -172,7 +175,7 @@ class ProjectStageDetailsView(Gtk.Box):
             )
             # Reloading option rows would discard unapplied edits of text rows, refresh only resolved values.
             for r in self.configuration_rows:
-                if r.argument != row.argument and isinstance(r, StageTextSourceRow):
+                if r.argument != row.argument and isinstance(r, (StageTextSourceRow, StageCacheRow)):
                     r.refresh_options()
             return
         if row.argument.details.type == StageArgumentType.select:
@@ -200,7 +203,7 @@ class ProjectStageDetailsView(Gtk.Box):
         for r in self.configuration_rows:
             if r.argument != row.argument and isinstance(r, StageOptionExpanderRow):
                 r.load_state()
-            elif r.argument != row.argument and isinstance(r, StageTextSourceRow):
+            elif r.argument != row.argument and isinstance(r, (StageTextSourceRow, StageCacheRow)):
                 r.refresh_options() # Keeps possibly unapplied text, only updates availability of automatic options.
 
     def _on_unrealize(self, widget):
@@ -713,3 +716,124 @@ class StageTextListRow(StageTextSourceRow):
     def update_display(self):
         super().update_display()
         self.on_buffer_changed(self.text_view.get_buffer())
+
+class StageCacheRow(Adw.ExpanderRow):
+    """Selects package or kernel cache of stage: automatic folder in project builds (shared by stages with the same
+    rel_type), folder selected by user, or no cache. Value is StageAutomaticOption, folder path or None."""
+
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, argument: StageArgumentTargetDetails):
+        super().__init__()
+        self.project_directory = project_directory
+        self.stage = stage
+        self.argument = argument
+        self.value = None
+        self._loading = False
+        self.event_bus = EventBus[ItemSelectionViewEvent]()
+        self.set_title(argument.display_name)
+        self.check_buttons: dict[str, Gtk.CheckButton] = {}
+        self.automatic_row = self._add_source_row("automatic", "Automatic")
+        self.folder_row = self._add_source_row("folder", "Folder")
+        self.none_row = self._add_source_row("none", "None", subtitle="Disabled, built packages are not kept" if argument.details == StageArgumentDetails.pkgcache_path else "Disabled, built kernels are not kept")
+        choose_button = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Select folder", valign=Gtk.Align.CENTER)
+        choose_button.add_css_class("flat")
+        choose_button.connect("clicked", lambda button: self._select_folder())
+        self.folder_row.add_suffix(choose_button)
+        self.load_state()
+
+    def _add_source_row(self, source: str, title: str, subtitle: str | None = None) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=title, subtitle=subtitle or "")
+        check_button = Gtk.CheckButton()
+        if self.check_buttons:
+            check_button.set_group(next(iter(self.check_buttons.values())))
+        check_button.connect("toggled", self._on_source_toggled, source)
+        row.add_prefix(check_button)
+        row.set_activatable_widget(check_button)
+        self.add_row(row)
+        self.check_buttons[source] = check_button
+        return row
+
+    # State:
+
+    def _source(self) -> str:
+        if is_automatic_cache(self.value):
+            return "automatic"
+        return "folder" if self.value else "none"
+
+    def load_state(self):
+        value = getattr(self.stage, self.argument.attribute_name, None)
+        # Automatic options other than automatic cache come from stages made before caches had it, see is_automatic_cache.
+        self.value = StageAutomaticOption.GENERATE_AUTOMATICALLY if is_automatic_cache(value) else (value if isinstance(value, str) and value else None)
+        self._folder = self.value if isinstance(self.value, str) else getattr(self, "_folder", None)
+        self._loading = True
+        self.check_buttons[self._source()].set_active(True)
+        self._loading = False
+        self.update_display()
+
+    def refresh_options(self):
+        """Automatic folder depends on rel_type."""
+        self.update_display()
+
+    def update_display(self):
+        automatic_path = stage_cache_path(self.project_directory, _StageWithValue(self.stage, self.argument.attribute_name, StageAutomaticOption.GENERATE_AUTOMATICALLY), self.argument.details)
+        automatic_display = display_path(automatic_path) if automatic_path else "Folder in project builds, shared by stages with the same Rel type"
+        self.automatic_row.set_subtitle(GLib.markup_escape_text(automatic_display))
+        self.folder_row.set_subtitle(GLib.markup_escape_text(display_path(self._folder) if self._folder else "No folder selected"))
+        match self._source():
+            case "automatic": subtitle = f"Automatic: {automatic_display}" if automatic_path else "Automatic"
+            case "folder": subtitle = display_path(self.value)
+            case _: subtitle = "None"
+        self.set_subtitle(GLib.markup_escape_text(subtitle))
+
+    def _set_value(self, value):
+        self.value = value
+        self.update_display()
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+
+    # Selecting:
+
+    def _on_source_toggled(self, button: Gtk.CheckButton, source: str):
+        if self._loading or not button.get_active():
+            return
+        match source:
+            case "automatic": self._set_value(StageAutomaticOption.GENERATE_AUTOMATICALLY)
+            case "none": self._set_value(None)
+            case "folder":
+                if self._folder:
+                    self._set_value(self._folder)
+                else:
+                    self._select_folder()
+
+    def _select_folder(self):
+        dialog = Gtk.FileDialog(title=f"Select {self.argument.display_name.lower()} folder", modal=True)
+        if self._folder and os.path.isdir(self._folder):
+            dialog.set_initial_folder(Gio.File.new_for_path(self._folder))
+        dialog.select_folder(self.get_root(), None, self._on_folder_selected)
+
+    def _on_folder_selected(self, dialog: Gtk.FileDialog, result: Gio.AsyncResult):
+        try:
+            folder = dialog.select_folder_finish(result)
+        except GLib.Error:
+            folder = None # Cancelled.
+        if folder and folder.get_path():
+            self._folder = folder.get_path()
+            self._loading = True
+            self.check_buttons["folder"].set_active(True)
+            self._loading = False
+            self._set_value(self._folder)
+        else:
+            # Restore previous selection when folder wasn't selected.
+            self._loading = True
+            self.check_buttons[self._source()].set_active(True)
+            self._loading = False
+            self.update_display()
+
+class _StageWithValue:
+    """Stage with one argument replaced, used to preview value of option that is not selected."""
+
+    def __init__(self, stage, attribute_name: str, value):
+        self._stage = stage
+        self._attribute_name = attribute_name
+        self._value = value
+
+    def __getattr__(self, name):
+        return self._value if name == self._attribute_name else getattr(self._stage, name)

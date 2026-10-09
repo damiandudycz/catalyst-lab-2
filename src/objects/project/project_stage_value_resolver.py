@@ -70,9 +70,18 @@ def _generate_source_subpath(project_directory, stage, visited: frozenset) -> st
     rel_type, subarch, version_stamp = values
     return f"{rel_type}/{parent.target.replace('_', '-')}-{subarch}-{version_stamp}"
 
+def _cache_generator(argument: StageArgumentDetails):
+    def generate(project_directory, stage, visited: frozenset) -> str | None:
+        from .project_stage_cache import stage_cache_path, display_path
+        path = stage_cache_path(project_directory, stage, argument)
+        return display_path(path) if path else None
+    return generate
+
 # Generators of GENERATE_AUTOMATICALLY values that can be determined before building.
 _automatic_value_generators = {
     StageArgumentDetails.source_subpath: _generate_source_subpath,
+    StageArgumentDetails.pkgcache_path: _cache_generator(StageArgumentDetails.pkgcache_path),
+    StageArgumentDetails.kerncache_path: _cache_generator(StageArgumentDetails.kerncache_path),
 }
 
 # ------------------------------------------------------------------------------
