@@ -153,6 +153,10 @@ class MultiStageProcessStageRow(Adw.ActionRow):
             MultiStageProcessStageEvent.OUTPUT_LINE_ADDED,
             self._step_output_line_added
         )
+        # View opened while step runs shows its last output line right away.
+        if step.state == MultiStageProcessStageState.IN_PROGRESS:
+            self._last_line = next((text for line in reversed(step.output_lines) if (text := _plain_text(line))), None)
+            self._update_subtitle()
 
     def _update_output_available(self):
         """Allow opening output only when there is some output to show."""
@@ -171,9 +175,7 @@ class MultiStageProcessStageRow(Adw.ActionRow):
         if not self.get_activatable():
             self._update_output_available()
         if self.step.state == MultiStageProcessStageState.IN_PROGRESS:
-            segments, _ = parse_ansi_line(line, AnsiStyle())
-            text = "".join(text for text, _ in segments).strip()
-            if text:
+            if text := _plain_text(line):
                 self._last_line = text
                 # Output can be fast, subtitle is updated a few times per second.
                 if self._subtitle_update_id is None:
@@ -354,6 +356,11 @@ class MultiStageProcessStageOutputView(Gtk.Box):
 # ------------------------------------------------------------------------------
 # ANSI escape sequences in command output:
 # ------------------------------------------------------------------------------
+
+def _plain_text(line: str) -> str:
+    """Line without ANSI sequences."""
+    segments, _ = parse_ansi_line(line, AnsiStyle())
+    return "".join(text for text, _ in segments).strip()
 
 @dataclass(frozen=True)
 class AnsiStyle:
