@@ -15,6 +15,9 @@ class BuildMachine:
     STATUS_STOPPED = "Stopped"
     STATUS_MISSING = "Missing"
 
+    # Delay before stopping unused machine, so it's not restarted between consecutive commands of operation.
+    IDLE_STOP_SECONDS = 90
+
     def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 64,
                  lima_home: str | None = None):
         self.id = id or uuid.uuid4()
@@ -28,6 +31,11 @@ class BuildMachine:
         self._lock = threading.Lock()
         self._workspace_lock = threading.Lock()
         self._workspace_users = 0
+        # Machines started automatically when used are stopped when nothing uses them (after IDLE_STOP_SECONDS).
+        self._usage_lock = threading.Lock()
+        self._users = 0
+        self._started_automatically = False
+        self._stop_timer: threading.Timer | None = None
 
     @property
     def instance_name(self) -> str:
@@ -77,7 +85,53 @@ class BuildMachine:
 
     # Lifecycle:
 
-    def start(self, output_handler=print, process_holder: list | None = None) -> bool:
+    # Usage:
+
+    def begin_use(self):
+        """Marks machine as used (by command or operation), cancels its automatic stop."""
+        with self._usage_lock:
+            self._users += 1
+            if self._stop_timer:
+                self._stop_timer.cancel()
+                self._stop_timer = None
+
+    def end_use(self):
+        """Marks end of usage. Machine started automatically is stopped when nothing uses it for a while."""
+        with self._usage_lock:
+            self._users = max(0, self._users - 1)
+            if self._users == 0 and self._started_automatically and self._stop_timer is None:
+                self._stop_timer = threading.Timer(self.IDLE_STOP_SECONDS, self._stop_if_idle)
+                self._stop_timer.daemon = True
+                self._stop_timer.start()
+
+    def _stop_if_idle(self):
+        with self._usage_lock:
+            self._stop_timer = None
+            if self._users > 0 or not self._started_automatically:
+                return
+            self._started_automatically = False
+        print(f"Stopping unused virtual machine {self.name}")
+        self.stop()
+
+    def stop_if_started_automatically(self):
+        """Stops machine started automatically (when app quits)."""
+        with self._usage_lock:
+            if self._stop_timer:
+                self._stop_timer.cancel()
+                self._stop_timer = None
+            started_automatically = self._started_automatically
+            self._started_automatically = False
+        if started_automatically and self.is_running:
+            self.stop()
+
+    # Lifecycle:
+
+    def start(self, output_handler=print, process_holder: list | None = None, automatically: bool = False) -> bool:
+        """Starts machine. Machine started automatically (for operation) is stopped when it's no longer used, started
+        by user keeps running."""
+        with self._usage_lock:
+            if not automatically:
+                self._started_automatically = False # User wants it running.
         with self._lock:
             self.refresh_status()
             if self.is_running:
@@ -87,9 +141,17 @@ class BuildMachine:
             output_handler(f"Starting virtual machine {self.name}...")
             success = run_limactl(["start", self.instance_name], output_handler, process_holder, home=self.lima_home)
             self.refresh_status()
+            if success and self.is_running and automatically:
+                with self._usage_lock:
+                    self._started_automatically = True
             return success and self.is_running
 
     def stop(self, output_handler=print) -> bool:
+        with self._usage_lock:
+            self._started_automatically = False
+            if self._stop_timer:
+                self._stop_timer.cancel()
+                self._stop_timer = None
         with self._lock:
             success = run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home)
             self.refresh_status()
@@ -98,7 +160,7 @@ class BuildMachine:
     def ensure_running(self, output_handler=print, process_holder: list | None = None):
         """Starts machine if needed, raises when it can't be started. Setup of machine is updated once while app runs,
         when it's older than current one (machines created by previous versions)."""
-        if not self.start(output_handler, process_holder):
+        if not self.start(output_handler, process_holder, automatically=True):
             raise RuntimeError(f"Failed to start virtual machine {self.name}")
         if not getattr(self, "_setup_checked", False):
             from .lima import machine_setup_update_script
@@ -129,7 +191,15 @@ class BuildMachine:
         return os.path.join(self.lima_home, self.instance_name)
 
     def acquire_workspace(self, output_handler=print, process_holder: list | None = None):
-        """Prepares working space for operation, call release_workspace when it finishes."""
+        """Prepares working space for operation, call release_workspace when it finishes. Machine is used until then."""
+        self.begin_use()
+        try:
+            self._acquire_workspace(output_handler, process_holder)
+        except Exception:
+            self.end_use()
+            raise
+
+    def _acquire_workspace(self, output_handler, process_holder):
         with self._workspace_lock:
             if self._workspace_users == 0:
                 self._create_workspace(output_handler, process_holder)
@@ -142,6 +212,7 @@ class BuildMachine:
             self._workspace_users -= 1
             if self._workspace_users == 0:
                 self._delete_workspace(output_handler)
+        self.end_use()
 
     def _create_workspace(self, output_handler, process_holder):
         from .rootless import MachineExecutor

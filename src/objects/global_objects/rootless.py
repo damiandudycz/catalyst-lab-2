@@ -79,15 +79,25 @@ def _filesystem_operations(request: dict) -> dict:
 
 class ExecutorProcess:
     """Running script. Output is in stdout (text lines), like subprocess.Popen."""
-    def __init__(self, process: subprocess.Popen, on_terminate=None):
+    def __init__(self, process: subprocess.Popen, on_terminate=None, on_exit=None):
         self.process = process
         self.stdout = process.stdout
         self.cancelled = False
         self._on_terminate = on_terminate
+        self._on_exit = on_exit # Called once when process exits.
+    def _exited(self):
+        on_exit, self._on_exit = self._on_exit, None
+        if on_exit:
+            on_exit()
     def wait(self, timeout=None) -> int:
-        return self.process.wait(timeout=timeout)
+        code = self.process.wait(timeout=timeout)
+        self._exited()
+        return code
     def poll(self):
-        return self.process.poll()
+        code = self.process.poll()
+        if code is not None:
+            self._exited()
+        return code
     def terminate(self):
         """Stops script with all its processes (killing pid namespace init ends whole namespace)."""
         self.cancelled = True
@@ -109,6 +119,8 @@ class ExecutorProcess:
                     os.killpg(self.process.pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError): # Already exited (macOS reports EPERM for exited group).
                 pass
+        if self.process.poll() is not None:
+            self._exited()
     def kill(self):
         self.terminate()
 
@@ -218,7 +230,13 @@ echo "Machine is ready: $(. /etc/os-release; echo $PRETTY_NAME), kernel $(uname 
 
     def start(self, script: str, namespace: bool = False) -> ExecutorProcess:
         from .lima import limactl_path, lima_environment
-        self.machine.ensure_running()
+        # Machine is used while command runs, it's started when needed and stopped automatically when no longer used.
+        self.machine.begin_use()
+        try:
+            self.machine.ensure_running()
+        except Exception:
+            self.machine.end_use()
+            raise
         token = uuid.uuid4().hex
         pid_file = f"/tmp/catalystlab-{token}.pid"
         encoded = base64.b64encode(script.encode()).decode()
@@ -237,7 +255,7 @@ echo "Machine is ready: $(. /etc/os-release; echo $PRETTY_NAME), kernel $(uname 
             subprocess.run([limactl_path(), "shell", self.machine.instance_name, "sh", "-c",
                             f"[ -f {pid_file} ] && kill -TERM -- -$(cat {pid_file}); rm -f {pid_file}"],
                            capture_output=True, timeout=30, env=lima_environment(self.machine.lima_home))
-        return ExecutorProcess(process, on_terminate=terminate_remote)
+        return ExecutorProcess(process, on_terminate=terminate_remote, on_exit=self.machine.end_use)
 
     def run(self, script: str, output_handler, process_holder: list | None = None, namespace: bool = False) -> bool:
         # Lima writes its warnings to output, they are not part of script output.

@@ -44,6 +44,13 @@ class CatalystlabApplication(Adw.Application):
     def do_shutdown(self):
         """Called when the application is shutting down."""
         RootHelperClient.shared().stop_root_helper()
+        # Virtual machines started automatically are stopped with app.
+        from .repository import Repository
+        for machine in Repository.BuildMachine.value:
+            try:
+                machine.stop_if_started_automatically()
+            except Exception as e:
+                print(f"Failed to stop virtual machine {machine.name}: {e}")
         Gio.Application.do_shutdown(self)
 
     def on_about_action(self, widget, _):
