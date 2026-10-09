@@ -2,6 +2,7 @@
 # OverlayDirectory.
 from __future__ import annotations
 import os, threading, subprocess, uuid
+from gi.repository import GLib
 from enum import Enum, auto
 from datetime import datetime
 from .repository import Serializable
@@ -47,6 +48,10 @@ class GitDirectory(Serializable, ABC):
         self.metadata = metadata
         self.logs: list[dict] = []
         self.event_bus = EventBus[GitDirectoryEvent]()
+        # Changes made by app (eg. stages of project saved, renamed or removed) change Git status. Several changes come
+        # together (eg. stage added and its file written), status is read once after them.
+        self._status_update_id = None
+        self.event_bus.subscribe(GitDirectoryEvent.CONTENT_CHANGED, self._on_content_changed)
 
     @property
     def short_details(self) -> str:
@@ -120,6 +125,15 @@ class GitDirectory(Serializable, ABC):
             has_remote_changes=has_remote_changes,
             metadata=metadata
         )
+
+    def _on_content_changed(self, *args):
+        if self._status_update_id is not None:
+            GLib.source_remove(self._status_update_id)
+        def update():
+            self._status_update_id = None
+            self.update_status()
+            return False
+        self._status_update_id = GLib.timeout_add(300, update)
 
     def update_status(self, wait: bool = False):
         def worker():
