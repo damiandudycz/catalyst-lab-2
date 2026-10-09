@@ -276,7 +276,7 @@
                 <child>
                   <object class="AdwPreferencesGroup">
                     <property name="title">Localization</property>
-                    <property name="description">Suggested from this computer. Separate locales with commas, first one is system language.</property>
+                    <property name="description">Suggested from this computer.</property>
                     <child>
                       <object class="AdwEntryRow" id="timezone_row">
                         <property name="title">Timezone</property>
@@ -284,9 +284,8 @@
                       </object>
                     </child>
                     <child>
-                      <object class="AdwEntryRow" id="locale_row">
+                      <object class="AdwExpanderRow" id="locale_row">
                         <property name="title">Locales</property>
-                        <signal name="changed" handler="on_system_changed"/>
                       </object>
                     </child>
                     <child>

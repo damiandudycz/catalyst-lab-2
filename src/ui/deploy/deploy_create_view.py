@@ -134,9 +134,16 @@ class DeployCreateView(Gtk.Box):
         self.local_architecture_row.set_subtitle(self.local_architecture or "Unknown architecture of build")
         self.firmware_options = TargetFirmware.options(self.local_architecture) if self.local_architecture else []
         self.target_firmware_row.set_model(Gtk.StringList.new([item.display_name(self.local_architecture) for item in self.firmware_options]))
+        # Like warnings of stage settings: icon with details in tooltip.
+        self.bootloader_warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
+        self.bootloader_warning_icon.add_css_class("warning")
+        self.bootloader_warning_icon.set_visible(False)
+        self.bootloader_row.add_suffix(self.bootloader_warning_icon)
+        # Rows below update system page state when filled, widgets used there are created first.
         localization = local_localization()
         self.timezone_row.set_text(localization.timezone)
-        self.locale_row.set_text(", ".join(localization.locales))
+        self._setup_locales_editor()
+        self.locales_view.get_buffer().set_text("\n".join(localization.locales))
         self.keymap_row.set_text(localization.keymap)
         self.key_checks: list[tuple[Gtk.CheckButton, str]] = []
         for key in local_public_keys():
@@ -148,11 +155,6 @@ class DeployCreateView(Gtk.Box):
             self.key_checks.append((check, key.key))
         if not self.key_checks:
             self.ssh_keys_group.add(Adw.ActionRow(title="No SSH keys found in ~/.ssh"))
-        # Like warnings of stage settings: icon with details in tooltip.
-        self.bootloader_warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
-        self.bootloader_warning_icon.add_css_class("warning")
-        self.bootloader_warning_icon.set_visible(False)
-        self.bootloader_row.add_suffix(self.bootloader_warning_icon)
         self._update_network_options()
         if self.build and installation_in_progress is None:
             threading.Thread(target=self._scan_stage, daemon=True).start()
@@ -655,9 +657,38 @@ class DeployCreateView(Gtk.Box):
             return "Hostname can contain only letters, digits, dots and hyphens"
         return self._localization().error() or self._network().error()
 
+    def _setup_locales_editor(self):
+        """Locales are edited one per line in expandable row, like list values in stage settings. Row subtitle shows
+        them when collapsed."""
+        self.locales_view = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                                         top_margin=8, bottom_margin=8, left_margin=8, right_margin=8)
+        self.locales_view.set_size_request(-1, 96)
+        self.locales_view.get_buffer().connect("changed", self._on_locales_changed)
+        frame = Gtk.Frame(child=self.locales_view)
+        hint_label = Gtk.Label(label="One locale per line, first one is system language.", halign=Gtk.Align.START, wrap=True)
+        hint_label.add_css_class("dimmed")
+        hint_label.add_css_class("caption")
+        editor_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=12, margin_bottom=12,
+                             margin_start=12, margin_end=12)
+        editor_box.append(frame)
+        editor_box.append(hint_label)
+        editor_row = Gtk.ListBoxRow(activatable=False, selectable=False, child=editor_box)
+        self.locale_row.add_row(editor_row)
+
+    def _locales(self) -> list[str]:
+        # Commas are accepted too, as separators.
+        buffer = self.locales_view.get_buffer()
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        return [locale for locale in re.split(r"[,\s]+", text) if locale]
+
+    def _on_locales_changed(self, buffer):
+        locales = self._locales()
+        self.locale_row.set_subtitle(GLib.markup_escape_text(", ".join(locales) or "None"))
+        self.on_system_changed(None)
+
     def _localization(self) -> LocalizationSettings:
         return LocalizationSettings(timezone=self.timezone_row.get_text().strip(),
-                                    locales=[locale for locale in re.split(r"[,\s]+", self.locale_row.get_text()) if locale],
+                                    locales=self._locales(),
                                     keymap=self.keymap_row.get_text().strip())
 
     def _network(self) -> NetworkSettings:
