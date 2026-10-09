@@ -5,11 +5,12 @@ from enum import Enum
 from gi.repository import Gtk, Adw, GLib, Gio
 from .project_directory import ProjectDirectory
 from .project_build import StageBuildStatus, load_project_builds
-from .project_build_process import ProjectBuildStepBuildStage, running_project_build
+from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, running_project_build
 from .project_build_view import ProjectBuildView
-from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState
+from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState, MultiStageProcessState
 from .app_events import app_event_bus, AppEvents
 from .helper_functions import get_file_size_string
+from .project_build_details import failure_details, format_duration
 from .deploy_installation import is_deployable
 from .deploy_create_view import DeployCreateView
 
@@ -32,9 +33,18 @@ class ProjectBuildsView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.project_directory = project_directory
         self.content_navigation_view = content_navigation_view
-        self.page = Adw.PreferencesPage()
-        self.page.set_vexpand(True)
-        self.append(self.page)
+        # Same layout as other views: groups use whole width of window.
+        scrolled_window = Gtk.ScrolledWindow(hexpand=True, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_bottom=24)
+        scrolled_window.set_child(self.content)
+        self.append(scrolled_window)
+        # Starts new build of project, or shows progress of running one (like Create build in project page).
+        actions_group = Adw.PreferencesGroup()
+        self.build_row = Adw.ButtonRow(title="Start new build", start_icon_name="sledgehammer-svgrepo-com-symbolic")
+        self.build_row.add_css_class("suggested-action")
+        self.build_row.connect("activated", self._on_build_activated)
+        actions_group.add(self.build_row)
+        self.content.append(actions_group)
         self.groups: list[Adw.PreferencesGroup] = []
         self._observed_build = None
         self._reload_scheduled = False
@@ -47,10 +57,11 @@ class ProjectBuildsView(Gtk.Box):
 
     def load_builds(self):
         for group in self.groups:
-            self.page.remove(group)
+            self.content.remove(group)
         self.groups = []
         running_build = running_project_build(self.project_directory)
         self._observe_running_build(running_build)
+        self._update_build_row(running_build)
         builds = load_project_builds(self.project_directory)
         if not builds and not running_build:
             group = Adw.PreferencesGroup()
@@ -116,18 +127,27 @@ class ProjectBuildsView(Gtk.Box):
         return entries
 
     def _add_group(self, group: Adw.PreferencesGroup):
-        self.page.add(group)
+        self.content.append(group)
         self.groups.append(group)
 
     def _build_row(self, stage_name: str, build, state: BuildRowState, stage_removed: bool, running_build) -> Adw.ActionRow:
         details = [state.value]
         if stage_removed:
             details.append("stage was removed from project")
+        if build and build.duration:
+            details.append(format_duration(build.duration))
         if build and build.artifact_path and os.path.isfile(build.artifact_path):
             details.append(build.artifact)
             if size := get_file_size_string(build.artifact_path):
                 details.append(size)
-        row = Adw.ActionRow(title=GLib.markup_escape_text(stage_name), subtitle=GLib.markup_escape_text(" · ".join(details)))
+            if packages := (build.details.get("output") or {}).get("packages"):
+                details.append(f"{packages} packages")
+        subtitle = " · ".join(details)
+        if state == BuildRowState.FAILED and (failure := _failure_summary(build)):
+            subtitle += f"\n{failure}"
+        row = Adw.ActionRow(title=GLib.markup_escape_text(stage_name), subtitle=GLib.markup_escape_text(subtitle))
+        if build and (build.details.get("failure") or {}).get("logs"):
+            row.set_tooltip_text("Logs for bug reports (build.log, environment, emerge --info) are in failure folder of build")
         icon = Gtk.Image.new_from_icon_name(_state_icon(state))
         icon.set_pixel_size(24)
         if css_class := _state_css_class(state):
@@ -186,6 +206,34 @@ class ProjectBuildsView(Gtk.Box):
             except Exception as e:
                 print(f"Error removing build {build.path}: {e}")
         self.load_builds()
+
+    def _update_build_row(self, running_build):
+        """Only one build runs at a time (also of different projects), toolset can't be busy with other operation."""
+        if running_build:
+            self.build_row.set_title("Show build progress")
+            self.build_row.set_sensitive(True)
+            self.build_row.set_tooltip_text(None)
+            return
+        toolset = self.project_directory.get_toolset()
+        other_build = any(build.status == MultiStageProcessState.IN_PROGRESS
+                          for build in MultiStageProcess.get_started_processes_by_class(ProjectBuild))
+        reason = ("Another project is being built" if other_build
+                  else toolset.busy_reason if toolset else "Select toolset in project configuration")
+        self.build_row.set_title(GLib.markup_escape_text(reason) if reason else "Start new build")
+        self.build_row.set_sensitive(reason is None)
+        self.build_row.set_tooltip_text(reason)
+
+    def _on_build_activated(self, row):
+        if running_build := running_project_build(self.project_directory):
+            self._open_build_progress(running_build)
+            return
+        project = self.project_directory
+        if project.get_toolset() is None or project.get_releng_directory() is None or project.get_snapshot() is None:
+            dialog = Adw.AlertDialog(heading="Can't start build", body="Please setup toolset, releng directory and snapshot first.")
+            dialog.add_response("ok", "OK")
+            dialog.present(self.get_root())
+            return
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=project), "Build stages", 640, 480)
 
     def _open_build_progress(self, running_build):
         app_event_bus.emit(
@@ -261,3 +309,15 @@ def _state_css_class(state: BuildRowState) -> str | None:
         case BuildRowState.BUILDING: return "accent"
         case BuildRowState.SCHEDULED | BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.NOT_STARTED: return "dimmed"
     return None
+
+def _failure_summary(build) -> str | None:
+    """Failed packages and reason. Builds made before details were recorded have them read from build.log."""
+    if build is None:
+        return None
+    if "failure" not in build.details and build.path:
+        try:
+            with open(os.path.join(build.path, "build.log"), encoding="utf-8", errors="replace") as file:
+                build.details["failure"] = failure_details(file.read().splitlines(), None)
+        except OSError:
+            return None
+    return build.failure_summary

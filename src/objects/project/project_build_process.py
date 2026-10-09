@@ -16,6 +16,7 @@ from .project_stage_cache import CACHE_ARGUMENTS, stage_cache_path
 from .rootless import extracted_squashfs, remove_stale_sessions, distfiles_directory
 from .project_build_rootless import stage_build_session_script, save_interrupted_caches, CATALYST_WRAPPER
 from .project_build import StageBuild, StageBuildStatus, StageBuildPlan, project_builds_directory, stage_builds_directory
+from .project_build_details import run_details, seed_details, failure_details, output_details, failure_logs_script
 from .project_build_spec import (
     StageSpecContext, generate_stage_spec, generate_portage_confdir, generate_root_overlay, seed_name_prefix, select_seed_url, snapshot_treeish
 )
@@ -527,6 +528,8 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
         try:
             self.build = StageBuild(stage_id=self.stage.id, stage_name=self.stage.name, timestamp=process.timestamp,
                                     order=process.plan.build_order().index(self.stage))
+            self.build.details = run_details(process)
+            self.build.details["inputs"]["seed"] = seed_details(process, self.stage)
             self.build.save(project)
             # Seed:
             source_subpath = process.seed_subpath(self.stage)
@@ -554,6 +557,13 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             spec_path = os.path.join(work_directory, "stage.spec")
             with open(spec_path, "w", encoding="utf-8") as file:
                 file.write(spec)
+            # Spec and portage configuration are kept with build (work directory is temporary).
+            shutil.copyfile(spec_path, os.path.join(self.build.path, StageBuild.SPEC_FILE))
+            self.build.details["inputs"]["spec"] = StageBuild.SPEC_FILE
+            if has_confdir:
+                shutil.copytree(portage_path, os.path.join(self.build.path, StageBuild.PORTAGE_DIRECTORY), symlinks=True, dirs_exist_ok=True)
+                self.build.details["inputs"]["portage"] = StageBuild.PORTAGE_DIRECTORY
+            self.build.save(project)
             self.log("Spec:")
             for line in spec.splitlines():
                 self.log(f"  {line}")
@@ -593,6 +603,8 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             self.log(f"Saved {', '.join(moved)} to {self.build.path}")
             self.build.artifact = artifact
             self.build.status = StageBuildStatus.COMPLETED
+            self.build.finished = datetime.now()
+            self.build.details["output"] = output_details(self.build)
             self.build.save(project)
             process.stage_builds[self.stage.id] = self.build
             self.complete(MultiStageProcessStageState.COMPLETED)
@@ -600,6 +612,12 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             print(f"Error during '{self.name}': {e}")
             if self.build:
                 self.build.status = StageBuildStatus.FAILED
+                self.build.finished = datetime.now()
+                try:
+                    failure_directory = os.path.join(self.build.path, StageBuild.FAILURE_DIRECTORY) if self.build.path else None
+                    self.build.details["failure"] = failure_details(self.output_lines + [str(e)], failure_directory)
+                except Exception as details_error:
+                    print(f"Failed to read failure details: {details_error}")
                 try:
                     self.build.save(project)
                 except Exception as save_error:
@@ -641,6 +659,8 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             chroot = f"/var/tmp/catalyst/tmp/{values['rel_type']}/{values['target']}-{values['subarch']}-{values['version_stamp']}"
             snapshot = f"{CATALYST_SNAPSHOTS_PATH}/gentoo-{values['snapshot_treeish']}.sqfs"
             profile = values.get("profile", "")
+            # Logs for bug reports are saved in build directory (available in toolset at path of builds directory).
+            failure_logs = failure_logs_script(chroot, process.container_path(os.path.join(self.build.path, StageBuild.FAILURE_DIRECTORY))) if self.build and self.build.path else ""
             script = f"""#!/bin/bash
 CHROOT="{chroot}"
 REPO="$CHROOT/var/db/repos/gentoo"
@@ -654,6 +674,7 @@ echo "--- mounts in chroot:"; grep "$CHROOT" /proc/mounts
 mkdir -p "$REPO"
 echo "--- mounting snapshot {snapshot}:"; mount {"--bind" if rootless else "-o ro,loop"} "{snapshot}" "$REPO" && echo "mounted"
 mount --bind /proc "$CHROOT/proc"
+{failure_logs}
 echo "--- repo profiles:"; ls "$REPO/profiles" | head -20
 echo "--- profile {profile}:"; ls "$REPO/profiles/{profile}"
 echo "--- portage in chroot:"

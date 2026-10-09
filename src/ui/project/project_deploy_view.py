@@ -17,15 +17,18 @@ class ProjectDeployView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.project_directory = project_directory
         self.content_navigation_view = content_navigation_view
-        self.page = Adw.PreferencesPage(vexpand=True)
-        self.append(self.page)
+        # Same layout as other views: groups use whole width of window.
+        scrolled_window = Gtk.ScrolledWindow(hexpand=True, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_bottom=24)
+        scrolled_window.set_child(self.content)
+        self.append(scrolled_window)
         self.groups: list[Adw.PreferencesGroup] = []
         # Builds can finish or be removed while view is open, refresh when shown again.
         self.connect("map", lambda widget: self.load_builds())
 
     def load_builds(self):
         for group in self.groups:
-            self.page.remove(group)
+            self.content.remove(group)
         self.groups = []
         builds = [build for build in load_project_builds(self.project_directory) if is_deployable(self.project_directory, build)]
         if not builds:
@@ -59,5 +62,5 @@ class ProjectDeployView(Gtk.Box):
         self._add_group(group)
 
     def _add_group(self, group: Adw.PreferencesGroup):
-        self.page.add(group)
+        self.content.append(group)
         self.groups.append(group)
