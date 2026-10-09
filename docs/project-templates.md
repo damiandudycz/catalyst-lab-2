@@ -38,7 +38,11 @@ Repositories are checked when they are downloaded, and are rejected if their lat
 format = 1                      # Optional, version of template format.
 name = "Gentoo release"         # Shown in list of templates and used as default project name.
 description = "Stages built like official Gentoo releases."
+architecture = "arm64"          # Optional, architecture of projects for templates made for one architecture.
 ```
+
+The architecture of the project is set by the template when it has `architecture`, or a variable of `architecture`
+type. Otherwise the app asks for it. A fixed architecture is available in expressions as `architecture`.
 
 ### Options: `[[variables]]`
 

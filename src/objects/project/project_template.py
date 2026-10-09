@@ -314,6 +314,7 @@ class ProjectTemplate:
     files: list[TemplateFiles]
     groups: list[TemplateGroup] = field(default_factory=list)
     groups_title: str = "Additional configuration"
+    architecture: Architecture | None = None # Fixed architecture of projects, for templates without architecture variable.
     repository_url: str | None = None # Git repository of template, None for templates included in app.
     # False for definition downloaded without other files of repository (to show options), files are checked when
     # template is applied from cloned repository.
@@ -383,10 +384,19 @@ class ProjectTemplate:
             ))
         if sum(variable.type == TemplateVariableType.ARCHITECTURE for variable in variables) > 1:
             raise TemplateError("Template can have only one architecture variable")
+        architecture_name = _text(data, "architecture", "Template", required=False)
+        if architecture_name is not None:
+            if architecture_name not in Architecture.__members__:
+                raise TemplateError(f"Template: unknown architecture {architecture_name}")
+            if any(variable.type == TemplateVariableType.ARCHITECTURE for variable in variables):
+                raise TemplateError("Template can't have both architecture and architecture variable")
+            if "architecture" in ids:
+                raise TemplateError("Template: architecture is used as name of variable or value")
         # Computed values:
         values = _table(data, "values", "Template")
         for key in values:
-            if not _IDENTIFIER_PATTERN.match(key) or key.lower() in _RESERVED_NAMES or key in ids:
+            if not _IDENTIFIER_PATTERN.match(key) or key.lower() in _RESERVED_NAMES or key in ids or (
+                    architecture_name is not None and key == "architecture"):
                 raise TemplateError(f"Value {key}: invalid or duplicated name")
             ids.add(key)
         # Stages:
@@ -447,7 +457,8 @@ class ProjectTemplate:
             ))
         groups_title = _text(data, "groups_title", "Template", required=False) or "Additional configuration"
         return cls(path=path, name=name, description=description, variables=variables, values=values, stages=stages,
-                   files=files, groups=groups, groups_title=groups_title, repository_url=repository_url,
+                   files=files, groups=groups, groups_title=groups_title,
+                   architecture=Architecture[architecture_name] if architecture_name else None, repository_url=repository_url,
                    files_available=files_available)
 
     @property
@@ -458,6 +469,8 @@ class ProjectTemplate:
         """Names available in expressions for selected values of variables. Variables that are not used get None,
         selections that are not available fall back to default or first available option."""
         names: dict[str, Any] = {"project_name": project_name}
+        if self.architecture is not None:
+            names["architecture"] = self.architecture.name
         for variable in self.variables:
             if not evaluate_condition(variable.when, names):
                 names[variable.id] = None
@@ -505,6 +518,8 @@ class ProjectTemplate:
         """Variables used for current selection (with "when" condition that is true)."""
         visible = []
         partial: dict[str, Any] = {"project_name": names.get("project_name", "")}
+        if self.architecture is not None:
+            partial["architecture"] = self.architecture.name
         for variable in self.variables:
             if evaluate_condition(variable.when, partial):
                 visible.append(variable)
@@ -574,7 +589,7 @@ class ProjectTemplate:
         architecture_variable = self.architecture_variable
         architecture_name = names.get(architecture_variable.id) if architecture_variable else None
         return GeneratedProject(stages=stages, files=files,
-                                architecture=Architecture[architecture_name] if architecture_name else None)
+                                architecture=Architecture[architecture_name] if architecture_name else self.architecture)
 
 def _template_files_paths(template: ProjectTemplate, entry: TemplateFiles, names: dict[str, Any], base: str) -> tuple[str, str]:
     """Source path in template and destination in project (relative to base directory in project) of files."""

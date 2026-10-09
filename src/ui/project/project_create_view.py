@@ -91,10 +91,11 @@ class ProjectCreateView(Gtk.Box):
         return getattr(self.source_view, "selected_source", None) == GitDirectorySource.TEMPLATE
 
     def _update_pages(self):
-        """Template options page is shown for template source, architecture page unless template selects it."""
+        """Template options page is shown for template source, architecture page unless template sets it (fixed or with
+        architecture variable)."""
         template = self.template_chooser.selected_template if self._uses_template else None
         self.wizard_view.set_page_visible(self.template_page, self._uses_template)
-        self.wizard_view.set_page_visible(self.arch_page, template is None or template.architecture_variable is None)
+        self.wizard_view.set_page_visible(self.arch_page, template is None or (template.architecture_variable is None and template.architecture is None))
 
     def toolset_changed(self, data):
         self.wizard_view._refresh_buttons_state()
