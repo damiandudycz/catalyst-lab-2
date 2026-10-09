@@ -817,7 +817,8 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
             else:
                 os.remove(entry_path)
     for source, destination in generated.files:
-        log(f"Copying {os.path.relpath(source, template.path)} to {destination}")
+        # Template directory can be reached through symbolic link (eg. in macOS application bundle).
+        log(f"Copying {os.path.relpath(source, os.path.realpath(template.path))} to {destination}")
         _copy_template_files(source, os.path.join(path, destination), names, log)
     os.makedirs(os.path.join(path, "stages"), exist_ok=True)
     if hasattr(project_directory, "_stages"):
