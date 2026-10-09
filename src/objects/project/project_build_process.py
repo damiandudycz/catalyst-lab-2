@@ -542,7 +542,9 @@ def _catalyst_build_script(spec_path: str, config_path: str, caches: set[str], w
     """Runs catalyst with /dev containing real device nodes. Catalyst bind mounts /dev into chroot without submounts,
     but device nodes in toolset /dev are bind mounts made by bwrap, so chroot would get empty files instead (portage
     fails with '/dev/null is not a character device'). Only standard nodes, loop devices and kvm are created.
-    Catalyst uses configuration of toolset, with cache options enabled only for caches used by stage.
+    Catalyst uses configuration of toolset, with cache options enabled only for caches used by stage, and parallel
+    builds using all processors when toolset doesn't configure them. Without jobs, catalyst sets empty MAKEOPTS,
+    which disables default of portage (-j<processors>), so packages would be built one by one with single process.
     In rootless builds (wrapper_path set) /dev is prepared by session script, and catalyst runs through wrapper."""
     enabled = " ".join(sorted(caches))
     disabled = " ".join(sorted(set(_catalyst_cache_options.values()) - caches))
@@ -562,7 +564,7 @@ done
 # used unchanged.
 CONFIG_ARGS=()
 if python3 - "{config_path}" "{enabled}" "{disabled}" <<'PYTHON'
-import json, sys, tomllib
+import json, os, sys, tomllib
 path, enabled, disabled = sys.argv[1], sys.argv[2].split(), sys.argv[3].split()
 with open("/etc/catalyst/catalyst.conf", "rb") as file:
     config = tomllib.load(file)
@@ -570,10 +572,15 @@ if any(isinstance(value, dict) for value in config.values()):
     sys.exit("Unsupported catalyst.conf structure")
 options = [option for option in config.get("options", []) if option not in disabled]
 config["options"] = options + [option for option in enabled if option not in options]
+# emerge --jobs and --load-average, and MAKEOPTS (-j, -l). Load average limits parallel jobs to processors count.
+processors = os.cpu_count() or 1
+config.setdefault("jobs", processors)
+config.setdefault("load-average", float(processors))
 with open(path, "w") as file:
     for key, value in config.items():
         file.write(f"{{key}} = {{json.dumps(value)}}\\n")
 print("Catalyst options: " + ", ".join(config["options"]))
+print(f"Parallel jobs: {{config['jobs']}}, load average: {{config['load-average']}}")
 PYTHON
 then
     CONFIG_ARGS=(-c "{config_path}")
