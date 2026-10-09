@@ -23,22 +23,6 @@
             <property name="margin-bottom">24</property>
 
             <child>
-              <object class="RepositoryListView">
-                <property name="title">Toolsets</property>
-                <property name="item_class_name">Toolset</property>
-                <property name="add_button_title">Add toolset</property>
-                <property name="item_installation_class_name">ToolsetInstallation</property>
-                <property name="item_icon">toolbox-symbolic</property>
-                <property name="item_title_property_name">name</property>
-                <property name="item_subtitle_property_name">short_details</property>
-                <property name="item_status_property_name">status_indicator_values</property>
-                <signal name="item-row-pressed" handler="on_item_row_pressed"/>
-                <signal name="installation-row-pressed" handler="on_installation_row_pressed"/>
-                <signal name="add-new-item-pressed" handler="on_add_new_item_pressed"/>
-              </object>
-            </child>
-
-            <child>
               <object class="RepositoryListView" id="machines_list">
                 <property name="title">Virtual machines</property>
                 <property name="item_class_name">BuildMachine</property>
@@ -55,13 +39,30 @@
             </child>
 
             <child>
+              <object class="RepositoryListView">
+                <property name="title">Toolsets</property>
+                <property name="item_class_name">Toolset</property>
+                <property name="add_button_title">Add toolset</property>
+                <property name="item_installation_class_name">ToolsetInstallation</property>
+                <property name="item_icon">toolbox-symbolic</property>
+                <property name="item_title_property_name">name</property>
+                <property name="item_subtitle_property_name">short_details</property>
+                <property name="item_status_property_name">status_indicator_values</property>
+                <signal name="item-row-pressed" handler="on_item_row_pressed"/>
+                <signal name="installation-row-pressed" handler="on_installation_row_pressed"/>
+                <signal name="add-new-item-pressed" handler="on_add_new_item_pressed"/>
+              </object>
+            </child>
+
+
+            <child>
               <object class="GtkSeparator"/>
             </child>
 
             <child>
               <object class="GtkLabel">
-                <property name="label">Toolsets are isolated Gentoo environments with tools needed to build stages, like Catalyst and QEMU. Each toolset is created from an official stage3 image and stored as a .squashfs file.
-Virtual machines run toolsets on systems that can't build stages themselves, like macOS. Toolsets linked to a virtual machine are loaded inside it, so their builds, updates and snapshots run there.</property>
+                <property name="label">Virtual machines run toolsets on systems that can't build stages themselves, like macOS, so on such systems create one before toolsets. Toolsets linked to a virtual machine are loaded inside it, so their builds, updates and snapshots run there.
+Toolsets are isolated Gentoo environments with tools needed to build stages, like Catalyst and QEMU. Each toolset is created from an official stage3 image and stored as a .squashfs file.</property>
                 <property name="halign">center</property>
                 <property name="wrap">True</property>
                 <property name="justify">fill</property>
