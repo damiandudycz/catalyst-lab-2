@@ -119,7 +119,7 @@ def extract(tarball: str, directory: str):
             print(f"PROGRESS: {progress}", flush=True)
 
 def create_work_directory(prefix: str, rootless: bool) -> str:
-    """Work directory for toolset files. Rootless ones are in rootless directory, owned by user and mapped ids."""
+    """Work directory for toolset files. Rootless ones are in temporary directory, owned by user and mapped ids."""
     if rootless:
         from .rootless import create_work_directory as create_rootless_work_directory
         return create_rootless_work_directory(prefix=prefix)

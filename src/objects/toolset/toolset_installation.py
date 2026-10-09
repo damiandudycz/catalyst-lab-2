@@ -7,7 +7,7 @@ from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .repository import Repository
 from .toolset import Toolset, ToolsetEnv
 from .helper_functions import create_work_directory, delete_work_directory, create_squashfs, extract
-from .rootless import rootless_toolset_unsupported_reason, extract_tarball, executor_for_machine, remove_in_namespace
+from .rootless import rootless_toolset_unsupported_reason, extract_tarball, executor_for_machine, remove_in_namespace, downloads_directory
 from .rootless import create_work_directory as create_rootless_work_directory
 from .toolset_manager import ToolsetManager
 
@@ -139,10 +139,7 @@ class ToolsetInstallationStepDownload(ToolsetInstallationStep):
             downloaded = 0
             chunk_size = 1024 * 1024 # 1MB chunks.
             # Machines see only shared folders of Catalyst Lab.
-            downloads_directory = os.path.join(os.path.dirname(os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location))), ".downloads") \
-                if self.multistage_process.machine else '/tmp/catalystlab'
-            os.makedirs(downloads_directory, exist_ok=True)
-            with tempfile.NamedTemporaryFile(delete=False, dir=downloads_directory) as tmp_file:
+            with tempfile.NamedTemporaryFile(delete=False, dir=downloads_directory()) as tmp_file:
                 self.multistage_process.tmp_stage_file = tmp_file
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if self._cancel_event.is_set():

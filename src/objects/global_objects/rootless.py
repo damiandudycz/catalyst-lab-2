@@ -10,8 +10,9 @@ from .repository import Repository
 # device nodes. Files of namespace root are owned by user, other owners are mapped ids (100000+), so such files are
 # created, packed and removed inside namespace.
 # Commands run on this computer (LocalExecutor) or in virtual machine linked to toolset (MachineExecutor), where
-# folders of Catalyst Lab are shared at the same paths. Data owned by mapped ids is kept in rootless directory of
-# executor, which for machine is on its own disk.
+# folders of Catalyst Lab are shared at the same paths. Data owned by mapped ids is kept in cache and temporary
+# directories of executor: on this computer they are Cache and Temporary folders from settings, on machine they are on
+# its working space.
 
 MAPPED_IDS_COUNT = 65536
 MIN_BWRAP_VERSION = (0, 11, 0) # Toolset bindings use --overlay-src and --overlay.
@@ -128,8 +129,18 @@ class Executor:
     """Runs rootless commands. Scripts run with bash, output goes to output handler line by line."""
     is_machine = False
 
-    def rootless_directory(self) -> str:
+    def cache_directory(self) -> str:
+        """Reusable data, safe to delete (distfiles, extracted toolsets and snapshots)."""
         raise NotImplementedError
+
+    def temporary_directory(self) -> str:
+        """Data of running operations (sessions, work directories, downloads)."""
+        raise NotImplementedError
+
+    def owns_path(self, path: str) -> bool:
+        """Path is in cache or temporary directory of executor, its files can be owned by mapped ids."""
+        return any(path == directory or path.startswith(directory + os.sep)
+                   for directory in (self.cache_directory(), self.temporary_directory()))
 
     def unsupported_reason(self) -> str | None:
         """None when commands can run without root."""
@@ -171,10 +182,11 @@ class Executor:
 class LocalExecutor(Executor):
     """Runs commands on this computer."""
 
-    def rootless_directory(self) -> str:
-        """Next to toolsets folder."""
-        toolsets_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location))
-        return os.path.join(os.path.dirname(toolsets_location), ".rootless")
+    def cache_directory(self) -> str:
+        return os.path.realpath(os.path.expanduser(Repository.Settings.value.cache_location))
+
+    def temporary_directory(self) -> str:
+        return os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
 
     def unsupported_reason(self) -> str | None:
         return rootless_unsupported_reason()
@@ -201,9 +213,15 @@ class MachineExecutor(Executor):
     def __init__(self, machine):
         self.machine = machine
 
-    def rootless_directory(self) -> str:
+    # Working space of machine is deleted after use, so everything there is temporary. Cache folder keeps the same
+    # layout as on this computer.
+    def cache_directory(self) -> str:
         from .lima import MACHINE_DATA_DIRECTORY
-        return MACHINE_DATA_DIRECTORY
+        return os.path.join(MACHINE_DATA_DIRECTORY, "Cache")
+
+    def temporary_directory(self) -> str:
+        from .lima import MACHINE_DATA_DIRECTORY
+        return os.path.join(MACHINE_DATA_DIRECTORY, "Temporary")
 
     def unsupported_reason(self) -> str | None:
         return self.toolset_unsupported_reason()
@@ -270,17 +288,10 @@ def executor_for_machine(machine) -> Executor:
 # ------------------------------------------------------------------------------
 # Local support.
 
-def rootless_directory() -> str:
-    """Rootless directory of this computer."""
-    return LOCAL_EXECUTOR.rootless_directory()
-
 def is_rootless_path(path: str | None) -> bool:
-    """Path is in rootless directory of this computer, its files are owned by user or mapped ids, not by real root."""
-    if not path:
-        return False
-    directory = rootless_directory()
-    path = os.path.realpath(path)
-    return path.startswith(directory + os.sep)
+    """Path is in cache or temporary directory of this computer, its files are owned by user or mapped ids, not by
+    real root."""
+    return bool(path) and LOCAL_EXECUTOR.owns_path(os.path.realpath(path))
 
 @functools.cache
 def rootless_toolset_unsupported_reason() -> str | None:
@@ -340,14 +351,14 @@ def run_in_namespace(script: str, output_handler, process_holder: list | None = 
 
 def extracted_squashfs(squashfs_path: str, kind: str, output_handler, process_holder: list | None = None,
                        check_path: str | None = None, executor: Executor | None = None) -> str:
-    """Folder with extracted squashfs file, extracted again when file changed. Kind is subfolder (toolsets,
-    snapshots). Device nodes can't be created in namespace and are skipped."""
+    """Folder with extracted squashfs file, extracted again when file changed. Kind is subfolder of extracted files
+    (toolsets, snapshots). Device nodes can't be created in namespace and are skipped."""
     executor = executor or LOCAL_EXECUTOR
     q = shlex.quote
     name = os.path.basename(squashfs_path)
-    parent = os.path.join(executor.rootless_directory(), kind)
+    parent = extracted_directory(kind, executor)
     path = os.path.join(parent, name + ".d")
-    temporary_path = os.path.join(parent, f".{name}.{uuid.uuid4().hex}")
+    temporary_path = os.path.join(work_directory(executor), f"{name}.{uuid.uuid4().hex}")
     script = f"""
 set -u
 STAMP=$(stat -c '%s:%Y' {q(squashfs_path)}) || exit 1
@@ -356,7 +367,7 @@ if [ -d {q(path)} ] && [ "$(cat {q(path + '.stamp')} 2>/dev/null)" = "$STAMP" ];
     exit 0
 fi
 echo "Extracting {name}, this is done once for every version of the file..."
-mkdir -p {q(parent)} && rm -rf {q(path)} {q(path + '.stamp')}
+mkdir -p {q(parent)} {q(os.path.dirname(temporary_path))} && rm -rf {q(path)} {q(path + '.stamp')}
 unsquashfs -n -d {q(temporary_path)} {q(squashfs_path)} 2>&1 | grep -v -e "create_inode: failed to create character device" -e "^\\[" -e "^$" | tail -5
 if [ ! -e {q(os.path.join(temporary_path, check_path or ''))} ]; then
     echo "Extraction failed"
@@ -376,7 +387,7 @@ def remove_extracted_squashfs(squashfs_path: str, kind: str, executor: Executor 
         return # Working space of machine is temporary, extracted copies are deleted with it.
     if rootless_unsupported_reason() is not None:
         return
-    path = os.path.join(executor.rootless_directory(), kind, os.path.basename(squashfs_path) + ".d")
+    path = os.path.join(extracted_directory(kind, executor), os.path.basename(squashfs_path) + ".d")
     threading.Thread(target=remove_in_namespace, args=([path, path + ".stamp"], print, None, executor), daemon=True).start()
 
 def remove_in_namespace(paths: list[str], output_handler, process_holder: list | None = None, executor: Executor | None = None) -> bool:
@@ -385,11 +396,48 @@ def remove_in_namespace(paths: list[str], output_handler, process_holder: list |
         return True
     return (executor or LOCAL_EXECUTOR).run_in_namespace("rm -rf -- " + " ".join(shlex.quote(path) for path in paths), output_handler, process_holder)
 
-def sessions_directory(executor: Executor | None = None) -> str:
-    return os.path.join((executor or LOCAL_EXECUTOR).rootless_directory(), "sessions")
+# ------------------------------------------------------------------------------
+# Folders of executor:
+# Cache/Distfiles             sources downloaded by portage
+# Cache/Extracted/<Kind>      extracted toolsets and snapshots
+# Temporary/Sessions          builds and toolset environments
+# Temporary/Work              writable toolset copies, work directories and unfinished extractions
+# Temporary/Downloads         downloads of operations (this computer only)
+
+def extracted_directory(kind: str, executor: Executor | None = None) -> str:
+    return os.path.join((executor or LOCAL_EXECUTOR).cache_directory(), "Extracted", kind.capitalize())
 
 def distfiles_directory(executor: Executor | None = None) -> str:
-    return os.path.join((executor or LOCAL_EXECUTOR).rootless_directory(), "distfiles")
+    return os.path.join((executor or LOCAL_EXECUTOR).cache_directory(), "Distfiles")
+
+def sessions_directory(executor: Executor | None = None) -> str:
+    return os.path.join((executor or LOCAL_EXECUTOR).temporary_directory(), "Sessions")
+
+def work_directory(executor: Executor | None = None) -> str:
+    return os.path.join((executor or LOCAL_EXECUTOR).temporary_directory(), "Work")
+
+def downloads_directory() -> str:
+    """Downloads on this computer (shared with machines, which can use downloaded files)."""
+    path = os.path.join(LOCAL_EXECUTOR.temporary_directory(), "Downloads")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def clear_temporary_directory():
+    """Removes data left in temporary directory of this computer by previous run of app (eg. after crash). Called
+    when app starts, in background. Files owned by mapped ids are removed in namespace."""
+    directory = LOCAL_EXECUTOR.temporary_directory()
+    if not os.path.isdir(directory) or not os.listdir(directory):
+        return
+    print(f"Removing temporary files from {directory}")
+    if rootless_unsupported_reason() is None:
+        LOCAL_EXECUTOR.run_in_namespace(f"rm -rf -- {shlex.quote(directory)}/* {shlex.quote(directory)}/.[!.]*", print)
+    else:
+        for name in os.listdir(directory):
+            path = os.path.join(directory, name)
+            try:
+                shutil.rmtree(path) if os.path.isdir(path) and not os.path.islink(path) else os.remove(path)
+            except OSError as e:
+                print(f"Failed to remove {path}: {e}")
 
 def remove_stale_sessions(output_handler, process_holder: list | None = None, executor: Executor | None = None):
     """Sessions left by interrupted builds (only one build runs at a time). Sessions of toolset environments are kept."""
@@ -406,7 +454,7 @@ def writable_squashfs_copy(squashfs_path: str, output_handler, process_holder: l
     """New extracted copy of squashfs file, for changing it and packing again. Remove it with remove_in_namespace."""
     executor = executor or LOCAL_EXECUTOR
     q = shlex.quote
-    directory = os.path.join(executor.rootless_directory(), "work")
+    directory = work_directory(executor)
     path = os.path.join(directory, f"{os.path.basename(squashfs_path)}.{uuid.uuid4().hex}")
     output_handler(f"Extracting {os.path.basename(squashfs_path)}...")
     script = f"""
@@ -419,10 +467,10 @@ unsquashfs -n -d {q(path)} {q(squashfs_path)} 2>&1 | grep -v -e "create_inode: f
     return path
 
 def create_work_directory(prefix: str, executor: Executor | None = None) -> str:
-    """Work directory in rootless directory, prefix can contain subdirectories (eg. 'toolsets/name/setup_')."""
+    """Work directory in temporary directory, prefix can contain subdirectories (eg. 'toolsets/name/setup_')."""
     executor = executor or LOCAL_EXECUTOR
     *subdirectories, name_prefix = prefix.rstrip("/").split("/")
-    parent = os.path.join(executor.rootless_directory(), "work", *subdirectories)
+    parent = os.path.join(work_directory(executor), *subdirectories)
     path = os.path.join(parent, f"{name_prefix}{uuid.uuid4().hex[:8]}")
     executor.filesystem({"mkdir": [path]})
     return path

@@ -88,14 +88,14 @@ class ProjectBuild(MultiStageProcess):
 
     def stage_cache_paths(self, stage) -> dict:
         """Folders of enabled caches of stage, by argument. Automatic caches of machine builds are on disk of machine
-        (shared folders can't store owners of files that portage sets), at the same path relative to rootless directory."""
+        (shared folders can't store owners of files that portage sets), in its cache directory."""
         paths = {
             argument: path for argument in CACHE_ARGUMENTS
             if (path := stage_cache_path(self.project_directory, stage, argument))
         }
         if self.machine:
             # Project id instead of name, paths in spec can't contain spaces.
-            project_caches = os.path.join(self.executor.rootless_directory(), "caches", self.project_directory.id.hex)
+            project_caches = os.path.join(self.executor.cache_directory(), "Projects", self.project_directory.id.hex)
             paths = {
                 argument: os.path.join(project_caches, os.path.relpath(path, self.builds_directory))
                 if path.startswith(self.builds_directory + os.sep) else path
@@ -108,8 +108,7 @@ class ProjectBuild(MultiStageProcess):
         Working space is deleted after build, caches are saved as plain files (shared folders can't store owners)."""
         if not self.machine:
             return []
-        toolsets_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location))
-        caches = [(os.path.join(os.path.dirname(toolsets_location), "Distfiles"), distfiles_directory(self.executor))]
+        caches = [(distfiles_directory(), distfiles_directory(self.executor))]
         used_paths = self.stage_cache_paths(stage)
         for argument in CACHE_ARGUMENTS:
             saved = stage_cache_path(self.project_directory, stage, argument)
@@ -118,8 +117,8 @@ class ProjectBuild(MultiStageProcess):
         return caches
 
     def make_directories(self, paths: list[str]):
-        """Creates directories, ones in rootless directory of machine are created in machine."""
-        machine_paths = [path for path in paths if self.machine and path.startswith(self.executor.rootless_directory() + os.sep)]
+        """Creates directories, ones in cache or temporary directory of machine are created in machine."""
+        machine_paths = [path for path in paths if self.machine and self.executor.owns_path(path)]
         for path in paths:
             if path not in machine_paths:
                 os.makedirs(path, exist_ok=True)

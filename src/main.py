@@ -24,6 +24,9 @@ class CatalystlabApplication(Adw.Application):
         self.create_action('about', self.on_about_action)
         self.create_action('preferences', self.on_preferences_action)
         scan_all_submodules("catalystlab")
+        # Before any operation starts, they keep their data there.
+        from .rootless import clear_temporary_directory
+        clear_temporary_directory()
         ToolsetManager.shared().refresh()
         SnapshotManager.shared().refresh()
         RelengManager.shared().refresh()
