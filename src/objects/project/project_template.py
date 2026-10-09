@@ -1,51 +1,12 @@
-"""Project templates: directories with template.toml describing stages (and optional files) of new project.
+"""Project templates: directories with template.toml describing stages, options and files of new project.
 
 Local templates are directories in data/project_templates of the app, templates from Git repositories have the same
 layout in root of repository. Repositories offered in the app are listed in data/project_templates/repositories.txt.
+Format of templates is described in docs/project-templates.md.
 
 Templates can't run code. Values in template.toml can contain {{ expressions }} and "when" conditions, evaluated by
-small evaluator that only allows constants, template variables, operators, conditional expressions and few functions
+small evaluator that only allows constants, template values, operators, conditional expressions and few functions
 (see TemplateExpression), so templates from other repositories are safe to use.
-
-template.toml:
-
-    format = 1
-    name = "Name of template"
-    description = "Shown in list of templates"
-
-    [[variables]]                        # Options selected when creating project, in this order.
-    id = "init"                          # Name used in expressions.
-    title = "Init system"
-    description = "..."                  # Optional.
-    type = "choice"                      # choice (default), boolean or architecture (sets architecture of project).
-    default = "openrc"                   # Optional, first available option otherwise.
-    when = "expression"                  # Optional, variable is not used (its value is none) when false.
-    options = [                          # Not used for boolean variables.
-        { value = "openrc", title = "OpenRC" },
-        { value = "systemd", title = "systemd", when = "expression" },  # Option available only when true.
-    ]
-
-    [values]                             # Optional values computed from variables, in this order.
-    profile_name = "{{ 'systemd' if init == 'systemd' else 'openrc' }}"
-
-    [[stages]]                           # Stages of project, parents before their children.
-    id = "stage1"                        # Used in parent of other stages.
-    name = "stage1-{{ init }}"
-    target = "stage1"                    # Catalyst target.
-    parent = "..."                       # Optional, id of parent stage (seed).
-    releng_template = "stage1-{{ init }}-23.spec"  # Optional, path relative to specs of architecture in releng.
-    when = "expression"                  # Optional, stage is created only when true.
-    [stages.arguments]                   # Optional values of stage arguments, others get default automatic values.
-    stage4_packages = ["app-admin/sudo"] # Strings, lists of strings, booleans and numbers, or { type, value } tables
-                                         # stored in stage.json format. Empty values are skipped.
-
-    [[files]]                            # Optional files copied to project (eg. portage configuration of stages).
-    source = "files/stage4"              # File or directory in template.
-    destination = "stages/{{ stage4_name }}"  # Path in project.
-    when = "expression"                  # Optional.
-
-Files with .template suffix are copied with {{ expressions }} in their contents replaced, and without that suffix.
-Expressions can use variables, computed values and project_name.
 """
 from __future__ import annotations
 import ast, hashlib, os, re, shutil, subprocess, tempfile, tomllib, uuid
@@ -221,14 +182,16 @@ def render_value(value, names: dict[str, Any]):
 # ------------------------------------------------------------------------------
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_RESERVED_NAMES = {"project_name", "true", "false", "none"} | set(_FUNCTIONS)
+_RESERVED_NAMES = {"project_name", "groups", "true", "false", "none"} | set(_FUNCTIONS)
+_GROUP_STAGES_NAME = "_group_stages" # Stages selected for enabled groups, used when generating.
 _RESERVED_STAGE_ARGUMENTS = {"id", "parent", "target", "name", "releng_template", "event_bus"}
 
 class TemplateVariableType:
     CHOICE = "choice"
     BOOLEAN = "boolean"
     ARCHITECTURE = "architecture" # Choice of architecture names, selected value is also architecture of project.
-    ALL = (CHOICE, BOOLEAN, ARCHITECTURE)
+    MULTIPLE = "multiple" # Any number of options, value is list of selected values (in order of options).
+    ALL = (CHOICE, BOOLEAN, ARCHITECTURE, MULTIPLE)
 
 @dataclass
 class TemplateOption:
@@ -266,6 +229,20 @@ class TemplateFiles:
     when: str | None
 
 @dataclass
+class TemplateGroup:
+    """Configuration that can be enabled when creating project and applied to selected stages: arguments added to
+    stages (lists are extended) and files copied to their directories."""
+    id: str
+    title: str
+    description: str | None
+    default: bool
+    when: str | None
+    stages: list[str] # Ids of stages group can be applied to.
+    default_stages: list[str]
+    arguments: dict[str, Any]
+    files: list[TemplateFiles] # Destination is relative to stage directory.
+
+@dataclass
 class ProjectTemplateSelection:
     """Template and values of its variables selected for new project (data of TEMPLATE Git directory source)."""
     template: ProjectTemplate
@@ -284,6 +261,7 @@ class GeneratedStage:
     parent: str | None # Template id of parent stage.
     releng_template: str | None
     arguments: dict[str, Any]
+    groups: list[str] = field(default_factory=list) # Titles of groups applied to stage.
 
 @dataclass
 class GeneratedProject:
@@ -311,6 +289,20 @@ def _condition(data: dict, context: str) -> str | None:
         TemplateExpression(condition) # Syntax is checked when loading.
     return condition
 
+def _parse_files(entries, context: str) -> list[TemplateFiles]:
+    if not isinstance(entries, list):
+        raise TemplateError(f"{context} must be a list of tables")
+    files = []
+    for index, files_data in enumerate(entries):
+        entry_context = f"{context} {index + 1}"
+        if not isinstance(files_data, dict):
+            raise TemplateError(f"{entry_context} must be a table")
+        files.append(TemplateFiles(
+            source=_text(files_data, "source", entry_context), destination=_text(files_data, "destination", entry_context),
+            when=_condition(files_data, entry_context)
+        ))
+    return files
+
 @dataclass
 class ProjectTemplate:
     path: str # Directory with template.toml.
@@ -320,6 +312,8 @@ class ProjectTemplate:
     values: dict[str, Any]
     stages: list[TemplateStage]
     files: list[TemplateFiles]
+    groups: list[TemplateGroup] = field(default_factory=list)
+    groups_title: str = "Additional configuration"
     repository_url: str | None = None # Git repository of template, None for templates included in app.
     # False for definition downloaded without other files of repository (to show options), files are checked when
     # template is applied from cloned repository.
@@ -375,7 +369,12 @@ class ProjectTemplate:
                 if not options:
                     raise TemplateError(f"{context}: no options")
             default = variable_data.get("default")
-            if default is not None and default not in [option.value for option in options]:
+            option_values = [option.value for option in options]
+            if variable_type == TemplateVariableType.MULTIPLE:
+                default = [] if default is None else default
+                if not isinstance(default, list) or any(value not in option_values for value in default):
+                    raise TemplateError(f"{context}: default value must be list of options")
+            elif default is not None and default not in option_values:
                 raise TemplateError(f"{context}: default value {default} is not one of options")
             variables.append(TemplateVariable(
                 id=variable_id, title=_text(variable_data, "title", context, required=False) or variable_id,
@@ -414,18 +413,42 @@ class ProjectTemplate:
                 parent=parent, releng_template=_text(stage_data, "releng_template", context, required=False),
                 arguments=arguments, when=_condition(stage_data, context)
             ))
-        # Files:
-        files = []
-        for index, files_data in enumerate(data.get("files", [])):
-            context = f"Files {index + 1}"
-            if not isinstance(files_data, dict):
+        files = _parse_files(data.get("files", []), "Files")
+        # Groups:
+        groups = []
+        group_ids = set()
+        for index, group_data in enumerate(data.get("groups", [])):
+            context = f"Group {index + 1}"
+            if not isinstance(group_data, dict):
                 raise TemplateError(f"{context} must be a table")
-            files.append(TemplateFiles(
-                source=_text(files_data, "source", context), destination=_text(files_data, "destination", context),
-                when=_condition(files_data, context)
+            group_id = _text(group_data, "id", context)
+            context = f"Group {group_id}"
+            if not _IDENTIFIER_PATTERN.match(group_id) or group_id in group_ids:
+                raise TemplateError(f"{context}: invalid or duplicated id")
+            group_ids.add(group_id)
+            group_stages = group_data.get("stages")
+            if not isinstance(group_stages, list) or not group_stages or any(stage_id not in stage_ids for stage_id in group_stages):
+                raise TemplateError(f"{context}: stages must be list of ids of stages")
+            default_stages = group_data.get("default_stages", group_stages)
+            if not isinstance(default_stages, list) or any(stage_id not in group_stages for stage_id in default_stages):
+                raise TemplateError(f"{context}: default_stages must be list of its stages")
+            default = group_data.get("default", False)
+            if not isinstance(default, bool):
+                raise TemplateError(f"{context}: default must be true or false")
+            arguments = _table(group_data, "arguments", context)
+            for key in arguments:
+                if not _IDENTIFIER_PATTERN.match(key) or key in _RESERVED_STAGE_ARGUMENTS:
+                    raise TemplateError(f"{context}: argument {key} can't be set in arguments")
+            groups.append(TemplateGroup(
+                id=group_id, title=_text(group_data, "title", context, required=False) or group_id,
+                description=_text(group_data, "description", context, required=False), default=default,
+                when=_condition(group_data, context), stages=group_stages, default_stages=default_stages,
+                arguments=arguments, files=_parse_files(group_data.get("files", []), f"{context} files")
             ))
+        groups_title = _text(data, "groups_title", "Template", required=False) or "Additional configuration"
         return cls(path=path, name=name, description=description, variables=variables, values=values, stages=stages,
-                   files=files, repository_url=repository_url, files_available=files_available)
+                   files=files, groups=groups, groups_title=groups_title, repository_url=repository_url,
+                   files_available=files_available)
 
     @property
     def architecture_variable(self) -> TemplateVariable | None:
@@ -440,15 +463,43 @@ class ProjectTemplate:
                 names[variable.id] = None
                 continue
             options = [option.value for option in variable.available_options(names)]
+            if variable.type == TemplateVariableType.MULTIPLE:
+                # Selection of user, or default, without options that are not available.
+                value = selected.get(variable.id)
+                value = variable.default if not isinstance(value, list) else value
+                names[variable.id] = [option for option in options if option in value]
+                continue
             if not options:
                 raise TemplateError(f"Variable {variable.id} has no available options")
             value = selected.get(variable.id)
             if value not in options:
                 value = variable.default if variable.default in options else options[0]
             names[variable.id] = value
+        # Groups: selected as {"enabled": bool, "stages": [stage ids]} under "group:<id>", defaults otherwise.
+        enabled_groups, group_stages = [], {}
+        for group in self.groups:
+            if not evaluate_condition(group.when, names):
+                continue
+            selection = selected.get(f"group:{group.id}")
+            selection = selection if isinstance(selection, dict) else {}
+            if not selection.get("enabled", group.default):
+                continue
+            stages = selection.get("stages")
+            stages = group.default_stages if not isinstance(stages, list) else stages
+            enabled_groups.append(group.id)
+            group_stages[group.id] = [stage_id for stage_id in group.stages if stage_id in stages]
+        names["groups"] = enabled_groups
+        names[_GROUP_STAGES_NAME] = group_stages
         for key, expression in self.values.items():
             names[key] = render_value(expression, names)
         return names
+
+    def _files_paths(self, entry: TemplateFiles, names: dict[str, Any], base: str) -> tuple[str, str]:
+        return _template_files_paths(self, entry, names, base)
+
+    def available_groups(self, names: dict[str, Any]) -> list[TemplateGroup]:
+        """Groups that can be enabled for selected values of variables."""
+        return [group for group in self.groups if evaluate_condition(group.when, names)]
 
     def visible_variables(self, names: dict[str, Any]) -> list[TemplateVariable]:
         """Variables used for current selection (with "when" condition that is true)."""
@@ -489,28 +540,57 @@ class ProjectTemplate:
                 if value is None or value == "" or value == []:
                     continue
                 arguments[key] = _stage_argument_value(value, f"{context}, argument {key}")
+            applied_groups = []
+            for group in self.groups:
+                if stage.id not in names.get(_GROUP_STAGES_NAME, {}).get(group.id, []):
+                    continue
+                applied_groups.append(group.title)
+                for key, value in group.arguments.items():
+                    value = render_value(value, names)
+                    if value is None or value == "" or value == []:
+                        continue
+                    value = _stage_argument_value(value, f"Group {group.id}, argument {key}")
+                    existing = arguments.get(key)
+                    if isinstance(existing, list) and isinstance(value, list):
+                        arguments[key] = existing + [item for item in value if item not in existing]
+                    else:
+                        arguments[key] = value
             stages.append(GeneratedStage(template_id=stage.id, name=name, target=target, parent=stage.parent,
-                                         releng_template=releng_template, arguments=arguments))
+                                         releng_template=releng_template, arguments=arguments, groups=applied_groups))
             generated_ids.add(stage.id)
         files = []
-        template_root = os.path.realpath(self.path)
         for entry in self.files:
-            if not evaluate_condition(entry.when, names):
-                continue
-            source = os.path.realpath(os.path.join(template_root, str(render_value(entry.source, names))))
-            destination = os.path.normpath(str(render_value(entry.destination, names)))
-            if not source.startswith(template_root + os.sep):
-                raise TemplateError(f"Files source {entry.source} is outside of template")
-            if os.path.isabs(destination) or destination == ".." or destination.startswith(".." + os.sep) \
-                    or destination.split(os.sep)[0] == ".git":
-                raise TemplateError(f"Files destination {entry.destination} is outside of project")
-            if self.files_available and not os.path.exists(source):
-                raise TemplateError(f"Files source {entry.source} doesn't exist")
-            files.append((source, destination))
+            if evaluate_condition(entry.when, names):
+                files.append(self._files_paths(entry, names, base=""))
+        # Files of groups, in directories of stages group is applied to.
+        stage_names = {stage.template_id: stage.name for stage in stages}
+        for group in self.groups:
+            for stage_id in names.get(_GROUP_STAGES_NAME, {}).get(group.id, []):
+                if stage_id not in stage_names:
+                    continue
+                for entry in group.files:
+                    if evaluate_condition(entry.when, names):
+                        files.append(self._files_paths(entry, names, base=os.path.join("stages", stage_names[stage_id])))
         architecture_variable = self.architecture_variable
         architecture_name = names.get(architecture_variable.id) if architecture_variable else None
         return GeneratedProject(stages=stages, files=files,
                                 architecture=Architecture[architecture_name] if architecture_name else None)
+
+def _template_files_paths(template: ProjectTemplate, entry: TemplateFiles, names: dict[str, Any], base: str) -> tuple[str, str]:
+    """Source path in template and destination in project (relative to base directory in project) of files."""
+    template_root = os.path.realpath(template.path)
+    source = os.path.realpath(os.path.join(template_root, str(render_value(entry.source, names))))
+    destination = os.path.normpath(str(render_value(entry.destination, names)))
+    if not source.startswith(template_root + os.sep):
+        raise TemplateError(f"Files source {entry.source} is outside of template")
+    if os.path.isabs(destination) or destination == ".." or destination.startswith(".." + os.sep):
+        raise TemplateError(f"Files destination {entry.destination} is outside of {'stage' if base else 'project'}")
+    destination = os.path.normpath(os.path.join(base, destination))
+    if destination.split(os.sep)[0] == ".git":
+        raise TemplateError(f"Files destination {entry.destination} is outside of project")
+    if template.files_available and not os.path.exists(source):
+        raise TemplateError(f"Files source {entry.source} doesn't exist")
+    return source, destination
 
 def _stage_argument_value(value, context: str):
     """Value of stage argument from template: texts, numbers, booleans and their lists are used directly, tables
@@ -518,7 +598,9 @@ def _stage_argument_value(value, context: str):
     if isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, list):
-        return [_stage_argument_value(item, context) for item in value]
+        # Items that are none (also tables with none value) are skipped, so expressions can leave them out.
+        return [_stage_argument_value(item, context) for item in value
+                if item is not None and not (isinstance(item, dict) and item.get("value") is None)]
     if isinstance(value, dict) and set(value) == {"type", "value"}:
         from .project_stage_argument_serialization import ProjectStageArgumentSerialization
         try:
@@ -587,6 +669,52 @@ def _run_git(command: list[str], timeout: int = 300):
         output = result.stdout.strip()
         raise TemplateError(output.splitlines()[-1] if output else f"{' '.join(command[:2])} failed")
 
+# Template repositories can contain only template: template.toml, files used by it and few common repository files.
+_REPOSITORY_ALLOWED_FILES = re.compile(r"^(template\.toml|\.gitignore|\.gitattributes|(README|LICENSE|LICENCE|COPYING)(\.[A-Za-z0-9]+)?)$")
+_REPOSITORY_FILES_DIRECTORY = "files"
+_REPOSITORY_MAX_FILES = 2_000
+_REPOSITORY_MAX_FILE_SIZE = 10 * 1024 * 1024
+_REPOSITORY_MAX_TOTAL_SIZE = 50 * 1024 * 1024
+
+def validate_template_repository(path: str, check_sizes: bool):
+    """Checks that latest commit of template repository contains only template: template.toml in root, optionally
+    README, LICENSE, COPYING, .gitignore and .gitattributes files, and other files in files directory. Symbolic links,
+    submodules and executable files are not allowed. Sizes of files are checked when they were downloaded
+    (check_sizes), listing of files doesn't need their contents."""
+    command = ["git", "-C", path, "ls-tree", "-r", "-z"] + (["-l"] if check_sizes else []) + ["HEAD"]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    if result.returncode != 0:
+        raise TemplateError(f"Failed to list files of repository: {result.stderr.decode(errors='replace').strip()}")
+    entries = [entry for entry in result.stdout.decode("utf-8", errors="replace").split("\0") if entry]
+    if len(entries) > _REPOSITORY_MAX_FILES:
+        raise TemplateError(f"Repository has more than {_REPOSITORY_MAX_FILES} files")
+    has_template = False
+    total_size = 0
+    for entry in entries:
+        details, _, file_path = entry.partition("\t")
+        mode, object_type, *rest = details.split()
+        if object_type == "commit":
+            raise TemplateError(f"Repository can't contain submodules ({file_path})")
+        if mode == "120000":
+            raise TemplateError(f"Repository can't contain symbolic links ({file_path})")
+        if mode != "100644":
+            raise TemplateError(f"Repository can't contain executable or special files ({file_path})")
+        if "/" in file_path:
+            if file_path.split("/")[0] != _REPOSITORY_FILES_DIRECTORY:
+                raise TemplateError(f"Files of template must be in {_REPOSITORY_FILES_DIRECTORY} directory ({file_path})")
+        elif not _REPOSITORY_ALLOWED_FILES.match(file_path):
+            raise TemplateError(f"Repository can contain only template ({file_path} is not allowed)")
+        has_template = has_template or file_path == TEMPLATE_FILE
+        if check_sizes:
+            size = int(rest[1]) if len(rest) > 1 and rest[1].isdigit() else 0
+            if size > _REPOSITORY_MAX_FILE_SIZE:
+                raise TemplateError(f"{file_path} is larger than {_REPOSITORY_MAX_FILE_SIZE // 1024 // 1024} MB")
+            total_size += size
+    if not has_template:
+        raise TemplateError(f"Repository has no {TEMPLATE_FILE}")
+    if total_size > _REPOSITORY_MAX_TOTAL_SIZE:
+        raise TemplateError(f"Files of repository are larger than {_REPOSITORY_MAX_TOTAL_SIZE // 1024 // 1024} MB")
+
 def fetch_template_repository(url: str) -> ProjectTemplate:
     """Downloads only template.toml from latest commit of template repository, to show its options. Other files are
     used from repository cloned when project is created. Uses partial clone without contents of files, servers that
@@ -598,6 +726,7 @@ def fetch_template_repository(url: str) -> ProjectTemplate:
         shutil.rmtree(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     _run_git(["git", "clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--quiet", url, path])
+    validate_template_repository(path, check_sizes=False)
     _run_git(["git", "-C", path, "sparse-checkout", "set", "--no-cone", "/" + TEMPLATE_FILE])
     _run_git(["git", "-C", path, "checkout", "--quiet"])
     return ProjectTemplate.load(path, repository_url=url, files_available=False)
@@ -606,6 +735,7 @@ def load_cloned_template(path: str, repository_url: str) -> ProjectTemplate:
     """Template of repository cloned as project directory. Its files are copied to temporary directory first, as
     project directory is replaced with generated content. Remove returned template path when done."""
     from .repository import Repository
+    validate_template_repository(path, check_sizes=True)
     temporary = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
     os.makedirs(temporary, exist_ok=True)
     copy_path = os.path.join(tempfile.mkdtemp(prefix="project-template-", dir=temporary), "template")
@@ -638,6 +768,36 @@ def _copy_template_files(source: str, destination: str, names: dict[str, Any], l
     else:
         shutil.copyfile(source, destination)
 
+def _stage_argument_names(project_directory, target: str) -> set[str] | None:
+    """Names of arguments of catalyst target (attribute names in stages), None when they can't be loaded."""
+    from .project_stage import load_catalyst_stage_arguments_details
+    try:
+        arguments = load_catalyst_stage_arguments_details(toolset=project_directory.get_toolset(), target_name=target)
+        return {argument.attribute_name for argument in arguments.values()}
+    except Exception:
+        return None
+
+def _enable_stage_overlays(project_directory, stage, log: Callable[[str], None]):
+    """Stage overlays (portage and root_overlay folders of stage) with files from template are used by stage, as
+    stage overlay source of Portage confdir and root overlay."""
+    from .project_stage_portage_confdir import (
+        StagePortageConfdirSource, PORTAGE_CONFDIR_SOURCES_ORDER, stage_overlay_path, stage_root_overlay_path,
+        root_overlay_argument, count_files, default_portage_confdir_sources
+    )
+    from .project_stage_arguments import StageArgumentDetails
+    for path, attribute in ((stage_overlay_path(project_directory, stage), StageArgumentDetails.portage_confdir.name),
+                            (stage_root_overlay_path(project_directory, stage), getattr(root_overlay_argument(stage), "name", None))):
+        if attribute is None or not os.path.isdir(path) or count_files(path) == 0:
+            continue
+        value = getattr(stage, attribute, None)
+        if not isinstance(value, list):
+            value = default_portage_confdir_sources(has_parent=getattr(stage, "parent", None) is not None)
+        sources = [item for item in value if isinstance(item, StagePortageConfdirSource)]
+        if StagePortageConfdirSource.STAGE_OVERLAY not in sources:
+            sources.append(StagePortageConfdirSource.STAGE_OVERLAY)
+            setattr(stage, attribute, [source for source in PORTAGE_CONFDIR_SOURCES_ORDER if source in sources])
+            log(f"Using {os.path.basename(path)} of {stage.name} from template")
+
 def apply_project_template(project_directory, template: ProjectTemplate, names: dict[str, Any],
                            log: Callable[[str], None], replace_content: bool = False):
     """Creates files and stages of template in project directory. Project needs configuration (toolset, releng) set
@@ -666,14 +826,20 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
     architecture = project_directory.get_architecture()
     stage_ids: dict[str, uuid.UUID] = {}
     for generated_stage in generated.stages:
-        if not ProjectManager.shared().is_stage_name_available(project=project_directory, name=generated_stage.name):
+        # Stage directory can exist already, with files copied from template.
+        if any(existing.name == generated_stage.name for existing in project_directory.stages) or os.path.exists(
+                os.path.join(project_directory.stage_directory_path(generated_stage.name), "stage.json")):
             raise TemplateError(f"Stage {generated_stage.name} already exists")
         stage = ProjectStage(
             parent_id=stage_ids[generated_stage.parent] if generated_stage.parent else None,
             name=generated_stage.name, target_name=generated_stage.target,
             releng_template_name=generated_stage.releng_template
         )
+        valid_arguments = _stage_argument_names(project_directory, generated_stage.target)
         for key, value in generated_stage.arguments.items():
+            if valid_arguments is not None and key not in valid_arguments:
+                # Groups can set arguments of different targets (eg. stage4_packages and livecd_packages).
+                continue
             setattr(stage, key, value)
         if generated_stage.releng_template and releng_directory and architecture:
             spec_path = os.path.join(releng_directory.directory_path(), "releases", "specs",
@@ -685,6 +851,7 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
         except Exception as e:
             # Stage can still be configured manually.
             log(f"Failed to set default values of {stage.name}: {e}")
+        _enable_stage_overlays(project_directory, stage, log)
         ProjectManager.shared().save_stage(project=project_directory, stage=stage)
         project_directory.stages.append(stage)
         stage_ids[generated_stage.template_id] = stage.id
