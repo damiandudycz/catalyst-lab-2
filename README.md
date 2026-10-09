@@ -71,6 +71,12 @@ efficiently without requiring in-depth knowledge of the underlying components.
  - squashfs-tools
  - git
 
+## macOS application:
+`packaging/macos/build-app.sh` builds self-contained `dist/Catalyst Lab.app` and `dist/Catalyst Lab.dmg` (Python, GTK,
+libadwaita, squashfs tools and Lima included). It installs missing build dependencies with Homebrew and downloads Lima
+from GitHub. Running the app requires only git (Xcode Command Line Tools) for releng and overlay repositories.
+App icon is `computer` icon from Adwaita icon theme (CC BY-SA 3.0, GNOME Project).
+
 ## Main layout:
 
 # CatalystlabApplication

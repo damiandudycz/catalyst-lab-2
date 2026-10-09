@@ -18,7 +18,7 @@
 
     <child>
       <object class="GtkImage">
-        <property name="icon-name">computer</property>
+        <property name="icon-name">com.damiandudycz.CatalystLab</property>
         <property name="pixel-size">128</property>
       </object>
     </child>
