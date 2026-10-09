@@ -23,8 +23,8 @@ import threading
 class ProjectDetailsView(Gtk.Box):
     __gtype_name__ = "ProjectDetailsView"
 
+    stack = Gtk.Template.Child()
     stages_tree_view = Gtk.Template.Child()
-    stages_view_mode_container = Gtk.Template.Child()
     build_row = Gtk.Template.Child()
     build_progress_row = Gtk.Template.Child()
     directory_details_view = Gtk.Template.Child()
@@ -141,15 +141,23 @@ class ProjectDetailsView(Gtk.Box):
         GLib.idle_add(refresh)
 
     def _setup_stages_view_mode(self):
-        """Compact stages (short names, expanded while hovered) or full ones."""
-        toggle_group = CLToggleGroup()
-        toggle_group.add_css_class("round")
-        toggle_group.add_css_class("caption")
-        toggle_group.add(CLToggle(label="Compact"))
-        toggle_group.add(CLToggle(label="Full"))
-        toggle_group.set_active(1 if self.stages_tree_view.expand_all else 0)
-        toggle_group.connect("notify::active", lambda group, _: self.stages_tree_view.set_expand_all(group.get_active() == 1))
-        self.stages_view_mode_container.append(toggle_group)
+        """Compact stages (short names, expanded while hovered) or full ones, switched in header bar while stages are
+        shown."""
+        self.stages_view_mode_toggle = CLToggleGroup(valign=Gtk.Align.CENTER)
+        self.stages_view_mode_toggle.add_css_class("round")
+        self.stages_view_mode_toggle.add_css_class("caption")
+        self.stages_view_mode_toggle.add(CLToggle(label="Compact"))
+        self.stages_view_mode_toggle.add(CLToggle(label="Full"))
+        self.stages_view_mode_toggle.set_active(1 if self.stages_tree_view.expand_all else 0)
+        self.stages_view_mode_toggle.connect("notify::active", lambda group, _: self.stages_tree_view.set_expand_all(group.get_active() == 1))
+        self.stack.connect("notify::visible-child-name", lambda *args: self._update_stages_view_mode_visibility())
+        self._update_stages_view_mode_visibility()
+
+    def _update_stages_view_mode_visibility(self):
+        self.stages_view_mode_toggle.set_visible(self.stack.get_visible_child_name() == "stages")
+
+    def header_bar_end_widgets(self) -> list[Gtk.Widget]:
+        return [self.stages_view_mode_toggle]
 
     def monitor_stages_changes(self):
         self.project_directory.event_bus.subscribe(

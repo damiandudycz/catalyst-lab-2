@@ -26,6 +26,9 @@ def _push_view(self, view: Gtk.Widget, title: str):
     if getattr(self, "show_root_access_button", True):
         root_access_button = RootAccessButton()
         header.pack_end(root_access_button)
+    # Widgets of view for header bar (eg. view options), placed before root access button.
+    for widget in getattr(view, "header_bar_end_widgets", lambda: [])():
+        header.pack_end(widget)
     # Create a navigation page with title and child
     page = Adw.NavigationPage.new(toolbar_view, title)
     view._page = page # TODO: Check if this needs weakref
