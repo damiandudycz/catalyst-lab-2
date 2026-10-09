@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
 from .ssh_connection import SSHConnection, quote
 from .deploy_target import TargetMachine, PartitionPlan, PartitionType
-from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, packages_script, bootloader_script, grub_platform
+from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, packages_script, bootloader_script, grub_platform, CHROOT_SETUP
 from .deploy_system import (
     NetworkService, NetworkSettings, LocalizationSettings, network_script, localization_script, authorized_keys_script
 )
@@ -219,7 +219,8 @@ class DeployStepConfigure(DeployStep):
         process = self.multistage_process
         settings = process.settings
         self.remote(process.plan.fstab_script(), "Failed to write fstab")
-        script = ["set -e", f"ROOT={MOUNT_POINT}", 'cp -L /etc/resolv.conf "$ROOT/etc/resolv.conf"']
+        # Commands run in installed system (locale-gen, useradd, chpasswd) need /proc, /sys and /dev mounted there.
+        script = ["set -e", f"ROOT={MOUNT_POINT}", CHROOT_SETUP]
         if settings.hostname:
             hostname = quote(settings.hostname)
             script += [
