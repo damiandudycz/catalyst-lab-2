@@ -15,6 +15,7 @@ class Bootloader(Enum):
     SYSTEMD_BOOT = "systemd-boot"
     REFIND = "refind"
     EFI_STUB = "efi-stub"
+    KBOOT = "kboot" # Configuration of petitboot (PS3), no bootloader is installed.
     NONE = "none"
 
     @property
@@ -24,6 +25,7 @@ class Bootloader(Enum):
             Bootloader.SYSTEMD_BOOT: "systemd-boot",
             Bootloader.REFIND: "rEFInd",
             Bootloader.EFI_STUB: "EFI stub (kernel started by firmware)",
+            Bootloader.KBOOT: "kboot (PS3 petitboot)",
             Bootloader.NONE: "Don't install bootloader",
         }[self]
 
@@ -36,9 +38,16 @@ class Bootloader(Enum):
             Bootloader.EFI_STUB: "sys-boot/efibootmgr",
         }.get(self)
 
+    @property
+    def needs_package(self) -> bool:
+        """Configuration only bootloaders don't need anything installed in stage."""
+        return self not in (Bootloader.KBOOT, Bootloader.NONE)
+
     def supported(self, architecture: str, uefi: bool) -> bool:
         if self == Bootloader.NONE:
             return True
+        if self == Bootloader.KBOOT:
+            return architecture in ("ppc64", "ppc64le") and not uefi # Machines booting with petitboot.
         if self == Bootloader.GRUB:
             return uefi or architecture in _X86
         return uefi # Others are UEFI applications.
@@ -119,6 +128,8 @@ class StageContents:
 
 def default_bootloader(contents: StageContents, architecture: str, uefi: bool) -> Bootloader:
     """First supported bootloader found in stage, otherwise GRUB (installed from repository) when supported."""
+    if Bootloader.KBOOT.supported(architecture, uefi):
+        return Bootloader.KBOOT
     for bootloader in (Bootloader.GRUB, Bootloader.SYSTEMD_BOOT, Bootloader.REFIND, Bootloader.EFI_STUB):
         if bootloader in contents.bootloaders and bootloader.supported(architecture, uefi):
             return bootloader
@@ -165,8 +176,10 @@ fi
     return "\n".join(lines) + "\n"
 
 def bootloader_script(bootloader: Bootloader, architecture: str, uefi: bool, disk: str, root_device: str,
-                      efi_device: str | None, esp: str | None) -> str | None:
+                      efi_device: str | None, esp: str | None, separate_boot: bool = False) -> str | None:
     """Installs and configures bootloader in installed system. ESP is mount point of EFI system partition."""
+    if bootloader == Bootloader.KBOOT:
+        return kboot_script(root_device, separate_boot)
     if uefi and not esp:
         return None
     root = f'root=UUID=$(blkid -s UUID -o value {root_device}) rw'
@@ -231,6 +244,33 @@ if [ -n "$INITRD" ]; then cp "$ROOT/boot/$INITRD" "$ROOT{esp}/EFI/gentoo/initrd"
 in_root efibootmgr --create --disk {disk} --part {partition.group(1) if partition else 1} --label Gentoo --loader '\\EFI\\gentoo\\linux.efi' --unicode "$OPTIONS"
 """
     return None
+
+def kboot_script(root_device: str, separate_boot: bool) -> str:
+    """Entries of petitboot (kboot.conf) for kernels in /boot, newest first (first entry is default). With separate
+    /boot partition configuration is in it and paths are relative to it, otherwise it's in /etc. Like PS3 Gentoo
+    installer (github.com/damiandudycz/ps3)."""
+    config = "$ROOT/boot/kboot.conf" if separate_boot else "$ROOT/etc/kboot.conf"
+    prefix = "" if separate_boot else "/boot"
+    return f"""set -e
+CONFIG="{config}"
+OPTIONS=""
+# PS3 framebuffer mode used by PS3 Gentoo images.
+grep -qi "PS3" /proc/device-tree/model 2>/dev/null && OPTIONS=" video=ps3fb:mode:133"
+KERNELS=$(cd "$ROOT/boot" && ls -t vmlinux* vmlinuz* 2>/dev/null || true)
+[ -n "$KERNELS" ] || {{ echo "No kernel in /boot, kboot entries can't be created"; exit 1; }}
+: > "$CONFIG.new"
+for KERNEL in $KERNELS; do
+    VERSION=${{KERNEL#vmlinu?-}}
+    INITRD=$(cd "$ROOT/boot" && ls -t "initramfs-$VERSION"* "initrd-$VERSION"* 2>/dev/null | head -n 1 || true)
+    ENTRY="Gentoo-$VERSION='{prefix}/$KERNEL${{INITRD:+ initrd={prefix}/$INITRD}} root={root_device}$OPTIONS'"
+    echo "$ENTRY" >> "$CONFIG.new"
+done
+# Entries added manually before are kept after new ones.
+[ -f "$CONFIG" ] && grep -vxF -f "$CONFIG.new" "$CONFIG" >> "$CONFIG.new" || true
+mv "$CONFIG.new" "$CONFIG"
+echo "kboot configuration ${{CONFIG#$ROOT}}:"
+cat "$CONFIG"
+"""
 
 def grub_target(architecture: str, uefi: bool) -> str | None:
     """GRUB platform for machine architecture."""

@@ -95,7 +95,7 @@ class DeployInstallation(MultiStageProcess):
         """Packages installed from Gentoo repository: bootloader missing in stage, and kernel."""
         packages = []
         bootloader = self.settings.bootloader
-        if bootloader != Bootloader.NONE and bootloader not in self.contents.bootloaders:
+        if bootloader.needs_package and bootloader not in self.contents.bootloaders:
             packages.append(bootloader.package(self.contents.init))
         service = self.settings.network.service
         if service.package and service not in self.contents.network_services:
@@ -294,6 +294,7 @@ class DeployStepBootloader(DeployStep):
             root_device=plan.partition_device(root_index),
             efi_device=plan.partition_device(efi_index) if efi_index else None,
             esp=plan.efi_mount_point,
+            separate_boot=plan.index_of(lambda spec: spec.type == PartitionType.LINUX and spec.mount_point == "/boot") is not None,
         )
         if script is None:
             raise RuntimeError(f"{process.settings.bootloader.display_name} is not supported on this machine")

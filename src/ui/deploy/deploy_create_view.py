@@ -409,7 +409,7 @@ class DeployCreateView(Gtk.Box):
         self.bootloader_options = [item for item in Bootloader if item.supported(architecture, uefi)]
         labels = []
         for item in self.bootloader_options:
-            if item == Bootloader.NONE:
+            if not item.needs_package:
                 labels.append(item.display_name)
             elif item in contents.bootloaders:
                 labels.append(f"{item.display_name}, in stage")
@@ -442,7 +442,7 @@ class DeployCreateView(Gtk.Box):
         contents = self.contents or StageContents()
         bootloader = self._selected_bootloader()
         installs = []
-        if bootloader != Bootloader.NONE and bootloader not in contents.bootloaders:
+        if bootloader.needs_package and bootloader not in contents.bootloaders:
             installs.append(bootloader.package(contents.init))
         kernel = self._selected_kernel()
         network = self._network().service
