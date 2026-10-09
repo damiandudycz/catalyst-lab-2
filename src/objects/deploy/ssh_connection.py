@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, shlex, stat, subprocess, threading, uuid
+import os, shlex, stat, subprocess, threading, time, uuid
 
 # ------------------------------------------------------------------------------
 # SSH connection to machine where build is deployed (usually booted from Gentoo LiveCD).
@@ -31,7 +31,7 @@ class SSHConnection:
             "ConnectTimeout": "15",
         }
         if master:
-            options |= {"ControlMaster": "yes", "ControlPersist": "yes"}
+            options |= {"ControlMaster": "yes", "ControlPersist": "no"}
         else:
             options |= {"ControlMaster": "no", "BatchMode": "yes"}
         command = ["ssh", "-p", str(self.port)]
@@ -42,10 +42,11 @@ class SSHConnection:
     # Connection:
 
     def connect(self, password: str | None) -> str | None:
-        """Opens master connection. Returns error message, or None when connected."""
+        """Opens master connection. Returns error message, or None when connected. Master runs as child process of
+        app (not backgrounded by ssh itself), it's ready when its control socket exists."""
         environment = dict(os.environ)
         askpass = None
-        arguments = ["-f", "-N"]
+        options = []
         if password:
             # Script printing password from environment of ssh process.
             askpass = os.path.join("/tmp", f"catalystlab-askpass-{uuid.uuid4().hex[:12]}")
@@ -54,35 +55,44 @@ class SSHConnection:
             os.chmod(askpass, stat.S_IRWXU)
             environment |= {"SSH_ASKPASS": askpass, "SSH_ASKPASS_REQUIRE": "force", "DISPLAY": environment.get("DISPLAY", ":0"),
                             "CATALYSTLAB_SSH_PASSWORD": password}
-            arguments = ["-o", "NumberOfPasswordPrompts=1", "-o", "PreferredAuthentications=keyboard-interactive,password,publickey"] + arguments
+            options = ["-o", "NumberOfPasswordPrompts=1", "-o", "PreferredAuthentications=keyboard-interactive,password,publickey"]
         command = self._command(master=True)
-        command = command[:-1] + arguments + [command[-1]]
+        command = command[:-1] + options + ["-N", command[-1]]
         try:
-            result = subprocess.run(command, env=environment, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
-        except subprocess.TimeoutExpired:
+            self._master = subprocess.Popen(command, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                            stderr=subprocess.PIPE, text=True, errors="replace", start_new_session=True)
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                if self._master.poll() is not None:
+                    message = self._master.stderr.read().strip().splitlines()
+                    return message[-1] if message else f"Failed to connect to {self.host}"
+                if os.path.exists(self.control_path) and self._check():
+                    self.connected = True
+                    return None
+                time.sleep(0.2)
+            self._master.terminate()
             return f"Connection to {self.host} timed out"
         finally:
             if askpass and os.path.exists(askpass):
                 os.remove(askpass)
-        if result.returncode != 0:
-            message = (result.stderr or result.stdout).strip().splitlines()
-            return message[-1] if message else f"Failed to connect to {self.host}"
-        self.connected = True
-        return None
+
+    def _check(self) -> bool:
+        result = subprocess.run(["ssh", "-o", f"ControlPath={self.control_path}", "-O", "check", self.destination],
+                                stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+        return result.returncode == 0
 
     def close(self):
         if not self.connected:
             return
         subprocess.run(["ssh", "-o", f"ControlPath={self.control_path}", "-O", "exit", self.destination],
                        stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+        master = getattr(self, "_master", None)
+        if master and master.poll() is None:
+            master.terminate()
         self.connected = False
 
     def is_alive(self) -> bool:
-        if not self.connected:
-            return False
-        result = subprocess.run(["ssh", "-o", f"ControlPath={self.control_path}", "-O", "check", self.destination],
-                                stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
-        return result.returncode == 0
+        return self.connected and self._check()
 
     # Commands:
 
