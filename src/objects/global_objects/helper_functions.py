@@ -118,8 +118,27 @@ def extract(tarball: str, directory: str):
             # This print must stay, it is used to receive progress by step implementation.
             print(f"PROGRESS: {progress}", flush=True)
 
+def create_work_directory(prefix: str, rootless: bool) -> str:
+    """Work directory for toolset files. Rootless ones are in rootless directory, owned by user and mapped ids."""
+    if rootless:
+        from .rootless import create_work_directory as create_rootless_work_directory
+        return create_rootless_work_directory(prefix=prefix)
+    return create_temp_workdir(prefix=prefix)
+
+def delete_work_directory(path: str):
+    """Deletes directory created with create_work_directory."""
+    from .rootless import is_rootless_path, remove_in_namespace
+    if is_rootless_path(path):
+        remove_in_namespace([path], print)
+    else:
+        delete_temp_workdir(path=path)
+
 def create_squashfs(source_directory: str, output_file: str) -> subprocess.Popen:
-    """Note: Runs as separate process, so need to wait for it to finish when called"""
+    """Note: Runs as separate process, so need to wait for it to finish when called.
+    Rootless toolset files (owned by mapped ids) are packed inside user namespace, to keep their owners."""
+    from .rootless import is_rootless_path, squashfs_process
+    if is_rootless_path(source_directory):
+        return squashfs_process(source_directory=source_directory, output_file=output_file)
     command = ['mksquashfs', source_directory, output_file, '-quiet', '-percentage']
     process = subprocess.Popen(
         command,

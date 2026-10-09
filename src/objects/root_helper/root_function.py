@@ -55,3 +55,15 @@ def root_function(func):
     proxy_function._raw = _raw
     proxy_function._async_raw = _async_raw
     return proxy_function
+
+def local_for_rootless_paths(proxy: Callable, path_argument: str) -> Callable:
+    """Root function that runs as user when path given in path_argument (keyword) is in rootless directory. Files there
+    are owned by user (root of user namespace), so they don't need root helper."""
+    original = ROOT_FUNCTION_REGISTRY[proxy.__name__]
+    @wraps(proxy)
+    def call(*args, **kwargs):
+        from .rootless import is_rootless_path
+        if is_rootless_path(kwargs.get(path_argument)):
+            return original(*args, **kwargs)
+        return proxy(*args, **kwargs)
+    return call

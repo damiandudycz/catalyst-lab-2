@@ -3,7 +3,7 @@ from gi.repository import Gtk, Adw, GLib
 from .project_directory import ProjectDirectory
 from .project_build import StageBuildPlan, StageBuildMode, load_project_builds, project_builds_directory
 from .project_build_process import ProjectBuild
-from .project_build_rootless import rootless_build_unsupported_reason
+from .rootless import rootless_unsupported_reason
 from .root_helper_client import RootHelperClient
 from .multistage_process import MultiStageProcessState
 from .wizard_view import WizardView
@@ -156,7 +156,7 @@ class ProjectBuildView(Gtk.Box):
     @Gtk.Template.Callback()
     def begin_installation(self, view):
         plan = self.plan
-        if rootless_build_unsupported_reason() is None:
+        if rootless_unsupported_reason() is None:
             # Builds run in user namespace, root privileges are not needed.
             self._start_installation(plan, None, rootless=True)
             return

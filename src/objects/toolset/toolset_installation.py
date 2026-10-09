@@ -2,11 +2,12 @@ from __future__ import annotations
 import os, uuid, shutil, tempfile, threading, re, random, string, requests, time
 from typing import final, Callable
 from pathlib import Path
-from .root_function import root_function
+from .root_function import root_function, local_for_rootless_paths
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .repository import Repository
 from .toolset import Toolset, ToolsetEnv
-from .helper_functions import create_temp_workdir, delete_temp_workdir, create_squashfs, extract
+from .helper_functions import create_work_directory, delete_work_directory, create_squashfs, extract
+from .rootless import rootless_toolset_unsupported_reason, extract_tarball
 from .toolset_manager import ToolsetManager
 
 from .multistage_process import (
@@ -27,6 +28,8 @@ class ToolsetInstallation(MultiStageProcess):
         self.allow_binpkgs = allow_binpkgs
         self.apps_selection = apps_selection
         self._process_selected_apps()
+        # Toolset is installed without root privileges (in user namespace) when system supports it.
+        self.rootless = rootless_toolset_unsupported_reason() is None
         super().__init__(title="Toolset installation")
 
     def setup_stages(self):
@@ -78,9 +81,12 @@ class ToolsetInstallation(MultiStageProcess):
 class ToolsetInstallationStep(MultiStageProcessStage):
     def start(self):
         self.server_call = None
+        self.namespace_processes = [] # Rootless processes, terminated when cancelled.
         super().start()
     def cancel(self):
         super().cancel()
+        for process in getattr(self, "namespace_processes", []):
+            process.terminate()
         if self.server_call:
             self.server_call.cancel()
             if self.server_call.thread:
@@ -162,7 +168,9 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            self.multistage_process.tmp_stage_extract_dir = create_temp_workdir(prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/setup_")
+            self.multistage_process.tmp_stage_extract_dir = create_work_directory(
+                prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/setup_",
+                rootless=self.multistage_process.rootless)
             return_value = False
             done_event = threading.Event()
             def completion_handler(response: ServerResponse):
@@ -177,14 +185,22 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
                         self._update_progress(progress_value)
                     except ValueError:
                         pass
-            self.server_call = extract._async_raw(
-                handler=output_handler,
-                completion_handler=completion_handler,
-                tarball=self.multistage_process.tmp_stage_file.name,
-                directory=self.multistage_process.tmp_stage_extract_dir
-            )
-            self.server_call.thread.join()
-            done_event.wait()
+            if self.multistage_process.rootless:
+                return_value = extract_tarball(
+                    tarball=self.multistage_process.tmp_stage_file.name,
+                    directory=self.multistage_process.tmp_stage_extract_dir,
+                    output_handler=output_handler,
+                    process_holder=self.namespace_processes
+                )
+            else:
+                self.server_call = extract._async_raw(
+                    handler=output_handler,
+                    completion_handler=completion_handler,
+                    tarball=self.multistage_process.tmp_stage_file.name,
+                    directory=self.multistage_process.tmp_stage_extract_dir
+                )
+                self.server_call.thread.join()
+                done_event.wait()
             if not self._cancel_event.is_set():
                 self.server_call = None
                 self.complete(MultiStageProcessStageState.COMPLETED if return_value else MultiStageProcessStageState.FAILED)
@@ -195,7 +211,7 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
         if not super().cleanup():
             return False
         if hasattr(self.multistage_process, "tmp_stage_extract_dir") and self.multistage_process.tmp_stage_extract_dir:
-            delete_temp_workdir(self.multistage_process.tmp_stage_extract_dir)
+            delete_work_directory(self.multistage_process.tmp_stage_extract_dir)
             return True
         return False
 
@@ -320,7 +336,9 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
     def start(self):
         super().start()
         try:
-            self.toolset_squashfs_dir = create_temp_workdir(prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/compress_")
+            self.toolset_squashfs_dir = create_work_directory(
+                prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/compress_",
+                rootless=self.multistage_process.rootless)
             self.toolset_squashfs_file = os.path.join(self.toolset_squashfs_dir, "toolset.squashfs")
             self.squashfs_process = create_squashfs(source_directory=self.multistage_process.toolset.toolset_root(), output_file=self.toolset_squashfs_file)
             for line in self.squashfs_process.stdout:
@@ -347,7 +365,7 @@ class ToolsetInstallationStepCompress(ToolsetInstallationStep):
             if os.path.isfile(self.multistage_process.toolset.file_path):
                 os.remove(self.multistage_process.toolset.file_path)
         if self.toolset_squashfs_dir:
-            delete_temp_workdir(path=self.toolset_squashfs_dir)
+            delete_work_directory(path=self.toolset_squashfs_dir)
     def cancel(self):
         super().cancel()
         proc = self.squashfs_process
@@ -376,4 +394,7 @@ def insert_portage_patch(patch_content: str, patch_filename: str, app_package: s
     patch_file_path = os.path.join(portage_dir, patch_filename)
     with open(patch_file_path, "w", encoding="utf-8") as f:
         f.write(patch_content)
+
+insert_portage_config = local_for_rootless_paths(insert_portage_config, path_argument="toolset_root")
+insert_portage_patch = local_for_rootless_paths(insert_portage_patch, path_argument="toolset_root")
 

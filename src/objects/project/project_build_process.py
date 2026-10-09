@@ -13,10 +13,10 @@ from .toolset import BindMount
 from .toolset_env_builder import ToolsetEnvBuilder
 from .project_stage_arguments import StageArgumentDetails
 from .project_stage_cache import CACHE_ARGUMENTS, stage_cache_path
-from .project_build_rootless import (
-    rootless_build_unsupported_reason, extracted_squashfs, remove_stale_sessions, distfiles_directory,
-    run_in_namespace, stage_build_session_script, CATALYST_WRAPPER
+from .rootless import (
+    rootless_unsupported_reason, extracted_squashfs, remove_stale_sessions, distfiles_directory, run_in_namespace
 )
+from .project_build_rootless import stage_build_session_script, CATALYST_WRAPPER
 from .project_build import StageBuild, StageBuildStatus, StageBuildPlan, project_builds_directory, stage_builds_directory
 from .project_build_spec import (
     StageSpecContext, generate_stage_spec, generate_portage_confdir, seed_name_prefix, select_seed_url, snapshot_treeish
@@ -47,7 +47,7 @@ class ProjectBuild(MultiStageProcess):
         self.failed_stage_ids: set = set()
         # Builds run without root privileges in user namespace when system supports it, otherwise in toolset spawned
         # by root helper.
-        self.rootless_unsupported_reason = rootless_build_unsupported_reason()
+        self.rootless_unsupported_reason = rootless_unsupported_reason()
         self.rootless = self.rootless_unsupported_reason is None
         self.rootless_toolset_path: str | None = None # Extracted toolset and snapshot, set when preparing toolset.
         self.rootless_snapshot_path: str | None = None

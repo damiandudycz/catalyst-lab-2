@@ -294,3 +294,17 @@ def delete_file(file_path: str, root_dir: str):
     # Delete the file
     os.remove(file_path)
 
+def _local_for_user_files(proxy, path_argument: str):
+    """Snapshot files generated in rootless toolset are owned by user, they don't need root helper."""
+    from .root_function import ROOT_FUNCTION_REGISTRY
+    original = ROOT_FUNCTION_REGISTRY[proxy.__name__]
+    def call(*args, **kwargs):
+        path = kwargs.get(path_argument, args[0] if args else None)
+        if path and (not os.path.lexists(path) or os.lstat(path).st_uid == os.getuid()):
+            return original(*args, **kwargs)
+        return proxy(*args, **kwargs)
+    return call
+
+unlock_file_access = _local_for_user_files(unlock_file_access, path_argument="path")
+delete_file = _local_for_user_files(delete_file, path_argument="file_path")
+

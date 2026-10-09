@@ -35,6 +35,7 @@ catalystlab_sources = [
   'objects/global_objects/architecture.py',
   'objects/global_objects/event_bus.py',
   'objects/global_objects/helper_functions.py',
+  'objects/global_objects/rootless.py',
   'objects/global_objects/modules_scanner.py',
   'objects/global_objects/multistage_process.py',
   'objects/global_objects/repositories.py',

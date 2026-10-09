@@ -1,6 +1,7 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio
 from gi.repository import Adw
+from .rootless import authorize_toolset_action
 from .root_helper_client import RootHelperClient, AuthorizationKeeper
 from .multistage_process import MultiStageProcessState
 from .toolset import Toolset, ToolsetEvents
@@ -73,7 +74,7 @@ class SnapshotCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
-        RootHelperClient.shared().authorize_and_run(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper, selected_toolset=self.toolset_selection_view.selected_item))
+        authorize_toolset_action(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper, selected_toolset=self.toolset_selection_view.selected_item))
 
     def _start_installation(self, authorization_keeper: AuthorizationKeeper, selected_toolset: Toolset | None = None, selected_file: Gio.File | None = None):
         if not authorization_keeper:
@@ -90,7 +91,7 @@ class SnapshotCreateView(Gtk.Box):
         def on_file_open_response(file_dialog, result):
             try:
                 selected_file = file_dialog.open_finish(result)
-                RootHelperClient.shared().authorize_and_run(
+                authorize_toolset_action(
                     callback=lambda authorization_keeper: self._start_installation(
                         authorization_keeper=authorization_keeper, selected_file=selected_file
                     )

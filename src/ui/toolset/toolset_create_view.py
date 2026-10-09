@@ -5,6 +5,7 @@ from gi.repository import Adw
 from urllib.parse import ParseResult
 from datetime import datetime
 from pathlib import Path
+from .rootless import authorize_toolset_action
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset_manager import ToolsetManager
 from .architecture import Architecture
@@ -63,7 +64,7 @@ class ToolsetCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
-        RootHelperClient.shared().authorize_and_run(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper))
+        authorize_toolset_action(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper))
 
     @Gtk.Template.Callback()
     def on_allow_binpkgs_toggled(self, checkbox):
