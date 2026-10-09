@@ -3,6 +3,7 @@ from .app_events import AppEvents, app_event_bus
 from .root_helper_client import RootHelperClient, RootHelperClientEvents, ServerCall, ServerCallEvents, AuthorizationKeeper
 from .settings import *
 from .root_command_output_view import RootCommandOutputView
+from .rootless import rootless_toolset_unsupported_reason
 
 class RootAccessButton(Gtk.Overlay):
 
@@ -107,6 +108,17 @@ class RootAccessButton(Gtk.Overlay):
 
         # Set initial state based on root access status
         self.root_access_changed(RootHelperClient.shared().is_server_process_running)
+        self.update_visibility()
+
+    def update_visibility(self):
+        """Hidden when everything runs without root (in user namespace). Still shown while root helper is running, eg.
+        when some action needed it anyway."""
+        client = RootHelperClient.shared()
+        self.set_visible(
+            rootless_toolset_unsupported_reason() is not None
+            or client.is_server_process_running
+            or bool(client.running_actions)
+        )
 
     def toggle_root_access(self, sender):
         """Toggle root access state and show the popover."""
@@ -132,6 +144,7 @@ class RootAccessButton(Gtk.Overlay):
             self.root_access_button.set_child(icon)
         self.start_button.set_visible(not enabled)
         self.stop_button.set_visible(enabled)
+        self.update_visibility()
         #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and enabled)
 
     def root_requests_status_changed(self, client: RootHelperClient, call: ServerCall, status: bool):
@@ -143,6 +156,7 @@ class RootAccessButton(Gtk.Overlay):
             self.remove_request_from_list(call)
         self.start_button.set_sensitive(not RootHelperClient.shared().running_actions)
         self.root_tasks_label.set_visible(RootHelperClient.shared().running_actions)
+        self.update_visibility()
         #self.stop_warning_label.set_visible(RootHelperClient.shared().running_actions and RootHelperClient.shared().is_server_process_running)
         #self.root_tasks_separator.set_visible(RootHelperClient.shared().running_actions)
 
