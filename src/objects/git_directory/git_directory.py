@@ -287,10 +287,12 @@ class GitDirectory(Serializable, ABC):
                     cwd=self.directory_path(),
                     check=True
                 )
-                self.update_status(wait=wait)
-                self.update_logs(wait=wait)
             except Exception as e:
                 print(f"DISCARD EXCEPTION: {e}")
+            finally:
+                # Status is read again also after failure, it could be outdated.
+                self.update_status(wait=wait)
+                self.update_logs(wait=wait)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:
@@ -308,15 +310,20 @@ class GitDirectory(Serializable, ABC):
                     cwd=self.directory_path(),
                     check=True
                 )
-                subprocess.run(
-                    ["git", "commit", "-m", message],
-                    cwd=self.directory_path(),
-                    check=True
-                )
-                self.update_status(wait=wait)
-                self.update_logs(wait=wait)
+                # Nothing to commit when changes were reverted outside of app (status shown was outdated).
+                staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=self.directory_path())
+                if staged.returncode != 0:
+                    subprocess.run(
+                        ["git", "commit", "-m", message],
+                        cwd=self.directory_path(),
+                        check=True
+                    )
             except Exception as e:
                 print(f"COMMIT EXCEPTION: {e}")
+            finally:
+                # Status is read again also after failure, it could be outdated.
+                self.update_status(wait=wait)
+                self.update_logs(wait=wait)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:
