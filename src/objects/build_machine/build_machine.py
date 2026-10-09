@@ -95,10 +95,16 @@ class BuildMachine:
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
-        return StatusIndicatorValues(
-            state=StatusIndicatorState.ENABLED if self.status == self.STATUS_RUNNING else StatusIndicatorState.DISABLED,
-            blinking=False
-        )
+        """Like toolsets: active while running, blinking while used by operations. Starting blinks as active, stopping
+        blinks as warning (machine becomes unavailable)."""
+        match self.status:
+            case self.STATUS_RUNNING:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=self.is_used)
+            case self.STATUS_STARTING:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
+            case self.STATUS_STOPPING:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=True)
+        return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
 
     # Lifecycle:
 
