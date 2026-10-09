@@ -267,7 +267,8 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         if process.machine:
             self.log(f"Building in virtual machine {process.machine.name}, without root privileges")
             process.machine.ensure_running(self.log, self.namespace_processes)
-            process.machine.acquire_workspace(self.log, self.namespace_processes)
+            self.workspace_user = f"Build of {process.project_directory.name}"
+            process.machine.acquire_workspace(self.log, self.namespace_processes, user=self.workspace_user)
             self.workspace_acquired = True
         else:
             self.log("Building without root privileges, in user namespace")
@@ -305,7 +306,7 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
                 save_interrupted_caches(self.multistage_process.executor, self.log)
             except Exception as e:
                 self.log(f"Failed to save caches: {e}")
-            self.multistage_process.machine.release_workspace(self.log)
+            self.multistage_process.machine.release_workspace(self.log, user=self.workspace_user)
         if self.reserved:
             toolset.release()
         return True

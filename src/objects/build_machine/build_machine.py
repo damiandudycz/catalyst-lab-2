@@ -18,7 +18,8 @@ class BuildMachine:
     STATUS_STOPPING = "Stopping"
 
     # Delay before stopping unused machine, so it's not restarted between consecutive commands of operation.
-    IDLE_STOP_SECONDS = 90
+    IDLE_STOP_SECONDS = 15
+    COMMAND_USER = "Command" # User of single commands (not listed as user of machine).
 
     def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 64,
                  lima_home: str | None = None):
@@ -35,7 +36,7 @@ class BuildMachine:
         self._workspace_users = 0
         # Machines started automatically when used are stopped when nothing uses them (after IDLE_STOP_SECONDS).
         self._usage_lock = threading.Lock()
-        self._users = 0
+        self._users: list[str] = [] # Names of operations using machine, like reservations of toolsets.
         self._started_automatically = False
         self._stop_timer: threading.Timer | None = None
 
@@ -96,21 +97,42 @@ class BuildMachine:
     # Lifecycle:
 
     # Usage:
+    # Operations using machine (mounted toolsets, builds, installations, single commands) register themselves while
+    # they run. Machine started automatically for them is stopped when nothing uses it anymore (after short delay, so
+    # it's not restarted between consecutive commands). Machine started by user keeps running.
 
-    def begin_use(self):
-        """Marks machine as used (by command or operation), cancels its automatic stop."""
+    @property
+    def users(self) -> list[str]:
+        """Operations using machine, without single commands."""
+        return [user for user in self._users if user != self.COMMAND_USER]
+
+    @property
+    def is_used(self) -> bool:
+        return bool(self._users)
+
+    @property
+    def stops_when_unused(self) -> bool:
+        return self._started_automatically
+
+    @property
+    def stop_scheduled(self) -> bool:
+        return self._stop_timer is not None
+
+    def begin_use(self, user: str = COMMAND_USER):
+        """Marks machine as used by operation, cancels its automatic stop. Call end_use with the same name later."""
         with self._usage_lock:
-            self._users += 1
+            self._users.append(user)
             if self._stop_timer:
                 self._stop_timer.cancel()
                 self._stop_timer = None
         self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
-    def end_use(self):
-        """Marks end of usage. Machine started automatically is stopped when nothing uses it for a while."""
+    def end_use(self, user: str = COMMAND_USER):
+        """Marks end of usage. Machine started automatically is stopped when nothing uses it."""
         with self._usage_lock:
-            self._users = max(0, self._users - 1)
-            if self._users == 0 and self._started_automatically and self._stop_timer is None:
+            if user in self._users:
+                self._users.remove(user)
+            if not self._users and self._started_automatically and self._stop_timer is None:
                 self._stop_timer = threading.Timer(self.IDLE_STOP_SECONDS, self._stop_if_idle)
                 self._stop_timer.daemon = True
                 self._stop_timer.start()
@@ -119,7 +141,7 @@ class BuildMachine:
     def _stop_if_idle(self):
         with self._usage_lock:
             self._stop_timer = None
-            if self._users > 0 or not self._started_automatically:
+            if self._users or not self._started_automatically:
                 return
             self._started_automatically = False
         print(f"Stopping unused virtual machine {self.name}")
@@ -230,13 +252,14 @@ class BuildMachine:
         """Folder of machine (Lima instance directory)."""
         return os.path.join(self.lima_home, self.instance_name)
 
-    def acquire_workspace(self, output_handler=print, process_holder: list | None = None):
-        """Prepares working space for operation, call release_workspace when it finishes. Machine is used until then."""
-        self.begin_use()
+    def acquire_workspace(self, output_handler=print, process_holder: list | None = None, user: str = "Operation"):
+        """Prepares working space for operation, call release_workspace with the same user when it finishes. Machine is
+        used by operation until then."""
+        self.begin_use(user)
         try:
             self._acquire_workspace(output_handler, process_holder)
         except Exception:
-            self.end_use()
+            self.end_use(user)
             raise
         self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
@@ -246,14 +269,14 @@ class BuildMachine:
                 self._create_workspace(output_handler, process_holder)
             self._workspace_users += 1
 
-    def release_workspace(self, output_handler=print):
+    def release_workspace(self, output_handler=print, user: str = "Operation"):
         with self._workspace_lock:
             if self._workspace_users == 0:
                 return
             self._workspace_users -= 1
             if self._workspace_users == 0:
                 self._delete_workspace(output_handler)
-        self.end_use()
+        self.end_use(user)
 
     def _create_workspace(self, output_handler, process_holder):
         from .rootless import MachineExecutor

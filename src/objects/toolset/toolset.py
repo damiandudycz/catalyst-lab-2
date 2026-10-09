@@ -162,14 +162,15 @@ class Toolset(Serializable):
         """Prepare /tmp folders for bwrap calls. Toolsets of machines use working space of machine while spawned."""
         machine = self.machine
         if machine:
-            machine.acquire_workspace()
+            self._workspace_user = f"Toolset {self.name} mounted"
+            machine.acquire_workspace(user=self._workspace_user)
             self._workspace_machine = machine
         try:
             self._spawn(store_changes=store_changes, hot_fixes=hot_fixes, additional_bindings=additional_bindings)
         finally:
             # Released by unspawn when spawning failed after toolset was spawned.
             if not self.spawned and getattr(self, "_workspace_machine", None):
-                self._workspace_machine.release_workspace()
+                self._workspace_machine.release_workspace(user=self._workspace_user)
                 self._workspace_machine = None
 
     def _spawn(self, store_changes: bool = False, hot_fixes: list[HotFix] | None = None, additional_bindings: list[BindMount] | None = None):
@@ -517,7 +518,7 @@ class Toolset(Serializable):
                 self.rootless = False
                 self.rootless_writable_copy = None
                 if getattr(self, "_workspace_machine", None):
-                    self._workspace_machine.release_workspace()
+                    self._workspace_machine.release_workspace(user=self._workspace_user)
                     self._workspace_machine = None
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
                 self.event_bus.emit(SharedEvent.STATE_UPDATED, self)

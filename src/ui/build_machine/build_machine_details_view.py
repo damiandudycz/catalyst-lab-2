@@ -47,10 +47,15 @@ class BuildMachineDetailsView(Gtk.Box):
         tags.append(self.spinner)
         self.tag_state = self._tag(tags)
         self.tag_in_use = self._tag(tags, "In use", "accent")
-        self.tag_automatic = self._tag(tags, "Started automatically")
+        self.tag_automatic = self._tag(tags, "Stops when unused")
+        self.tag_stopping_soon = self._tag(tags, "Stopping soon", "warning")
         self.tag_workspace = self._tag(tags, "Working space mounted")
         status_row.add_suffix(tags)
         status_group.add(status_row)
+        # Operations using machine, like reservations of toolsets.
+        self.users_row = Adw.ExpanderRow(title="Used by")
+        self.user_rows: list[Adw.ActionRow] = []
+        status_group.add(self.users_row)
         content.append(status_group)
 
         # Actions
@@ -140,14 +145,16 @@ class BuildMachineDetailsView(Gtk.Box):
             self.tag_state.remove_css_class(style)
         if not self.working and (running or status == BuildMachine.STATUS_MISSING):
             self.tag_state.add_css_class("success" if running else "error")
-        self.tag_in_use.set_visible(running and self.machine._users > 0)
-        self.tag_automatic.set_visible(running and self.machine._started_automatically)
+        self.tag_in_use.set_visible(running and self.machine.is_used)
+        self.tag_automatic.set_visible(running and self.machine.stops_when_unused and not self.machine.stop_scheduled)
+        self.tag_stopping_soon.set_visible(running and self.machine.stop_scheduled)
         self.tag_workspace.set_visible(running and self.machine._workspace_users > 0)
+        self._update_users()
         # Actions
         self.start_button.set_visible(not running)
         self.start_button.set_sensitive(self.working is None and stopped)
         self.stop_button.set_visible(running)
-        self.stop_button.set_sensitive(self.working is None and self.machine._users == 0)
+        self.stop_button.set_sensitive(self.working is None and not self.machine.is_used)
         self.delete_button.set_sensitive(self.working is None and not running)
         # Resources
         editable = self.working is None and stopped
@@ -156,6 +163,16 @@ class BuildMachineDetailsView(Gtk.Box):
         self.resources_group.set_description(None if editable else "Stop the machine to change its resources")
         self.resources_actions.set_visible(self._resources_changed())
         self.apply_button.set_sensitive(editable)
+
+    def _update_users(self):
+        users = self.machine.users
+        for row in self.user_rows:
+            self.users_row.remove(row)
+        self.user_rows = [Adw.ActionRow(title=GLib.markup_escape_text(user)) for user in users]
+        for row in self.user_rows:
+            self.users_row.add_row(row)
+        self.users_row.set_visible(bool(users))
+        self.users_row.set_subtitle(f"{len(users)} operation{'s' if len(users) != 1 else ''}")
 
     def _run_action(self, description: str, action):
         """Runs machine action in background, showing it in status until it finishes."""
