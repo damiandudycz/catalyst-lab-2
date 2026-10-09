@@ -14,10 +14,43 @@
         <property name="show_welcome_screen">True</property>
         <property name="welcome_screen_icon_name">deploy-symbolic</property>
         <property name="welcome_screen_title">Deploy Build</property>
-        <property name="welcome_screen_description">Installs stage on disk of another machine. Boot that machine from Gentoo LiveCD and allow SSH connections to it, Catalyst Lab partitions its disk, installs the stage and configures the system.</property>
+        <property name="welcome_screen_description">Installs stage on disk of another machine booted from Gentoo LiveCD, or on disk connected to this computer. Catalyst Lab partitions the disk, installs the stage and configures the system.</property>
         <property name="install_button_label">Deploy</property>
 
-        <!-- Page 1: Connection -->
+        <!-- Page 1: Deploy method -->
+        <child>
+          <object class="GtkScrolledWindow" id="method_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="ItemSelectionView" id="method_selection_view">
+                    <property name="title">Deploy to</property>
+                    <property name="description">Where the stage is installed. Methods that can't be used on this computer are disabled, with the reason.</property>
+                    <property name="item_title_property_name">title</property>
+                    <property name="item_subtitle_property_name">details</property>
+                    <property name="item_unsupported_property_name">unavailable</property>
+                    <property name="autoselect_default">True</property>
+                    <signal name="is-item-selectable" handler="is_method_selectable"/>
+                    <signal name="is-item-usable" handler="is_method_usable"/>
+                  </object>
+                </child>
+
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 2: Connection -->
         <child>
           <object class="GtkScrolledWindow" id="connection_page">
             <property name="hscrollbar-policy">never</property>
@@ -33,7 +66,26 @@
                 <property name="orientation">vertical</property>
                 <property name="spacing">12</property>
                 <child>
-                  <object class="AdwPreferencesGroup">
+                  <object class="AdwPreferencesGroup" id="local_group">
+                    <property name="title">Disk of this computer</property>
+                    <property name="description">Connect SD card or external disk. System is installed for machine that will boot from it, select its firmware. Root access is needed to write to the disk.</property>
+                    <property name="visible">False</property>
+                    <child>
+                      <object class="AdwActionRow" id="local_architecture_row">
+                        <property name="title">Architecture</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwComboRow" id="target_firmware_row">
+                        <property name="title">Firmware</property>
+                        <property name="subtitle">Of machine that will boot from the disk</property>
+                        <signal name="notify::selected" handler="on_firmware_changed"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup" id="ssh_group">
                     <property name="title">Connection</property>
                     <property name="description">On the machine booted from Gentoo LiveCD set root password with passwd, start SSH server with rc-service sshd start and check its address with ip address.</property>
                     <child>
@@ -101,7 +153,7 @@
           </object>
         </child>
 
-        <!-- Page 2: Disk -->
+        <!-- Page 3: Disk -->
         <child>
           <object class="GtkScrolledWindow" id="disk_page">
             <property name="hscrollbar-policy">never</property>
@@ -184,7 +236,7 @@
           </object>
         </child>
 
-        <!-- Page 3: System -->
+        <!-- Page 4: System -->
         <child>
           <object class="GtkScrolledWindow" id="system_page">
             <property name="hscrollbar-policy">never</property>
@@ -224,7 +276,7 @@
                 <child>
                   <object class="AdwPreferencesGroup">
                     <property name="title">Localization</property>
-                    <property name="description">Suggested from this computer.</property>
+                    <property name="description">Suggested from this computer. Separate locales with commas, first one is system language.</property>
                     <child>
                       <object class="AdwEntryRow" id="timezone_row">
                         <property name="title">Timezone</property>
@@ -233,7 +285,7 @@
                     </child>
                     <child>
                       <object class="AdwEntryRow" id="locale_row">
-                        <property name="title">Locale</property>
+                        <property name="title">Locales</property>
                         <signal name="changed" handler="on_system_changed"/>
                       </object>
                     </child>
@@ -308,7 +360,7 @@
           </object>
         </child>
 
-        <!-- Page 4: Users -->
+        <!-- Page 5: Users -->
         <child>
           <object class="GtkScrolledWindow" id="users_page">
             <property name="hscrollbar-policy">never</property>
@@ -381,7 +433,7 @@
           </object>
         </child>
 
-        <!-- Page 5: Boot -->
+        <!-- Page 6: Boot -->
         <child>
           <object class="GtkScrolledWindow" id="boot_page">
             <property name="hscrollbar-policy">never</property>

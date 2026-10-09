@@ -38,7 +38,7 @@ class ProjectDeployView(Gtk.Box):
             self._add_group(group)
             return
         stages = {stage.id: stage for stage in self.project_directory.stages}
-        group = Adw.PreferencesGroup(title="Builds", description="Select build to install it on another machine")
+        group = Adw.PreferencesGroup(title="Builds", description="Select build to install it on another machine or disk")
         for build in builds:
             stage = stages.get(build.stage_id)
             details = [build.date.strftime("%Y-%m-%d %H:%M"), build.artifact]

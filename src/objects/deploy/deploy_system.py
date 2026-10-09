@@ -1,6 +1,6 @@
 from __future__ import annotations
 import glob, ipaddress, os, re, subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from .ssh_connection import quote
 
@@ -150,14 +150,17 @@ def network_script(settings: NetworkSettings) -> str:
 @dataclass
 class LocalizationSettings:
     timezone: str = ""  # Eg. Europe/Warsaw.
-    locale: str = ""    # Eg. en_US.UTF-8.
+    locales: list[str] = field(default_factory=list) # Generated locales, eg. pl_PL.UTF-8, first one is system language.
     keymap: str = ""    # Console keymap, eg. us, pl.
 
     def error(self) -> str | None:
         if self.timezone and not re.match(r"^[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+)*$", self.timezone):
             return "Invalid timezone, use name like Europe/Warsaw"
-        if self.locale and not re.match(r"^[A-Za-z_@.0-9\-]+$", self.locale):
-            return "Invalid locale, use name like en_US.UTF-8"
+        for locale in self.locales:
+            if not re.match(r"^[A-Za-z_@.0-9\-]+$", locale):
+                return f"Invalid locale {locale}, use name like en_US.UTF-8"
+        if len(set(self.locales)) != len(self.locales):
+            return "Locales must be different"
         if self.keymap and not re.match(r"^[A-Za-z0-9_\-]+$", self.keymap):
             return "Invalid keyboard layout, use name like us"
         return None
@@ -171,18 +174,20 @@ def localization_script(settings: LocalizationSettings) -> str:
             f'    ln -sf ../usr/share/zoneinfo/{settings.timezone} "$ROOT/etc/localtime"; echo {timezone} > "$ROOT/etc/timezone"; echo "Timezone: {settings.timezone}"',
             f'else echo "Warning: timezone {settings.timezone} doesn\'t exist in stage"; fi',
         ]
-    if settings.locale:
-        locale = settings.locale
-        charset = locale.split(".", 1)[1] if "." in locale else "UTF-8"
+    if settings.locales:
+        # glibc locales are generated, musl has no locale-gen. C and POSIX locales are built in.
+        lines.append('if [ -x "$ROOT/usr/sbin/locale-gen" ]; then')
+        for locale in settings.locales:
+            if locale.split(".")[0] in ("C", "POSIX"):
+                continue
+            charset = locale.split(".", 1)[1] if "." in locale else "UTF-8"
+            lines.append(f'    grep -q "^{locale} " "$ROOT/etc/locale.gen" 2>/dev/null || echo "{locale} {charset}" >> "$ROOT/etc/locale.gen"')
+        lines += ['    chroot "$ROOT" locale-gen', 'fi']
+        language = settings.locales[0]
         lines += [
-            # glibc locales are generated, musl has no locale-gen.
-            f'if [ -x "$ROOT/usr/sbin/locale-gen" ]; then',
-            f'    grep -q "^{locale} " "$ROOT/etc/locale.gen" 2>/dev/null || echo "{locale} {charset}" >> "$ROOT/etc/locale.gen"',
-            '    chroot "$ROOT" locale-gen',
-            'fi',
-            f'echo "LANG=\\"{locale}\\"" > "$ROOT/etc/env.d/02locale"',
-            f'echo "LANG={locale}" > "$ROOT/etc/locale.conf"',
-            f'echo "Locale: {locale}"',
+            f'echo "LANG=\\"{language}\\"" > "$ROOT/etc/env.d/02locale"',
+            f'echo "LANG={language}" > "$ROOT/etc/locale.conf"',
+            f'echo "Locales: {", ".join(settings.locales)}, system language {language}"',
         ]
     if settings.keymap:
         keymap = settings.keymap
@@ -213,7 +218,9 @@ def local_localization() -> LocalizationSettings:
                 locale = value.split("@")[0] + ".UTF-8"
         except (OSError, subprocess.SubprocessError):
             pass
-    return LocalizationSettings(timezone=timezone, locale=locale or "en_US.UTF-8", keymap=_local_keymap())
+    # English is generated too, many programs and logs expect it.
+    locales = [locale or "en_US.UTF-8"] + ([] if locale in ("", "en_US.UTF-8") else ["en_US.UTF-8"])
+    return LocalizationSettings(timezone=timezone, locales=locales, keymap=_local_keymap())
 
 # Console keymaps for keyboard layouts of macOS (com.apple.keylayout.<name>), by name prefix.
 _MACOS_KEYMAPS = {

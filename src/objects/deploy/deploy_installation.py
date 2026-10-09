@@ -10,11 +10,17 @@ from .deploy_system import (
 )
 
 # ------------------------------------------------------------------------------
-# Deploying stage build (stage3/stage4 tarball) to machine booted from Gentoo LiveCD, through SSH: disk is
-# partitioned and formatted, stage is extracted to it and system is configured.
+# Deploying stage build (stage3/stage4 tarball) to machine booted from Gentoo LiveCD, through SSH, or to disk of this
+# computer (SD card, external disk) through root helper: disk is partitioned and formatted, stage is extracted to it
+# and system is configured.
 # ------------------------------------------------------------------------------
 
-MOUNT_POINT = "/mnt/gentoo"
+MOUNT_POINT = "/mnt/gentoo" # On LiveCD.
+
+def local_mount_point() -> str:
+    """Root of system installed on disk of this computer, own for every installation."""
+    import uuid
+    return f"/mnt/catalystlab-deploy-{uuid.uuid4().hex[:8]}"
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _EMERGE_PACKAGE = re.compile(r">>> (Emerging|Completed)(?: binary)? \((\d+) of (\d+)\)")
@@ -77,7 +83,7 @@ class DeploySystemSettings:
     install_firmware: bool = False
     reboot: bool = False
 
-def tar_extract_command(artifact: str) -> str:
+def tar_extract_command(artifact: str, root: str = MOUNT_POINT) -> str:
     """Command extracting stage tarball read from stdin, keeping owners and extended attributes."""
     compression = next((option for extension, option in (
         (".tar.xz", "-J"), (".tar.zst", "--zstd"), (".tar.zstd", "--zstd"), (".tar.bz2", "-j"), (".tar.gz", "-z"),
@@ -85,12 +91,13 @@ def tar_extract_command(artifact: str) -> str:
     ) if artifact.endswith(extension)), None)
     if compression is None:
         raise RuntimeError(f"Unsupported archive: {artifact}")
-    return f"tar -x -p {compression} --xattrs-include='*.*' --numeric-owner -C {MOUNT_POINT} -f -"
+    return f"tar -x -p {compression} --xattrs-include='*.*' --numeric-owner -C {quote(root)} -f -"
 
 class DeployInstallation(MultiStageProcess):
-    """Installs stage build on disk of machine connected through SSH."""
+    """Installs stage build on disk of machine connected through SSH, or on disk of this computer (connection is
+    LocalDiskConnection, plan has own mount point)."""
 
-    def __init__(self, build, project_name: str, connection: SSHConnection, machine: TargetMachine, plan: PartitionPlan,
+    def __init__(self, build, project_name: str, connection, machine: TargetMachine, plan: PartitionPlan,
                  settings: DeploySystemSettings, contents: StageContents):
         self.build = build
         self.project_name = project_name
@@ -100,6 +107,7 @@ class DeployInstallation(MultiStageProcess):
         self.plan = plan
         self.settings = settings
         self.contents = contents
+        self.root = plan.root
         self.mounted = False
         self._log_file = None
         self.log_path = self._new_log_path()
@@ -120,8 +128,13 @@ class DeployInstallation(MultiStageProcess):
             self.stages.append(DeployStepBootloader(multistage_process=self))
         self.stages.append(DeployStepFinish(multistage_process=self))
 
+    @property
+    def target_name(self) -> str:
+        """Machine, or disk of this computer."""
+        return self.plan.disk.path if self.machine.local else self.connection.host
+
     def name(self) -> str:
-        return f"{self.build.stage_name} on {self.connection.host}"
+        return f"{self.build.stage_name} on {self.target_name}"
 
     @property
     def packages(self) -> list[str]:
@@ -133,7 +146,7 @@ class DeployInstallation(MultiStageProcess):
         service = self.settings.network.service
         if service.package and service not in self.contents.network_services:
             packages.append(service.package)
-        if self.settings.install_firmware:
+        if self.settings.install_firmware and not self.contents.firmware:
             packages.append(FIRMWARE_PACKAGE) # Before kernel, so its initramfs includes firmware.
         if self.settings.kernel.package:
             packages.append(self.settings.kernel.package)
@@ -145,7 +158,8 @@ class DeployInstallation(MultiStageProcess):
         if not self.build.path:
             return None
         from datetime import datetime
-        host = "".join(character if character.isalnum() or character in ".-" else "_" for character in self.connection.host)
+        target = os.path.basename(self.plan.disk.path) if self.machine.local else self.connection.host
+        host = "".join(character if character.isalnum() or character in ".-" else "_" for character in target)
         return os.path.join(self.build.path, f"deploy-{datetime.now().strftime('%Y%m%dT%H%M%S')}-{host}.log")
 
     def write_log(self, line: str):
@@ -159,15 +173,22 @@ class DeployInstallation(MultiStageProcess):
             print(f"Failed to write deploy log: {e}")
 
     def complete_process(self, success: bool):
+        # Partitions stay mounted after failure on LiveCD, so their files can be checked. Disk of this computer is
+        # unmounted, it can be removed then. Connection is closed.
+        if self.mounted and self.machine.local:
+            try:
+                self.connection.run(f"umount -R -l {quote(self.root)}; rmdir {quote(self.root)} 2>/dev/null; true", self.write_log)
+                self.mounted = False
+            except Exception as e:
+                print(f"Failed to unmount {self.root}: {e}")
         self.write_log(f"=== Deployment {'completed' if success else 'failed'}")
         if self._log_file:
             self._log_file.close()
             self._log_file = None
-        # Partitions stay mounted after failure, so their files can be checked. Connection is closed.
         try:
             self.connection.close()
         except Exception as e:
-            print(f"Failed to close SSH connection: {e}")
+            print(f"Failed to close connection: {e}")
 
 class DeployStep(MultiStageProcessStage):
     """Step running scripts on machine, cancelled by stopping them."""
@@ -201,8 +222,10 @@ class DeployStepCheck(DeployStep):
     def run(self):
         process = self.multistage_process
         if not process.connection.is_alive():
-            raise RuntimeError(f"Connection to {process.connection.host} was lost, connect again")
+            raise RuntimeError("Root access ended, start again" if process.machine.local else f"Connection to {process.connection.host} was lost, connect again")
         tools = " ".join(quote(tool) for tool in process.plan.required_tools())
+        if process.machine.local:
+            self._check_local_disk()
         self.remote(f"""
 missing=""
 for tool in {tools}; do command -v "$tool" > /dev/null || missing="$missing $tool"; done
@@ -212,6 +235,20 @@ lsblk {quote(process.plan.disk.path)}
 """, "Machine doesn't have tools needed for installation")
         if not os.path.isfile(process.build.artifact_path or ""):
             raise RuntimeError("Build archive doesn't exist anymore")
+
+    def _check_local_disk(self):
+        """Disk of this computer could be used since it was listed (mounted, swap, LVM...)."""
+        from .deploy_target import TargetMachine
+        process = self.multistage_process
+        machine = TargetMachine.load_local(process.connection, process.machine.architecture, process.machine.firmware)
+        disk = next((disk for disk in machine.disks if disk.path == process.plan.disk.path), None)
+        if disk is None:
+            raise RuntimeError(f"Disk {process.plan.disk.path} is not connected")
+        if disk.size != process.plan.disk.size:
+            raise RuntimeError(f"Disk {process.plan.disk.path} changed since it was selected")
+        if disk.in_use:
+            self.log(f"Disk {disk.path} is {disk.in_use_reason}")
+            raise RuntimeError(f"Disk {disk.path} is in use")
 
 class DeployStepPartition(DeployStep):
     def __init__(self, multistage_process):
@@ -236,10 +273,11 @@ class DeployStepFormat(DeployStep):
 
 class DeployStepMount(DeployStep):
     def __init__(self, multistage_process):
-        super().__init__(name="Mount partitions", description=f"Mounts new filesystems at {MOUNT_POINT}", multistage_process=multistage_process)
+        super().__init__(name="Mount partitions", description=f"Mounts new filesystems at {multistage_process.root}", multistage_process=multistage_process)
     def run(self):
-        self.remote(self.multistage_process.plan.mount_script(), "Failed to mount partitions")
+        # Marked before mounting, so partitions mounted before failure are unmounted from this computer too.
         self.multistage_process.mounted = True
+        self.remote(self.multistage_process.plan.mount_script(), "Failed to mount partitions")
 
 class DeployStepExtract(DeployStep):
     def __init__(self, multistage_process):
@@ -247,11 +285,19 @@ class DeployStepExtract(DeployStep):
     def run(self):
         process = self.multistage_process
         path = process.build.artifact_path
-        self.log(f"Extracting {os.path.basename(path)} ({os.path.getsize(path) // (1024 * 1024)} MiB) to {MOUNT_POINT}")
-        command = tar_extract_command(path)
+        root = quote(process.root)
+        self.log(f"Extracting {os.path.basename(path)} ({os.path.getsize(path) // (1024 * 1024)} MiB) to {process.root}")
+        command = tar_extract_command(path, process.root)
         if not process.connection.stream_file(path, command, self.log, self._update_progress, self.processes):
             raise RuntimeError("Failed to extract stage")
-        self.remote(f"sync; df -h {MOUNT_POINT}", "Failed to check installed files")
+        self.remote(f"sync; df -h {root}", "Failed to check installed files")
+        if process.machine.local:
+            # Configuration runs programs of installed system, which can be built for other architecture.
+            self.remote(f"""chroot {root} /bin/true || {{
+    echo "Programs of installed system ({process.machine.architecture}) can't run on this computer ($(uname -m))."
+    echo "Install QEMU user emulation with binfmt_misc support (eg. app-emulation/qemu with QEMU_USER_TARGETS) and try again."
+    exit 1
+}}""", "Can't run programs of installed system")
 
 class DeployStepConfigure(DeployStep):
     def __init__(self, multistage_process):
@@ -261,7 +307,7 @@ class DeployStepConfigure(DeployStep):
         settings = process.settings
         self.remote(process.plan.fstab_script(), "Failed to write fstab")
         # Commands run in installed system (locale-gen, useradd, chpasswd) need /proc, /sys and /dev mounted there.
-        script = ["set -e", f"ROOT={MOUNT_POINT}", CHROOT_SETUP]
+        script = ["set -e", f"ROOT={quote(process.root)}", CHROOT_SETUP]
         if settings.hostname:
             hostname = quote(settings.hostname)
             script += [
@@ -320,7 +366,8 @@ class DeployStepPackages(DeployStep):
     def run(self):
         process = self.multistage_process
         platform = grub_platform(process.machine.architecture, process.machine.uefi) if "sys-boot/grub" in process.packages else None
-        script = f"ROOT={MOUNT_POINT}\n" + packages_script(process.packages, platform, process.contents.init)
+        script = f"ROOT={quote(process.root)}\n" + packages_script(process.packages, platform, process.contents.init,
+                                                                   generic_initramfs=process.machine.local)
         self.remote(script, "Failed to install packages, machine needs internet connection")
 
 class DeployStepNetwork(DeployStep):
@@ -328,7 +375,7 @@ class DeployStepNetwork(DeployStep):
         super().__init__(name="Configure network", description=f"Enables {multistage_process.settings.network.service.display_name}", multistage_process=multistage_process)
     def run(self):
         script = network_script(self.multistage_process.settings.network)
-        self.remote(f"set -e\nROOT={MOUNT_POINT}\n{script}\n", "Failed to configure network")
+        self.remote(f"set -e\nROOT={quote(self.multistage_process.root)}\n{script}\n", "Failed to configure network")
 
 class DeployStepBootloader(DeployStep):
     def __init__(self, multistage_process):
@@ -345,17 +392,25 @@ class DeployStepBootloader(DeployStep):
             efi_device=plan.partition_device(efi_index) if efi_index else None,
             esp=plan.efi_mount_point,
             separate_boot=plan.index_of(lambda spec: spec.type == PartitionType.LINUX and spec.mount_point == "/boot") is not None,
+            removable=process.machine.local,
+            ps3=process.machine.ps3,
         )
         if script is None:
             raise RuntimeError(f"{process.settings.bootloader.display_name} is not supported on this machine")
-        self.remote(f"ROOT={MOUNT_POINT}\n" + script, "Failed to install bootloader")
+        self.remote(f"ROOT={quote(process.root)}\n" + script, "Failed to install bootloader")
 
 class DeployStepFinish(DeployStep):
     def __init__(self, multistage_process):
         super().__init__(name="Finish", description="Unmounts filesystems", multistage_process=multistage_process)
     def run(self):
         process = self.multistage_process
-        self.remote(f"sync; umount -R {MOUNT_POINT}; echo 'Installation finished'", "Failed to unmount filesystems")
+        root = quote(process.root)
+        if process.machine.local:
+            self.remote(f"sync && umount -R {root} && rmdir {root} && echo 'Installation finished, disk can be removed'",
+                        "Failed to unmount filesystems")
+            process.mounted = False
+            return
+        self.remote(f"sync; umount -R {root}; echo 'Installation finished'", "Failed to unmount filesystems")
         process.mounted = False
         if process.settings.reboot:
             self.log("Rebooting machine")

@@ -43,14 +43,56 @@ class Bootloader(Enum):
         """Configuration only bootloaders don't need anything installed in stage."""
         return self not in (Bootloader.KBOOT, Bootloader.NONE)
 
-    def supported(self, architecture: str, uefi: bool) -> bool:
+    def supported(self, architecture: str, uefi: bool, removable: bool = False) -> bool:
+        """Removable disks (prepared on this computer) boot from fallback path of ESP, without boot entries in firmware,
+        which EFI stub needs."""
         if self == Bootloader.NONE:
             return True
+        if self == Bootloader.EFI_STUB and removable:
+            return False
         if self == Bootloader.KBOOT:
             return architecture in ("ppc64", "ppc64le") and not uefi # Machines booting with petitboot.
         if self == Bootloader.GRUB:
             return uefi or architecture in _X86
         return uefi # Others are UEFI applications.
+
+@dataclass
+class BootloaderWarning:
+    """Something bootloader installation can't set up or keep updated automatically."""
+    summary: str
+    details: str
+
+def bootloader_warnings(bootloader: Bootloader, uefi: bool, removable: bool) -> list[BootloaderWarning]:
+    """Boot entries that have to be added or updated manually with selected bootloader. Removable disks (prepared on
+    this computer) get no boot entry in firmware of target machine."""
+    warnings = []
+    if removable and uefi and bootloader in (Bootloader.GRUB, Bootloader.SYSTEMD_BOOT, Bootloader.REFIND):
+        warnings.append(BootloaderWarning(
+            "No firmware boot entry",
+            "No boot entry is added to firmware of the machine, it starts the disk from fallback path EFI/BOOT. "
+            "If it doesn't, select the disk in boot menu of the machine."))
+    match bootloader:
+        case Bootloader.GRUB:
+            warnings.append(BootloaderWarning(
+                "Menu not updated for new kernels",
+                "GRUB menu lists kernels installed now. After installing other kernels run grub-mkconfig -o "
+                "/boot/grub/grub.cfg, or enable grub USE flag of sys-kernel/installkernel."))
+        case Bootloader.SYSTEMD_BOOT:
+            warnings.append(BootloaderWarning(
+                "Entry not updated for new kernels",
+                "Kernel and initramfs are copied to ESP with fixed boot entry. New kernels are not added automatically, "
+                "copy them to ESP and update loader/entries/gentoo.conf, or enable systemd-boot USE flag of "
+                "sys-kernel/installkernel."))
+        case Bootloader.EFI_STUB:
+            warnings.append(BootloaderWarning(
+                "Kernel not updated automatically",
+                "Kernel is copied to ESP as EFI/gentoo/linux.efi and started by firmware. New kernels have to be "
+                "copied there manually."))
+        case Bootloader.KBOOT:
+            warnings.append(BootloaderWarning(
+                "Entries not updated for new kernels",
+                "kboot.conf lists kernels installed now. New kernels need their entries added to kboot.conf."))
+    return warnings
 
 class Kernel(Enum):
     STAGE = "stage"
@@ -82,6 +124,7 @@ _BOOTLOADER_FILES = {
 }
 _KERNEL = re.compile(r"^boot/(vmlinuz|vmlinux|kernel|Image)[^/]*$")
 _INITRAMFS = re.compile(r"^boot/(initramfs|initrd)[^/]*$")
+_FIRMWARE = re.compile(r"^var/db/pkg/sys-kernel/linux-firmware-[^/]+/")
 
 @dataclass
 class StageContents:
@@ -91,6 +134,7 @@ class StageContents:
     initramfs: list[str] = field(default_factory=list)
     init: str | None = None # openrc or systemd.
     network_services: set[NetworkService] = field(default_factory=set)
+    firmware: bool = False # linux-firmware is installed.
 
     @classmethod
     def scan(cls, archive_path: str, process_holder: list | None = None) -> StageContents:
@@ -108,6 +152,8 @@ class StageContents:
             for service, pattern in NETWORK_SERVICE_FILES.items():
                 if pattern.match(path):
                     contents.network_services.add(service)
+            if not contents.firmware and _FIRMWARE.match(path):
+                contents.firmware = True
             if _KERNEL.match(path):
                 contents.kernels.append(path.removeprefix("boot/"))
             elif _INITRAMFS.match(path):
@@ -124,16 +170,17 @@ class StageContents:
     def summary(self) -> str:
         bootloaders = ", ".join(item.display_name.split(" (")[0] for item in Bootloader if item in self.bootloaders) or "no bootloader"
         kernel = f"kernel {', '.join(self.kernels)}" if self.kernels else "no kernel"
-        return f"Stage contains {bootloaders}, {kernel}" + (f", {self.init}" if self.init else "")
+        firmware = ", linux-firmware" if self.firmware else ""
+        return f"Stage contains {bootloaders}, {kernel}{firmware}" + (f", {self.init}" if self.init else "")
 
-def default_bootloader(contents: StageContents, architecture: str, uefi: bool) -> Bootloader:
+def default_bootloader(contents: StageContents, architecture: str, uefi: bool, removable: bool = False) -> Bootloader:
     """First supported bootloader found in stage, otherwise GRUB (installed from repository) when supported."""
-    if Bootloader.KBOOT.supported(architecture, uefi):
+    if Bootloader.KBOOT.supported(architecture, uefi, removable):
         return Bootloader.KBOOT
     for bootloader in (Bootloader.GRUB, Bootloader.SYSTEMD_BOOT, Bootloader.REFIND, Bootloader.EFI_STUB):
-        if bootloader in contents.bootloaders and bootloader.supported(architecture, uefi):
+        if bootloader in contents.bootloaders and bootloader.supported(architecture, uefi, removable):
             return bootloader
-    return Bootloader.GRUB if Bootloader.GRUB.supported(architecture, uefi) else Bootloader.NONE
+    return Bootloader.GRUB if Bootloader.GRUB.supported(architecture, uefi, removable) else Bootloader.NONE
 
 # ------------------------------------------------------------------------------
 # Scripts run on machine (bash, ROOT is root of installed system).
@@ -149,9 +196,10 @@ trap 'umount -l "$ROOT/run" "$ROOT/dev" "$ROOT/sys" "$ROOT/proc" 2>/dev/null' EX
 in_root() { chroot "$ROOT" /usr/bin/env -i HOME=/root TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin "$@"; }
 '''
 
-def packages_script(packages: list[str], grub_platform: str | None, init: str | None) -> str:
+def packages_script(packages: list[str], grub_platform: str | None, init: str | None, generic_initramfs: bool = False) -> str:
     """Installs packages in installed system with emerge. Gentoo repository is downloaded when stage doesn't have it.
-    Binary packages are used when system has binary repository configured."""
+    Binary packages are used when system has binary repository configured. Generic initramfs (with all drivers) is
+    generated when system is installed on other computer than the one it boots on."""
     lines = ["set -e", CHROOT_SETUP]
     lines.append(r'''
 if [ ! -e "$ROOT/var/db/repos/gentoo/profiles" ]; then
@@ -167,6 +215,8 @@ fi
     if any(package.startswith("sys-kernel/gentoo-kernel") for package in packages):
         # Distribution kernel is installed to /boot by installkernel, with initramfs generated by dracut.
         lines.append('mkdir -p "$ROOT/etc/portage/package.use" && echo "sys-kernel/installkernel dracut" > "$ROOT/etc/portage/package.use/catalystlab-kernel"')
+        if generic_initramfs:
+            lines.append('mkdir -p "$ROOT/etc/dracut.conf.d" && echo \'hostonly="no"\' > "$ROOT/etc/dracut.conf.d/catalystlab.conf"')
     if FIRMWARE_PACKAGE in packages:
         lines.append(f'mkdir -p "$ROOT/etc/portage/package.license" && echo "{FIRMWARE_PACKAGE} linux-fw-redistributable" > "$ROOT/etc/portage/package.license/catalystlab-firmware"')
     binpkgs = '$( [ -n "$(ls -A "$ROOT/etc/portage/binrepos.conf" 2>/dev/null)" ] && echo --getbinpkg )'
@@ -176,10 +226,13 @@ fi
     return "\n".join(lines) + "\n"
 
 def bootloader_script(bootloader: Bootloader, architecture: str, uefi: bool, disk: str, root_device: str,
-                      efi_device: str | None, esp: str | None, separate_boot: bool = False) -> str | None:
-    """Installs and configures bootloader in installed system. ESP is mount point of EFI system partition."""
+                      efi_device: str | None, esp: str | None, separate_boot: bool = False, removable: bool = False,
+                      ps3: bool | None = None) -> str | None:
+    """Installs and configures bootloader in installed system. ESP is mount point of EFI system partition. Removable
+    disks (prepared on this computer for other machine) get bootloader in fallback path of ESP, without boot entries in
+    firmware of this computer."""
     if bootloader == Bootloader.KBOOT:
-        return kboot_script(root_device, separate_boot)
+        return kboot_script(root_device, separate_boot, ps3=ps3, by_partuuid=removable)
     if uefi and not esp:
         return None
     root = f'root=UUID=$(blkid -s UUID -o value {root_device}) rw'
@@ -195,6 +248,8 @@ echo "Kernel: $KERNEL${INITRD:+, initramfs: $INITRD}"
             if target is None:
                 return None
             install = f"grub-install --target={target} --efi-directory={esp} --bootloader-id=Gentoo" if uefi else f"grub-install --target={target} {disk}"
+            if uefi and removable:
+                install += " --removable --no-nvram"
             return f"""set -e
 {CHROOT_SETUP}
 in_root {install}
@@ -205,7 +260,7 @@ in_root grub-mkconfig -o /boot/grub/grub.cfg
             return f"""set -e
 {CHROOT_SETUP}
 {kernel}
-in_root bootctl install --esp-path={esp}
+in_root bootctl install --esp-path={esp}{' --no-variables' if removable else ''}
 mkdir -p "$ROOT{esp}/gentoo" "$ROOT{esp}/loader/entries"
 cp "$ROOT/boot/$KERNEL" "$ROOT{esp}/gentoo/linux"
 [ -z "$INITRD" ] || cp "$ROOT/boot/$INITRD" "$ROOT{esp}/gentoo/initrd"
@@ -226,7 +281,7 @@ cat "$ROOT{esp}/loader/entries/gentoo.conf"
 {CHROOT_SETUP}
 {kernel}
 {f'mkdir -p "$ROOT/boot/efi" && mount --bind "$ROOT{esp}" "$ROOT/boot/efi"' if bind else ''}
-in_root refind-install --yes || {{ {'umount "$ROOT/boot/efi";' if bind else ''} exit 1; }}
+in_root refind-install --yes{f' --usedefault {efi_device}' if removable and efi_device else ''} || {{ {'umount "$ROOT/boot/efi";' if bind else ''} exit 1; }}
 {'umount "$ROOT/boot/efi"' if bind else ''}
 echo "\\"Boot with defaults\\" \\"{root}\\"" > "$ROOT/boot/refind_linux.conf"
 cat "$ROOT/boot/refind_linux.conf"
@@ -245,24 +300,29 @@ in_root efibootmgr --create --disk {disk} --part {partition.group(1) if partitio
 """
     return None
 
-def kboot_script(root_device: str, separate_boot: bool) -> str:
+def kboot_script(root_device: str, separate_boot: bool, ps3: bool | None = None, by_partuuid: bool = False) -> str:
     """Entries of petitboot (kboot.conf) for kernels in /boot, newest first (first entry is default). With separate
     /boot partition configuration is in it and paths are relative to it, otherwise it's in /etc. Like PS3 Gentoo
-    installer (github.com/damiandudycz/ps3)."""
+    installer (github.com/damiandudycz/ps3). PS3 is detected on machine when not given. Disks prepared for other
+    machine reference root partition by PARTUUID (kernel finds it without initramfs), device names differ there."""
     config = "$ROOT/boot/kboot.conf" if separate_boot else "$ROOT/etc/kboot.conf"
     prefix = "" if separate_boot else "/boot"
+    root = f"PARTUUID=$(blkid -s PARTUUID -o value {root_device})" if by_partuuid else root_device
+    detect_ps3 = {True: "true", False: "false"}.get(ps3, 'grep -qi "PS3" /proc/device-tree/model 2>/dev/null')
     return f"""set -e
 CONFIG="{config}"
 OPTIONS=""
+ROOT_DEVICE="{root}"
+[ "$ROOT_DEVICE" != "PARTUUID=" ] || {{ echo "Failed to read PARTUUID of {root_device}"; exit 1; }}
 # PS3 framebuffer mode used by PS3 Gentoo images.
-grep -qi "PS3" /proc/device-tree/model 2>/dev/null && OPTIONS=" video=ps3fb:mode:133"
+{detect_ps3} && OPTIONS=" video=ps3fb:mode:133"
 KERNELS=$(cd "$ROOT/boot" && ls -t vmlinux* vmlinuz* 2>/dev/null || true)
 [ -n "$KERNELS" ] || {{ echo "No kernel in /boot, kboot entries can't be created"; exit 1; }}
 : > "$CONFIG.new"
 for KERNEL in $KERNELS; do
     VERSION=${{KERNEL#vmlinu?-}}
     INITRD=$(cd "$ROOT/boot" && ls -t "initramfs-$VERSION"* "initrd-$VERSION"* 2>/dev/null | head -n 1 || true)
-    ENTRY="Gentoo-$VERSION='{prefix}/$KERNEL${{INITRD:+ initrd={prefix}/$INITRD}} root={root_device}$OPTIONS'"
+    ENTRY="Gentoo-$VERSION='{prefix}/$KERNEL${{INITRD:+ initrd={prefix}/$INITRD}} root=$ROOT_DEVICE$OPTIONS'"
     echo "$ENTRY" >> "$CONFIG.new"
 done
 # Entries added manually before are kept after new ones.

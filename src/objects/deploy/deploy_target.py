@@ -18,6 +18,8 @@ class TargetDisk:
     transport: str | None = None
     removable: bool = False
     in_use: bool = False # Has mounted partitions (eg. LiveCD media).
+    in_use_reason: str | None = None
+    automounted: bool = False # Disk of this computer with partitions mounted by desktop, unmounted before installation.
 
     @property
     def title(self) -> str:
@@ -27,8 +29,14 @@ class TargetDisk:
     def subtitle(self) -> str:
         details = [value for value in (self.model, (self.transport or "").upper() or None, "removable" if self.removable else None) if value]
         if self.in_use:
-            details.append("in use, has mounted partitions")
+            details.append(self.in_use_reason or "in use, has mounted partitions")
+        elif self.automounted:
+            details.append("mounted, will be unmounted")
         return ", ".join(details) or "Disk"
+
+    @property
+    def external(self) -> bool:
+        return self.removable or self.transport in ("usb", "mmc", "sdio", "ieee1394")
 
 @dataclass
 class TargetMachine:
@@ -43,6 +51,10 @@ class TargetMachine:
     address: str = ""
     gateway: str = ""
     dns: str = ""
+    # Disk of this computer, installed system boots on other machine: its firmware is chosen by user and partitions
+    # are referenced by UUIDs, as device names differ there.
+    local: bool = False
+    firmware: TargetFirmware | None = None
 
     _SCRIPT = r'''
 echo "architecture=$(uname -m)"
@@ -83,9 +95,90 @@ echo "dns=$(awk '/^nameserver/ {print $2}' /etc/resolv.conf | tr '\n' ' ')"
             ))
         return machine
 
+    @classmethod
+    def load_local(cls, connection, architecture: str, firmware: TargetFirmware) -> TargetMachine:
+        """Disks of this computer (connection running commands as root here). Architecture is architecture of build,
+        as uname -m of machines running it. Disks with mounted system filesystems, swap, LVM, RAID or encrypted
+        volumes are in use, partitions mounted by desktop (eg. inserted SD card) are unmounted before installation."""
+        output = connection.output("lsblk -J -b -o NAME,PATH,SIZE,MODEL,TYPE,RO,RM,TRAN,MOUNTPOINTS")
+        machine = cls(architecture=architecture, uefi=firmware == TargetFirmware.UEFI, memory=0,
+                      hostname=connection.host, local=True, firmware=firmware)
+        for device in json.loads(output or "{}").get("blockdevices", []):
+            if (device.get("type") != "disk" or _flag(device.get("ro")) or int(device.get("size") or 0) == 0
+                    or (device.get("name") or "").startswith(("zram", "ram", "nbd"))):
+                continue
+            reason = _local_in_use_reason(device)
+            disk = TargetDisk(
+                path=device.get("path") or f"/dev/{device['name']}",
+                size=int(device["size"]),
+                model=(device.get("model") or "").strip() or None,
+                transport=device.get("tran"),
+                removable=_flag(device.get("rm")),
+                in_use=reason is not None,
+                in_use_reason=reason,
+                automounted=_has_mountpoints(device),
+            )
+            machine.disks.append(disk)
+        # External disks first, they are usually the ones to install on.
+        machine.disks.sort(key=lambda disk: (disk.in_use, not disk.external))
+        return machine
+
     @property
     def description(self) -> str:
+        if self.local:
+            return f"Installed system runs on {self.architecture} machine with {self.firmware.display_name(self.architecture)} firmware"
         return f"{self.architecture}, {'UEFI' if self.uefi else 'BIOS'} firmware, {format_size(self.memory)} memory"
+
+    @property
+    def ps3(self) -> bool | None:
+        """Machine is PS3, None when it's detected on machine (LiveCD)."""
+        return self.firmware == TargetFirmware.PS3 if self.local else None
+
+class TargetFirmware(Enum):
+    """Firmware of machine booting disk prepared on this computer."""
+    UEFI = "uefi"
+    BIOS = "bios"
+    PS3 = "ps3"
+    PETITBOOT = "petitboot"
+    OTHER = "other"
+
+    def display_name(self, architecture: str) -> str:
+        return {
+            TargetFirmware.UEFI: "UEFI",
+            TargetFirmware.BIOS: "BIOS (legacy boot)",
+            TargetFirmware.PS3: "PS3 petitboot",
+            TargetFirmware.PETITBOOT: "petitboot",
+            TargetFirmware.OTHER: "other",
+        }[self]
+
+    @staticmethod
+    def options(architecture: str) -> list[TargetFirmware]:
+        if architecture in ("x86_64", "i686", "i586", "i486"):
+            return [TargetFirmware.UEFI, TargetFirmware.BIOS]
+        if architecture == "ppc64":
+            return [TargetFirmware.PS3, TargetFirmware.PETITBOOT]
+        if architecture == "ppc64le":
+            return [TargetFirmware.PETITBOOT]
+        return [TargetFirmware.UEFI, TargetFirmware.OTHER]
+
+# Where desktops mount removable media, such mounts are unmounted before installation. Other mounts mean disk is used
+# by this computer.
+_AUTOMOUNT_LOCATIONS = ("/media/", "/run/media/")
+
+def _local_in_use_reason(device: dict) -> str | None:
+    for mountpoint in device.get("mountpoints") or []:
+        if not mountpoint:
+            continue
+        if mountpoint == "[SWAP]":
+            return "in use, has active swap"
+        if not mountpoint.startswith(_AUTOMOUNT_LOCATIONS):
+            return f"in use, mounted at {mountpoint}"
+    if device.get("type") not in ("disk", "part"):
+        return f"in use by {device.get('type')} volume"
+    for child in device.get("children") or []:
+        if reason := _local_in_use_reason(child):
+            return reason
+    return None
 
 def _flag(value) -> bool:
     return value in (True, 1, "1", "true")
@@ -111,6 +204,11 @@ _MACHINE_ARCHITECTURES = {
     "ppc64le": {"ppc64le"},
     "riscv": {"riscv64"},
 }
+
+def machine_architecture(build_architecture: str | None) -> str | None:
+    """uname -m of machine running build of given architecture."""
+    return {"amd64": "x86_64", "x86": "i686", "arm64": "aarch64", "arm": "armv7l", "ppc64": "ppc64", "ppc64le": "ppc64le",
+            "riscv": "riscv64"}.get(build_architecture or "")
 
 def architecture_supported(build_architecture: str | None, machine_architecture: str) -> bool | None:
     """Whether machine can run build of given architecture, None when unknown."""
@@ -242,6 +340,8 @@ class PartitionPlan:
     uefi: bool
     layout: list[PartitionSpec] = field(default_factory=list)
     table: PartitionTable = PartitionTable.GPT
+    root: str = "/mnt/gentoo" # Where root filesystem is mounted during installation.
+    local: bool = False # Disk of this computer, only its own partitions are unmounted (not all swap and mounts).
 
     @property
     def partitions(self) -> list[TargetPartition]:
@@ -358,12 +458,21 @@ class PartitionPlan:
 
     # Scripts run on machine:
 
+    def release_script(self) -> str:
+        """Unmounts partitions of disk and disables their swap. On LiveCD all of them, on this computer only partitions
+        of selected disk (mounted by desktop, eg. when SD card was inserted or new partitions appeared)."""
+        if not self.local:
+            return f"swapoff -a 2>/dev/null || true\numount -R {quote(self.root)} 2>/dev/null || true\n"
+        return f"""for PART in $(lsblk -lnpo NAME {quote(self.disk.path)}); do
+    swapoff "$PART" 2>/dev/null || true
+    while findmnt -rn -S "$PART" > /dev/null; do echo "Unmounting $PART"; umount "$PART" || exit 1; done
+done
+"""
+
     def partition_script(self) -> str:
         disk = quote(self.disk.path)
         return f"""set -e
-swapoff -a 2>/dev/null || true
-umount -R /mnt/gentoo 2>/dev/null || true
-echo "Removing old partitions and signatures from {self.disk.path}"
+{self.release_script()}echo "Removing old partitions and signatures from {self.disk.path}"
 wipefs -a {disk}
 sfdisk --wipe always --wipe-partitions always {disk} <<'SFDISK'
 {self.sfdisk_script()}SFDISK
@@ -373,7 +482,7 @@ sfdisk -l {disk}
 """
 
     def format_script(self) -> str:
-        lines = ["set -e"]
+        lines = ["set -e", self.release_script()]
         for index, partition in enumerate(self.partitions, start=1):
             if partition.format_command:
                 device = quote(self.partition_device(index))
@@ -382,22 +491,22 @@ sfdisk -l {disk}
         return "\n".join(lines) + "\n"
 
     def mount_script(self) -> str:
-        lines = ["set -e", "mkdir -p /mnt/gentoo"]
+        lines = ["set -e", self.release_script(), f"mkdir -p {quote(self.root)}"]
         # Parents are mounted before their subdirectories.
         mounted = sorted(
             ((index, partition) for index, partition in enumerate(self.partitions, start=1) if partition.mount_point),
             key=lambda item: item[1].mount_point.rstrip("/").count("/") if item[1].mount_point != "/" else 0
         )
         for index, partition in mounted:
-            target = "/mnt/gentoo" + (partition.mount_point if partition.mount_point != "/" else "")
+            target = self.root + (partition.mount_point if partition.mount_point != "/" else "")
             lines.append(f"mkdir -p {quote(target)}")
             lines.append(f"mount {quote(self.partition_device(index))} {quote(target)}")
-        lines.append("df -h /mnt/gentoo")
+        lines.append(f"df -h {quote(self.root)}")
         return "\n".join(lines) + "\n"
 
     def fstab_script(self) -> str:
         """Appends partitions to /etc/fstab of installed system, using UUIDs."""
-        lines = ["set -e", "FSTAB=/mnt/gentoo/etc/fstab", 'echo "" >> "$FSTAB"', 'echo "# Added by Catalyst Lab" >> "$FSTAB"']
+        lines = ["set -e", f"FSTAB={quote(self.root)}/etc/fstab", 'echo "" >> "$FSTAB"', 'echo "# Added by Catalyst Lab" >> "$FSTAB"']
         for index, partition in enumerate(self.partitions, start=1):
             if not partition.filesystem:
                 continue
@@ -415,6 +524,6 @@ sfdisk -l {disk}
         return "\n".join(lines) + "\n"
 
     def required_tools(self) -> list[str]:
-        tools = ["wipefs", "sfdisk", "blkid", "tar"]
+        tools = ["wipefs", "sfdisk", "blkid", "tar", "chroot"] + (["lsblk", "findmnt"] if self.local else [])
         tools += sorted({partition.format_command.split()[0] for partition in self.partitions if partition.format_command})
         return tools

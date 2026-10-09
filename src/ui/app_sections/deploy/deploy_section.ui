@@ -22,6 +22,20 @@
             <property name="margin-bottom">24</property>
 
             <child>
+              <object class="GtkLabel">
+                <property name="label">Deploying is currently being tested and might not work correctly. Check the installed system before relying on it.</property>
+                <property name="margin-top">12</property>
+                <property name="halign">center</property>
+                <property name="wrap">True</property>
+                <property name="justify">center</property>
+                <style>
+                  <class name="warning"/>
+                  <class name="caption"/>
+                </style>
+              </object>
+            </child>
+
+            <child>
               <object class="RepositoryListView">
                 <property name="title">Projects</property>
                 <property name="item_class_name">ProjectDirectory</property>
@@ -42,7 +56,7 @@
 
             <child>
               <object class="GtkLabel">
-                <property name="label">Stage3 and stage4 builds can be installed on another machine booted from Gentoo LiveCD, through SSH: its disk is partitioned, stage is installed on it and system is configured. Select a project to see its builds ready to deploy. Running deployments are listed first.</property>
+                <property name="label">Stage3 and stage4 builds can be installed on another machine booted from Gentoo LiveCD, through SSH, or on Linux on a disk connected to this computer, like SD card or external disk: disk is partitioned, stage is installed on it and system is configured. Select a project to see its builds ready to deploy. Running deployments are listed first.</property>
                 <property name="halign">center</property>
                 <property name="wrap">True</property>
                 <property name="justify">fill</property>

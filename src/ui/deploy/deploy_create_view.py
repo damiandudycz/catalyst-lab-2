@@ -1,26 +1,70 @@
 from __future__ import annotations
-import os, threading
+import os, shutil, sys, threading
+from enum import Enum
 from gi.repository import Gtk, Adw, GLib
 import re
-from .deploy_installation import DeployInstallation, DeploySystemSettings, DeployUser, DEFAULT_USER_GROUPS
-from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, default_bootloader
+from .deploy_installation import DeployInstallation, DeploySystemSettings, DeployUser, DEFAULT_USER_GROUPS, local_mount_point
+from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, default_bootloader, bootloader_warnings
 from .deploy_system import (
     NetworkService, NetworkSettings, LocalizationSettings, default_network_service, local_localization, local_public_keys
 )
 from .deploy_target import (
     TargetMachine, TargetFilesystem, PartitionPlan, PartitionSpec, PartitionType, GIB, MIB, format_size,
-    architecture_supported, default_layout, PartitionTable
+    architecture_supported, default_layout, PartitionTable, TargetFirmware, machine_architecture
 )
 from .ssh_connection import SSHConnection
+from .local_disk_connection import LocalDiskConnection
+from .item_select_view import ItemSelectionViewEvent
+
+class DeployMethod(Enum):
+    """Where build is deployed."""
+    SSH = "ssh"
+    LOCAL_DISK = "local-disk"
+
+    @property
+    def title(self) -> str:
+        return {DeployMethod.SSH: "Machine through SSH", DeployMethod.LOCAL_DISK: "Disk of this computer"}[self]
+
+    @property
+    def icon_name(self) -> str:
+        return {DeployMethod.SSH: "network-wired-symbolic", DeployMethod.LOCAL_DISK: "drive-removable-media-symbolic"}[self]
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        match self:
+            case DeployMethod.SSH:
+                return None if shutil.which("ssh") else "Not available: ssh command is not installed on this computer"
+            case DeployMethod.LOCAL_DISK:
+                # Installed system is configured in chroot, which needs Linux. Virtual machines used on macOS can't
+                # access disks of this computer.
+                return None if sys.platform.startswith("linux") else "Not available: needs Linux, virtual machines on this system can't access disks of this computer"
+
+    @property
+    def unavailable(self) -> bool:
+        return self.unavailable_reason is not None
+
+    @property
+    def details(self) -> str:
+        description = {
+            DeployMethod.SSH: "Other machine booted from Gentoo LiveCD, installed through SSH connection",
+            DeployMethod.LOCAL_DISK: "SD card or external disk connected to this computer, booted later on other machine",
+        }[self]
+        return self.unavailable_reason or description
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/deploy/deploy_create_view.ui')
 class DeployCreateView(Gtk.Box):
-    """Wizard deploying stage build to machine booted from Gentoo LiveCD: connection, disk partitioning, system
-    settings, users and bootloader."""
+    """Wizard deploying stage build to machine booted from Gentoo LiveCD, or to disk of this computer (Linux only):
+    connection, disk partitioning, system settings, users and bootloader."""
     __gtype_name__ = "DeployCreateView"
 
     wizard_view = Gtk.Template.Child()
+    method_page = Gtk.Template.Child()
+    method_selection_view = Gtk.Template.Child()
     connection_page = Gtk.Template.Child()
+    local_group = Gtk.Template.Child()
+    local_architecture_row = Gtk.Template.Child()
+    target_firmware_row = Gtk.Template.Child()
+    ssh_group = Gtk.Template.Child()
     host_row = Gtk.Template.Child()
     port_row = Gtk.Template.Child()
     user_row = Gtk.Template.Child()
@@ -69,7 +113,7 @@ class DeployCreateView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         self.project_directory = project_directory
         self.build = build if build else installation_in_progress.build if installation_in_progress else None
-        self.connection: SSHConnection | None = None
+        self.connection: SSHConnection | LocalDiskConnection | None = None
         self.machine: TargetMachine | None = None
         self.connecting = False
         self.selected_disk = None
@@ -82,9 +126,17 @@ class DeployCreateView(Gtk.Box):
         self.bootloader_options: list[Bootloader] = []
         self.kernel_options: list[Kernel] = []
         self.network_options: list[NetworkService] = []
+        self.method_selection_view.set_static_list(list(DeployMethod))
+        self.method_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.on_method_changed)
+        self.on_method_changed(None) # First available method is selected when list is loaded.
+        architecture = self.project_directory.get_architecture() if self.project_directory else None
+        self.local_architecture = machine_architecture(architecture.value if architecture else None)
+        self.local_architecture_row.set_subtitle(self.local_architecture or "Unknown architecture of build")
+        self.firmware_options = TargetFirmware.options(self.local_architecture) if self.local_architecture else []
+        self.target_firmware_row.set_model(Gtk.StringList.new([item.display_name(self.local_architecture) for item in self.firmware_options]))
         localization = local_localization()
         self.timezone_row.set_text(localization.timezone)
-        self.locale_row.set_text(localization.locale)
+        self.locale_row.set_text(", ".join(localization.locales))
         self.keymap_row.set_text(localization.keymap)
         self.key_checks: list[tuple[Gtk.CheckButton, str]] = []
         for key in local_public_keys():
@@ -96,6 +148,11 @@ class DeployCreateView(Gtk.Box):
             self.key_checks.append((check, key.key))
         if not self.key_checks:
             self.ssh_keys_group.add(Adw.ActionRow(title="No SSH keys found in ~/.ssh"))
+        # Like warnings of stage settings: icon with details in tooltip.
+        self.bootloader_warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
+        self.bootloader_warning_icon.add_css_class("warning")
+        self.bootloader_warning_icon.set_visible(False)
+        self.bootloader_row.add_suffix(self.bootloader_warning_icon)
         self._update_network_options()
         if self.build and installation_in_progress is None:
             threading.Thread(target=self._scan_stage, daemon=True).start()
@@ -103,8 +160,9 @@ class DeployCreateView(Gtk.Box):
             size = os.path.getsize(self.build.artifact_path) if self.build.artifact_path and os.path.isfile(self.build.artifact_path) else 0
             self.wizard_view.set_property("welcome_screen_description",
                 f"Installs {self.build.stage_name} ({self.build.artifact}, {format_size(size)}) on disk of another machine. "
-                "Boot that machine from Gentoo LiveCD and allow SSH connections to it, Catalyst Lab partitions its disk, "
-                "installs the stage and configures the system.")
+                "Boot that machine from Gentoo LiveCD and allow SSH connections to it" +
+                (", or connect its disk (eg. SD card) to this computer" if not DeployMethod.LOCAL_DISK.unavailable else "") +
+                ". Catalyst Lab partitions the disk, installs the stage and configures the system.")
         self.connect("realize", self.on_realize)
         self.connect("unrealize", self.on_unrealize)
 
@@ -123,6 +181,9 @@ class DeployCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def is_page_ready_to_continue(self, sender, page) -> bool:
+        if page == self.method_page:
+            method = self.method_selection_view.selected_item
+            return method is not None and not method.unavailable
         if page == self.connection_page:
             return self.machine is not None
         if page == self.disk_page:
@@ -138,6 +199,31 @@ class DeployCreateView(Gtk.Box):
 
     # Connection
 
+    # Deploy method
+
+    @Gtk.Template.Callback()
+    def is_method_selectable(self, sender, method) -> bool:
+        return not method.unavailable
+
+    @Gtk.Template.Callback()
+    def is_method_usable(self, sender, method) -> bool:
+        return True
+
+    def _local(self) -> bool:
+        return self.method_selection_view.selected_item == DeployMethod.LOCAL_DISK
+
+    def on_method_changed(self, view):
+        local = self._local()
+        if getattr(self, "_shown_method_local", None) == local:
+            return
+        self._shown_method_local = local
+        self.local_group.set_visible(local)
+        self.ssh_group.set_visible(not local)
+        self.reboot_row.set_visible(not local)
+        # Machine or disks found with other method are not used.
+        self.on_connection_changed(None)
+        self.wizard_view._refresh_buttons_state()
+
     @Gtk.Template.Callback()
     def on_connection_changed(self, row):
         # Changed connection details need connecting again.
@@ -148,7 +234,28 @@ class DeployCreateView(Gtk.Box):
                 self.connection = None
         self._update_connect_button()
 
+    @Gtk.Template.Callback()
+    def on_firmware_changed(self, row, param):
+        # Firmware changes bootloaders and default layout, disks don't need to be listed again.
+        if self.machine is None or not self.machine.local:
+            return
+        self.machine.firmware = self._firmware()
+        self.machine.uefi = self.machine.firmware == TargetFirmware.UEFI
+        self.machine_row.set_subtitle(GLib.markup_escape_text(self.machine.description))
+        if self.selected_disk:
+            self.layout = self._default_layout()
+            self._load_partition_rows()
+        self._update_boot_options()
+
+    def _firmware(self) -> TargetFirmware:
+        index = self.target_firmware_row.get_selected()
+        return self.firmware_options[index] if 0 <= index < len(self.firmware_options) else TargetFirmware.OTHER
+
     def _update_connect_button(self):
+        if self._local():
+            self.connect_button.set_sensitive(not self.connecting and self.local_architecture is not None)
+            self.connect_button.set_label("Finding disks..." if self.connecting else "Find disks" if self.machine is None else "Find disks again")
+            return
         self.connect_button.set_sensitive(not self.connecting and bool(self.host_row.get_text().strip())
                                           and self.port_row.get_text().strip().isdigit())
         self.connect_button.set_label("Connecting..." if self.connecting else "Connect" if self.machine is None else "Connect again")
@@ -157,10 +264,14 @@ class DeployCreateView(Gtk.Box):
     def on_connect_clicked(self, sender):
         if self.connecting or not self.connect_button.get_sensitive():
             return
+        if self._local():
+            self._find_local_disks()
+            return
         host = self.host_row.get_text().strip()
         port = int(self.port_row.get_text().strip() or 22)
         user = self.user_row.get_text().strip() or "root"
         password = self.password_row.get_text()
+        local = False
         self.connecting = True
         self._set_status(None)
         self._update_connect_button()
@@ -178,6 +289,51 @@ class DeployCreateView(Gtk.Box):
                     connection.close()
             def done():
                 self.connecting = False
+                if self._local() != local:
+                    # Method was changed while connecting.
+                    if machine:
+                        threading.Thread(target=connection.close, daemon=True).start()
+                    self._update_connect_button()
+                    return
+                self.connection = connection if machine else None
+                self._set_machine(machine)
+                self._set_status(error)
+                self._update_connect_button()
+            GLib.idle_add(done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _find_local_disks(self):
+        """Disks of this computer, listed as root (root access is kept while wizard is open)."""
+        architecture, firmware = self.local_architecture, self._firmware()
+        local = True
+        self.connecting = True
+        self._set_status(None)
+        self._update_connect_button()
+        previous = self.connection
+        def work():
+            connection = previous if isinstance(previous, LocalDiskConnection) and previous.is_alive() else None
+            if connection is None:
+                if previous:
+                    previous.close()
+                connection = LocalDiskConnection()
+                error = connection.connect()
+            else:
+                error = None
+            machine = None
+            if error is None:
+                try:
+                    machine = TargetMachine.load_local(connection, architecture, firmware)
+                except Exception as e:
+                    error = f"Failed to list disks: {e}"
+                    connection.close()
+            def done():
+                self.connecting = False
+                if self._local() != local:
+                    # Method was changed while connecting.
+                    if machine:
+                        threading.Thread(target=connection.close, daemon=True).start()
+                    self._update_connect_button()
+                    return
                 self.connection = connection if machine else None
                 self._set_machine(machine)
                 self._set_status(error)
@@ -194,7 +350,14 @@ class DeployCreateView(Gtk.Box):
     def _set_machine(self, machine: TargetMachine | None):
         self.machine = machine
         self.machine_group.set_visible(machine is not None)
-        if machine:
+        if machine and machine.local:
+            available = sum(1 for disk in machine.disks if not disk.in_use)
+            self.machine_row.set_title(GLib.markup_escape_text(f"{available} disk{'' if available == 1 else 's'} of this computer can be used"))
+            self.machine_row.set_subtitle(GLib.markup_escape_text(machine.description))
+            if not self.hostname_row.get_text():
+                self.hostname_row.set_text("gentoo")
+            self._update_boot_options()
+        elif machine:
             self.machine_row.set_title(GLib.markup_escape_text(f"Connected to {machine.hostname or self.connection.host}"))
             subtitle = machine.description
             architecture = self.project_directory.get_architecture() if self.project_directory else None
@@ -249,7 +412,8 @@ class DeployCreateView(Gtk.Box):
     def _plan(self) -> PartitionPlan | None:
         if self.selected_disk is None or self.machine is None:
             return None
-        return PartitionPlan(disk=self.selected_disk, uefi=self.machine.uefi, layout=self.layout, table=self._table())
+        return PartitionPlan(disk=self.selected_disk, uefi=self.machine.uefi, layout=self.layout, table=self._table(),
+                             local=self.machine.local)
 
     def _table(self) -> PartitionTable:
         return list(PartitionTable)[self.table_row.get_selected()]
@@ -312,7 +476,9 @@ class DeployCreateView(Gtk.Box):
             self.wizard_view._refresh_buttons_state()
             return
         for index, row in enumerate(self.partition_rows, start=1):
-            row.update(plan.partition_device(index), plan.size_of(row.spec), first=index == 1, last=index == len(self.partition_rows))
+            # Space partition gets when it uses remaining space: space not used by other partitions.
+            available = max(0, plan.remaining_size + (row.spec.size or 0))
+            row.update(plan.partition_device(index), plan.size_of(row.spec), available, first=index == 1, last=index == len(self.partition_rows))
         free = plan.remaining_size if all(spec.size for spec in self.layout) else 0
         description = f"New {plan.table.display_name} partition table on {plan.disk.path}, {format_size(plan.usable_size)}"
         if free > 0:
@@ -405,8 +571,8 @@ class DeployCreateView(Gtk.Box):
         if self.machine is None:
             return
         contents = self.contents or StageContents()
-        architecture, uefi = self.machine.architecture, self.machine.uefi
-        self.bootloader_options = [item for item in Bootloader if item.supported(architecture, uefi)]
+        architecture, uefi, removable = self.machine.architecture, self.machine.uefi, self.machine.local
+        self.bootloader_options = [item for item in Bootloader if item.supported(architecture, uefi, removable)]
         labels = []
         for item in self.bootloader_options:
             if not item.needs_package:
@@ -416,7 +582,7 @@ class DeployCreateView(Gtk.Box):
             else:
                 labels.append(f"{item.display_name}, will be installed")
         self.bootloader_row.set_model(Gtk.StringList.new(labels))
-        self.bootloader_row.set_selected(self.bootloader_options.index(default_bootloader(contents, architecture, uefi)))
+        self.bootloader_row.set_selected(self.bootloader_options.index(default_bootloader(contents, architecture, uefi, removable)))
         # Kernel from stage is used when it has one, otherwise prebuilt distribution kernel is installed.
         self.kernel_options = ([Kernel.STAGE] if contents.kernels else []) + [Kernel.DISTRIBUTION_BINARY, Kernel.DISTRIBUTION, Kernel.NONE]
         self.kernel_row.set_model(Gtk.StringList.new([
@@ -424,8 +590,13 @@ class DeployCreateView(Gtk.Box):
             for item in self.kernel_options
         ]))
         self.kernel_row.set_selected(0)
-        self.firmware_row.set_active(not contents.kernels)
+        # Firmware is offered only when stage doesn't have it.
+        self.firmware_row.set_visible(not contents.firmware)
+        self.firmware_row.set_active(not contents.kernels and not contents.firmware)
         self.on_boot_changed()
+
+    def _install_firmware(self) -> bool:
+        return self.firmware_row.get_active() and not (self.contents and self.contents.firmware)
 
     def _selected_kernel(self) -> Kernel:
         index = self.kernel_row.get_selected()
@@ -441,6 +612,7 @@ class DeployCreateView(Gtk.Box):
             return
         contents = self.contents or StageContents()
         bootloader = self._selected_bootloader()
+        self._update_bootloader_warnings(bootloader)
         installs = []
         if bootloader.needs_package and bootloader not in contents.bootloaders:
             installs.append(bootloader.package(contents.init))
@@ -448,16 +620,20 @@ class DeployCreateView(Gtk.Box):
         network = self._network().service
         if network.package and network not in contents.network_services:
             installs.append(network.package)
-        if self.firmware_row.get_active():
+        if self._install_firmware():
             installs.append(FIRMWARE_PACKAGE)
         if kernel.package:
             installs.append(kernel.package)
         notes = []
+        local = self.machine is not None and self.machine.local
         if installs:
-            notes.append(f"{', '.join(installs)} will be installed with emerge on the machine, it needs internet connection. "
+            notes.append(f"{', '.join(installs)} will be installed with emerge {'in installed system on this computer' if local else 'on the machine'}, it needs internet connection. "
                          "Gentoo repository is downloaded when stage doesn't contain it, packages are compiled unless stage has binary packages repository configured.")
         if kernel.package:
-            notes.append("Installed kernel gets initramfs generated by dracut.")
+            notes.append("Installed kernel gets initramfs generated by dracut" + (", with drivers for any machine." if local else "."))
+        if local and not runs_natively(self.machine.architecture):
+            notes.append(f"Programs of installed system run on this computer with QEMU user emulation of {self.machine.architecture}, "
+                         "it needs to be installed and configuring the system is slower.")
         if kernel == Kernel.DISTRIBUTION:
             notes.append("Compiling kernel can take an hour or more.")
         if kernel == Kernel.NONE and bootloader != Bootloader.NONE:
@@ -467,6 +643,12 @@ class DeployCreateView(Gtk.Box):
         self.boot_info_label.set_label(" ".join(notes))
         self.boot_info_label.set_visible(bool(notes))
 
+    def _update_bootloader_warnings(self, bootloader: Bootloader):
+        warnings = bootloader_warnings(bootloader, self.machine.uefi, self.machine.local) if self.machine else []
+        self.bootloader_warning_icon.set_visible(bool(warnings))
+        self.bootloader_warning_icon.set_tooltip_text("\n\n".join(warning.details for warning in warnings) or None)
+        self.bootloader_row.set_subtitle(GLib.markup_escape_text(", ".join(warning.summary for warning in warnings)))
+
     def _system_error(self) -> str | None:
         hostname = self.hostname_row.get_text().strip()
         if hostname and not all(character.isalnum() or character in "-." for character in hostname):
@@ -474,7 +656,8 @@ class DeployCreateView(Gtk.Box):
         return self._localization().error() or self._network().error()
 
     def _localization(self) -> LocalizationSettings:
-        return LocalizationSettings(timezone=self.timezone_row.get_text().strip(), locale=self.locale_row.get_text().strip(),
+        return LocalizationSettings(timezone=self.timezone_row.get_text().strip(),
+                                    locales=[locale for locale in re.split(r"[,\s]+", self.locale_row.get_text()) if locale],
                                     keymap=self.keymap_row.get_text().strip())
 
     def _network(self) -> NetworkSettings:
@@ -507,9 +690,10 @@ class DeployCreateView(Gtk.Box):
         plan = self._plan()
         if plan is None or self.connection is None:
             return
+        owner = "this computer" if self.machine.local else self.connection.host
         dialog = Adw.AlertDialog(
             heading="Erase disk?",
-            body=f"All data on {plan.disk.path} ({plan.disk.subtitle}, {format_size(plan.disk.size)}) of {self.connection.host} will be erased and {self.build.stage_name} will be installed on it."
+            body=f"All data on {plan.disk.path} ({plan.disk.subtitle}, {format_size(plan.disk.size)}) of {owner} will be erased and {self.build.stage_name} will be installed on it."
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("deploy", "Erase and deploy")
@@ -522,6 +706,8 @@ class DeployCreateView(Gtk.Box):
     def _on_confirm_response(self, dialog, response: str, plan: PartitionPlan):
         if response != "deploy":
             return
+        if self.machine.local:
+            plan.root = local_mount_point()
         settings = DeploySystemSettings(
             hostname=self.hostname_row.get_text().strip() or None,
             root_password=self.root_password_row.get_text() or None,
@@ -532,8 +718,8 @@ class DeployCreateView(Gtk.Box):
             localization=self._localization(),
             bootloader=self._selected_bootloader(),
             kernel=self._selected_kernel(),
-            install_firmware=self.firmware_row.get_active(),
-            reboot=self.reboot_row.get_active(),
+            install_firmware=self._install_firmware(),
+            reboot=self.reboot_row.get_active() and not self.machine.local,
         )
         installation = DeployInstallation(
             build=self.build, project_name=self.project_directory.name if self.project_directory else "",
@@ -670,8 +856,9 @@ class PartitionRow(Adw.ExpanderRow):
         self.rest_row.set_visible(partition_type in (PartitionType.LINUX, PartitionType.SWAP))
         self.size_row.set_visible(partition_type != PartitionType.BIOS_BOOT and not (self.rest_row.get_visible() and self.rest_row.get_active()))
 
-    def update(self, device: str, size: int, first: bool, last: bool):
+    def update(self, device: str, size: int, available: int, first: bool, last: bool):
         spec = self.spec
+        self.rest_row.set_subtitle(f"Uses {format_size(size)}" if spec.size is None else f"Would use {format_size(available)}")
         purpose = spec.mount_point if spec.type in (PartitionType.LINUX, PartitionType.EFI) and spec.mount_point else spec.type.display_name
         self.set_title(GLib.markup_escape_text(f"{device} · {purpose}"))
         details = [format_size(size) + (" (remaining space)" if spec.size is None else "")]
@@ -684,3 +871,9 @@ class PartitionRow(Adw.ExpanderRow):
         self.set_subtitle(GLib.markup_escape_text(", ".join(details)))
         self.up_button.set_sensitive(not first)
         self.down_button.set_sensitive(not last)
+
+
+def runs_natively(architecture: str) -> bool:
+    """Programs of architecture (uname -m) run on this computer without emulation."""
+    host = os.uname().machine
+    return architecture == host or (host == "x86_64" and architecture in ("i686", "i586", "i486"))

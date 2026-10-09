@@ -8,6 +8,7 @@ import os, shlex, stat, subprocess, threading, time, uuid
 # Host keys are not checked, LiveCD generates new ones on every boot.
 
 class SSHConnection:
+    is_local = False
 
     def __init__(self, host: str, port: int = 22, user: str = "root"):
         self.host = host
