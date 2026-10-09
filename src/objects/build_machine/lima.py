@@ -106,6 +106,47 @@ def run_limactl(arguments: list[str], output_handler, process_holder: list | Non
         output_handler(_clean_log_line(line.rstrip("\n")))
     return process.wait() == 0
 
+def run_as_root_in_instance(instance_name: str, script: str, output_handler, home: str | None = None) -> bool:
+    """Runs shell script as root in running instance, output goes to handler line by line."""
+    path = limactl_path()
+    if path is None:
+        raise RuntimeError(lima_unavailable_reason())
+    process = subprocess.Popen([path, "shell", "--workdir", "/", instance_name, "sudo", "sh", "-c", script],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True,
+                               errors="replace", bufsize=1, start_new_session=True, env=lima_environment(home))
+    for line in process.stdout:
+        line = line.rstrip("\n")
+        if not (line.startswith("time=") and "level=" in line): # Lima warnings.
+            output_handler(line)
+    return process.wait() == 0
+
+def swap_activation_script(size_bytes: int) -> str:
+    """Turns on swap on additional disk of machine (as root). Disk is found by its size, only empty disk without
+    partitions, filesystem or mounts is used, so system disk is never formatted."""
+    return f"""set -e
+SIZE={size_bytes}
+DEVICE=""
+for NAME in $(lsblk -dnro NAME,TYPE | awk '$2 == "disk" {{ print $1 }}'); do
+    [ "$(lsblk -dnbro SIZE "/dev/$NAME")" = "$SIZE" ] || continue
+    [ "$(lsblk -dnro RO "/dev/$NAME")" = "0" ] || continue
+    [ "$(lsblk -nro NAME "/dev/$NAME" | wc -l)" = "1" ] || continue # Has partitions.
+    findmnt -rn -S "/dev/$NAME" > /dev/null && continue
+    if command -v blkid > /dev/null; then
+        TYPE=$(blkid -p -o value -s TYPE "/dev/$NAME" 2>/dev/null || true)
+        PTTYPE=$(blkid -p -o value -s PTTYPE "/dev/$NAME" 2>/dev/null || true)
+        [ -z "$PTTYPE" ] || continue
+        [ -z "$TYPE" ] || [ "$TYPE" = swap ] || continue
+    fi
+    DEVICE="/dev/$NAME"
+    break
+done
+[ -n "$DEVICE" ] || {{ echo "Swap disk was not found in machine"; exit 1; }}
+grep -q "^$DEVICE " /proc/swaps && {{ echo "Swap is on $DEVICE"; exit 0; }}
+mkswap -L catalystlab-swap "$DEVICE" > /dev/null
+swapon "$DEVICE"
+echo "Swap: $((SIZE / 1073741824)) GiB on $DEVICE"
+"""
+
 def _clean_log_line(line: str) -> str:
     """Lima logs as time="..." level=info msg="...", only message is shown."""
     if line.startswith("time=") and ' msg="' in line:
