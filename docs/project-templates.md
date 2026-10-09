@@ -8,7 +8,9 @@ Templates come from two places:
 - **Included in Catalyst Lab** — directories in [`data/project_templates`](../data/project_templates), for example
   [Gentoo release](../data/project_templates/gentoo-release/template.toml).
 - **Git repositories** — listed in [`data/project_templates/repositories.txt`](../data/project_templates/repositories.txt).
-  When a repository template is selected, only its `template.toml` is downloaded to show its options. When the project
+  The app always downloads this list from the `main` branch, so templates removed from it are not offered anymore.
+  When the list can't be downloaded, only templates included in the app are shown. When a repository template is
+  selected, only its `template.toml` is downloaded to show its options. When the project
   is created, the repository is cloned under the project name and its content is replaced with the generated project,
   so the project keeps the history of the template.
 
@@ -197,8 +199,10 @@ rejected. Expressions are limited in length, complexity and size of their result
 Run Catalyst Lab from the checkout ([Development](../README.md#development)) and either:
 
 - put the template directory in `data/project_templates`, or
-- add the repository to `data/project_templates/repositories.txt`. Local repositories can be added with a `file://`
-  URL, for example `file:///home/me/my-template`. Only committed files are used.
+- write a list of repositories in the format of `repositories.txt` and start the app with
+  `CATALYSTLAB_TEMPLATE_REPOSITORIES` set to its `file://` (or `https://`) URL, which replaces the list from `main`.
+  Local repositories can be added to it with `file://` URLs, for example `file:///home/me/my-template`. Only committed
+  files are used.
 
 Then create a new project, select **From template** and your template. Errors in `template.toml` are shown in the list
 of templates or on the options page. Check that every combination of options creates the stages you expect: the
@@ -219,6 +223,7 @@ Templates in Git repositories are added to the list in the app with a pull reque
    Releng specs it was tested with.
 
 Catalyst Lab downloads the latest list from the `main` branch of catalyst-lab-2 when templates are shown, so a merged
-template is available without updating the app (the list included in the app is used when it can't be downloaded).
+template is available without updating the app, and a template removed from the list (for example when it's broken
+or unsafe) is not offered anymore.
 Repository URLs have to use `https://`. Templates are downloaded from the default branch of their repository, so later
 changes are available without changing the list.

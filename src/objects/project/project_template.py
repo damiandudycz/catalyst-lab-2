@@ -1,7 +1,8 @@
 """Project templates: directories with template.toml describing stages, options and files of new project.
 
 Local templates are directories in data/project_templates of the app, templates from Git repositories have the same
-layout in root of repository. Repositories offered in the app are listed in data/project_templates/repositories.txt.
+layout in root of repository. Repositories offered in the app are listed in data/project_templates/repositories.txt,
+downloaded from main branch of Catalyst Lab repository.
 Format of templates is described in docs/project-templates.md.
 
 Templates can't run code. Values in template.toml can contain {{ expressions }} and "when" conditions, evaluated by
@@ -677,19 +678,16 @@ def parse_template_repositories(text: str) -> list[TemplateRepository]:
         repositories.append(TemplateRepository(url=url, title=title.strip() or url.rstrip("/").split("/")[-1].removesuffix(".git")))
     return repositories
 
-def template_repositories() -> list[TemplateRepository]:
-    """Repositories from repositories.txt included in app."""
-    directory = templates_directory()
-    path = os.path.join(directory, REPOSITORIES_FILE) if directory else None
-    if not path or not os.path.isfile(path):
-        return []
-    with open(path, encoding="utf-8") as file:
-        return parse_template_repositories(file.read())
-
 def download_template_repositories() -> list[TemplateRepository]:
-    """Latest list of repositories from main branch of Catalyst Lab. Raises when it can't be downloaded."""
+    """Latest list of repositories from main branch of Catalyst Lab, so templates removed from it are not offered
+    anymore. Raises when it can't be downloaded. CATALYSTLAB_TEMPLATE_REPOSITORIES environment variable can point to
+    other list (https:// or file:// URL), for testing templates."""
+    url = os.environ.get("CATALYSTLAB_TEMPLATE_REPOSITORIES") or REPOSITORIES_LIST_URL
+    if url.startswith("file://"):
+        with open(url.removeprefix("file://"), encoding="utf-8") as file:
+            return parse_template_repositories(file.read(1_000_000))
     import requests
-    response = requests.get(REPOSITORIES_LIST_URL, timeout=15)
+    response = requests.get(url, timeout=15)
     response.raise_for_status()
     if len(response.content) > 1_000_000:
         raise TemplateError("List of template repositories is too large")
