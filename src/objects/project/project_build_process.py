@@ -8,6 +8,7 @@ from .multistage_process import (
 )
 from .root_function import root_function
 from .repository import Repository
+from .event_bus import SharedEvent
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .toolset import BindMount
 from .toolset_env_builder import ToolsetEnvBuilder
@@ -60,9 +61,14 @@ class ProjectBuild(MultiStageProcess):
         self.rootless_toolset_path: str | None = None # Extracted toolset and snapshot, set when preparing toolset.
         self.rootless_snapshot_path: str | None = None
         super().__init__(title=f"Building {project_directory.name}")
+        # Project rows show running builds in their status indicators, so project state changes with build state.
+        self.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._on_state_changed)
 
     def name(self) -> str:
         return self.project_directory.name
+
+    def _on_state_changed(self, *args):
+        self.project_directory.event_bus.emit(SharedEvent.STATE_UPDATED, self.project_directory)
 
     def setup_stages(self):
         # Latest snapshot is generated in toolset prepared for build, so toolset is prepared once.
