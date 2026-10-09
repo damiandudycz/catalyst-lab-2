@@ -29,7 +29,7 @@
             <child>
               <object class="GitDirectoryCreateConfigView" id="source_view">
                 <property name="manager_class_name">ProjectManager</property>
-                <property name="available_sources">CREATE_NEW,GIT_REPOSITORY</property>
+                <property name="available_sources">CREATE_NEW,GIT_REPOSITORY,TEMPLATE</property>
                 <property name="default_directory_name">Project</property>
                 <property name="margin-start">24</property>
                 <property name="margin-end">24</property>
@@ -40,7 +40,26 @@
           </object>
         </child>
 
-        <!-- Page 2: Toolset screen -->
+        <!-- Page 2: Template options screen (only for template source) -->
+        <child>
+          <object class="GtkScrolledWindow" id="template_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox" id="template_options_container">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 3: Toolset screen -->
         <child>
           <object class="GtkScrolledWindow" id="toolset_page">
             <property name="hscrollbar-policy">never</property>
@@ -75,7 +94,7 @@
           </object>
         </child>
 
-        <!-- Page 3: Releng screen -->
+        <!-- Page 4: Releng screen -->
         <child>
           <object class="GtkScrolledWindow" id="releng_page">
             <property name="hscrollbar-policy">never</property>
@@ -110,7 +129,7 @@
           </object>
         </child>
 
-        <!-- Page 4: Snapshot screen -->
+        <!-- Page 5: Snapshot screen -->
         <child>
           <object class="GtkScrolledWindow" id="snapshot_page">
             <property name="hscrollbar-policy">never</property>
@@ -145,7 +164,7 @@
           </object>
         </child>
 
-        <!-- Page 5: Architecture screen -->
+        <!-- Page 6: Architecture screen (not for templates with architecture option) -->
         <child>
           <object class="GtkScrolledWindow" id="arch_page">
             <property name="hscrollbar-policy">never</property>

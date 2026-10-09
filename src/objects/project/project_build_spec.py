@@ -44,6 +44,9 @@ def generate_stage_spec(project_directory, stage, context: StageSpecContext) -> 
     placeholders = {
         "@TIMESTAMP@": context.timestamp,
         "@REPO_DIR@": releng_directory.directory_path() if releng_directory else "",
+        # Files kept in project (eg. added by project templates), available in toolset at the same paths.
+        "@PROJECT_DIR@": project_directory.directory_path(),
+        "@STAGE_DIR@": project_directory.stage_directory_path(name=stage.name),
         "@TREEISH@": snapshot_treeish(project_directory, context.snapshot) or "",
     }
     lines, missing = [], []

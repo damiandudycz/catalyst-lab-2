@@ -80,6 +80,18 @@ class ProjectDirectory(GitDirectory):
         return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
 
     @property
+    def status_indicator_values(self):
+        """Git status of project, blinking while project is being built."""
+        values = super().status_indicator_values
+        from .project_build_process import running_project_build
+        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+        if running_project_build(self):
+            # Changed files keep their color, otherwise build is shown like in builds list.
+            state = values.state if values.state == StatusIndicatorState.ENABLED_UNSAFE else StatusIndicatorState.ENABLED
+            return StatusIndicatorValues(state=state, blinking=True)
+        return values
+
+    @property
     def deploy_summary(self) -> str:
         """Builds of project that can be deployed, for Deploy section."""
         from .project_build import load_project_builds

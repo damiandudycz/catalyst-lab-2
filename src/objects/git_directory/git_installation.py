@@ -19,6 +19,7 @@ class GitDirectorySource(Enum):
     GIT_REPOSITORY = 0 # Clone git repository.
     LOCAL_DIRECTORY = 1 # Copy local directory.
     CREATE_NEW = 2 # Create new empty directory.
+    TEMPLATE = 3 # Create from template, data has repository_url of template (cloned) or None (new empty directory).
 
     def name(self) -> str:
         match self:
@@ -28,6 +29,8 @@ class GitDirectorySource(Enum):
                 return "Local directory"
             case GitDirectorySource.CREATE_NEW:
                 return "Create new"
+            case GitDirectorySource.TEMPLATE:
+                return "From template"
 
 GitDirectorySetupConfiguration = namedtuple(
     "GitDirectorySetupConfiguration",
@@ -83,6 +86,26 @@ class GitInstallation(MultiStageProcess, ABC):
                         multistage_process=self
                     )
                 )
+            case GitDirectorySource.TEMPLATE:
+                # Content is created from template by subclass, template repository is cloned like Git repository.
+                if self.configuration.data.repository_url:
+                    self.stages.append(
+                        GitInstallationStepClone(
+                            dir_name=self.configuration.name,
+                            repository_url=self.configuration.data.repository_url,
+                            item_class=self.manager().repository()._cls,
+                            multistage_process=self
+                        )
+                    )
+                else:
+                    self.stages.append(
+                        GitInstallationStepInitLocal(
+                            dir_name=self.configuration.name,
+                            default_dir_content_builder=None,
+                            item_class=self.manager().repository()._cls,
+                            multistage_process=self
+                        )
+                    )
         self.stages.append(
             GitInstallationStepSetupRepository(multistage_process=self)
         )

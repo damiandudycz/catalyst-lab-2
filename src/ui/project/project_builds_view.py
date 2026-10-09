@@ -209,14 +209,12 @@ class ProjectBuildsView(Gtk.Box):
     def _update_build_row(self, running_build):
         """Only one build runs at a time (also of different projects), toolset can't be busy with other operation."""
         if running_build:
-            # Light row: not default action, unlike blue Start new build.
+            # Plain row, like build progress row in project page.
             self.build_row.set_title("Show build progress")
             self.build_row.remove_css_class("suggested-action")
-            self.build_row.add_css_class("light-action")
             self.build_row.set_sensitive(True)
             self.build_row.set_tooltip_text(None)
             return
-        self.build_row.remove_css_class("light-action")
         self.build_row.add_css_class("suggested-action")
         toolset = self.project_directory.get_toolset()
         other_build = any(build.status == MultiStageProcessState.IN_PROGRESS

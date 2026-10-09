@@ -30,6 +30,7 @@
         <!-- Page 1 container -->
         <child>
           <object class="AdwViewStackPage">
+            <property name="name">stages</property>
             <property name="title">Stages</property>
             <property name="icon-name">checklist-minimalistic-svgrepo-com-symbolic</property>
             <property name="child">
