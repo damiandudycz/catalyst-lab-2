@@ -47,7 +47,7 @@ class TargetMachine:
     _SCRIPT = r'''
 echo "architecture=$(uname -m)"
 [ -d /sys/firmware/efi ] && echo "firmware=uefi" || echo "firmware=bios"
-echo "memory=$(awk '/MemTotal/ {print $2 * 1024}' /proc/meminfo)"
+echo "memory_kib=$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
 echo "hostname=$(hostname)"
 echo "disks=$(lsblk -J -b -o NAME,PATH,SIZE,MODEL,TYPE,RO,RM,TRAN,MOUNTPOINTS | tr -d '\n')"
 INTERFACE=$(ip -o route get "${SSH_CLIENT%% *}" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p')
@@ -63,7 +63,7 @@ echo "dns=$(awk '/^nameserver/ {print $2}' /etc/resolv.conf | tr '\n' ' ')"
         machine = cls(
             architecture=values.get("architecture", "unknown"),
             uefi=values.get("firmware") == "uefi",
-            memory=int(values.get("memory") or 0),
+            memory=int(values.get("memory_kib") or 0) * 1024, # Bytes overflow formatting of some awk versions.
             hostname=values.get("hostname", ""),
             interface=values.get("interface", ""),
             address=values.get("address", ""),
