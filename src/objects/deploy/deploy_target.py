@@ -38,6 +38,11 @@ class TargetMachine:
     memory: int # Bytes.
     hostname: str
     disks: list[TargetDisk] = field(default_factory=list)
+    # Network used by SSH connection, suggested for static configuration.
+    interface: str = ""
+    address: str = ""
+    gateway: str = ""
+    dns: str = ""
 
     _SCRIPT = r'''
 echo "architecture=$(uname -m)"
@@ -45,6 +50,11 @@ echo "architecture=$(uname -m)"
 echo "memory=$(awk '/MemTotal/ {print $2 * 1024}' /proc/meminfo)"
 echo "hostname=$(hostname)"
 echo "disks=$(lsblk -J -b -o NAME,PATH,SIZE,MODEL,TYPE,RO,RM,TRAN,MOUNTPOINTS | tr -d '\n')"
+INTERFACE=$(ip -o route get "${SSH_CLIENT%% *}" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p')
+echo "interface=$INTERFACE"
+[ -n "$INTERFACE" ] && echo "address=$(ip -o -4 addr show dev "$INTERFACE" | awk '{print $4; exit}')"
+echo "gateway=$(ip -4 route show default | awk '{print $3; exit}')"
+echo "dns=$(awk '/^nameserver/ {print $2}' /etc/resolv.conf | tr '\n' ' ')"
 '''
 
     @classmethod
@@ -55,6 +65,10 @@ echo "disks=$(lsblk -J -b -o NAME,PATH,SIZE,MODEL,TYPE,RO,RM,TRAN,MOUNTPOINTS | 
             uefi=values.get("firmware") == "uefi",
             memory=int(values.get("memory") or 0),
             hostname=values.get("hostname", ""),
+            interface=values.get("interface", ""),
+            address=values.get("address", ""),
+            gateway=values.get("gateway", ""),
+            dns=values.get("dns", "").strip(),
         )
         for device in json.loads(values.get("disks") or "{}").get("blockdevices", []):
             if device.get("type") != "disk" or _flag(device.get("ro")) or int(device.get("size") or 0) == 0:

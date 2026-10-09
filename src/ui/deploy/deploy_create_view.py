@@ -4,6 +4,9 @@ from gi.repository import Gtk, Adw, GLib
 import re
 from .deploy_installation import DeployInstallation, DeploySystemSettings, DeployUser, DEFAULT_USER_GROUPS
 from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, default_bootloader
+from .deploy_system import (
+    NetworkService, NetworkSettings, LocalizationSettings, default_network_service, local_localization, local_public_keys
+)
 from .deploy_target import TargetMachine, TargetFilesystem, PartitionPlan, GIB, MIB, format_size, architecture_supported
 from .ssh_connection import SSHConnection
 
@@ -34,6 +37,16 @@ class DeployCreateView(Gtk.Box):
     ssh_row = Gtk.Template.Child()
     reboot_row = Gtk.Template.Child()
     system_status_label = Gtk.Template.Child()
+    timezone_row = Gtk.Template.Child()
+    locale_row = Gtk.Template.Child()
+    keymap_row = Gtk.Template.Child()
+    network_service_row = Gtk.Template.Child()
+    network_mode_row = Gtk.Template.Child()
+    interface_row = Gtk.Template.Child()
+    address_row = Gtk.Template.Child()
+    gateway_row = Gtk.Template.Child()
+    dns_row = Gtk.Template.Child()
+    ssh_keys_group = Gtk.Template.Child()
     users_page = Gtk.Template.Child()
     root_password_row = Gtk.Template.Child()
     root_password_confirm_row = Gtk.Template.Child()
@@ -65,6 +78,22 @@ class DeployCreateView(Gtk.Box):
         self.contents_error: str | None = None
         self.bootloader_options: list[Bootloader] = []
         self.kernel_options: list[Kernel] = []
+        self.network_options: list[NetworkService] = []
+        localization = local_localization()
+        self.timezone_row.set_text(localization.timezone)
+        self.locale_row.set_text(localization.locale)
+        self.keymap_row.set_text(localization.keymap)
+        self.key_checks: list[tuple[Gtk.CheckButton, str]] = []
+        for key in local_public_keys():
+            check = Gtk.CheckButton(active=True, valign=Gtk.Align.CENTER)
+            row = Adw.ActionRow(title=GLib.markup_escape_text(key.title), subtitle=GLib.markup_escape_text(key.subtitle))
+            row.add_prefix(check)
+            row.set_activatable_widget(check)
+            self.ssh_keys_group.add(row)
+            self.key_checks.append((check, key.key))
+        if not self.key_checks:
+            self.ssh_keys_group.add(Adw.ActionRow(title="No SSH keys found in ~/.ssh"))
+        self._update_network_options()
         if self.build and installation_in_progress is None:
             threading.Thread(target=self._scan_stage, daemon=True).start()
         if self.build:
@@ -173,6 +202,11 @@ class DeployCreateView(Gtk.Box):
             self.efi_row.set_visible(machine.uefi)
             if not self.hostname_row.get_text():
                 self.hostname_row.set_text("gentoo")
+            # Static address suggested from LiveCD network.
+            self.interface_row.set_text(machine.interface)
+            self.address_row.set_text(machine.address)
+            self.gateway_row.set_text(machine.gateway)
+            self.dns_row.set_text(machine.dns)
             self._update_boot_options()
         self._load_disks()
         self.wizard_view._refresh_buttons_state()
@@ -253,11 +287,19 @@ class DeployCreateView(Gtk.Box):
     # System
 
     @Gtk.Template.Callback()
-    def on_system_changed(self, row):
+    def on_system_changed(self, row, *args):
+        if not hasattr(self, "network_options"):
+            return
+        network = self._network()
+        static = network.service != NetworkService.NONE and network.static
+        self.network_mode_row.set_visible(network.service != NetworkService.NONE)
+        for widget in (self.interface_row, self.address_row, self.gateway_row, self.dns_row):
+            widget.set_visible(static)
         error = self._system_error()
         self.system_status_label.set_visible(error is not None)
         self.system_status_label.set_label(error or "")
         self.wizard_view._refresh_buttons_state()
+        self.on_boot_changed() # Lists packages installed for selected network service.
 
     # Users
 
@@ -307,6 +349,7 @@ class DeployCreateView(Gtk.Box):
             contents, error = None, str(e)
         def done():
             self.contents, self.contents_error = contents, error
+            self._update_network_options()
             self._update_boot_options()
             self.wizard_view._refresh_buttons_state()
         GLib.idle_add(done)
@@ -360,6 +403,9 @@ class DeployCreateView(Gtk.Box):
         if bootloader != Bootloader.NONE and bootloader not in contents.bootloaders:
             installs.append(bootloader.package(contents.init))
         kernel = self._selected_kernel()
+        network = self._network().service
+        if network.package and network not in contents.network_services:
+            installs.append(network.package)
         if self.firmware_row.get_active():
             installs.append(FIRMWARE_PACKAGE)
         if kernel.package:
@@ -383,7 +429,34 @@ class DeployCreateView(Gtk.Box):
         hostname = self.hostname_row.get_text().strip()
         if hostname and not all(character.isalnum() or character in "-." for character in hostname):
             return "Hostname can contain only letters, digits, dots and hyphens"
-        return None
+        return self._localization().error() or self._network().error()
+
+    def _localization(self) -> LocalizationSettings:
+        return LocalizationSettings(timezone=self.timezone_row.get_text().strip(), locale=self.locale_row.get_text().strip(),
+                                    keymap=self.keymap_row.get_text().strip())
+
+    def _network(self) -> NetworkSettings:
+        index = self.network_service_row.get_selected()
+        service = self.network_options[index] if 0 <= index < len(self.network_options) else NetworkService.NONE
+        return NetworkSettings(
+            service=service, static=self.network_mode_row.get_selected() == 1,
+            interface=self.interface_row.get_text().strip(), address=self.address_row.get_text().strip(),
+            gateway=self.gateway_row.get_text().strip(), dns=self.dns_row.get_text().strip(),
+        )
+
+    def _update_network_options(self):
+        """Services found in stage, or dhcpcd installed from repository when stage has none."""
+        contents = self.contents or StageContents()
+        selected = self._network().service if self.network_options else None
+        self.network_options = [service for service in NetworkService if service.supported(contents.init)
+                                and (service in contents.network_services or service in (NetworkService.DHCPCD, NetworkService.NONE))]
+        labels = [service.display_name if service == NetworkService.NONE else
+                  f"{service.display_name}, {'in stage' if service in contents.network_services else 'will be installed'}"
+                  for service in self.network_options]
+        self.network_service_row.set_model(Gtk.StringList.new(labels))
+        default = selected if selected in self.network_options and self.contents is None else default_network_service(contents.network_services, contents.init)
+        self.network_service_row.set_selected(self.network_options.index(default))
+        self.on_system_changed(None)
 
     # Installation
 
@@ -412,6 +485,9 @@ class DeployCreateView(Gtk.Box):
             root_password=self.root_password_row.get_text() or None,
             users=[row.user() for row in self.user_rows],
             enable_ssh=self.ssh_row.get_active(),
+            ssh_keys=[key for check, key in self.key_checks if check.get_active()],
+            network=self._network(),
+            localization=self._localization(),
             bootloader=self._selected_bootloader(),
             kernel=self._selected_kernel(),
             install_firmware=self.firmware_row.get_active(),

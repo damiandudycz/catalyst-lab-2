@@ -221,6 +221,79 @@
                   </object>
                 </child>
                 <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Localization</property>
+                    <property name="description">Suggested from this computer.</property>
+                    <child>
+                      <object class="AdwEntryRow" id="timezone_row">
+                        <property name="title">Timezone</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="locale_row">
+                        <property name="title">Locale</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="keymap_row">
+                        <property name="title">Keyboard layout</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">Network</property>
+                    <child>
+                      <object class="AdwComboRow" id="network_service_row">
+                        <property name="title">Network service</property>
+                        <signal name="notify::selected" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwComboRow" id="network_mode_row">
+                        <property name="title">Address</property>
+                        <property name="model">
+                          <object class="GtkStringList">
+                            <items>
+                              <item>Automatic (DHCP)</item>
+                              <item>Static</item>
+                            </items>
+                          </object>
+                        </property>
+                        <signal name="notify::selected" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="interface_row">
+                        <property name="title">Interface</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="address_row">
+                        <property name="title">Address with prefix</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="gateway_row">
+                        <property name="title">Gateway</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwEntryRow" id="dns_row">
+                        <property name="title">DNS servers</property>
+                        <signal name="changed" handler="on_system_changed"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
                   <object class="GtkLabel" id="system_status_label">
                     <property name="visible">False</property>
                     <property name="wrap">True</property>
@@ -285,6 +358,12 @@
                         </style>
                       </object>
                     </property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup" id="ssh_keys_group">
+                    <property name="title">SSH keys</property>
+                    <property name="description">Selected keys of this computer are authorized for root and added users.</property>
                   </object>
                 </child>
                 <child>

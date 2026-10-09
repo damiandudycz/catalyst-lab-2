@@ -2,6 +2,7 @@ from __future__ import annotations
 import re, subprocess
 from dataclasses import dataclass, field
 from enum import Enum
+from .deploy_system import NetworkService, NETWORK_SERVICE_FILES
 
 # ------------------------------------------------------------------------------
 # Booting deployed system: bootloaders found in stage archive, and installing them (with packages from Gentoo
@@ -80,6 +81,7 @@ class StageContents:
     kernels: list[str] = field(default_factory=list) # Files in /boot.
     initramfs: list[str] = field(default_factory=list)
     init: str | None = None # openrc or systemd.
+    network_services: set[NetworkService] = field(default_factory=set)
 
     @classmethod
     def scan(cls, archive_path: str, process_holder: list | None = None) -> StageContents:
@@ -94,6 +96,9 @@ class StageContents:
             for bootloader, pattern in _BOOTLOADER_FILES.items():
                 if pattern.match(path):
                     contents.bootloaders.add(bootloader)
+            for service, pattern in NETWORK_SERVICE_FILES.items():
+                if pattern.match(path):
+                    contents.network_services.add(service)
             if _KERNEL.match(path):
                 contents.kernels.append(path.removeprefix("boot/"))
             elif _INITRAMFS.match(path):

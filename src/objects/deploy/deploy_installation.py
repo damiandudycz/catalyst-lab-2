@@ -5,6 +5,9 @@ from .multistage_process import MultiStageProcess, MultiStageProcessStage, Multi
 from .ssh_connection import SSHConnection, quote
 from .deploy_target import TargetMachine, PartitionPlan
 from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, packages_script, bootloader_script, grub_platform
+from .deploy_system import (
+    NetworkService, NetworkSettings, LocalizationSettings, network_script, localization_script, authorized_keys_script
+)
 
 # ------------------------------------------------------------------------------
 # Deploying stage build (stage3/stage4 tarball) to machine booted from Gentoo LiveCD, through SSH: disk is
@@ -34,6 +37,9 @@ class DeploySystemSettings:
     root_password: str | None = None
     users: list[DeployUser] = field(default_factory=list)
     enable_ssh: bool = False
+    ssh_keys: list[str] = field(default_factory=list) # Authorized for root and users.
+    network: NetworkSettings = field(default_factory=NetworkSettings)
+    localization: LocalizationSettings = field(default_factory=LocalizationSettings)
     bootloader: Bootloader = Bootloader.NONE
     kernel: Kernel = Kernel.STAGE
     install_firmware: bool = False
@@ -62,6 +68,8 @@ class DeployInstallation(MultiStageProcess):
         self.settings = settings
         self.contents = contents
         self.mounted = False
+        self._log_file = None
+        self.log_path = self._new_log_path()
         super().__init__(title="Deploy")
 
     def setup_stages(self):
@@ -73,6 +81,8 @@ class DeployInstallation(MultiStageProcess):
         self.stages.append(DeployStepConfigure(multistage_process=self))
         if self.packages:
             self.stages.append(DeployStepPackages(multistage_process=self))
+        if self.settings.network.service != NetworkService.NONE:
+            self.stages.append(DeployStepNetwork(multistage_process=self))
         if self.settings.bootloader != Bootloader.NONE:
             self.stages.append(DeployStepBootloader(multistage_process=self))
         self.stages.append(DeployStepFinish(multistage_process=self))
@@ -87,13 +97,39 @@ class DeployInstallation(MultiStageProcess):
         bootloader = self.settings.bootloader
         if bootloader != Bootloader.NONE and bootloader not in self.contents.bootloaders:
             packages.append(bootloader.package(self.contents.init))
+        service = self.settings.network.service
+        if service.package and service not in self.contents.network_services:
+            packages.append(service.package)
         if self.settings.install_firmware:
             packages.append(FIRMWARE_PACKAGE) # Before kernel, so its initramfs includes firmware.
         if self.settings.kernel.package:
             packages.append(self.settings.kernel.package)
         return packages
 
+    # Log of deployment is saved next to build, like build.log.
+
+    def _new_log_path(self) -> str | None:
+        if not self.build.path:
+            return None
+        from datetime import datetime
+        host = "".join(character if character.isalnum() or character in ".-" else "_" for character in self.connection.host)
+        return os.path.join(self.build.path, f"deploy-{datetime.now().strftime('%Y%m%dT%H%M%S')}-{host}.log")
+
+    def write_log(self, line: str):
+        if not self.log_path:
+            return
+        try:
+            if self._log_file is None:
+                self._log_file = open(self.log_path, "a", encoding="utf-8", buffering=1)
+            self._log_file.write(line + "\n")
+        except OSError as e:
+            print(f"Failed to write deploy log: {e}")
+
     def complete_process(self, success: bool):
+        self.write_log(f"=== Deployment {'completed' if success else 'failed'}")
+        if self._log_file:
+            self._log_file.close()
+            self._log_file = None
         # Partitions stay mounted after failure, so their files can be checked. Connection is closed.
         try:
             self.connection.close()
@@ -102,9 +138,13 @@ class DeployInstallation(MultiStageProcess):
 
 class DeployStep(MultiStageProcessStage):
     """Step running scripts on machine, cancelled by stopping them."""
+    def log(self, line: str):
+        super().log(line)
+        self.multistage_process.write_log(line)
     def start(self):
         self.processes = []
         super().start()
+        self.multistage_process.write_log(f"=== {self.name}")
         try:
             self.run()
             self.complete(MultiStageProcessStageState.COMPLETED)
@@ -202,6 +242,7 @@ class DeployStepConfigure(DeployStep):
                 '    echo "Warning: SSH server is not installed in stage"',
                 'fi',
             ]
+        script.append(localization_script(settings.localization))
         for user in settings.users:
             # Groups missing in stage are skipped.
             groups = " ".join(quote(group) for group in user.groups)
@@ -211,6 +252,7 @@ class DeployStepConfigure(DeployStep):
                 f"echo {quote(user.name + ':' + user.password)} | chroot \"$ROOT\" chpasswd",
                 f'echo "User {user.name} created${{GROUPS_LIST:+, groups $GROUPS_LIST}}"',
             ]
+        script.append(authorized_keys_script(settings.ssh_keys, [user.name for user in settings.users]))
         # Stage3 doesn't contain kernel, system can't boot without it.
         if settings.kernel in (Kernel.STAGE, Kernel.NONE):
             script += [
@@ -230,6 +272,13 @@ class DeployStepPackages(DeployStep):
         platform = grub_platform(process.machine.architecture, process.machine.uefi) if "sys-boot/grub" in process.packages else None
         script = f"ROOT={MOUNT_POINT}\n" + packages_script(process.packages, platform, process.contents.init)
         self.remote(script, "Failed to install packages, machine needs internet connection")
+
+class DeployStepNetwork(DeployStep):
+    def __init__(self, multistage_process):
+        super().__init__(name="Configure network", description=f"Enables {multistage_process.settings.network.service.display_name}", multistage_process=multistage_process)
+    def run(self):
+        script = network_script(self.multistage_process.settings.network)
+        self.remote(f"set -e\nROOT={MOUNT_POINT}\n{script}\n", "Failed to configure network")
 
 class DeployStepBootloader(DeployStep):
     def __init__(self, multistage_process):
