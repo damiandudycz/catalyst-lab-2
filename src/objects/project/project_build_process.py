@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from gi.repository import GLib
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage, MultiStageProcessState, MultiStageProcessStageState,
-    MultiStageProcessEvent, MultiStageProcessStageEvent
+    MultiStageProcessEvent
 )
 from .root_function import root_function
 from .repository import Repository
@@ -64,9 +64,10 @@ class ProjectBuild(MultiStageProcess):
         return self.project_directory.name
 
     def setup_stages(self):
+        # Latest snapshot is generated in toolset prepared for build, so toolset is prepared once.
+        self.stages.append(ProjectBuildStepPrepareToolset(multistage_process=self))
         if self.fetch_snapshot:
             self.stages.append(ProjectBuildStepFetchSnapshot(multistage_process=self))
-        self.stages.append(ProjectBuildStepPrepareToolset(multistage_process=self))
         for stage in self.plan.build_order():
             if self.plan.parent(stage) is None:
                 self.stages.append(ProjectBuildStepDownloadSeed(stage=stage, multistage_process=self))
@@ -270,58 +271,65 @@ class ProjectBuildStep(MultiStageProcessStage):
         return result
 
 class ProjectBuildStepFetchSnapshot(ProjectBuildStep):
-    """Generates latest snapshot of Gentoo repository with project toolset (like Snapshots section does), and uses it
-    in this build. Snapshot is stored with other snapshots, and in project when user chose that."""
+    """Generates latest snapshot of Gentoo repository with catalyst -s (like Snapshots section does), in toolset
+    prepared for build, and uses it in this build. Snapshot is stored with other snapshots, and in project when user
+    chose that."""
     def __init__(self, multistage_process: ProjectBuild):
         super().__init__(name="Get latest snapshot", description="Generates snapshot of Gentoo repository with project toolset", multistage_process=multistage_process)
-        self.installation = None
     def start(self):
         super().start()
         try:
-            from .snapshot_installation import SnapshotInstallation
+            from .snapshot import Snapshot
+            from .snapshot_manager import SnapshotManager
+            from .snapshot_installation import delete_file, unlock_file_access
             process = self.multistage_process
-            toolset = process.toolset
-            if toolset is None:
-                raise RuntimeError("Project has no toolset")
-            if reason := toolset.busy_reason:
-                raise RuntimeError(reason)
-            installation = SnapshotInstallation(toolset=toolset)
-            self.installation = installation
-            finished = threading.Event()
-            def on_state_changed(state):
-                if state in (MultiStageProcessState.COMPLETED, MultiStageProcessState.FAILED):
-                    # Snapshot is added to repository (and toolset released) after state changes, on main thread.
-                    GLib.idle_add(finished.set)
-            # Event bus keeps weak references, handlers are kept by step.
-            self._handlers = [on_state_changed]
-            installation.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, on_state_changed)
-            for stage in installation.stages:
-                handler = lambda state, stage=stage: self._stage_changed(stage, state)
-                self._handlers.append(handler)
-                stage.event_bus.subscribe(MultiStageProcessStageEvent.OUTPUT_LINE_ADDED, self.log)
-                stage.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, handler)
-            installation.start(authorization_keeper=process.authorization_keeper)
-            finished.wait()
-            if installation.status != MultiStageProcessState.COMPLETED or installation.snapshot is None:
-                raise RuntimeError("Failed to generate snapshot")
-            process.snapshot = installation.snapshot
-            self.log(f"Using snapshot {installation.snapshot.filename} ({installation.snapshot.name})")
+            snapshots = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
+            os.makedirs(snapshots, exist_ok=True)
+            started = datetime.now().timestamp() - 1
+            command = "catalyst -s stable"
+            if process.rootless:
+                # Same session as stage builds, catalyst writes snapshot to snapshots folder.
+                self.log(f"$ {command}")
+                script = stage_build_session_script(executor=process.executor, toolset_path=process.rootless_toolset_path,
+                                                    bindings=[(snapshots, CATALYST_SNAPSHOTS_PATH)], command=command)
+                success = process.executor.run_in_namespace(script, self.log, self.namespace_processes)
+            else:
+                success = self.run_command_in_toolset(command) # Toolset is spawned with snapshots folder bound.
+            if not success:
+                raise RuntimeError(f"{command} failed")
+            # Snapshot with the same name is replaced when repository didn't change since it was generated.
+            written = [name for name in os.listdir(snapshots)
+                       if name.endswith(".sqfs") and os.path.getmtime(os.path.join(snapshots, name)) >= started]
+            if not written:
+                raise RuntimeError("Generated snapshot was not found")
+            filename = max(written, key=lambda name: os.path.getmtime(os.path.join(snapshots, name)))
+            path = os.path.join(snapshots, filename)
+            delete_file(file_path=os.path.join(snapshots, os.path.splitext(filename)[0] + ".lock"), root_dir=snapshots)
+            unlock_file_access(path=path)
+            snapshot = Snapshot(filename=filename, date=_snapshot_timestamp(path) or datetime.now())
+            GLib.idle_add(SnapshotManager.shared().add_snapshot, snapshot)
+            process.snapshot = snapshot
+            self.log(f"Using snapshot {filename} ({snapshot.name})")
+            if process.rootless:
+                process.rootless_snapshot_path = extracted_squashfs(
+                    snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles", executor=process.executor)
             if process.update_project_snapshot:
                 GLib.idle_add(process.store_project_snapshot)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during snapshot generation: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
-    def _stage_changed(self, stage, state):
-        if state == MultiStageProcessStageState.IN_PROGRESS:
-            self.log(f"--- {stage.name}")
-        stages = self.installation.stages if self.installation else []
-        done = sum(1 for item in stages if item.state == MultiStageProcessStageState.COMPLETED)
-        self._update_progress(done / len(stages) if stages else None)
-    def cancel(self):
-        super().cancel()
-        if self.installation and self.installation.status == MultiStageProcessState.IN_PROGRESS:
-            self.installation.cancel()
+
+def _snapshot_timestamp(path: str):
+    """Date of Gentoo repository in snapshot, None when it can't be read."""
+    import subprocess
+    from .helper_functions import parse_strict_rfc_datetime
+    try:
+        output = subprocess.check_output(["unsquashfs", "-cat", path, "metadata/timestamp.chk"], text=True)
+        return parse_strict_rfc_datetime(output.strip())
+    except Exception as e:
+        print(f"Failed to read snapshot timestamp: {e}")
+        return None
 
 class ProjectBuildStepPrepareToolset(ProjectBuildStep):
     def __init__(self, multistage_process: ProjectBuild):
@@ -373,11 +381,13 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         remove_stale_sessions(self.log, self.namespace_processes, executor=executor)
         process.rootless_toolset_path = extracted_squashfs(
             process.toolset.file_path(), "toolsets", self.log, self.namespace_processes, check_path="bin/bash", executor=executor)
-        snapshot = process.snapshot
-        if snapshot is None:
-            raise RuntimeError("Build has no snapshot")
-        process.rootless_snapshot_path = extracted_squashfs(
-            snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles", executor=executor)
+        # Latest snapshot is extracted after it's generated.
+        if not process.fetch_snapshot:
+            snapshot = process.snapshot
+            if snapshot is None:
+                raise RuntimeError("Build has no snapshot")
+            process.rootless_snapshot_path = extracted_squashfs(
+                snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles", executor=executor)
         process.make_directories([distfiles_directory(executor)] + process.mirrored_paths())
     def required_bindings(self) -> list[BindMount]:
         process = self.multistage_process
