@@ -4,7 +4,7 @@ from typing import Any, Callable
 from gi.repository import Gtk, GLib, Adw
 from .project_template import (
     ProjectTemplate, TemplateError, TemplateVariableType, GeneratedProject, _GROUP_STAGES_NAME,
-    local_templates, template_repositories, fetch_template_repository
+    local_templates, template_repositories, download_template_repositories, fetch_template_repository
 )
 from .project_stage import stage_target_icon
 
@@ -31,10 +31,36 @@ class ProjectTemplateChooser(Gtk.Box):
                 row.add_css_class("error")
                 row.set_sensitive(False)
             group.add(row)
-        for repository in template_repositories():
+        # Repositories: latest list is downloaded, list included in app is used when it can't be.
+        self._group = group
+        self._check_group = check_group
+        self._loading_row = Adw.ActionRow(title="Loading templates from repositories…")
+        self._loading_row.add_css_class("dimmed")
+        self._loading_row.add_prefix(Adw.Spinner())
+        group.add(self._loading_row)
+        def download():
+            try:
+                repositories, error = download_template_repositories(), None
+            except Exception as e:
+                repositories, error = None, e
+            GLib.idle_add(self._show_repositories, repositories, error)
+        threading.Thread(target=download, daemon=True).start()
+
+    def _show_repositories(self, repositories, error):
+        self._group.remove(self._loading_row)
+        if repositories is None:
+            print(f"Failed to download list of template repositories: {error}")
+            repositories = template_repositories()
+            note = Adw.ActionRow(title="Latest list of templates couldn't be downloaded",
+                                 subtitle="Showing templates known to this version of Catalyst Lab.")
+            note.add_prefix(Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic"))
+            note.add_css_class("dimmed")
+            self._group.add(note)
+        for repository in repositories:
             row = Adw.ActionRow(title=GLib.markup_escape_text(repository.title), subtitle=GLib.markup_escape_text(repository.url))
-            self._add_check(row, check_group, lambda row, repository=repository: self._fetch(row, repository))
-            group.add(row)
+            self._add_check(row, self._check_group, lambda row, repository=repository: self._fetch(row, repository))
+            self._group.add(row)
+        return False
 
     def _add_check(self, row: Adw.ActionRow, check_group: Gtk.CheckButton, on_selected: Callable):
         check_button = Gtk.CheckButton()

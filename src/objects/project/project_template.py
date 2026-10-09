@@ -644,21 +644,41 @@ class TemplateRepository:
     url: str
     title: str
 
+# Latest list of template repositories, from main branch of Catalyst Lab repository. New templates are added there with
+# pull requests, so they are available without updating the app.
+REPOSITORIES_LIST_URL = "https://raw.githubusercontent.com/damiandudycz/catalyst-lab-2/main/data/project_templates/repositories.txt"
+
+def parse_template_repositories(text: str) -> list[TemplateRepository]:
+    """Repositories from repositories.txt: lines with URL, optionally followed by title. Empty lines and lines starting
+    with # are skipped."""
+    repositories = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        url, _, title = line.partition(" ")
+        if not re.match(r"^(https://|file://)", url):
+            continue # Only HTTPS repositories (and local ones for testing templates).
+        repositories.append(TemplateRepository(url=url, title=title.strip() or url.rstrip("/").split("/")[-1].removesuffix(".git")))
+    return repositories
+
 def template_repositories() -> list[TemplateRepository]:
-    """Git repositories with templates from repositories.txt: lines with URL, optionally followed by title."""
+    """Repositories from repositories.txt included in app."""
     directory = templates_directory()
     path = os.path.join(directory, REPOSITORIES_FILE) if directory else None
     if not path or not os.path.isfile(path):
         return []
-    repositories = []
     with open(path, encoding="utf-8") as file:
-        for line in file:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            url, _, title = line.partition(" ")
-            repositories.append(TemplateRepository(url=url, title=title.strip() or url.rstrip("/").split("/")[-1].removesuffix(".git")))
-    return repositories
+        return parse_template_repositories(file.read())
+
+def download_template_repositories() -> list[TemplateRepository]:
+    """Latest list of repositories from main branch of Catalyst Lab. Raises when it can't be downloaded."""
+    import requests
+    response = requests.get(REPOSITORIES_LIST_URL, timeout=15)
+    response.raise_for_status()
+    if len(response.content) > 1_000_000:
+        raise TemplateError("List of template repositories is too large")
+    return parse_template_repositories(response.text)
 
 def _run_git(command: list[str], timeout: int = 300):
     result = subprocess.run(

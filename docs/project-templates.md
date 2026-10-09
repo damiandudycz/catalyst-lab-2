@@ -214,5 +214,7 @@ Templates in Git repositories are added to the list in the app with a pull reque
 3. Open a pull request that changes only this file. Describe what the template creates and which architectures and
    Releng specs it was tested with.
 
-Templates are downloaded from the default branch of the repository, so later changes are available without changing
-the list.
+Catalyst Lab downloads the latest list from the `main` branch of catalyst-lab-2 when templates are shown, so a merged
+template is available without updating the app (the list included in the app is used when it can't be downloaded).
+Repository URLs have to use `https://`. Templates are downloaded from the default branch of their repository, so later
+changes are available without changing the list.
