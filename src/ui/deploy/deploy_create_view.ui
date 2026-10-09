@@ -329,17 +329,22 @@
                       </object>
                     </child>
                     <child>
-                      <object class="AdwComboRow" id="bootloader_row">
-                        <property name="title">Bootloader</property>
+                      <object class="AdwComboRow" id="kernel_row">
+                        <property name="title">Kernel</property>
                         <signal name="notify::selected" handler="on_boot_changed"/>
                       </object>
                     </child>
                     <child>
-                      <object class="AdwSwitchRow" id="kernel_row">
-                        <property name="title">Install kernel</property>
-                        <property name="subtitle">Stage has no kernel. Installs distribution kernel (sys-kernel/gentoo-kernel-bin)</property>
-                        <property name="visible">False</property>
+                      <object class="AdwSwitchRow" id="firmware_row">
+                        <property name="title">Install firmware</property>
+                        <property name="subtitle">sys-kernel/linux-firmware, needed by most Wi-Fi, Bluetooth and graphics hardware</property>
                         <signal name="notify::active" handler="on_boot_changed"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwComboRow" id="bootloader_row">
+                        <property name="title">Bootloader</property>
+                        <signal name="notify::selected" handler="on_boot_changed"/>
                       </object>
                     </child>
                   </object>

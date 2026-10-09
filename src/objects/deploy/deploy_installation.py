@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
 from .ssh_connection import SSHConnection, quote
 from .deploy_target import TargetMachine, PartitionPlan
-from .deploy_boot import Bootloader, StageContents, packages_script, bootloader_script, grub_platform
+from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, packages_script, bootloader_script, grub_platform
 
 # ------------------------------------------------------------------------------
 # Deploying stage build (stage3/stage4 tarball) to machine booted from Gentoo LiveCD, through SSH: disk is
@@ -35,7 +35,8 @@ class DeploySystemSettings:
     users: list[DeployUser] = field(default_factory=list)
     enable_ssh: bool = False
     bootloader: Bootloader = Bootloader.NONE
-    install_kernel: bool = False # Distribution kernel, when stage has none.
+    kernel: Kernel = Kernel.STAGE
+    install_firmware: bool = False
     reboot: bool = False
 
 def tar_extract_command(artifact: str) -> str:
@@ -86,8 +87,10 @@ class DeployInstallation(MultiStageProcess):
         bootloader = self.settings.bootloader
         if bootloader != Bootloader.NONE and bootloader not in self.contents.bootloaders:
             packages.append(bootloader.package(self.contents.init))
-        if self.settings.install_kernel:
-            packages.append("sys-kernel/gentoo-kernel-bin")
+        if self.settings.install_firmware:
+            packages.append(FIRMWARE_PACKAGE) # Before kernel, so its initramfs includes firmware.
+        if self.settings.kernel.package:
+            packages.append(self.settings.kernel.package)
         return packages
 
     def complete_process(self, success: bool):
@@ -209,7 +212,7 @@ class DeployStepConfigure(DeployStep):
                 f'echo "User {user.name} created${{GROUPS_LIST:+, groups $GROUPS_LIST}}"',
             ]
         # Stage3 doesn't contain kernel, system can't boot without it.
-        if not settings.install_kernel:
+        if settings.kernel in (Kernel.STAGE, Kernel.NONE):
             script += [
                 'if ls "$ROOT"/boot/vmlinu* "$ROOT"/boot/kernel* "$ROOT"/boot/Image* > /dev/null 2>&1; then',
                 '    echo "Kernel: $(cd "$ROOT/boot" && ls vmlinu* kernel* Image* 2>/dev/null | tr \'\\n\' \' \')"',
@@ -221,7 +224,7 @@ class DeployStepConfigure(DeployStep):
 
 class DeployStepPackages(DeployStep):
     def __init__(self, multistage_process):
-        super().__init__(name="Install packages", description="Installs packages missing in stage from Gentoo repository", multistage_process=multistage_process)
+        super().__init__(name="Install packages", description="Installs kernel, firmware and bootloader from Gentoo repository", multistage_process=multistage_process)
     def run(self):
         process = self.multistage_process
         platform = grub_platform(process.machine.architecture, process.machine.uefi) if "sys-boot/grub" in process.packages else None
