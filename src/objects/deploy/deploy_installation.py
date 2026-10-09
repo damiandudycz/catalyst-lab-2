@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os
+import os, re
 from dataclasses import dataclass, field
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
 from .ssh_connection import SSHConnection, quote
@@ -15,6 +15,38 @@ from .deploy_system import (
 # ------------------------------------------------------------------------------
 
 MOUNT_POINT = "/mnt/gentoo"
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_EMERGE_PACKAGE = re.compile(r">>> (Emerging|Completed)(?: binary)? \((\d+) of (\d+)\)")
+_EMERGE_JOBS = re.compile(r"Jobs: (\d+) of (\d+) complete")
+
+class EmergeProgress:
+    """Progress of emerge from its output: "(N of M)" of packages, and "Jobs: N of M complete" status lines (both
+    are printed, status lines can lag behind). Progress doesn't go back, until total number of packages changes
+    (next emerge)."""
+
+    def __init__(self):
+        self.total = 0
+        self.completed = 0
+
+    def parse(self, line: str) -> float | None:
+        """Progress when line changes it, otherwise None."""
+        result = None
+        for part in _ANSI.sub("", line).split("\r"):
+            if match := _EMERGE_JOBS.search(part):
+                completed, total = int(match.group(1)), int(match.group(2))
+            elif match := _EMERGE_PACKAGE.search(part):
+                number, total = int(match.group(2)), int(match.group(3))
+                completed = number if match.group(1) == "Completed" else number - 1
+            else:
+                continue
+            if total != self.total: # Next emerge.
+                self.total, self.completed = total, completed
+                result = completed / total
+            elif completed > self.completed:
+                self.completed = completed
+                result = completed / total
+        return result
 
 @dataclass
 class DeployUser:
@@ -190,7 +222,16 @@ class DeployStepPartition(DeployStep):
 class DeployStepFormat(DeployStep):
     def __init__(self, multistage_process):
         super().__init__(name="Format partitions", description="Creates filesystems", multistage_process=multistage_process)
+        self._formatted = 0
+    def log(self, line: str):
+        super().log(line)
+        # Script reports every partition it formats.
+        if line.startswith("Formatting "):
+            total = sum(1 for partition in self.multistage_process.plan.partitions if partition.format_command)
+            self._update_progress(self._formatted / total)
+            self._formatted += 1
     def run(self):
+        self._formatted = 0
         self.remote(self.multistage_process.plan.format_script(), "Failed to format partitions")
 
 class DeployStepMount(DeployStep):
@@ -269,6 +310,13 @@ class DeployStepConfigure(DeployStep):
 class DeployStepPackages(DeployStep):
     def __init__(self, multistage_process):
         super().__init__(name="Install packages", description="Installs kernel, firmware and bootloader from Gentoo repository", multistage_process=multistage_process)
+    def log(self, line: str):
+        super().log(line)
+        if (progress := self._emerge_progress.parse(line)) is not None:
+            self._update_progress(progress)
+    def start(self):
+        self._emerge_progress = EmergeProgress()
+        super().start()
     def run(self):
         process = self.multistage_process
         platform = grub_platform(process.machine.architecture, process.machine.uefi) if "sys-boot/grub" in process.packages else None
