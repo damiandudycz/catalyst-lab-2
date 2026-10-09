@@ -3,6 +3,7 @@ from gi.repository import Gtk, Adw, GLib
 from .project_directory import ProjectDirectory
 from .project_build import StageBuildPlan, StageBuildMode, load_project_builds, project_builds_directory
 from .project_build_process import ProjectBuild
+from .project_build_rootless import rootless_build_unsupported_reason
 from .root_helper_client import RootHelperClient
 from .multistage_process import MultiStageProcessState
 from .wizard_view import WizardView
@@ -155,6 +156,10 @@ class ProjectBuildView(Gtk.Box):
     @Gtk.Template.Callback()
     def begin_installation(self, view):
         plan = self.plan
+        if rootless_build_unsupported_reason() is None:
+            # Builds run in user namespace, root privileges are not needed.
+            self._start_installation(plan, None, rootless=True)
+            return
         def start(authorization_keeper):
             # Called from background thread. Keeper is released when this callback returns, retain it until build
             # is started on main thread and retains it by itself.
@@ -163,14 +168,15 @@ class ProjectBuildView(Gtk.Box):
             GLib.idle_add(self._start_installation, plan, authorization_keeper)
         RootHelperClient.shared().authorize_and_run(name="Build stages", callback=start)
 
-    def _start_installation(self, plan: StageBuildPlan, authorization_keeper):
-        if authorization_keeper is None:
+    def _start_installation(self, plan: StageBuildPlan, authorization_keeper, rootless: bool = False):
+        if authorization_keeper is None and not rootless:
             return False # Authorization cancelled.
         try:
             installation_in_progress = ProjectBuild(project_directory=self.project_directory, plan=plan)
             installation_in_progress.start(authorization_keeper=authorization_keeper)
         finally:
-            authorization_keeper.release()
+            if authorization_keeper:
+                authorization_keeper.release()
         if installation_in_progress.status == MultiStageProcessState.SETUP:
             print("Failed to start build")
             return False

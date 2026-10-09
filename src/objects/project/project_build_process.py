@@ -13,9 +13,13 @@ from .toolset import BindMount
 from .toolset_env_builder import ToolsetEnvBuilder
 from .project_stage_arguments import StageArgumentDetails
 from .project_stage_cache import CACHE_ARGUMENTS, stage_cache_path
+from .project_build_rootless import (
+    rootless_build_unsupported_reason, extracted_squashfs, remove_stale_sessions, distfiles_directory,
+    run_in_namespace, stage_build_session_script, CATALYST_WRAPPER
+)
 from .project_build import StageBuild, StageBuildStatus, StageBuildPlan, project_builds_directory, stage_builds_directory
 from .project_build_spec import (
-    StageSpecContext, generate_stage_spec, generate_portage_confdir, seed_name_prefix, select_seed_url
+    StageSpecContext, generate_stage_spec, generate_portage_confdir, seed_name_prefix, select_seed_url, snapshot_treeish
 )
 
 # Paths used by catalyst inside toolset.
@@ -41,6 +45,12 @@ class ProjectBuild(MultiStageProcess):
         self.seed_subpaths: dict = {} # Downloaded seeds of root stages, relative to builds directory.
         self.stage_builds: dict = {} # Builds made in this run, by stage id.
         self.failed_stage_ids: set = set()
+        # Builds run without root privileges in user namespace when system supports it, otherwise in toolset spawned
+        # by root helper.
+        self.rootless_unsupported_reason = rootless_build_unsupported_reason()
+        self.rootless = self.rootless_unsupported_reason is None
+        self.rootless_toolset_path: str | None = None # Extracted toolset and snapshot, set when preparing toolset.
+        self.rootless_snapshot_path: str | None = None
         super().__init__(title=f"Building {project_directory.name}")
 
     def name(self) -> str:
@@ -58,6 +68,22 @@ class ProjectBuild(MultiStageProcess):
         if host_path != self.builds_directory and not host_path.startswith(self.builds_directory + os.sep):
             return host_path
         return os.path.join(CATALYST_BUILDS_PATH, os.path.relpath(host_path, self.builds_directory))
+
+    def mirrored_paths(self) -> list[str]:
+        """Host directories referenced by spec values (@REPO_DIR@, root_overlay, repos, selected cache folders),
+        available in toolset at the same paths."""
+        project = self.project_directory
+        paths = [project.directory_path()]
+        if releng_directory := project.get_releng_directory():
+            paths.append(releng_directory.directory_path())
+        paths += [overlay.directory_path() for overlay in Repository.OverlayDirectory.value]
+        paths = [path for path in paths if os.path.isdir(path)]
+        # Caches in folders selected by user (automatic ones are in builds directory).
+        paths += sorted({
+            path for stage in self.plan.build_order() for path in self.stage_cache_paths(stage).values()
+            if self.container_path(path) == path
+        })
+        return paths
 
     def stage_cache_paths(self, stage) -> dict:
         """Host folders of enabled caches of stage, by argument."""
@@ -144,9 +170,12 @@ def running_project_build(project_directory, timestamp: str | None = None) -> Pr
 class ProjectBuildStep(MultiStageProcessStage):
     def start(self):
         self.server_call = None
+        self.namespace_processes = [] # Rootless processes, terminated when cancelled.
         super().start()
     def cancel(self):
         super().cancel()
+        for process in getattr(self, "namespace_processes", []):
+            process.terminate()
         if self.server_call:
             self.server_call.cancel()
             if self.server_call.thread:
@@ -180,6 +209,11 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
                 raise RuntimeError(f"Toolset {toolset.name} is in use. Close its environment and try again.")
             self.reserved = True
             os.makedirs(self.multistage_process.builds_directory, exist_ok=True)
+            if self.multistage_process.rootless:
+                self._prepare_rootless()
+                self.complete(MultiStageProcessStageState.COMPLETED)
+                return
+            self.log(f"Building with root privileges: {self.multistage_process.rootless_unsupported_reason}")
             # Catalyst mounts snapshot squashfs with loop device. Loop device nodes are created by kernel in host /dev,
             # so free ones are prepared before spawning and only they are made available in toolset.
             self.loop_devices = prepare_loop_devices()
@@ -193,26 +227,31 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         except Exception as e:
             print(f"Error during '{self.name}': {e}")
             self.complete(MultiStageProcessStageState.FAILED)
+    def _prepare_rootless(self):
+        """Extracts toolset and snapshot (once for every version of their files), used by stage builds."""
+        process = self.multistage_process
+        self.log("Building without root privileges, in user namespace")
+        remove_stale_sessions(self.log, self.namespace_processes)
+        process.rootless_toolset_path = extracted_squashfs(
+            process.toolset.file_path(), "toolsets", self.log, self.namespace_processes, check_path="bin/bash")
+        snapshot = process.project_directory.get_snapshot()
+        if snapshot is None:
+            raise RuntimeError("Project has no snapshot")
+        process.rootless_snapshot_path = extracted_squashfs(
+            snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles")
+        os.makedirs(distfiles_directory(), exist_ok=True)
+        for path in process.mirrored_paths():
+            os.makedirs(path, exist_ok=True)
     def required_bindings(self) -> list[BindMount]:
         process = self.multistage_process
-        project = process.project_directory
         bindings = [
             # Catalyst writes builds here and reads seeds from it.
             BindMount(mount_path=CATALYST_BUILDS_PATH, host_path=process.builds_directory, store_changes=True, create_if_missing=True),
             BindMount(mount_path=CATALYST_SNAPSHOTS_PATH, host_path=Repository.Settings.value.snapshots_location, store_changes=True),
         ]
-        # Directories referenced by spec values with host paths (@REPO_DIR@, root_overlay, repos) are available at the same paths.
-        mirrored = [project.directory_path()]
-        if releng_directory := project.get_releng_directory():
-            mirrored.append(releng_directory.directory_path())
-        mirrored += [overlay.directory_path() for overlay in Repository.OverlayDirectory.value]
-        bindings += [BindMount(mount_path=path, host_path=path) for path in mirrored if os.path.isdir(path)]
-        # Caches in folders selected by user (automatic ones are in builds directory).
-        cache_paths = {
-            path for stage in process.plan.build_order() for path in process.stage_cache_paths(stage).values()
-            if process.container_path(path) == path
-        }
-        bindings += [BindMount(mount_path=path, host_path=path, store_changes=True, create_if_missing=True) for path in sorted(cache_paths)]
+        # Directories referenced by spec values with host paths (@REPO_DIR@, root_overlay, repos, cache folders) are
+        # available at the same paths.
+        bindings += [BindMount(mount_path=path, host_path=path, store_changes=True, create_if_missing=True) for path in process.mirrored_paths()]
         # Loop devices for mounting snapshot (store_changes gives read-write device access).
         bindings += [BindMount(mount_path=path, host_path=path, store_changes=True) for path in getattr(self, "loop_devices", [])]
         return bindings
@@ -314,22 +353,35 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             for line in spec.splitlines():
                 self.log(f"  {line}")
             # Build:
+            wrapper_path = None
+            if process.rootless:
+                wrapper_path = os.path.join(work_directory, "catalyst-wrapper.py")
+                with open(wrapper_path, "w", encoding="utf-8") as file:
+                    file.write(CATALYST_WRAPPER)
             build_script_path = os.path.join(work_directory, "build.sh")
             with open(build_script_path, "w", encoding="utf-8") as file:
                 file.write(_catalyst_build_script(
                     spec_path=process.container_path(spec_path),
                     config_path=process.container_path(os.path.join(work_directory, "catalyst.conf")),
                     caches={_catalyst_cache_options[argument] for argument in cache_paths},
+                    wrapper_path=process.container_path(wrapper_path) if wrapper_path else None,
                 ))
+            if process.rootless:
+                if not self._run_rootless(spec=spec, work_directory=work_directory, build_script_path=build_script_path):
+                    raise RuntimeError("Catalyst build failed")
             # Command is passed in single quotes, path in double quotes allows spaces in stage name.
-            if not self.run_command_in_toolset(f'bash "{process.container_path(build_script_path)}"'):
+            elif not self.run_command_in_toolset(f'bash "{process.container_path(build_script_path)}"'):
                 self._run_diagnostics(spec=spec, work_directory=work_directory)
                 raise RuntimeError("Catalyst build failed")
             # Move results to stage build directory (catalyst writes them to builds/<rel_type>/):
             values = _spec_values(spec)
             output_name = f"{values['target']}-{values['subarch']}-{values['version_stamp']}"
             output_directory = os.path.join(process.builds_directory, values["rel_type"])
-            moved = move_stage_build_files(source_directory=output_directory, name=output_name, destination_directory=self.build.path)
+            if process.rootless:
+                # Files written by namespace root are already owned by user.
+                moved = _move_stage_build_files(source_directory=output_directory, name=output_name, destination_directory=self.build.path)
+            else:
+                moved = move_stage_build_files(source_directory=output_directory, name=output_name, destination_directory=self.build.path)
             artifact = next((filename for filename in moved if filename.endswith(STAGE_ARCHIVE_EXTENSIONS)), None)
             if artifact is None:
                 raise RuntimeError(f"Built stage {output_name} not found in {output_directory}")
@@ -349,9 +401,33 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                     print(f"Failed to save build status: {save_error}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+    def _run_rootless(self, spec: str, work_directory: str, build_script_path: str) -> bool:
+        """Runs build script in toolset root inside user namespace, with diagnostics after failure."""
+        process = self.multistage_process
+        diagnostics_path = self._write_diagnostics_script(spec=spec, work_directory=work_directory, rootless=True)
+        bindings = [
+            (process.builds_directory, CATALYST_BUILDS_PATH),
+            (process.rootless_snapshot_path, f"{CATALYST_SNAPSHOTS_PATH}/gentoo-{snapshot_treeish(process.project_directory)}.sqfs"),
+            (distfiles_directory(), "/var/cache/distfiles"),
+        ] + [(path, path) for path in process.mirrored_paths()]
+        script = stage_build_session_script(
+            toolset_path=process.rootless_toolset_path,
+            bindings=bindings,
+            command=f'bash "{process.container_path(build_script_path)}"',
+            diagnostics_command=f'bash "{process.container_path(diagnostics_path)}"' if diagnostics_path else None,
+        )
+        self.log(f"$ bash {process.container_path(build_script_path)}")
+        return run_in_namespace(script, self.log, self.namespace_processes)
+
     def _run_diagnostics(self, spec: str, work_directory: str):
         """Collects details about chroot left by failed catalyst build. Catalyst hides errors of some scripts
         (eg. stage1 build.py), this runs the same checks with errors visible."""
+        if script_path := self._write_diagnostics_script(spec=spec, work_directory=work_directory, rootless=False):
+            self.run_command_in_toolset(f'bash "{self.multistage_process.container_path(script_path)}"')
+
+    def _write_diagnostics_script(self, spec: str, work_directory: str, rootless: bool) -> str | None:
+        """Writes diagnostics script, returns its path. Rootless builds use extracted snapshot folder instead of
+        squashfs file, which is bound instead of loop mounted."""
         try:
             process = self.multistage_process
             values = _spec_values(spec)
@@ -369,7 +445,7 @@ echo "--- /etc/portage:"; find "$CHROOT/etc/portage" -maxdepth 3 | head -60
 echo "--- repos.conf:"; cat "$CHROOT"/etc/portage/repos.conf/* 2>&1 | head -20
 echo "--- mounts in chroot:"; grep "$CHROOT" /proc/mounts
 mkdir -p "$REPO"
-echo "--- mounting snapshot {snapshot}:"; mount -o ro,loop "{snapshot}" "$REPO" && echo "mounted"
+echo "--- mounting snapshot {snapshot}:"; mount {"--bind" if rootless else "-o ro,loop"} "{snapshot}" "$REPO" && echo "mounted"
 mount --bind /proc "$CHROOT/proc"
 echo "--- repo profiles:"; ls "$REPO/profiles" | head -20
 echo "--- profile {profile}:"; ls "$REPO/profiles/{profile}"
@@ -382,9 +458,10 @@ echo "===== End of diagnostics ====="
             script_path = os.path.join(work_directory, "diagnostics.sh")
             with open(script_path, "w", encoding="utf-8") as file:
                 file.write(script)
-            self.run_command_in_toolset(f'bash "{process.container_path(script_path)}"')
+            return script_path
         except Exception as e:
-            self.log(f"Failed to run diagnostics: {e}")
+            self.log(f"Failed to prepare diagnostics: {e}")
+            return None
 
 # ------------------------------------------------------------------------------
 # Helper functions.
@@ -396,13 +473,18 @@ _catalyst_cache_options = {
     StageArgumentDetails.kerncache_path: "kerncache",
 }
 
-def _catalyst_build_script(spec_path: str, config_path: str, caches: set[str]) -> str:
+def _catalyst_build_script(spec_path: str, config_path: str, caches: set[str], wrapper_path: str | None = None) -> str:
     """Runs catalyst with /dev containing real device nodes. Catalyst bind mounts /dev into chroot without submounts,
     but device nodes in toolset /dev are bind mounts made by bwrap, so chroot would get empty files instead (portage
     fails with '/dev/null is not a character device'). Only standard nodes, loop devices and kvm are created.
-    Catalyst uses configuration of toolset, with cache options enabled only for caches used by stage."""
+    Catalyst uses configuration of toolset, with cache options enabled only for caches used by stage.
+    In rootless builds (wrapper_path set) /dev is prepared by session script, and catalyst runs through wrapper."""
     enabled = " ".join(sorted(caches))
     disabled = " ".join(sorted(set(_catalyst_cache_options.values()) - caches))
+    if wrapper_path:
+        run = f'exec python3 "{wrapper_path}" "${{CONFIG_ARGS[@]}}" -f "{spec_path}"'
+    else:
+        run = _CATALYST_DEV_SETUP + f'exec catalyst "${{CONFIG_ARGS[@]}}" -f "{spec_path}"'
     return f"""#!/bin/bash
 # Catalyst configuration with cache options matching stage settings. Configuration of older catalyst (not TOML) is
 # used unchanged.
@@ -426,7 +508,10 @@ then
 else
     echo "Using toolset catalyst.conf without changes"
 fi
-set -e
+{run}
+"""
+
+_CATALYST_DEV_SETUP = """set -e
 DEV=/tmp/catalystlab-dev
 mkdir -p "$DEV"
 mount -t tmpfs -o mode=0755,nosuid catalystlab-dev "$DEV"
@@ -456,7 +541,6 @@ mount --bind "$DEV" /dev
 mount -t devpts -o newinstance,ptmxmode=0666,mode=0620 devpts /dev/pts
 mount -t tmpfs -o mode=1777,nosuid,nodev shm /dev/shm
 set +e
-exec catalyst "${{CONFIG_ARGS[@]}}" -f "{spec_path}"
 """
 
 def _strip_archive_extension(path: str) -> str:
@@ -477,6 +561,18 @@ def prepare_loop_devices() -> list[str]:
     subprocess.run(["losetup", "--find"], check=True, stdout=subprocess.DEVNULL)
     devices = sorted(glob.glob("/dev/loop[0-9]*"), key=lambda path: int(re.sub(r"\D", "", path)))
     return (["/dev/loop-control"] if os.path.exists("/dev/loop-control") else []) + devices
+
+def _move_stage_build_files(source_directory: str, name: str, destination_directory: str) -> list[str]:
+    """Like move_stage_build_files, for files already owned by user (rootless builds)."""
+    os.makedirs(destination_directory, exist_ok=True)
+    moved = []
+    if not os.path.isdir(source_directory):
+        return moved
+    for filename in sorted(os.listdir(source_directory)):
+        if filename.startswith(name + "."):
+            shutil.move(os.path.join(source_directory, filename), os.path.join(destination_directory, filename))
+            moved.append(filename)
+    return moved
 
 @root_function
 def move_stage_build_files(source_directory: str, name: str, destination_directory: str) -> list[str]:
