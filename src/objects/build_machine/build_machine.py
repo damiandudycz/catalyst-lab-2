@@ -17,8 +17,9 @@ class BuildMachine:
     STATUS_STARTING = "Starting"   # Displayed while machine is being started or stopped by app.
     STATUS_STOPPING = "Stopping"
 
-    # Delay before stopping unused machine, so it's not restarted between consecutive commands of operation.
-    IDLE_STOP_SECONDS = 15
+    # Delay before stopping unused machine, so it's not restarted between consecutive commands. Operations (builds,
+    # environments, installations) use machine for their whole duration, so short delay is enough.
+    IDLE_STOP_SECONDS = 2
     COMMAND_USER = "Command" # User of single commands (not listed as user of machine).
 
     DEFAULT_SWAP_GIB = 16
