@@ -75,6 +75,28 @@ def stage_target_icon(target: str | None) -> str:
     kind = (target or "").replace("-", "_").split("_")[0].rstrip("0123456789")
     return _STAGE_TARGET_ICONS.get(kind, "layers-minimalistic-svgrepo-com-symbolic")
 
+# Abbreviations of words in catalyst target names, other words use their first three letters.
+_STAGE_TARGET_WORD_ABBREVIATIONS = {
+    "stage": "S",
+    "livecd": "LCD",
+    "diskimage": "DI",
+    "netboot": "NB",
+    "embedded": "EMB",
+}
+
+def stage_target_short_name(target: str | None) -> str:
+    """Short name of catalyst target, eg. S1 for stage1, LCD2 for livecd_stage2, DI1 for diskimage_stage1. Built from
+    words of target name, so targets read from catalyst that are not known here get short names too."""
+    parts = [part for part in (target or "").replace("-", "_").split("_") if part]
+    short_name = ""
+    for index, part in enumerate(parts):
+        word = part.rstrip("0123456789")
+        number = part[len(word):]
+        # "stage" after other word only adds its number (livecd_stage2 -> LCD2).
+        abbreviation = "" if word == "stage" and index > 0 else _STAGE_TARGET_WORD_ABBREVIATIONS.get(word, word[:3].upper())
+        short_name += abbreviation + number
+    return short_name or "?"
+
 class ProjectStageEvent(Enum):
     NAME_CHANGED = auto()
 
