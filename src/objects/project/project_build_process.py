@@ -17,7 +17,7 @@ from .rootless import extracted_squashfs, remove_stale_sessions, distfiles_direc
 from .project_build_rootless import stage_build_session_script, CATALYST_WRAPPER
 from .project_build import StageBuild, StageBuildStatus, StageBuildPlan, project_builds_directory, stage_builds_directory
 from .project_build_spec import (
-    StageSpecContext, generate_stage_spec, generate_portage_confdir, seed_name_prefix, select_seed_url, snapshot_treeish
+    StageSpecContext, generate_stage_spec, generate_portage_confdir, generate_root_overlay, seed_name_prefix, select_seed_url, snapshot_treeish
 )
 
 # Paths used by catalyst inside toolset.
@@ -394,12 +394,15 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             os.makedirs(work_directory)
             portage_path = os.path.join(work_directory, "portage")
             has_confdir = generate_portage_confdir(project, self.stage, portage_path)
+            root_overlay_path = os.path.join(work_directory, "root_overlay")
+            has_root_overlay = generate_root_overlay(project, self.stage, root_overlay_path)
             cache_paths = process.stage_cache_paths(self.stage)
             process.make_directories(list(cache_paths.values()))
             spec = generate_stage_spec(project, self.stage, StageSpecContext(
                 timestamp=process.timestamp,
                 source_subpath=source_subpath,
                 portage_confdir=process.container_path(portage_path) if has_confdir else None,
+                root_overlay=process.container_path(root_overlay_path) if has_root_overlay else None,
                 cache_paths={argument: process.container_path(path) for argument, path in cache_paths.items()},
             ))
             spec_path = os.path.join(work_directory, "stage.spec")

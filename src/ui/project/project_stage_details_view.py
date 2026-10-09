@@ -23,7 +23,9 @@ from .item_select_expander_row import ItemSelectionExpanderRow
 from .event_bus import EventBus
 from .project_stage_automatic_option import StageAutomaticOption
 from .project_stage_value_resolver import resolved_stage_argument_display
-from .project_stage_portage_confdir import StagePortageConfdirSource, stage_overlay_path
+from .project_stage_portage_confdir import (
+    StagePortageConfdirSource, stage_overlay_path, stage_root_overlay_path, root_overlay_values, ROOT_OVERLAY_ARGUMENTS
+)
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -215,7 +217,7 @@ class ProjectStageDetailsView(Gtk.Box):
         # Overlay files could be edited outside of app, refresh their counts.
         if window.is_active():
             for row in getattr(self, "configuration_rows", []):
-                if isinstance(row, StageOptionExpanderRow) and row.argument.details == StageArgumentDetails.portage_confdir:
+                if isinstance(row, StageOptionExpanderRow) and row.uses_stage_overlay_folder:
                     row.load_state()
 
     # Monitoring stage changes
@@ -348,6 +350,9 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
                 current_values = []
             elif not isinstance(current_values, list):
                 current_values = [current_values]
+            if self.argument.details in ROOT_OVERLAY_ARGUMENTS:
+                # Values stored by older versions (inherit options, path of stage folder) are shown as sources.
+                current_values = root_overlay_values(self.project_directory, self.stage)
             automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
             options = automatic_options + (load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or [])
             # Add entries for unsupported values
@@ -381,8 +386,13 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
                     self.resolved_values[option.value] = resolved
                     option.subtitle = GLib.markup_escape_text(resolved)
         super().set_static_list(list=list)
-        if self.argument.details == StageArgumentDetails.portage_confdir:
+        if self.uses_stage_overlay_folder:
             self._add_open_stage_overlay_button()
+
+    @property
+    def uses_stage_overlay_folder(self) -> bool:
+        """Argument combined from sources that include folder in stage directory (portage_confdir, root overlay)."""
+        return self.argument.details == StageArgumentDetails.portage_confdir or self.argument.details in ROOT_OVERLAY_ARGUMENTS
 
     def _add_open_stage_overlay_button(self):
         row = next((row for row in getattr(self, "rows", []) if row.item.value == StagePortageConfdirSource.STAGE_OVERLAY), None)
@@ -395,7 +405,10 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
 
     def _on_open_stage_overlay_clicked(self, button):
         # Folder is created when needed and kept when overlay is disabled, to allow enabling it back.
-        path = stage_overlay_path(self.project_directory, self.stage)
+        if self.argument.details in ROOT_OVERLAY_ARGUMENTS:
+            path = stage_root_overlay_path(self.project_directory, self.stage)
+        else:
+            path = stage_overlay_path(self.project_directory, self.stage)
         os.makedirs(path, exist_ok=True)
         Gtk.FileLauncher.new(Gio.File.new_for_path(path)).launch(self.get_root(), None, None)
 

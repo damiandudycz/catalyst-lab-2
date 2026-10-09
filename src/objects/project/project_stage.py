@@ -22,7 +22,9 @@ from .project_stage_arguments import (
 from .project_stage_compression_mode import StageCompressionMode
 from .project_stage_argument_serialization import ProjectStageArgumentSerialization
 from .project_stage_automatic_option import StageAutomaticOption
-from .project_stage_portage_confdir import portage_confdir_options, default_portage_confdir_sources
+from .project_stage_portage_confdir import (
+    portage_confdir_options, default_portage_confdir_sources, root_overlay_options, default_root_overlay_sources, ROOT_OVERLAY_ARGUMENTS
+)
 
 class ProjectStage(Serializable):
 
@@ -234,6 +236,8 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
             return [StageArgumentOption(raw=value, display=value, subtitle=None, value=value, argument=arg_details.details) for value in values]
         case StageArgumentDetails.portage_confdir:
             return portage_confdir_options(project_directory=project_directory, stage=stage)
+        case StageArgumentDetails.stage4_root_overlay | StageArgumentDetails.livecd_root_overlay:
+            return root_overlay_options(project_directory=project_directory, stage=stage)
         case StageArgumentDetails.profile:
             values = project_directory.get_snapshot().load_profiles(arch=project_directory.get_architecture())
             values += load_stage_overlay_profiles(project_directory=project_directory, stage=stage)
@@ -329,6 +333,10 @@ def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dic
             continue
         if argument.details == StageArgumentDetails.portage_confdir:
             setattr(stage, argument.attribute_name, default_portage_confdir_sources(has_parent=has_parent))
+            applied[name] = getattr(stage, argument.attribute_name)
+            continue
+        if argument.details in ROOT_OVERLAY_ARGUMENTS:
+            setattr(stage, argument.attribute_name, default_root_overlay_sources(has_parent=has_parent))
             applied[name] = getattr(stage, argument.attribute_name)
             continue
         available = [option for option in argument.details.default_options if is_available(argument.details, option)]
