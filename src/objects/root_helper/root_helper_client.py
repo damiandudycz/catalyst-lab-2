@@ -477,7 +477,7 @@ class RootHelperClient:
                     except Exception as e:
                         print(f"[Server process]: Warning: Exception closing socket: {e}")
 
-                return server_response
+            return server_response
 
         if asynchronous:
             async_call = ServerCall(request=request, client=self)

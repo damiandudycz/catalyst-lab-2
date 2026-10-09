@@ -9,6 +9,17 @@ from .lima import virtual_machines_supported
 from .root_helper_client import RootHelperClient
 from .multistage_process import MultiStageProcessState
 from .wizard_view import WizardView
+from .repository import Repository
+from .item_select_view import ItemSelectionViewEvent
+from .toolset_application import ToolsetApplication
+
+class LatestSnapshotOption:
+    """Snapshot list entry generating new snapshot with project toolset when build starts."""
+    name = "Get latest"
+    short_details = "Generates new snapshot of the Gentoo ebuild repository with the project toolset"
+    icon_name = "folder-download-symbolic"
+
+LATEST_SNAPSHOT = LatestSnapshotOption()
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_build_view.ui')
 class ProjectBuildView(Gtk.Box):
@@ -20,12 +31,15 @@ class ProjectBuildView(Gtk.Box):
     wizard_view = Gtk.Template.Child()
     # Setup view elements:
     stages_page = Gtk.Template.Child()
+    snapshot_page = Gtk.Template.Child()
+    snapshot_selection_view = Gtk.Template.Child()
     summary_page = Gtk.Template.Child()
     stages_group = Gtk.Template.Child()
     build_order_group = Gtk.Template.Child()
     reused_group = Gtk.Template.Child()
     location_row = Gtk.Template.Child()
     runs_on_row = Gtk.Template.Child()
+    snapshot_row = Gtk.Template.Child()
 
     def __init__(self, project_directory: ProjectDirectory, installation_in_progress: ProjectBuild | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -37,6 +51,8 @@ class ProjectBuildView(Gtk.Box):
         self.rows: dict = {} # stage id -> (row, check_button)
         self.summary_rows: list = []
         self._updating = False
+        self.snapshot_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.snapshot_changed)
+        self.load_snapshots()
         self.connect("realize", self.on_realize)
 
     def on_realize(self, widget):
@@ -76,6 +92,44 @@ class ProjectBuildView(Gtk.Box):
         for root in self.project_directory.stages_tree():
             visit(root, 0)
         return result
+
+    # Snapshot
+    # --------------------------------------------------------------------------
+
+    def load_snapshots(self):
+        """Latest snapshot option and all snapshots (newest first), snapshot of project is selected."""
+        snapshots = sorted(Repository.Snapshot.value, key=lambda snapshot: snapshot.date.timestamp() if snapshot.date else 0, reverse=True)
+        self.snapshot_selection_view.selected_item = self.project_directory.get_snapshot()
+        self.snapshot_selection_view.set_static_list([LATEST_SNAPSHOT] + snapshots)
+        self._update_snapshot_row()
+
+    def snapshot_changed(self, view):
+        self._update_snapshot_row()
+        self.wizard_view._refresh_buttons_state()
+
+    def _update_snapshot_row(self):
+        selected = self.snapshot_selection_view.selected_item
+        if selected is LATEST_SNAPSHOT:
+            subtitle = "Latest, generated with the project toolset before building"
+        elif selected:
+            subtitle = f"{selected.name} ({selected.short_details})"
+        else:
+            subtitle = "Not selected"
+        if selected is not None and selected is not LATEST_SNAPSHOT and selected == self.project_directory.get_snapshot():
+            subtitle += ", snapshot of the project"
+        self.snapshot_row.set_subtitle(GLib.markup_escape_text(subtitle))
+
+    def _toolset_generates_snapshots(self) -> bool:
+        toolset = self.project_directory.get_toolset()
+        return toolset is not None and toolset.get_app_install(ToolsetApplication.CATALYST) is not None
+
+    @Gtk.Template.Callback()
+    def is_item_selectable(self, sender, item) -> bool:
+        return item is not LATEST_SNAPSHOT or self._toolset_generates_snapshots()
+
+    @Gtk.Template.Callback()
+    def is_item_usable(self, sender, item) -> bool:
+        return True
 
     # Build plan
     # --------------------------------------------------------------------------
@@ -159,11 +213,49 @@ class ProjectBuildView(Gtk.Box):
         match page:
             case self.stages_page | self.summary_page:
                 return bool(getattr(self, "plan", None) and self.plan.build_order())
+            case self.snapshot_page:
+                selected = self.snapshot_selection_view.selected_item
+                return selected is not None and self.is_item_selectable(self.snapshot_selection_view, selected)
         return True
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
+        toolset = self.project_directory.get_toolset()
+        # Toolset or its virtual machine could become busy while wizard was open.
+        if busy_reason := (toolset.busy_reason if toolset else "Project has no toolset"):
+            dialog = Adw.AlertDialog(heading="Can't start build", body=busy_reason)
+            dialog.add_response("ok", "OK")
+            dialog.present(self.get_root())
+            return
+        selected = self.snapshot_selection_view.selected_item
+        if selected is LATEST_SNAPSHOT or selected != self.project_directory.get_snapshot():
+            self._ask_update_project_snapshot(selected)
+        else:
+            self._authorize_and_start(update_project_snapshot=False)
+
+    def _ask_update_project_snapshot(self, selected):
+        """Snapshot different than project snapshot is used in this build, it can be stored in project too."""
+        if selected is LATEST_SNAPSHOT:
+            body = ("The latest snapshot will be generated before building. Do you want the project to use it as well? "
+                    "Project settings are updated when the snapshot is ready.")
+        else:
+            body = f"This build uses snapshot {selected.name}. Do you want the project to use it as well?"
+        dialog = Adw.AlertDialog(heading="Update project snapshot?", body=body)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("build", "Only this build")
+        dialog.add_response("project", "Update project")
+        dialog.set_response_appearance("project", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("project")
+        dialog.set_close_response("cancel")
+        def on_response(dialog, response):
+            if response != "cancel":
+                self._authorize_and_start(update_project_snapshot=response == "project")
+        dialog.connect("response", on_response)
+        dialog.present(self.get_root())
+
+    def _authorize_and_start(self, update_project_snapshot: bool):
         plan = self.plan
+        self.update_project_snapshot = update_project_snapshot
         toolset = self.project_directory.get_toolset()
         if (toolset and toolset.machine) or rootless_unsupported_reason() is None:
             # Builds run in user namespace, root privileges are not needed.
@@ -181,7 +273,11 @@ class ProjectBuildView(Gtk.Box):
         if authorization_keeper is None and not rootless:
             return False # Authorization cancelled.
         try:
-            installation_in_progress = ProjectBuild(project_directory=self.project_directory, plan=plan)
+            selected = self.snapshot_selection_view.selected_item
+            fetch = selected is LATEST_SNAPSHOT
+            installation_in_progress = ProjectBuild(project_directory=self.project_directory, plan=plan,
+                                                    snapshot=None if fetch else selected, fetch_snapshot=fetch,
+                                                    update_project_snapshot=self.update_project_snapshot)
             installation_in_progress.start(authorization_keeper=authorization_keeper)
         finally:
             if authorization_keeper:
@@ -189,6 +285,8 @@ class ProjectBuildView(Gtk.Box):
         if installation_in_progress.status == MultiStageProcessState.SETUP:
             print("Failed to start build")
             return False
+        if self.update_project_snapshot and not installation_in_progress.fetch_snapshot:
+            installation_in_progress.store_project_snapshot()
         self.wizard_view.set_installation(installation_in_progress)
         return False
 

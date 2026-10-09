@@ -27,10 +27,11 @@ class StageSpecContext:
     portage_confdir: str | None # Generated portage configuration, as seen by catalyst.
     cache_paths: dict = field(default_factory=dict) # Enabled caches (pkgcache_path, kerncache_path), as seen by catalyst.
     root_overlay: str | None = None # Generated root overlay, as seen by catalyst.
+    snapshot: object | None = None # Snapshot selected for build, project snapshot when not set.
 
-def snapshot_treeish(project_directory) -> str | None:
-    """Catalyst finds snapshot as snapshots/gentoo-<treeish>.sqfs."""
-    snapshot = project_directory.get_snapshot()
+def snapshot_treeish(project_directory, snapshot=None) -> str | None:
+    """Catalyst finds snapshot as snapshots/gentoo-<treeish>.sqfs. Snapshot of project, unless other is given."""
+    snapshot = snapshot or project_directory.get_snapshot()
     if snapshot is None:
         return None
     match = re.match(r"^gentoo-(.+)\.sqfs$", snapshot.filename)
@@ -43,7 +44,7 @@ def generate_stage_spec(project_directory, stage, context: StageSpecContext) -> 
     placeholders = {
         "@TIMESTAMP@": context.timestamp,
         "@REPO_DIR@": releng_directory.directory_path() if releng_directory else "",
-        "@TREEISH@": snapshot_treeish(project_directory) or "",
+        "@TREEISH@": snapshot_treeish(project_directory, context.snapshot) or "",
     }
     lines, missing = [], []
     for name, argument in arguments.items():
@@ -69,7 +70,7 @@ def _argument_value(project_directory, stage, name: str, argument, context: Stag
         case StageArgumentDetails.source_subpath:
             return context.source_subpath
         case StageArgumentDetails.snapshot_treeish:
-            return snapshot_treeish(project_directory)
+            return snapshot_treeish(project_directory, context.snapshot)
         case StageArgumentDetails.portage_confdir:
             return context.portage_confdir
         case StageArgumentDetails.pkgcache_path | StageArgumentDetails.kerncache_path:

@@ -4,6 +4,7 @@ from .project_manager import ProjectManager
 from .project_directory import ProjectDirectory, ProjectConfiguration
 from .toolset_application import ToolsetApplication
 from .toolset import ToolsetEvents
+from .event_bus import SharedEvent
 from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
 from .project_stage_create_view import ProjectStageCreateView
@@ -42,6 +43,7 @@ class ProjectDetailsView(Gtk.Box):
         self.monitor_configuration_changes()
         self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
         self._observed_builds: set[int] = set() # Ids of builds whose changes are observed.
+        self._observed_toolset = None # Toolset (and its machine) whose state allows building.
         self._build_refresh_scheduled = False
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._on_build_changed)
         self._refresh_build_state()
@@ -76,6 +78,7 @@ class ProjectDetailsView(Gtk.Box):
                     if self.arch_selection_view.selected_item else None
                 )
         Repository.ProjectDirectory.save()
+        self._refresh_build_state() # Toolset could change.
 
     def _update_name(self, name: str):
         self._page.set_title(name)
@@ -97,9 +100,15 @@ class ProjectDetailsView(Gtk.Box):
                     step.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, self._on_build_changed)
                     step.event_bus.subscribe(MultiStageProcessStageEvent.PROGRESS_CHANGED, self._on_build_changed)
         running_build = running_project_build(self.project_directory)
-        # Only one build can run at a time, also for different projects.
+        # Only one build can run at a time, also for different projects. Toolset (and its virtual machine) can't be
+        # used by other operation then.
+        toolset = self.project_directory.get_toolset()
+        self._observe_toolset(toolset)
+        busy_reason = toolset.busy_reason if toolset else "Select toolset in project configuration"
         self.build_row.set_visible(not running_builds)
-        self.build_row.set_sensitive(not running_builds)
+        self.build_row.set_sensitive(not running_builds and busy_reason is None)
+        self.build_row.set_title(GLib.markup_escape_text(busy_reason) if busy_reason else "Create build")
+        self.build_row.set_tooltip_text(busy_reason)
         self.build_progress_row.set_visible(running_build is not None)
         statuses = {}
         if running_build is not None:
@@ -107,6 +116,15 @@ class ProjectDetailsView(Gtk.Box):
                 if isinstance(step, ProjectBuildStepBuildStage):
                     statuses[step.stage.id] = _build_step_status(step)
         self.stages_tree_view.set_statuses(statuses)
+
+    def _observe_toolset(self, toolset):
+        if toolset is None or toolset is self._observed_toolset:
+            return
+        self._observed_toolset = toolset
+        for event in ToolsetEvents:
+            toolset.event_bus.subscribe(event, self._on_build_changed)
+        if machine := toolset.machine:
+            machine.event_bus.subscribe(SharedEvent.STATE_UPDATED, self._on_build_changed)
 
     def _on_build_changed(self, *args):
         # Several changes can come at once, refresh once.

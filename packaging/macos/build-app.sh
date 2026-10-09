@@ -2,12 +2,13 @@
 # Builds self-contained Catalyst Lab application for macOS: dist/Catalyst Lab.app and dist/Catalyst Lab.dmg.
 # Bundle contains Python, GTK, libadwaita, app icons and schemas, squashfs tools and Lima (virtual machines), so it
 # runs on Macs without Homebrew. Dependencies are downloaded here:
-# - GTK stack, Python and squashfs tools from Homebrew (installed when missing),
+# - GTK stack, Python and squashfs tools from Homebrew. Packages missing on this Mac are installed only for the build
+#   and removed when it ends (with dependencies they brought), unless --keep-packages is given,
 # - PyInstaller and Python packages from PyPI (into build environment),
 # - Lima release from GitHub (checksum verified).
 # Bundle is built for architecture of this Mac.
 #
-# Usage: packaging/macos/build-app.sh [--no-dmg] [--clean]
+# Usage: packaging/macos/build-app.sh [--no-dmg] [--clean] [--keep-packages]
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -20,10 +21,12 @@ PYTHON_FORMULA=python@3.14 # Same Python that Homebrew pygobject3 is built for.
 BREW_PACKAGES=(gtk4 libadwaita pygobject3 adwaita-icon-theme librsvg meson ninja squashfs "$PYTHON_FORMULA")
 
 MAKE_DMG=1
+KEEP_PACKAGES=0
 for argument in "$@"; do
     case "$argument" in
         --no-dmg) MAKE_DMG=0 ;;
         --clean) rm -rf "$WORK" ;;
+        --keep-packages) KEEP_PACKAGES=1 ;;
         *) echo "Unknown option: $argument"; exit 1 ;;
     esac
 done
@@ -48,9 +51,25 @@ missing=()
 for package in "${BREW_PACKAGES[@]}"; do
     "$BREW" list --versions "$package" > /dev/null 2>&1 || missing+=("$package")
 done
+# Formulae installed before build, everything else is removed when build ends (also after failure).
+FORMULAE_BEFORE="$WORK/formulae-before"
+mkdir -p "$WORK"
+"$BREW" list --formula -1 | sort > "$FORMULAE_BEFORE"
+remove_build_packages() {
+    [ $KEEP_PACKAGES = 0 ] || return 0
+    local added
+    added=$("$BREW" list --formula -1 | sort | comm -13 "$FORMULAE_BEFORE" -)
+    [ -n "$added" ] || return 0
+    step "Removing Homebrew packages installed for build"
+    echo $added
+    # Whole set installed by build is removed, so dependencies between its packages don't matter.
+    "$BREW" uninstall --ignore-dependencies $added || echo "Warning: failed to remove some packages, remove them with brew uninstall"
+}
 if [ ${#missing[@]} -gt 0 ]; then
-    echo "Installing ${missing[*]}"
-    "$BREW" install "${missing[@]}"
+    trap remove_build_packages EXIT
+    echo "Installing ${missing[*]} for build$([ $KEEP_PACKAGES = 0 ] && echo ", removed when it ends")"
+    # Packages already installed on this Mac are not rebuilt or reinstalled because of new ones.
+    HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1 "$BREW" install "${missing[@]}"
 else
     echo "All packages are installed"
 fi

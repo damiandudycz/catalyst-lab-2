@@ -34,6 +34,8 @@
     <file preprocess="xml-stripblanks">ui/snapshot/snapshot_details_view.ui</file>
     <file preprocess="xml-stripblanks">ui/toolset/toolset_create_view.ui</file>
     <file preprocess="xml-stripblanks">ui/build_machine/build_machine_create_view.ui</file>
+    <file preprocess="xml-stripblanks">ui/deploy/deploy_create_view.ui</file>
+    <file preprocess="xml-stripblanks">ui/app_sections/deploy/deploy_section.ui</file>
     <file preprocess="xml-stripblanks">ui/toolset/toolset_details_view.ui</file>
 
   </gresource>

@@ -13,9 +13,17 @@ from .project_stage_arguments import StageArgumentDetails
 # (moved to stage build directory after build), downloaded seeds (seeds/) and generated specs (work/).
 
 class StageBuildStatus(Enum):
+    SCHEDULED = "scheduled" # Part of build run, didn't start yet (or app was closed before it started).
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
+    SKIPPED = "skipped" # Not built, because stage it depends on failed.
+    CANCELLED = "cancelled" # Not built, because build run was cancelled.
+
+    @property
+    def is_attempt(self) -> bool:
+        """Stage was built (or building started)."""
+        return self in (StageBuildStatus.IN_PROGRESS, StageBuildStatus.COMPLETED, StageBuildStatus.FAILED)
 
 @dataclass
 class StageBuild:
@@ -28,6 +36,7 @@ class StageBuild:
     id: uuid.UUID = field(default_factory=uuid.uuid4)
     path: str | None = None # Build directory, set when loaded or saved.
     artifact: str | None = None # Filename of built stage archive, inside build directory.
+    order: int | None = None # Position of stage in build order of its run.
 
     METADATA_FILE = "build.json"
 
@@ -45,6 +54,7 @@ class StageBuild:
             "status": self.status.value,
             "date": self.date.isoformat(),
             "artifact": self.artifact,
+            "order": self.order,
         }
 
     @classmethod
@@ -58,6 +68,7 @@ class StageBuild:
             date=datetime.fromisoformat(data["date"]),
             path=path,
             artifact=data.get("artifact"),
+            order=data.get("order"),
         )
 
     @property
@@ -154,8 +165,8 @@ class StageBuildPlan:
         ), None)
 
     def latest_attempt(self, stage) -> StageBuild | None:
-        """Latest build, including failed and unfinished ones."""
-        return next((build for build in self.builds if build.stage_id == stage.id), None)
+        """Latest build, including failed and unfinished ones (not stages that didn't start)."""
+        return next((build for build in self.builds if build.stage_id == stage.id and build.status.is_attempt), None)
 
     def parent(self, stage):
         parent_id = getattr(stage, StageArgumentDetails.parent.name, None)

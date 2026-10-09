@@ -1,10 +1,10 @@
 from __future__ import annotations
-import os, re, threading, shutil
+import json, os, re, threading, shutil
 from datetime import datetime, timezone
 from gi.repository import GLib
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage, MultiStageProcessState, MultiStageProcessStageState,
-    MultiStageProcessEvent
+    MultiStageProcessEvent, MultiStageProcessStageEvent
 )
 from .root_function import root_function
 from .repository import Repository
@@ -32,11 +32,17 @@ STAGE_ARCHIVE_EXTENSIONS = (".tar.xz", ".tar.bz2", ".tar.gz", ".tar.zst", ".tar"
 
 class ProjectBuild(MultiStageProcess):
     """Builds stages of project selected in build plan, parents first. Failed stage doesn't stop the process,
-    only stages depending on it are skipped, so other branches are still built."""
+    only stages depending on it are skipped, so other branches are still built.
+    Builds use snapshot selected for build (project snapshot by default), or latest snapshot generated with project
+    toolset before building. Selected snapshot can be stored in project too."""
 
-    def __init__(self, project_directory, plan: StageBuildPlan):
+    def __init__(self, project_directory, plan: StageBuildPlan, snapshot=None, fetch_snapshot: bool = False,
+                 update_project_snapshot: bool = False):
         self.project_directory = project_directory
         self.plan = plan
+        self.snapshot = None if fetch_snapshot else (snapshot or project_directory.get_snapshot()) # Set when fetched.
+        self.fetch_snapshot = fetch_snapshot
+        self.update_project_snapshot = update_project_snapshot
         self.toolset = project_directory.get_toolset()
         self.timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") # @TIMESTAMP@ for all stages of this build.
         self.builds_directory = project_builds_directory(project_directory)
@@ -58,6 +64,8 @@ class ProjectBuild(MultiStageProcess):
         return self.project_directory.name
 
     def setup_stages(self):
+        if self.fetch_snapshot:
+            self.stages.append(ProjectBuildStepFetchSnapshot(multistage_process=self))
         self.stages.append(ProjectBuildStepPrepareToolset(multistage_process=self))
         for stage in self.plan.build_order():
             if self.plan.parent(stage) is None:
@@ -184,8 +192,42 @@ class ProjectBuild(MultiStageProcess):
             )
             self.complete_process(success=success)
 
+    # Records of stages in this run are saved when it starts, so stages that don't start (skipped after failure of
+    # stage they depend on, or cancelled) are listed in builds too.
+
+    def start(self, authorization_keeper=None):
+        for order, stage in enumerate(self.plan.build_order()):
+            try:
+                StageBuild(stage_id=stage.id, stage_name=stage.name, timestamp=self.timestamp, order=order,
+                           status=StageBuildStatus.SCHEDULED).save(self.project_directory)
+            except OSError as e:
+                print(f"Failed to save scheduled build of {stage.name}: {e}")
+        super().start(authorization_keeper)
+
+    def cancel(self):
+        self.cancelled = True
+        super().cancel()
+
+    def store_project_snapshot(self):
+        """Selected snapshot becomes snapshot of project."""
+        if self.snapshot is None:
+            return False
+        self.project_directory.initialize_metadata().snapshot_id = self.snapshot.filename
+        Repository.ProjectDirectory.save()
+        return False
+
     def complete_process(self, success: bool):
-        pass
+        status = StageBuildStatus.CANCELLED if getattr(self, "cancelled", False) else StageBuildStatus.SKIPPED
+        for stage in self.plan.build_order():
+            path = os.path.join(stage_builds_directory(self.project_directory, stage.name), self.timestamp)
+            try:
+                with open(os.path.join(path, StageBuild.METADATA_FILE), encoding="utf-8") as file:
+                    build = StageBuild.init_from(json.load(file), path=path)
+                if build.status == StageBuildStatus.SCHEDULED:
+                    build.status = status
+                    build.save(self.project_directory)
+            except (OSError, ValueError, KeyError) as e:
+                print(f"Failed to update build of {stage.name}: {e}")
 
 def running_project_build(project_directory, timestamp: str | None = None) -> ProjectBuild | None:
     """Build of project that is currently in progress, optionally only build started with given timestamp."""
@@ -227,6 +269,60 @@ class ProjectBuildStep(MultiStageProcessStage):
         done_event.wait()
         return result
 
+class ProjectBuildStepFetchSnapshot(ProjectBuildStep):
+    """Generates latest snapshot of Gentoo repository with project toolset (like Snapshots section does), and uses it
+    in this build. Snapshot is stored with other snapshots, and in project when user chose that."""
+    def __init__(self, multistage_process: ProjectBuild):
+        super().__init__(name="Get latest snapshot", description="Generates snapshot of Gentoo repository with project toolset", multistage_process=multistage_process)
+        self.installation = None
+    def start(self):
+        super().start()
+        try:
+            from .snapshot_installation import SnapshotInstallation
+            process = self.multistage_process
+            toolset = process.toolset
+            if toolset is None:
+                raise RuntimeError("Project has no toolset")
+            if reason := toolset.busy_reason:
+                raise RuntimeError(reason)
+            installation = SnapshotInstallation(toolset=toolset)
+            self.installation = installation
+            finished = threading.Event()
+            def on_state_changed(state):
+                if state in (MultiStageProcessState.COMPLETED, MultiStageProcessState.FAILED):
+                    # Snapshot is added to repository (and toolset released) after state changes, on main thread.
+                    GLib.idle_add(finished.set)
+            # Event bus keeps weak references, handlers are kept by step.
+            self._handlers = [on_state_changed]
+            installation.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, on_state_changed)
+            for stage in installation.stages:
+                handler = lambda state, stage=stage: self._stage_changed(stage, state)
+                self._handlers.append(handler)
+                stage.event_bus.subscribe(MultiStageProcessStageEvent.OUTPUT_LINE_ADDED, self.log)
+                stage.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, handler)
+            installation.start(authorization_keeper=process.authorization_keeper)
+            finished.wait()
+            if installation.status != MultiStageProcessState.COMPLETED or installation.snapshot is None:
+                raise RuntimeError("Failed to generate snapshot")
+            process.snapshot = installation.snapshot
+            self.log(f"Using snapshot {installation.snapshot.filename} ({installation.snapshot.name})")
+            if process.update_project_snapshot:
+                GLib.idle_add(process.store_project_snapshot)
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            print(f"Error during snapshot generation: {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
+    def _stage_changed(self, stage, state):
+        if state == MultiStageProcessStageState.IN_PROGRESS:
+            self.log(f"--- {stage.name}")
+        stages = self.installation.stages if self.installation else []
+        done = sum(1 for item in stages if item.state == MultiStageProcessStageState.COMPLETED)
+        self._update_progress(done / len(stages) if stages else None)
+    def cancel(self):
+        super().cancel()
+        if self.installation and self.installation.status == MultiStageProcessState.IN_PROGRESS:
+            self.installation.cancel()
+
 class ProjectBuildStepPrepareToolset(ProjectBuildStep):
     def __init__(self, multistage_process: ProjectBuild):
         super().__init__(name="Prepare toolset", description="Spawns toolset with builds, snapshots and project directories", multistage_process=multistage_process)
@@ -238,8 +334,10 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
             toolset = self.multistage_process.toolset
             if toolset is None:
                 raise RuntimeError("Project has no toolset")
-            if toolset.spawned or not toolset.reserve():
-                raise RuntimeError(f"Toolset {toolset.name} is in use. Close its environment and try again.")
+            if reason := toolset.busy_reason:
+                raise RuntimeError(reason)
+            if not toolset.reserve():
+                raise RuntimeError(f"Toolset {toolset.name} is used by another operation")
             self.reserved = True
             os.makedirs(self.multistage_process.builds_directory, exist_ok=True)
             if self.multistage_process.rootless:
@@ -275,9 +373,9 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         remove_stale_sessions(self.log, self.namespace_processes, executor=executor)
         process.rootless_toolset_path = extracted_squashfs(
             process.toolset.file_path(), "toolsets", self.log, self.namespace_processes, check_path="bin/bash", executor=executor)
-        snapshot = process.project_directory.get_snapshot()
+        snapshot = process.snapshot
         if snapshot is None:
-            raise RuntimeError("Project has no snapshot")
+            raise RuntimeError("Build has no snapshot")
         process.rootless_snapshot_path = extracted_squashfs(
             snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles", executor=executor)
         process.make_directories([distfiles_directory(executor)] + process.mirrored_paths())
@@ -417,7 +515,8 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
         process = self.multistage_process
         project = process.project_directory
         try:
-            self.build = StageBuild(stage_id=self.stage.id, stage_name=self.stage.name, timestamp=process.timestamp)
+            self.build = StageBuild(stage_id=self.stage.id, stage_name=self.stage.name, timestamp=process.timestamp,
+                                    order=process.plan.build_order().index(self.stage))
             self.build.save(project)
             # Seed:
             source_subpath = process.seed_subpath(self.stage)
@@ -440,6 +539,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                 portage_confdir=process.container_path(portage_path) if has_confdir else None,
                 root_overlay=process.container_path(root_overlay_path) if has_root_overlay else None,
                 cache_paths={argument: process.container_path(path) for argument, path in cache_paths.items()},
+                snapshot=process.snapshot,
             ))
             spec_path = os.path.join(work_directory, "stage.spec")
             with open(spec_path, "w", encoding="utf-8") as file:
@@ -502,7 +602,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
         diagnostics_path = self._write_diagnostics_script(spec=spec, work_directory=work_directory, rootless=True)
         bindings = [
             (process.builds_directory, CATALYST_BUILDS_PATH),
-            (process.rootless_snapshot_path, f"{CATALYST_SNAPSHOTS_PATH}/gentoo-{snapshot_treeish(process.project_directory)}.sqfs"),
+            (process.rootless_snapshot_path, f"{CATALYST_SNAPSHOTS_PATH}/gentoo-{snapshot_treeish(process.project_directory, process.snapshot)}.sqfs"),
             (distfiles_directory(process.executor), "/var/cache/distfiles"),
         ] + [(path, path) for path in process.mirrored_paths()]
         script = stage_build_session_script(
