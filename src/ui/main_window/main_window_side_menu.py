@@ -1,4 +1,4 @@
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
 from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
 from .main_window_side_menu_button import MainWindowSideMenuButton
@@ -18,8 +18,20 @@ class CatalystlabWindowSideMenu(Gtk.Box):
                 button = MainWindowSideMenuButton(section)
                 self.section_list.append(button)
         app_event_bus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
+        # Statuses of sections come from many objects (toolsets, machines, directories, processes), they are checked
+        # periodically. Checks only read cached states.
+        self._update_statuses()
+        GLib.timeout_add(1000, self._update_statuses)
         # Set initial selected page
         self.selected_section: AppSection = None
+
+    def _update_statuses(self):
+        row = self.section_list.get_first_child()
+        while row:
+            if isinstance(row, MainWindowSideMenuButton):
+                row.update_status()
+            row = row.get_next_sibling()
+        return True
 
     def opened_app_section(self, section: AppSection):
         if self.selected_section == section:

@@ -1,5 +1,8 @@
 from gi.repository import Gtk, Adw
 from .app_section import app_section
+from .project_installation import ProjectInstallation
+from .repository import Repository
+from .status_indicator import combined_status, items_status, processes_status
 from .project_create_view import ProjectCreateView
 from .project_manager import ProjectManager
 from .project_update import ProjectUpdate
@@ -11,6 +14,11 @@ from .project_details_view import ProjectDetailsView
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/projects/projects_section.ui')
 class ProjectsSection(Gtk.Box):
     __gtype_name__ = "ProjectsSection"
+
+    @staticmethod
+    def section_status():
+        """Unsaved changes of projects, projects being created or updated (side menu)."""
+        return combined_status(items_status(Repository.ProjectDirectory.value) + processes_status(ProjectInstallation, ProjectUpdate))
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)

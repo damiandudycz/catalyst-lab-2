@@ -1,5 +1,7 @@
 from gi.repository import Gtk, Adw
 from .app_section import app_section
+from .project_build_process import ProjectBuild
+from .status_indicator import combined_status, items_status, processes_status
 from .app_events import app_event_bus, AppEvents
 from .project_builds_view import ProjectBuildsView
 from .project_build_view import ProjectBuildView
@@ -8,6 +10,11 @@ from .project_build_view import ProjectBuildView
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/builds/builds_section.ui')
 class BuildsSection(Gtk.Box):
     __gtype_name__ = "BuildsSection"
+
+    @staticmethod
+    def section_status():
+        """Build running (side menu)."""
+        return combined_status(processes_status(ProjectBuild))
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)

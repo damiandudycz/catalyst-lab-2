@@ -1,5 +1,7 @@
 from gi.repository import Gtk, Adw
 from .app_section import app_section
+from .snapshot_installation import SnapshotInstallation
+from .status_indicator import combined_status, items_status, processes_status
 from .snapshot_details_view import SnapshotDetailsView
 from .snapshot_create_view import SnapshotCreateView
 from .app_events import app_event_bus, AppEvents
@@ -8,6 +10,11 @@ from .app_events import app_event_bus, AppEvents
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/snapshots/snapshots_section.ui')
 class SnapshotsSection(Gtk.Box):
     __gtype_name__ = "SnapshotsSection"
+
+    @staticmethod
+    def section_status():
+        """Snapshot being created (side menu)."""
+        return combined_status(processes_status(SnapshotInstallation))
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
