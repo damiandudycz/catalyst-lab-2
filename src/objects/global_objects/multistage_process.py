@@ -188,6 +188,7 @@ class MultiStageProcessStage(ABC):
         self.description = description
         self.multistage_process = multistage_process
         self.progress: float | None = None
+        self.progress_text: str | None = None # Displayed instead of percentage, eg. "12 of 300 packages".
         self.event_bus = EventBus[MultiStageProcessStageEvent]()
         self._cancel_event = threading.Event()
         self.output_lines: list[str] = [] # Output of commands executed by this stage, displayed in execution view.
@@ -237,12 +238,15 @@ class MultiStageProcessStage(ABC):
         self._update_state(state=state)
         if self.state == MultiStageProcessStageState.COMPLETED:
            self._update_progress(1.0)
+        elif self.progress_text:
+           self._update_progress(self.progress) # Clears progress text.
         # Continue process
         GLib.idle_add(self.multistage_process._continue_process)
     def _update_state(self, state: MultiStageProcessStageState):
         self.state = state
         self.event_bus.emit(MultiStageProcessStageEvent.STATE_CHANGED, state)
-    def _update_progress(self, progress: float | None):
+    def _update_progress(self, progress: float | None, text: str | None = None):
         self.progress = progress
+        self.progress_text = text
         self.event_bus.emit(MultiStageProcessStageEvent.PROGRESS_CHANGED, progress)
 

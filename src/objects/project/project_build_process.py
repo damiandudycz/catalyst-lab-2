@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, threading, shutil
+import os, re, threading, shutil
 from datetime import datetime, timezone
 from gi.repository import GLib
 from .multistage_process import (
@@ -360,15 +360,52 @@ class ProjectBuildStepDownloadSeed(ProjectBuildStep):
             print(f"Error during '{self.name}': {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+class EmergeProgress:
+    """Progress of packages built by catalyst, read from its output: emerge prints "(N of M)" for every package.
+    Catalyst runs every emerge with run_merge, which first prints the command. Update of seed (stage1 with
+    update_seed) is the first emerge after "Updating seed stage...", it's shown without progress, as it's not part of
+    the stage. Stages run several emerges, progress is of the current one."""
+    _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    _PACKAGE = re.compile(r"^>>> (Emerging|Completed)(?: binary)? \((\d+) of (\d+)\)")
+
+    def __init__(self):
+        self.seed_update = False
+        self.seed_update_started = False
+
+    def parse(self, line: str) -> tuple[float | None, str] | None:
+        """Progress and its description when line changes it, otherwise None."""
+        line = self._ANSI.sub("", line).strip()
+        if line.startswith("Updating seed stage"):
+            self.seed_update, self.seed_update_started = True, False
+            return None, "Updating seed"
+        if line.startswith("emerge ") and self.seed_update:
+            if self.seed_update_started:
+                self.seed_update = False # Next emerge after the seed update.
+            else:
+                self.seed_update_started = True
+            return None
+        match = self._PACKAGE.match(line)
+        if not match:
+            return None
+        action, number, total = match.group(1), int(match.group(2)), int(match.group(3))
+        if self.seed_update:
+            return None, f"Updating seed, {number} of {total}"
+        completed = number if action == "Completed" else number - 1
+        return completed / total, f"{number} of {total} packages"
+
 class ProjectBuildStepBuildStage(ProjectBuildStep):
     def __init__(self, stage, multistage_process: ProjectBuild):
         super().__init__(name=f"Build {stage.name}", description=f"Builds {stage.target.replace('_', '-')} with catalyst", multistage_process=multistage_process)
         self.stage = stage
         self.build: StageBuild | None = None
         self._log_file = None
+        self._emerge_progress = EmergeProgress()
     def log(self, line: str):
-        """Output is also saved as build.log in build directory, to keep it after app is closed."""
+        """Output is also saved as build.log in build directory, to keep it after app is closed. Packages built by
+        catalyst are shown as progress."""
         super().log(line)
+        if progress := self._emerge_progress.parse(line):
+            self._update_progress(*progress)
         if self.build and self.build.path:
             try:
                 if self._log_file is None:
