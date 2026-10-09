@@ -48,7 +48,7 @@ Files with .template suffix are copied with {{ expressions }} in their contents 
 Expressions can use variables, computed values and project_name.
 """
 from __future__ import annotations
-import ast, hashlib, os, re, shutil, subprocess, tomllib, uuid
+import ast, hashlib, os, re, shutil, subprocess, tempfile, tomllib, uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from .architecture import Architecture
@@ -321,9 +321,12 @@ class ProjectTemplate:
     stages: list[TemplateStage]
     files: list[TemplateFiles]
     repository_url: str | None = None # Git repository of template, None for templates included in app.
+    # False for definition downloaded without other files of repository (to show options), files are checked when
+    # template is applied from cloned repository.
+    files_available: bool = True
 
     @classmethod
-    def load(cls, path: str, repository_url: str | None = None) -> ProjectTemplate:
+    def load(cls, path: str, repository_url: str | None = None, files_available: bool = True) -> ProjectTemplate:
         file_path = os.path.join(path, TEMPLATE_FILE)
         if not os.path.isfile(file_path):
             raise TemplateError(f"{TEMPLATE_FILE} not found")
@@ -422,7 +425,7 @@ class ProjectTemplate:
                 when=_condition(files_data, context)
             ))
         return cls(path=path, name=name, description=description, variables=variables, values=values, stages=stages,
-                   files=files, repository_url=repository_url)
+                   files=files, repository_url=repository_url, files_available=files_available)
 
     @property
     def architecture_variable(self) -> TemplateVariable | None:
@@ -501,7 +504,7 @@ class ProjectTemplate:
             if os.path.isabs(destination) or destination == ".." or destination.startswith(".." + os.sep) \
                     or destination.split(os.sep)[0] == ".git":
                 raise TemplateError(f"Files destination {entry.destination} is outside of project")
-            if not os.path.exists(source):
+            if self.files_available and not os.path.exists(source):
                 raise TemplateError(f"Files source {entry.source} doesn't exist")
             files.append((source, destination))
         architecture_variable = self.architecture_variable
@@ -575,22 +578,39 @@ def template_repositories() -> list[TemplateRepository]:
             repositories.append(TemplateRepository(url=url, title=title.strip() or url.rstrip("/").split("/")[-1].removesuffix(".git")))
     return repositories
 
+def _run_git(command: list[str], timeout: int = 300):
+    result = subprocess.run(
+        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"} # Fails instead of waiting for credentials.
+    )
+    if result.returncode != 0:
+        output = result.stdout.strip()
+        raise TemplateError(output.splitlines()[-1] if output else f"{' '.join(command[:2])} failed")
+
 def fetch_template_repository(url: str) -> ProjectTemplate:
-    """Downloads latest version of template repository (shallow clone in temporary directory) and loads template."""
+    """Downloads only template.toml from latest commit of template repository, to show its options. Other files are
+    used from repository cloned when project is created. Uses partial clone without contents of files, servers that
+    don't support it send whole latest commit."""
     from .repository import Repository
     temporary = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
     path = os.path.join(temporary, "Project templates", hashlib.sha1(url.encode()).hexdigest()[:16])
     if os.path.exists(path):
         shutil.rmtree(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    result = subprocess.run(
-        ["git", "clone", "--depth", "1", "--quiet", url, path],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=300,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"} # Fails instead of waiting for credentials.
-    )
-    if result.returncode != 0:
-        raise TemplateError(result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "Failed to download repository")
-    return ProjectTemplate.load(path, repository_url=url)
+    _run_git(["git", "clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--quiet", url, path])
+    _run_git(["git", "-C", path, "sparse-checkout", "set", "--no-cone", "/" + TEMPLATE_FILE])
+    _run_git(["git", "-C", path, "checkout", "--quiet"])
+    return ProjectTemplate.load(path, repository_url=url, files_available=False)
+
+def load_cloned_template(path: str, repository_url: str) -> ProjectTemplate:
+    """Template of repository cloned as project directory. Its files are copied to temporary directory first, as
+    project directory is replaced with generated content. Remove returned template path when done."""
+    from .repository import Repository
+    temporary = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
+    os.makedirs(temporary, exist_ok=True)
+    copy_path = os.path.join(tempfile.mkdtemp(prefix="project-template-", dir=temporary), "template")
+    shutil.copytree(path, copy_path, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+    return ProjectTemplate.load(copy_path, repository_url=repository_url)
 
 # ------------------------------------------------------------------------------
 # Creating project.
