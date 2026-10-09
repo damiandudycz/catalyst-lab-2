@@ -110,6 +110,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         self.welcome_page = scrolled_window
         self.carousel.prepend(scrolled_window)
         self.pages.insert(0, scrolled_window)
+        self._all_pages.insert(0, scrolled_window) # Counted in positions of pages shown with set_page_visible.
         self.carousel.scroll_to(scrolled_window, False)
 
     def _setup_bottom_bar(self) -> Gtk.Widget:
