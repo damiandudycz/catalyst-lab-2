@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, re, threading, shutil
+import json, os, re, threading, shutil
 from datetime import datetime, timezone
 from gi.repository import GLib
 from .multistage_process import (
@@ -184,8 +184,34 @@ class ProjectBuild(MultiStageProcess):
             )
             self.complete_process(success=success)
 
+    # Records of stages in this run are saved when it starts, so stages that don't start (skipped after failure of
+    # stage they depend on, or cancelled) are listed in builds too.
+
+    def start(self, authorization_keeper=None):
+        for order, stage in enumerate(self.plan.build_order()):
+            try:
+                StageBuild(stage_id=stage.id, stage_name=stage.name, timestamp=self.timestamp, order=order,
+                           status=StageBuildStatus.SCHEDULED).save(self.project_directory)
+            except OSError as e:
+                print(f"Failed to save scheduled build of {stage.name}: {e}")
+        super().start(authorization_keeper)
+
+    def cancel(self):
+        self.cancelled = True
+        super().cancel()
+
     def complete_process(self, success: bool):
-        pass
+        status = StageBuildStatus.CANCELLED if getattr(self, "cancelled", False) else StageBuildStatus.SKIPPED
+        for stage in self.plan.build_order():
+            path = os.path.join(stage_builds_directory(self.project_directory, stage.name), self.timestamp)
+            try:
+                with open(os.path.join(path, StageBuild.METADATA_FILE), encoding="utf-8") as file:
+                    build = StageBuild.init_from(json.load(file), path=path)
+                if build.status == StageBuildStatus.SCHEDULED:
+                    build.status = status
+                    build.save(self.project_directory)
+            except (OSError, ValueError, KeyError) as e:
+                print(f"Failed to update build of {stage.name}: {e}")
 
 def running_project_build(project_directory, timestamp: str | None = None) -> ProjectBuild | None:
     """Build of project that is currently in progress, optionally only build started with given timestamp."""
@@ -417,7 +443,8 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
         process = self.multistage_process
         project = process.project_directory
         try:
-            self.build = StageBuild(stage_id=self.stage.id, stage_name=self.stage.name, timestamp=process.timestamp)
+            self.build = StageBuild(stage_id=self.stage.id, stage_name=self.stage.name, timestamp=process.timestamp,
+                                    order=process.plan.build_order().index(self.stage))
             self.build.save(project)
             # Seed:
             source_subpath = process.seed_subpath(self.stage)

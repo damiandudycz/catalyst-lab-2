@@ -19,8 +19,10 @@ class BuildRowState(Enum):
     FAILED = "Failed"
     BUILDING = "Building"
     SCHEDULED = "Scheduled"
-    SKIPPED = "Skipped"
+    SKIPPED = "Skipped" # Stage it depends on failed.
+    CANCELLED = "Cancelled" # Build was cancelled before stage started.
     INTERRUPTED = "Interrupted" # Not finished, but its build is not running anymore (eg. app was closed).
+    NOT_STARTED = "Not started" # Scheduled, but its build is not running anymore (eg. app was closed).
 
 class ProjectBuildsView(Gtk.Box):
     """Lists builds of project stages, grouped by build runs (stages built together). Shown from Builds section.
@@ -71,7 +73,9 @@ class ProjectBuildsView(Gtk.Box):
             if running_build and timestamp == running_build.timestamp:
                 entries = self._running_build_entries(running_build, run_builds)
             else:
-                entries = [(build.stage_name, build, _record_state(build)) for build in sorted(run_builds, key=lambda build: build.date)]
+                # Stages in build order (older records without it by date).
+                ordered = sorted(run_builds, key=lambda build: (build.order is None, build.order or 0, build.date))
+                entries = [(build.stage_name, build, _record_state(build)) for build in ordered]
             is_running = running_build is not None and timestamp == running_build.timestamp
             title = f"Started {_format_timestamp(timestamp, fallback=entries[0][1].date if entries and entries[0][1] else datetime.now())}"
             group = Adw.PreferencesGroup(title=title, description=_run_summary([state for _, _, state in entries]))
@@ -99,9 +103,10 @@ class ProjectBuildsView(Gtk.Box):
         for stage in running_build.plan.build_order():
             build = builds_by_stage.get(stage.id)
             step = steps_by_stage.get(stage.id)
-            if build is not None and build.status != StageBuildStatus.IN_PROGRESS:
+            started = build is not None and build.status.is_attempt
+            if started and build.status != StageBuildStatus.IN_PROGRESS:
                 state = _record_state(build)
-            elif build is not None:
+            elif started:
                 state = BuildRowState.BUILDING
             elif step is not None and step.state == MultiStageProcessStageState.FAILED:
                 state = BuildRowState.SKIPPED
@@ -220,6 +225,9 @@ def _record_state(build) -> BuildRowState:
     match build.status:
         case StageBuildStatus.COMPLETED: return BuildRowState.COMPLETED
         case StageBuildStatus.FAILED: return BuildRowState.FAILED
+        case StageBuildStatus.SKIPPED: return BuildRowState.SKIPPED
+        case StageBuildStatus.CANCELLED: return BuildRowState.CANCELLED
+        case StageBuildStatus.SCHEDULED: return BuildRowState.NOT_STARTED
     # Running builds are handled separately, so not finished build here is not running anymore.
     return BuildRowState.INTERRUPTED
 
@@ -243,7 +251,7 @@ def _state_icon(state: BuildRowState) -> str:
         case BuildRowState.COMPLETED: return "check-square-svgrepo-com-symbolic"
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error-box-svgrepo-com-symbolic"
         case BuildRowState.BUILDING: return "menu-dots-square-svgrepo-com-symbolic"
-        case BuildRowState.SKIPPED: return "square-svgrepo-com-symbolic"
+        case BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
         case _: return "clock-square-svgrepo-com-symbolic"
 
 def _state_css_class(state: BuildRowState) -> str | None:
@@ -251,5 +259,5 @@ def _state_css_class(state: BuildRowState) -> str | None:
         case BuildRowState.COMPLETED: return "success"
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error"
         case BuildRowState.BUILDING: return "accent"
-        case BuildRowState.SCHEDULED | BuildRowState.SKIPPED: return "dimmed"
+        case BuildRowState.SCHEDULED | BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.NOT_STARTED: return "dimmed"
     return None
