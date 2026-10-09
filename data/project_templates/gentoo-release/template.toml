@@ -10,8 +10,47 @@ default = "amd64"
 options = [
     { value = "amd64", title = "amd64" },
     { value = "arm64", title = "arm64" },
+    { value = "arm", title = "arm" },
+    { value = "ppc", title = "ppc (32-bit)" },
     { value = "ppc64", title = "ppc64" },
+    { value = "ppc64le", title = "ppc64le" },
+    { value = "s390x", title = "s390x" },
+    { value = "sparc", title = "sparc" },
+    { value = "x86", title = "x86" },
 ]
+
+[[variables]]
+id = "variant"
+title = "Variant"
+description = "Directory of releng specs for this architecture."
+when = "architecture in ['arm', 'sparc', 'x86']"
+options = [
+    { value = "armv7a", title = "ARMv7-A", when = "architecture == 'arm'" },
+    { value = "armv6j", title = "ARMv6", when = "architecture == 'arm'" },
+    { value = "armv5tel", title = "ARMv5TE", when = "architecture == 'arm'" },
+    { value = "armv4tl", title = "ARMv4T", when = "architecture == 'arm'" },
+    { value = "sparc64", title = "SPARC64", when = "architecture == 'sparc'" },
+    { value = "sparc", title = "SPARC (32-bit userland)", when = "architecture == 'sparc'" },
+    { value = "i686", title = "i686", when = "architecture == 'x86'" },
+    { value = "i686-ssemath", title = "i686 with SSE math", when = "architecture == 'x86'" },
+    { value = "i486", title = "i486", when = "architecture == 'x86'" },
+]
+
+[[variables]]
+id = "hardfloat"
+title = "Hard float"
+description = "Floating point unit used for floating point calculations."
+type = "boolean"
+default = true
+when = "variant in ['armv7a', 'armv6j']"
+
+[[variables]]
+id = "power9"
+title = "POWER9"
+description = "Optimized for POWER9 processors."
+type = "boolean"
+default = false
+when = "architecture == 'ppc64le'"
 
 [[variables]]
 id = "init"
@@ -28,9 +67,14 @@ title = "Installation ISO"
 description = "Minimal installation ISO, built from OpenRC stage3 like official releases."
 type = "boolean"
 default = true
-when = "init == 'openrc' and architecture in ['amd64', 'arm64']"
+when = "init == 'openrc' and (architecture in ['amd64', 'arm64', 'ppc', 'ppc64le'] or variant in ['sparc64', 'i486'])"
 
 [values]
+# Releng spec names, eg. armv7a/stage1-hardfloat-openrc-23.spec, stage3-systemd-power9le-23.spec.
+spec_directory = "{{ f'{variant}/' if variant else '' }}"
+spec_flavor = "{{ init + ('-power9le' if power9 else '') }}"
+spec_prefix = "{{ 'hardfloat-' if hardfloat else '' }}"
+iso_suffix = "{{ '-openrc' if variant == 'i486' else '' }}"
 stage4_packages = "{{ ['app-admin/sudo', 'app-portage/gentoolkit', 'net-misc/chrony'] + (['app-admin/sysklogd', 'net-misc/dhcpcd'] if init == 'openrc' else []) }}"
 stage4_services = "{{ ['sysklogd|default', 'dhcpcd|default', 'chronyd|default', 'sshd|default'] if init == 'openrc' else [] }}"
 
@@ -38,14 +82,14 @@ stage4_services = "{{ ['sysklogd|default', 'dhcpcd|default', 'chronyd|default', 
 id = "stage1"
 name = "stage1-{{ init }}"
 target = "stage1"
-releng_template = "stage1-{{ init }}-23.spec"
+releng_template = "{{ spec_directory }}stage1-{{ spec_prefix }}{{ spec_flavor }}-23.spec"
 
 [[stages]]
 id = "stage3"
 parent = "stage1"
 name = "stage3-{{ init }}"
 target = "stage3"
-releng_template = "stage3-{{ init }}-23.spec"
+releng_template = "{{ spec_directory }}stage3-{{ spec_prefix }}{{ spec_flavor }}-23.spec"
 
 [[stages]]
 id = "stage4"
@@ -61,7 +105,7 @@ id = "livecd-stage1"
 parent = "stage3"
 name = "livecd-stage1"
 target = "livecd_stage1"
-releng_template = "installcd-stage1.spec"
+releng_template = "{{ spec_directory }}installcd-stage1{{ iso_suffix }}.spec"
 when = "iso"
 
 [[stages]]
@@ -69,5 +113,5 @@ id = "livecd-stage2"
 parent = "livecd-stage1"
 name = "livecd-stage2"
 target = "livecd_stage2"
-releng_template = "installcd-stage2-minimal.spec"
+releng_template = "{{ spec_directory }}installcd-stage2-minimal{{ iso_suffix }}.spec"
 when = "iso"
