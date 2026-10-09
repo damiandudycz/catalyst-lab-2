@@ -10,7 +10,7 @@ from .deploy_system import (
 )
 from .deploy_target import (
     TargetMachine, TargetFilesystem, PartitionPlan, PartitionSpec, PartitionType, GIB, MIB, format_size,
-    architecture_supported, default_layout, PartitionTable, TargetFirmware, machine_architecture
+    architecture_supported, default_layout, PartitionTable, TargetFirmware, machine_architecture, MOUNTED_TYPES
 )
 from .ssh_connection import SSHConnection
 from .local_disk_connection import LocalDiskConnection
@@ -82,7 +82,9 @@ class DeployCreateView(Gtk.Box):
     hostname_row = Gtk.Template.Child()
     ssh_row = Gtk.Template.Child()
     reboot_row = Gtk.Template.Child()
-    system_status_label = Gtk.Template.Child()
+    hostname_status_label = Gtk.Template.Child()
+    localization_status_label = Gtk.Template.Child()
+    network_status_label = Gtk.Template.Child()
     timezone_row = Gtk.Template.Child()
     locale_row = Gtk.Template.Child()
     keymap_row = Gtk.Template.Child()
@@ -97,6 +99,7 @@ class DeployCreateView(Gtk.Box):
     root_password_row = Gtk.Template.Child()
     root_password_confirm_row = Gtk.Template.Child()
     users_group = Gtk.Template.Child()
+    root_status_label = Gtk.Template.Child()
     users_status_label = Gtk.Template.Child()
     boot_page = Gtk.Template.Child()
     stage_contents_row = Gtk.Template.Child()
@@ -244,6 +247,7 @@ class DeployCreateView(Gtk.Box):
         self.machine.firmware = self._firmware()
         self.machine.uefi = self.machine.firmware == TargetFirmware.UEFI
         self.machine_row.set_subtitle(GLib.markup_escape_text(self.machine.description))
+        self._suggest_table()
         if self.selected_disk:
             self.layout = self._default_layout()
             self._load_partition_rows()
@@ -374,6 +378,7 @@ class DeployCreateView(Gtk.Box):
             self.gateway_row.set_text(machine.gateway)
             self.dns_row.set_text(machine.dns)
             self._update_boot_options()
+        self._suggest_table()
         self._load_disks()
         self.wizard_view._refresh_buttons_state()
 
@@ -415,13 +420,19 @@ class DeployCreateView(Gtk.Box):
         if self.selected_disk is None or self.machine is None:
             return None
         return PartitionPlan(disk=self.selected_disk, uefi=self.machine.uefi, layout=self.layout, table=self._table(),
-                             local=self.machine.local)
+                             local=self.machine.local, raspberry_pi=self.machine.raspberry_pi)
 
     def _table(self) -> PartitionTable:
         return list(PartitionTable)[self.table_row.get_selected()]
 
     def _default_layout(self) -> list[PartitionSpec]:
-        return default_layout(self.selected_disk, self.machine.uefi, self.machine.memory, self.machine.architecture, self._table())
+        return default_layout(self.selected_disk, self.machine.uefi, self.machine.memory, self.machine.architecture, self._table(),
+                              raspberry_pi=self.machine.raspberry_pi)
+
+    def _suggest_table(self):
+        """Raspberry Pi models before 4 boot only from MBR."""
+        if self.machine and self.machine.raspberry_pi:
+            self.table_row.set_selected(list(PartitionTable).index(PartitionTable.MBR))
 
     @Gtk.Template.Callback()
     def on_table_changed(self, row, param):
@@ -505,9 +516,10 @@ class DeployCreateView(Gtk.Box):
         self.network_mode_row.set_visible(network.service != NetworkService.NONE)
         for widget in (self.interface_row, self.address_row, self.gateway_row, self.dns_row):
             widget.set_visible(static)
-        error = self._system_error()
-        self.system_status_label.set_visible(error is not None)
-        self.system_status_label.set_label(error or "")
+        # Errors are shown under groups of fields they refer to.
+        _show_error(self.hostname_status_label, self._hostname_error())
+        _show_error(self.localization_status_label, self._localization().error())
+        _show_error(self.network_status_label, network.error())
         self.wizard_view._refresh_buttons_state()
         self.on_boot_changed() # Lists packages installed for selected network service.
 
@@ -515,11 +527,10 @@ class DeployCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_users_changed(self, *args):
-        error = self._users_error()
         # Missing root password is not shown as error until something was typed.
-        typed = bool(self.root_password_row.get_text() or self.root_password_confirm_row.get_text() or self.user_rows)
-        self.users_status_label.set_visible(error is not None and typed)
-        self.users_status_label.set_label(error or "")
+        typed = bool(self.root_password_row.get_text() or self.root_password_confirm_row.get_text())
+        _show_error(self.root_status_label, self._root_password_error() if typed else None)
+        _show_error(self.users_status_label, self._user_accounts_error())
         self.wizard_view._refresh_buttons_state()
 
     @Gtk.Template.Callback()
@@ -536,10 +547,16 @@ class DeployCreateView(Gtk.Box):
         self.on_users_changed()
 
     def _users_error(self) -> str | None:
+        return self._root_password_error() or self._user_accounts_error()
+
+    def _root_password_error(self) -> str | None:
         if not self.root_password_row.get_text():
             return "Set root password"
         if self.root_password_row.get_text() != self.root_password_confirm_row.get_text():
             return "Root passwords don't match"
+        return None
+
+    def _user_accounts_error(self) -> str | None:
         names = set()
         for row in self.user_rows:
             if error := row.error():
@@ -584,17 +601,22 @@ class DeployCreateView(Gtk.Box):
             else:
                 labels.append(f"{item.display_name}, will be installed")
         self.bootloader_row.set_model(Gtk.StringList.new(labels))
-        self.bootloader_row.set_selected(self.bootloader_options.index(default_bootloader(contents, architecture, uefi, removable)))
-        # Kernel from stage is used when it has one, otherwise prebuilt distribution kernel is installed.
-        self.kernel_options = ([Kernel.STAGE] if contents.kernels else []) + [Kernel.DISTRIBUTION_BINARY, Kernel.DISTRIBUTION, Kernel.NONE]
+        raspberry_pi = self.machine.raspberry_pi
+        self.bootloader_row.set_selected(self.bootloader_options.index(default_bootloader(contents, architecture, uefi, removable, raspberry_pi)))
+        # Kernel from stage is used when it has one, otherwise prebuilt kernel is installed (Raspberry Pi kernel on Raspberry
+        # Pi, distribution kernel elsewhere). Raspberry Pi kernel is offered only on architectures of Raspberry Pi.
+        kernels = [Kernel.DISTRIBUTION_BINARY, Kernel.DISTRIBUTION]
+        if Kernel.RASPBERRY_PI.supported(architecture):
+            kernels.insert(0 if raspberry_pi else 2, Kernel.RASPBERRY_PI)
+        self.kernel_options = ([Kernel.STAGE] if contents.kernels else []) + kernels + [Kernel.NONE]
         self.kernel_row.set_model(Gtk.StringList.new([
             f"{item.display_name} ({', '.join(contents.kernels)})" if item == Kernel.STAGE else item.display_name
             for item in self.kernel_options
         ]))
         self.kernel_row.set_selected(0)
-        # Firmware is offered only when stage doesn't have it.
+        # Firmware is offered only when stage doesn't have it. Raspberry Pi kernel doesn't need linux-firmware.
         self.firmware_row.set_visible(not contents.firmware)
-        self.firmware_row.set_active(not contents.kernels and not contents.firmware)
+        self.firmware_row.set_active(not contents.kernels and not contents.firmware and not raspberry_pi)
         self.on_boot_changed()
 
     def _install_firmware(self) -> bool:
@@ -614,11 +636,12 @@ class DeployCreateView(Gtk.Box):
             return
         contents = self.contents or StageContents()
         bootloader = self._selected_bootloader()
-        self._update_bootloader_warnings(bootloader)
+        kernel = self._selected_kernel()
+        has_kernel = bool(kernel.package) or (kernel == Kernel.STAGE and bool(contents.kernels))
+        self._update_bootloader_warnings(bootloader, has_kernel)
         installs = []
         if bootloader.needs_package and bootloader not in contents.bootloaders:
             installs.append(bootloader.package(contents.init))
-        kernel = self._selected_kernel()
         network = self._network().service
         if network.package and network not in contents.network_services:
             installs.append(network.package)
@@ -638,24 +661,26 @@ class DeployCreateView(Gtk.Box):
                          "it needs to be installed and configuring the system is slower.")
         if kernel == Kernel.DISTRIBUTION:
             notes.append("Compiling kernel can take an hour or more.")
-        if kernel == Kernel.NONE and bootloader != Bootloader.NONE:
-            notes.append("Bootloader can't start the system until kernel is installed.")
+        # Missing kernel is shown as bootloader warning.
         if bootloader == Bootloader.NONE:
             notes.append("System won't boot until bootloader is installed manually.")
         self.boot_info_label.set_label(" ".join(notes))
         self.boot_info_label.set_visible(bool(notes))
 
-    def _update_bootloader_warnings(self, bootloader: Bootloader):
-        warnings = bootloader_warnings(bootloader, self.machine.uefi, self.machine.local) if self.machine else []
+    def _update_bootloader_warnings(self, bootloader: Bootloader, has_kernel: bool):
+        warnings = bootloader_warnings(bootloader, self.machine.uefi, self.machine.local, has_kernel) if self.machine else []
         self.bootloader_warning_icon.set_visible(bool(warnings))
         self.bootloader_warning_icon.set_tooltip_text("\n\n".join(warning.details for warning in warnings) or None)
         self.bootloader_row.set_subtitle(GLib.markup_escape_text(", ".join(warning.summary for warning in warnings)))
 
     def _system_error(self) -> str | None:
+        return self._hostname_error() or self._localization().error() or self._network().error()
+
+    def _hostname_error(self) -> str | None:
         hostname = self.hostname_row.get_text().strip()
         if hostname and not all(character.isalnum() or character in "-." for character in hostname):
             return "Hostname can contain only letters, digits, dots and hyphens"
-        return self._localization().error() or self._network().error()
+        return None
 
     def _setup_locales_editor(self):
         """Locales are edited one per line in expandable row, like list values in stage settings. Row subtitle shows
@@ -763,6 +788,11 @@ class DeployCreateView(Gtk.Box):
         self.wizard_view.set_installation(installation)
 
 
+def _show_error(label: Gtk.Label, error: str | None):
+    label.set_visible(error is not None)
+    label.set_label(error or "")
+
+
 _USERNAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 
 class UserRow(Adw.ExpanderRow):
@@ -868,6 +898,10 @@ class PartitionRow(Adw.ExpanderRow):
                 self.mount_row.set_text("/efi")
                 self.rest_row.set_active(False)
                 self.size_row.set_value(1)
+            elif self.spec.type == PartitionType.FIRMWARE:
+                self.mount_row.set_text("/boot")
+                self.rest_row.set_active(False)
+                self.size_row.set_value(0.5)
             elif self.spec.type == PartitionType.LINUX and self.mount_row.get_text() == "/efi":
                 self.mount_row.set_text("")
             self._loading = False
@@ -883,20 +917,22 @@ class PartitionRow(Adw.ExpanderRow):
     def _update_visibility(self):
         partition_type = self.spec.type
         self.filesystem_row.set_visible(partition_type == PartitionType.LINUX)
-        self.mount_row.set_visible(partition_type in (PartitionType.LINUX, PartitionType.EFI))
+        self.mount_row.set_visible(partition_type in MOUNTED_TYPES)
         self.rest_row.set_visible(partition_type in (PartitionType.LINUX, PartitionType.SWAP))
         self.size_row.set_visible(partition_type != PartitionType.BIOS_BOOT and not (self.rest_row.get_visible() and self.rest_row.get_active()))
 
     def update(self, device: str, size: int, available: int, first: bool, last: bool):
         spec = self.spec
         self.rest_row.set_subtitle(f"Uses {format_size(size)}" if spec.size is None else f"Would use {format_size(available)}")
-        purpose = spec.mount_point if spec.type in (PartitionType.LINUX, PartitionType.EFI) and spec.mount_point else spec.type.display_name
+        purpose = spec.mount_point if spec.type in MOUNTED_TYPES and spec.mount_point else spec.type.display_name
         self.set_title(GLib.markup_escape_text(f"{device} · {purpose}"))
         details = [format_size(size) + (" (remaining space)" if spec.size is None else "")]
         if spec.type == PartitionType.LINUX:
             details.append((spec.filesystem or TargetFilesystem.EXT4).value)
         elif spec.type == PartitionType.EFI:
             details.append("EFI system, vfat")
+        elif spec.type == PartitionType.FIRMWARE:
+            details.append("Firmware boot, vfat")
         else:
             details.append(spec.type.display_name)
         self.set_subtitle(GLib.markup_escape_text(", ".join(details)))

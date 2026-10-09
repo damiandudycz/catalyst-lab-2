@@ -367,7 +367,8 @@ class DeployStepPackages(DeployStep):
         process = self.multistage_process
         platform = grub_platform(process.machine.architecture, process.machine.uefi) if "sys-boot/grub" in process.packages else None
         script = f"ROOT={quote(process.root)}\n" + packages_script(process.packages, platform, process.contents.init,
-                                                                   generic_initramfs=process.machine.local)
+                                                                   generic_initramfs=process.machine.local,
+                                                                   bootloader=process.settings.bootloader)
         self.remote(script, "Failed to install packages, machine needs internet connection")
 
 class DeployStepNetwork(DeployStep):

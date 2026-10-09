@@ -16,6 +16,7 @@ class Bootloader(Enum):
     REFIND = "refind"
     EFI_STUB = "efi-stub"
     KBOOT = "kboot" # Configuration of petitboot (PS3), no bootloader is installed.
+    RASPBERRY_PI = "raspberry-pi" # Firmware of Raspberry Pi boots kernel from FAT /boot (config.txt, cmdline.txt).
     NONE = "none"
 
     @property
@@ -26,6 +27,7 @@ class Bootloader(Enum):
             Bootloader.REFIND: "rEFInd",
             Bootloader.EFI_STUB: "EFI stub (kernel started by firmware)",
             Bootloader.KBOOT: "kboot (PS3 petitboot)",
+            Bootloader.RASPBERRY_PI: "Raspberry Pi firmware",
             Bootloader.NONE: "Don't install bootloader",
         }[self]
 
@@ -36,6 +38,8 @@ class Bootloader(Enum):
             Bootloader.SYSTEMD_BOOT: "sys-apps/systemd" if init == "systemd" else "sys-apps/systemd-utils",
             Bootloader.REFIND: "sys-boot/refind",
             Bootloader.EFI_STUB: "sys-boot/efibootmgr",
+            # Boot files of older models (Raspberry Pi 5 has them in EEPROM).
+            Bootloader.RASPBERRY_PI: "sys-boot/raspberrypi-firmware",
         }.get(self)
 
     @property
@@ -52,6 +56,9 @@ class Bootloader(Enum):
             return False
         if self == Bootloader.KBOOT:
             return architecture in ("ppc64", "ppc64le") and not uefi # Machines booting with petitboot.
+        if self == Bootloader.RASPBERRY_PI:
+            from .deploy_target import RASPBERRY_PI_ARCHITECTURES
+            return architecture in RASPBERRY_PI_ARCHITECTURES and not uefi
         if self == Bootloader.GRUB:
             return uefi or architecture in _X86
         return uefi # Others are UEFI applications.
@@ -62,42 +69,29 @@ class BootloaderWarning:
     summary: str
     details: str
 
-def bootloader_warnings(bootloader: Bootloader, uefi: bool, removable: bool) -> list[BootloaderWarning]:
-    """Boot entries that have to be added or updated manually with selected bootloader. Removable disks (prepared on
-    this computer) get no boot entry in firmware of target machine."""
+def bootloader_warnings(bootloader: Bootloader, uefi: bool, removable: bool, has_kernel: bool) -> list[BootloaderWarning]:
+    """What can't be set up for booting installed system. Removable disks (prepared on this computer) get no boot entry
+    in firmware of target machine."""
     warnings = []
+    if bootloader != Bootloader.NONE and not has_kernel:
+        failure = ("its menu will be empty" if bootloader == Bootloader.GRUB
+                   else "installation fails at Install bootloader step, as it can't be configured without kernel")
+        warnings.append(BootloaderWarning(
+            "No kernel to boot",
+            f"Stage doesn't contain kernel and no kernel is installed, so system can't boot. {bootloader.display_name} "
+            f"is installed, but {failure}. Select distribution kernel to install one."))
     if removable and uefi and bootloader in (Bootloader.GRUB, Bootloader.SYSTEMD_BOOT, Bootloader.REFIND):
         warnings.append(BootloaderWarning(
             "No firmware boot entry",
             "No boot entry is added to firmware of the machine, it starts the disk from fallback path EFI/BOOT. "
             "If it doesn't, select the disk in boot menu of the machine."))
-    match bootloader:
-        case Bootloader.GRUB:
-            warnings.append(BootloaderWarning(
-                "Menu not updated for new kernels",
-                "GRUB menu lists kernels installed now. After installing other kernels run grub-mkconfig -o "
-                "/boot/grub/grub.cfg, or enable grub USE flag of sys-kernel/installkernel."))
-        case Bootloader.SYSTEMD_BOOT:
-            warnings.append(BootloaderWarning(
-                "Entry not updated for new kernels",
-                "Kernel and initramfs are copied to ESP with fixed boot entry. New kernels are not added automatically, "
-                "copy them to ESP and update loader/entries/gentoo.conf, or enable systemd-boot USE flag of "
-                "sys-kernel/installkernel."))
-        case Bootloader.EFI_STUB:
-            warnings.append(BootloaderWarning(
-                "Kernel not updated automatically",
-                "Kernel is copied to ESP as EFI/gentoo/linux.efi and started by firmware. New kernels have to be "
-                "copied there manually."))
-        case Bootloader.KBOOT:
-            warnings.append(BootloaderWarning(
-                "Entries not updated for new kernels",
-                "kboot.conf lists kernels installed now. New kernels need their entries added to kboot.conf."))
     return warnings
 
 class Kernel(Enum):
     STAGE = "stage"
     DISTRIBUTION_BINARY = "gentoo-kernel-bin"
     DISTRIBUTION = "gentoo-kernel"
+    RASPBERRY_PI = "raspberrypi-image" # Prebuilt kernel of Raspberry Pi, with device trees and overlays.
     NONE = "none"
 
     @property
@@ -106,12 +100,20 @@ class Kernel(Enum):
             Kernel.STAGE: "Kernel from stage",
             Kernel.DISTRIBUTION_BINARY: "Distribution kernel, prebuilt",
             Kernel.DISTRIBUTION: "Distribution kernel, compiled on machine",
+            Kernel.RASPBERRY_PI: "Raspberry Pi kernel, prebuilt",
             Kernel.NONE: "Don't install kernel",
         }[self]
 
     @property
     def package(self) -> str | None:
-        return {Kernel.DISTRIBUTION_BINARY: "sys-kernel/gentoo-kernel-bin", Kernel.DISTRIBUTION: "sys-kernel/gentoo-kernel"}.get(self)
+        return {Kernel.DISTRIBUTION_BINARY: "sys-kernel/gentoo-kernel-bin", Kernel.DISTRIBUTION: "sys-kernel/gentoo-kernel",
+                Kernel.RASPBERRY_PI: "sys-kernel/raspberrypi-image"}.get(self)
+
+    def supported(self, architecture: str) -> bool:
+        if self == Kernel.RASPBERRY_PI:
+            from .deploy_target import RASPBERRY_PI_ARCHITECTURES
+            return architecture in RASPBERRY_PI_ARCHITECTURES
+        return True
 
 FIRMWARE_PACKAGE = "sys-kernel/linux-firmware"
 
@@ -121,6 +123,7 @@ _BOOTLOADER_FILES = {
     Bootloader.SYSTEMD_BOOT: re.compile(r"^usr/lib/systemd/boot/efi/systemd-boot\w+\.efi$"),
     Bootloader.REFIND: re.compile(r"^usr/s?bin/refind-install$"),
     Bootloader.EFI_STUB: re.compile(r"^usr/s?bin/efibootmgr$"),
+    Bootloader.RASPBERRY_PI: re.compile(r"^boot/(start4?\.elf|bootcode\.bin)$"),
 }
 _KERNEL = re.compile(r"^boot/(vmlinuz|vmlinux|kernel|Image)[^/]*$")
 _INITRAMFS = re.compile(r"^boot/(initramfs|initrd)[^/]*$")
@@ -173,8 +176,11 @@ class StageContents:
         firmware = ", linux-firmware" if self.firmware else ""
         return f"Stage contains {bootloaders}, {kernel}{firmware}" + (f", {self.init}" if self.init else "")
 
-def default_bootloader(contents: StageContents, architecture: str, uefi: bool, removable: bool = False) -> Bootloader:
+def default_bootloader(contents: StageContents, architecture: str, uefi: bool, removable: bool = False,
+                       raspberry_pi: bool = False) -> Bootloader:
     """First supported bootloader found in stage, otherwise GRUB (installed from repository) when supported."""
+    if raspberry_pi:
+        return Bootloader.RASPBERRY_PI
     if Bootloader.KBOOT.supported(architecture, uefi, removable):
         return Bootloader.KBOOT
     for bootloader in (Bootloader.GRUB, Bootloader.SYSTEMD_BOOT, Bootloader.REFIND, Bootloader.EFI_STUB):
@@ -196,7 +202,8 @@ trap 'umount -l "$ROOT/run" "$ROOT/dev" "$ROOT/sys" "$ROOT/proc" 2>/dev/null' EX
 in_root() { chroot "$ROOT" /usr/bin/env -i HOME=/root TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin "$@"; }
 '''
 
-def packages_script(packages: list[str], grub_platform: str | None, init: str | None, generic_initramfs: bool = False) -> str:
+def packages_script(packages: list[str], grub_platform: str | None, init: str | None, generic_initramfs: bool = False,
+                    bootloader: Bootloader | None = None) -> str:
     """Installs packages in installed system with emerge. Gentoo repository is downloaded when stage doesn't have it.
     Binary packages are used when system has binary repository configured. Generic initramfs (with all drivers) is
     generated when system is installed on other computer than the one it boots on."""
@@ -213,8 +220,10 @@ fi
         package = "sys-apps/systemd" if init == "systemd" else "sys-apps/systemd-utils"
         lines.append(f'mkdir -p "$ROOT/etc/portage/package.use" && echo "{package} boot kernel-install" > "$ROOT/etc/portage/package.use/catalystlab-boot"')
     if any(package.startswith("sys-kernel/gentoo-kernel") for package in packages):
-        # Distribution kernel is installed to /boot by installkernel, with initramfs generated by dracut.
-        lines.append('mkdir -p "$ROOT/etc/portage/package.use" && echo "sys-kernel/installkernel dracut" > "$ROOT/etc/portage/package.use/catalystlab-kernel"')
+        # Distribution kernel is installed to /boot by installkernel, with initramfs generated by dracut. With GRUB,
+        # installkernel also regenerates its menu, so kernels installed later are added to it.
+        flags = "dracut grub" if bootloader == Bootloader.GRUB else "dracut"
+        lines.append(f'mkdir -p "$ROOT/etc/portage/package.use" && echo "sys-kernel/installkernel {flags}" > "$ROOT/etc/portage/package.use/catalystlab-kernel"')
         if generic_initramfs:
             lines.append('mkdir -p "$ROOT/etc/dracut.conf.d" && echo \'hostonly="no"\' > "$ROOT/etc/dracut.conf.d/catalystlab.conf"')
     if FIRMWARE_PACKAGE in packages:
@@ -233,6 +242,8 @@ def bootloader_script(bootloader: Bootloader, architecture: str, uefi: bool, dis
     firmware of this computer."""
     if bootloader == Bootloader.KBOOT:
         return kboot_script(root_device, separate_boot, ps3=ps3, by_partuuid=removable)
+    if bootloader == Bootloader.RASPBERRY_PI:
+        return raspberry_pi_script(root_device, architecture)
     if uefi and not esp:
         return None
     root = f'root=UUID=$(blkid -s UUID -o value {root_device}) rw'
@@ -330,6 +341,25 @@ done
 mv "$CONFIG.new" "$CONFIG"
 echo "kboot configuration ${{CONFIG#$ROOT}}:"
 cat "$CONFIG"
+"""
+
+def raspberry_pi_script(root_device: str, architecture: str) -> str:
+    """Boot configuration read by Raspberry Pi firmware from FAT /boot: cmdline.txt with root partition (by PARTUUID,
+    device names differ between SD card, USB and NVMe), and config.txt when stage doesn't have one. Firmware picks
+    kernel for model itself (kernel_2712.img on Pi 5, kernel8.img on other 64-bit models)."""
+    arm_64bit = "arm_64bit=1" if architecture == "aarch64" else ""
+    return f"""set -e
+ls "$ROOT"/boot/kernel*.img > /dev/null 2>&1 || {{ echo "No Raspberry Pi kernel in /boot (kernel*.img), boot configuration can't be created"; exit 1; }}
+echo "Kernels: $(cd "$ROOT/boot" && ls kernel*.img | tr '\\n' ' ')"
+PARTUUID=$(blkid -s PARTUUID -o value {root_device})
+[ -n "$PARTUUID" ] || {{ echo "Failed to read PARTUUID of {root_device}"; exit 1; }}
+FSTYPE=$(blkid -s TYPE -o value {root_device})
+echo "console=serial0,115200 console=tty1 root=PARTUUID=$PARTUUID rootfstype=$FSTYPE fsck.repair=yes rootwait" > "$ROOT/boot/cmdline.txt"
+if [ ! -f "$ROOT/boot/config.txt" ]; then
+    printf '%s\\n' "# Created by Catalyst Lab, see https://www.raspberrypi.com/documentation/computers/config_txt.html" {arm_64bit and f'"{arm_64bit}"'} 'dtparam=audio=on' 'auto_initramfs=1' > "$ROOT/boot/config.txt"
+fi
+echo "cmdline.txt:"; cat "$ROOT/boot/cmdline.txt"
+echo "config.txt:"; cat "$ROOT/boot/config.txt"
 """
 
 def grub_target(architecture: str, uefi: bool) -> str | None:

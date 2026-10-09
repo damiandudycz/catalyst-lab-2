@@ -274,6 +274,15 @@
                   </object>
                 </child>
                 <child>
+                  <object class="GtkLabel" id="hostname_status_label">
+                    <property name="visible">False</property>
+                    <property name="wrap">True</property>
+                    <style>
+                      <class name="error"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
                   <object class="AdwPreferencesGroup">
                     <property name="title">Localization</property>
                     <property name="description">Suggested from this computer.</property>
@@ -294,6 +303,15 @@
                         <signal name="changed" handler="on_system_changed"/>
                       </object>
                     </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="localization_status_label">
+                    <property name="visible">False</property>
+                    <property name="wrap">True</property>
+                    <style>
+                      <class name="error"/>
+                    </style>
                   </object>
                 </child>
                 <child>
@@ -346,7 +364,7 @@
                   </object>
                 </child>
                 <child>
-                  <object class="GtkLabel" id="system_status_label">
+                  <object class="GtkLabel" id="network_status_label">
                     <property name="visible">False</property>
                     <property name="wrap">True</property>
                     <style>
@@ -393,6 +411,15 @@
                   </object>
                 </child>
                 <child>
+                  <object class="GtkLabel" id="root_status_label">
+                    <property name="visible">False</property>
+                    <property name="wrap">True</property>
+                    <style>
+                      <class name="error"/>
+                    </style>
+                  </object>
+                </child>
+                <child>
                   <object class="AdwPreferencesGroup" id="users_group">
                     <property name="title">Users</property>
                     <property name="description">Groups not existing in stage are skipped.</property>
@@ -413,18 +440,18 @@
                   </object>
                 </child>
                 <child>
-                  <object class="AdwPreferencesGroup" id="ssh_keys_group">
-                    <property name="title">SSH keys</property>
-                    <property name="description">Selected keys of this computer are authorized for root and added users.</property>
-                  </object>
-                </child>
-                <child>
                   <object class="GtkLabel" id="users_status_label">
                     <property name="visible">False</property>
                     <property name="wrap">True</property>
                     <style>
                       <class name="error"/>
                     </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwPreferencesGroup" id="ssh_keys_group">
+                    <property name="title">SSH keys</property>
+                    <property name="description">Selected keys of this computer are authorized for root and added users.</property>
                   </object>
                 </child>
               </object>
