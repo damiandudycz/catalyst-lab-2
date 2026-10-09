@@ -62,6 +62,7 @@ class DeployInstallation(MultiStageProcess):
                  settings: DeploySystemSettings, contents: StageContents):
         self.build = build
         self.project_name = project_name
+        self.project_id = None # Set by wizard, for status of project in Deploy section.
         self.connection = connection
         self.machine = machine
         self.plan = plan
@@ -327,18 +328,3 @@ def is_deployable(project_directory, build) -> bool:
     # Stage could be removed from project, its archive name tells its target then.
     target = (stage.target if stage else build.artifact.split("-")[0]).replace("-", "_")
     return target in DEPLOYABLE_TARGETS
-
-def deployable_builds() -> list[tuple]:
-    """(project, builds) for projects having deployable builds, newest builds first."""
-    from .repository import Repository
-    from .project_build import load_project_builds
-    result = []
-    for project in Repository.ProjectDirectory.value:
-        try:
-            builds = [build for build in load_project_builds(project) if is_deployable(project, build)]
-        except Exception as e:
-            print(f"Failed to load builds of {project.name}: {e}")
-            continue
-        if builds:
-            result.append((project, builds))
-    return result

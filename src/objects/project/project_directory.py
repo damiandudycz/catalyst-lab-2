@@ -79,6 +79,26 @@ class ProjectDirectory(GitDirectory):
             return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
         return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
 
+    @property
+    def deploy_summary(self) -> str:
+        """Builds of project that can be deployed, for Deploy section."""
+        from .project_build import load_project_builds
+        from .deploy_installation import is_deployable
+        builds = [build for build in load_project_builds(self) if is_deployable(self, build)]
+        if not builds:
+            return "No stage3 or stage4 builds"
+        return f"{len(builds)} build{'s' if len(builds) != 1 else ''} ready to deploy, last {builds[0].date.strftime('%Y-%m-%d %H:%M')}"
+
+    @property
+    def deploy_status_indicator_values(self):
+        """Blinking indicator while build of project is being deployed."""
+        from .deploy_installation import DeployInstallation
+        from .multistage_process import MultiStageProcess, MultiStageProcessState
+        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+        deploying = any(process.project_id == self.id and process.status == MultiStageProcessState.IN_PROGRESS
+                        for process in MultiStageProcess.get_started_processes_by_class(DeployInstallation))
+        return StatusIndicatorValues(state=StatusIndicatorState.ENABLED if deploying else StatusIndicatorState.DISABLED, blinking=deploying)
+
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:
             self.metadata = ProjectConfiguration()

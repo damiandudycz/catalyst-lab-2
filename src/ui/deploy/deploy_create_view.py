@@ -540,6 +540,7 @@ class DeployCreateView(Gtk.Box):
             connection=self.connection, machine=self.machine, plan=plan, settings=settings,
             contents=self.contents or StageContents(),
         )
+        installation.project_id = self.project_directory.id if self.project_directory else None
         self.installation_in_progress = installation
         installation.start()
         self.wizard_view.set_installation(installation)

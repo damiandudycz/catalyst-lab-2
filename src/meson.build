@@ -136,6 +136,7 @@ catalystlab_sources = [
   'ui/build_machine/build_machine_create_view.py',
   'ui/build_machine/build_machine_details_view.py',
   'ui/deploy/deploy_create_view.py',
+  'ui/project/project_deploy_view.py',
   'ui/toolset/toolset_details_view.py',
 ]
 
