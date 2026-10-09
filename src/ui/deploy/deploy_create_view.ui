@@ -123,59 +123,45 @@
                   </object>
                 </child>
                 <child>
-                  <object class="AdwPreferencesGroup">
-                    <property name="title">Partitioning</property>
-                    <child>
-                      <object class="AdwComboRow" id="filesystem_row">
-                        <property name="title">Root filesystem</property>
-                        <property name="model">
-                          <object class="GtkStringList">
-                            <items>
-                              <item>ext4</item>
-                              <item>xfs</item>
-                              <item>btrfs</item>
-                            </items>
+                  <object class="AdwPreferencesGroup" id="partitions_group">
+                    <property name="title">Partitions</property>
+                    <property name="header-suffix">
+                      <object class="GtkBox">
+                        <property name="spacing">6</property>
+                        <child>
+                          <object class="GtkButton" id="default_layout_button">
+                            <property name="label">Default layout</property>
+                            <signal name="clicked" handler="on_default_layout_clicked"/>
+                            <style>
+                              <class name="flat"/>
+                            </style>
                           </object>
-                        </property>
-                        <signal name="notify::selected" handler="on_partitioning_changed"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="AdwSpinRow" id="swap_row">
-                        <property name="title">Swap</property>
-                        <property name="subtitle">GiB, 0 for none</property>
-                        <property name="adjustment">
-                          <object class="GtkAdjustment">
-                            <property name="lower">0</property>
-                            <property name="upper">256</property>
-                            <property name="step-increment">1</property>
-                            <property name="page-increment">4</property>
+                        </child>
+                        <child>
+                          <object class="GtkButton" id="add_partition_button">
+                            <property name="child">
+                              <object class="AdwButtonContent">
+                                <property name="icon-name">list-add-symbolic</property>
+                                <property name="label">Add partition</property>
+                              </object>
+                            </property>
+                            <signal name="clicked" handler="on_add_partition_clicked"/>
+                            <style>
+                              <class name="flat"/>
+                            </style>
                           </object>
-                        </property>
-                        <signal name="notify::value" handler="on_partitioning_changed"/>
+                        </child>
                       </object>
-                    </child>
-                    <child>
-                      <object class="AdwSpinRow" id="efi_row">
-                        <property name="title">EFI system partition</property>
-                        <property name="subtitle">MiB, holds bootloader</property>
-                        <property name="adjustment">
-                          <object class="GtkAdjustment">
-                            <property name="lower">256</property>
-                            <property name="upper">4096</property>
-                            <property name="value">1024</property>
-                            <property name="step-increment">256</property>
-                            <property name="page-increment">512</property>
-                          </object>
-                        </property>
-                        <signal name="notify::value" handler="on_partitioning_changed"/>
-                      </object>
-                    </child>
+                    </property>
                   </object>
                 </child>
                 <child>
-                  <object class="AdwPreferencesGroup" id="partitions_group">
-                    <property name="title">Partitions</property>
+                  <object class="GtkLabel" id="partitions_status_label">
+                    <property name="visible">False</property>
+                    <property name="wrap">True</property>
+                    <style>
+                      <class name="error"/>
+                    </style>
                   </object>
                 </child>
               </object>

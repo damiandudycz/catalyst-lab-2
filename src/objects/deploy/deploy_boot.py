@@ -6,7 +6,7 @@ from .deploy_system import NetworkService, NETWORK_SERVICE_FILES
 
 # ------------------------------------------------------------------------------
 # Booting deployed system: bootloaders found in stage archive, and installing them (with packages from Gentoo
-# repository when stage doesn't contain them). ESP is mounted at /efi, root filesystem at MOUNT_POINT on machine.
+# repository when stage doesn't contain them). Root filesystem is mounted at MOUNT_POINT on machine, ESP in it.
 
 _X86 = ("x86_64", "i686", "i586", "i486")
 
@@ -164,8 +164,11 @@ fi
     lines.append(f'in_root emerge --noreplace --quiet-build=y {binpkgs} {atoms}')
     return "\n".join(lines) + "\n"
 
-def bootloader_script(bootloader: Bootloader, architecture: str, uefi: bool, disk: str, root_device: str, efi_device: str | None) -> str | None:
-    """Installs and configures bootloader in installed system."""
+def bootloader_script(bootloader: Bootloader, architecture: str, uefi: bool, disk: str, root_device: str,
+                      efi_device: str | None, esp: str | None) -> str | None:
+    """Installs and configures bootloader in installed system. ESP is mount point of EFI system partition."""
+    if uefi and not esp:
+        return None
     root = f'root=UUID=$(blkid -s UUID -o value {root_device}) rw'
     kernel = r'''
 KERNEL=$(cd "$ROOT/boot" && ls -t vmlinuz* kernel* Image* vmlinux* 2>/dev/null | head -n 1)
@@ -178,7 +181,7 @@ echo "Kernel: $KERNEL${INITRD:+, initramfs: $INITRD}"
             target = grub_target(architecture, uefi)
             if target is None:
                 return None
-            install = f"grub-install --target={target} --efi-directory=/efi --bootloader-id=Gentoo" if uefi else f"grub-install --target={target} {disk}"
+            install = f"grub-install --target={target} --efi-directory={esp} --bootloader-id=Gentoo" if uefi else f"grub-install --target={target} {disk}"
             return f"""set -e
 {CHROOT_SETUP}
 in_root {install}
@@ -189,28 +192,29 @@ in_root grub-mkconfig -o /boot/grub/grub.cfg
             return f"""set -e
 {CHROOT_SETUP}
 {kernel}
-in_root bootctl install --esp-path=/efi
-mkdir -p "$ROOT/efi/gentoo" "$ROOT/efi/loader/entries"
-cp "$ROOT/boot/$KERNEL" "$ROOT/efi/gentoo/linux"
-[ -z "$INITRD" ] || cp "$ROOT/boot/$INITRD" "$ROOT/efi/gentoo/initrd"
+in_root bootctl install --esp-path={esp}
+mkdir -p "$ROOT{esp}/gentoo" "$ROOT{esp}/loader/entries"
+cp "$ROOT/boot/$KERNEL" "$ROOT{esp}/gentoo/linux"
+[ -z "$INITRD" ] || cp "$ROOT/boot/$INITRD" "$ROOT{esp}/gentoo/initrd"
 {{
     echo "title Gentoo Linux"
     echo "linux /gentoo/linux"
     [ -z "$INITRD" ] || echo "initrd /gentoo/initrd"
     echo "options {root}"
-}} > "$ROOT/efi/loader/entries/gentoo.conf"
-printf 'default gentoo.conf\\ntimeout 3\\n' > "$ROOT/efi/loader/loader.conf"
-cat "$ROOT/efi/loader/entries/gentoo.conf"
+}} > "$ROOT{esp}/loader/entries/gentoo.conf"
+printf 'default gentoo.conf\\ntimeout 3\\n' > "$ROOT{esp}/loader/loader.conf"
+cat "$ROOT{esp}/loader/entries/gentoo.conf"
 """
         case Bootloader.REFIND:
-            # rEFInd finds kernels in /boot, with options from refind_linux.conf.
+            # rEFInd finds kernels in /boot, with options from refind_linux.conf. Its installer looks for ESP in
+            # /boot/efi, it's bound there when mounted elsewhere.
+            bind = esp != "/boot/efi"
             return f"""set -e
 {CHROOT_SETUP}
 {kernel}
-mkdir -p "$ROOT/boot/efi"
-mount --bind "$ROOT/efi" "$ROOT/boot/efi"
-in_root refind-install --yes || {{ umount "$ROOT/boot/efi"; exit 1; }}
-umount "$ROOT/boot/efi"
+{f'mkdir -p "$ROOT/boot/efi" && mount --bind "$ROOT{esp}" "$ROOT/boot/efi"' if bind else ''}
+in_root refind-install --yes || {{ {'umount "$ROOT/boot/efi";' if bind else ''} exit 1; }}
+{'umount "$ROOT/boot/efi"' if bind else ''}
 echo "\\"Boot with defaults\\" \\"{root}\\"" > "$ROOT/boot/refind_linux.conf"
 cat "$ROOT/boot/refind_linux.conf"
 """
@@ -220,10 +224,10 @@ cat "$ROOT/boot/refind_linux.conf"
             return f"""set -e
 {CHROOT_SETUP}
 {kernel}
-mkdir -p "$ROOT/efi/EFI/gentoo"
-cp "$ROOT/boot/$KERNEL" "$ROOT/efi/EFI/gentoo/linux.efi"
+mkdir -p "$ROOT{esp}/EFI/gentoo"
+cp "$ROOT/boot/$KERNEL" "$ROOT{esp}/EFI/gentoo/linux.efi"
 OPTIONS="{root}"
-if [ -n "$INITRD" ]; then cp "$ROOT/boot/$INITRD" "$ROOT/efi/EFI/gentoo/initrd"; OPTIONS="$OPTIONS initrd=\\\\EFI\\\\gentoo\\\\initrd"; fi
+if [ -n "$INITRD" ]; then cp "$ROOT/boot/$INITRD" "$ROOT{esp}/EFI/gentoo/initrd"; OPTIONS="$OPTIONS initrd=\\\\EFI\\\\gentoo\\\\initrd"; fi
 in_root efibootmgr --create --disk {disk} --part {partition.group(1) if partition else 1} --label Gentoo --loader '\\EFI\\gentoo\\linux.efi' --unicode "$OPTIONS"
 """
     return None

@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass, field
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
 from .ssh_connection import SSHConnection, quote
-from .deploy_target import TargetMachine, PartitionPlan
+from .deploy_target import TargetMachine, PartitionPlan, PartitionType
 from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, packages_script, bootloader_script, grub_platform
 from .deploy_system import (
     NetworkService, NetworkSettings, LocalizationSettings, network_script, localization_script, authorized_keys_script
@@ -287,12 +287,13 @@ class DeployStepBootloader(DeployStep):
     def run(self):
         process = self.multistage_process
         plan = process.plan
-        efi_index = next((index for index, partition in enumerate(plan.partitions, start=1) if partition.mount_point == "/efi"), None)
-        root_index = next(index for index, partition in enumerate(plan.partitions, start=1) if partition.mount_point == "/")
+        efi_index = plan.index_of(lambda spec: spec.type == PartitionType.EFI)
+        root_index = plan.index_of(lambda spec: spec.type == PartitionType.LINUX and spec.mount_point == "/")
         script = bootloader_script(
             process.settings.bootloader, process.machine.architecture, process.machine.uefi, plan.disk.path,
             root_device=plan.partition_device(root_index),
             efi_device=plan.partition_device(efi_index) if efi_index else None,
+            esp=plan.efi_mount_point,
         )
         if script is None:
             raise RuntimeError(f"{process.settings.bootloader.display_name} is not supported on this machine")

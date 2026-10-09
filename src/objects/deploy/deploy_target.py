@@ -118,20 +118,67 @@ def architecture_supported(build_architecture: str | None, machine_architecture:
     return None if supported is None else machine_architecture in supported
 
 # ------------------------------------------------------------------------------
-# Partitioning:
+# Partitioning: new GPT partition table with partitions defined by user, in order. Last partition can use
+# remaining space of disk.
+
+class PartitionType(Enum):
+    EFI = "efi"
+    BIOS_BOOT = "bios-boot"
+    LINUX = "linux"
+    SWAP = "swap"
+
+    @property
+    def display_name(self) -> str:
+        return {PartitionType.EFI: "EFI system", PartitionType.BIOS_BOOT: "BIOS boot", PartitionType.LINUX: "Linux filesystem",
+                PartitionType.SWAP: "Swap"}[self]
+
+    @property
+    def gpt_type(self) -> str:
+        return {
+            PartitionType.EFI: "C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
+            PartitionType.BIOS_BOOT: "21686148-6449-6E6F-744E-656564454649",
+            PartitionType.LINUX: "0FC63DAF-8483-4772-8E79-3D69D7984743",
+            PartitionType.SWAP: "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F",
+        }[self]
 
 class TargetFilesystem(Enum):
     EXT4 = "ext4"
     XFS = "xfs"
     BTRFS = "btrfs"
+    VFAT = "vfat"
+
+    def format_command(self, label: str) -> str:
+        label = quote(label[:11].upper() if self == TargetFilesystem.VFAT else label[:16])
+        return {
+            TargetFilesystem.EXT4: f"mkfs.ext4 -F -L {label}",
+            TargetFilesystem.XFS: f"mkfs.xfs -f -L {label}",
+            TargetFilesystem.BTRFS: f"mkfs.btrfs -f -L {label}",
+            TargetFilesystem.VFAT: f"mkfs.vfat -F 32 -n {label}",
+        }[self]
+
+@dataclass
+class PartitionSpec:
+    """Partition defined by user."""
+    type: PartitionType
+    size: int | None # Bytes, None uses remaining space of disk.
+    filesystem: TargetFilesystem | None = None # Linux filesystem partitions.
+    mount_point: str | None = None # Linux filesystem and EFI partitions.
 
     @property
-    def format_command(self) -> str:
-        return {
-            TargetFilesystem.EXT4: "mkfs.ext4 -F -L root",
-            TargetFilesystem.XFS: "mkfs.xfs -f -L root",
-            TargetFilesystem.BTRFS: "mkfs.btrfs -f -L root",
-        }[self]
+    def effective_filesystem(self) -> TargetFilesystem | None:
+        match self.type:
+            case PartitionType.EFI: return TargetFilesystem.VFAT
+            case PartitionType.LINUX: return self.filesystem or TargetFilesystem.EXT4
+        return None
+
+    @property
+    def label(self) -> str:
+        """Name of partition and filesystem label."""
+        match self.type:
+            case PartitionType.EFI: return "EFI"
+            case PartitionType.BIOS_BOOT: return "BIOS boot"
+            case PartitionType.SWAP: return "swap"
+        return "root" if self.mount_point == "/" else (self.mount_point or "data").strip("/").replace("/", "-")
 
 @dataclass
 class TargetPartition:
@@ -141,37 +188,119 @@ class TargetPartition:
     mount_point: str | None # None for swap and BIOS boot.
     filesystem: str | None # fstab type.
     format_command: str | None
+    spec: PartitionSpec | None = None
 
-_GPT_EFI = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
-_GPT_BIOS_BOOT = "21686148-6449-6E6F-744E-656564454649"
-_GPT_SWAP = "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F"
-_GPT_LINUX = "0FC63DAF-8483-4772-8E79-3D69D7984743"
+_MOUNT_POINT = re.compile(r"^/([A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*)?$")
+
+def default_layout(disk: TargetDisk, uefi: bool, memory: int, architecture: str) -> list[PartitionSpec]:
+    """EFI system (UEFI) or BIOS boot partition (x86 BIOS), /boot, swap (size of memory, up to 8 GiB), root and
+    /home. Small disks get no /home, root uses remaining space then."""
+    layout = []
+    if uefi:
+        layout.append(PartitionSpec(PartitionType.EFI, 1 * GIB, mount_point="/efi"))
+    elif architecture in ("x86_64", "i686", "i586", "i486"):
+        layout.append(PartitionSpec(PartitionType.BIOS_BOOT, 1 * MIB))
+    layout.append(PartitionSpec(PartitionType.LINUX, 1 * GIB, TargetFilesystem.EXT4, "/boot"))
+    swap = min(8 * GIB, max(1 * GIB, round(memory / GIB) * GIB)) if memory else 2 * GIB
+    available = disk.size - sum(partition.size for partition in layout) - 8 * MIB
+    if available - swap < 24 * GIB:
+        swap = 0 if available < 16 * GIB else min(swap, 2 * GIB)
+    if swap:
+        layout.append(PartitionSpec(PartitionType.SWAP, swap))
+    available -= swap
+    if available >= 96 * GIB:
+        # Root gets 30% of space (between 48 and 256 GiB), the rest is for /home.
+        root = min(256 * GIB, max(48 * GIB, int(available * 0.3) // GIB * GIB))
+        layout.append(PartitionSpec(PartitionType.LINUX, root, TargetFilesystem.EXT4, "/"))
+        layout.append(PartitionSpec(PartitionType.LINUX, None, TargetFilesystem.EXT4, "/home"))
+    else:
+        layout.append(PartitionSpec(PartitionType.LINUX, None, TargetFilesystem.EXT4, "/"))
+    return layout
 
 @dataclass
 class PartitionPlan:
-    """Whole disk is used: EFI system partition (UEFI) or BIOS boot partition, optional swap, root filesystem."""
     disk: TargetDisk
     uefi: bool
-    efi_size: int = 1 * GIB
-    swap_size: int = 0
-    filesystem: TargetFilesystem = TargetFilesystem.EXT4
+    layout: list[PartitionSpec] = field(default_factory=list)
 
     @property
     def partitions(self) -> list[TargetPartition]:
         partitions = []
-        if self.uefi:
-            partitions.append(TargetPartition("EFI system", self.efi_size, _GPT_EFI, "/efi", "vfat", "mkfs.vfat -F 32 -n EFI"))
-        else:
-            partitions.append(TargetPartition("BIOS boot", 1 * MIB, _GPT_BIOS_BOOT, None, None, None))
-        if self.swap_size > 0:
-            partitions.append(TargetPartition("Swap", self.swap_size, _GPT_SWAP, None, "swap", "mkswap -L swap"))
-        partitions.append(TargetPartition("Root", None, _GPT_LINUX, "/", self.filesystem.value, self.filesystem.format_command))
+        for spec in self.layout:
+            filesystem = spec.effective_filesystem
+            fstab_type = "swap" if spec.type == PartitionType.SWAP else filesystem.value if filesystem else None
+            if spec.type == PartitionType.SWAP:
+                command = "mkswap -L swap"
+            elif filesystem:
+                command = filesystem.format_command(spec.label)
+            else:
+                command = None
+            mount_point = spec.mount_point if spec.type in (PartitionType.LINUX, PartitionType.EFI) else None
+            partitions.append(TargetPartition(spec.label, spec.size, spec.type.gpt_type, mount_point, fstab_type, command, spec))
         return partitions
 
     @property
-    def root_size(self) -> int:
-        # GPT and alignment take few MiB.
-        return self.disk.size - sum(partition.size for partition in self.partitions if partition.size) - 4 * MIB
+    def fixed_size(self) -> int:
+        return sum(spec.size for spec in self.layout if spec.size)
+
+    @property
+    def usable_size(self) -> int:
+        """Disk size without GPT and alignment."""
+        return self.disk.size - 4 * MIB
+
+    @property
+    def remaining_size(self) -> int:
+        return self.usable_size - self.fixed_size
+
+    def size_of(self, spec: PartitionSpec) -> int:
+        return spec.size if spec.size else max(0, self.remaining_size)
+
+    @property
+    def efi_mount_point(self) -> str | None:
+        return next((spec.mount_point for spec in self.layout if spec.type == PartitionType.EFI and spec.mount_point), None)
+
+    def index_of(self, predicate) -> int | None:
+        """Partition number (1-based) of first partition matching predicate."""
+        return next((index for index, spec in enumerate(self.layout, start=1) if predicate(spec)), None)
+
+    def error(self) -> str | None:
+        if not self.layout:
+            return "Add partitions"
+        roots = [spec for spec in self.layout if spec.type == PartitionType.LINUX and spec.mount_point == "/"]
+        if len(roots) != 1:
+            return "Exactly one Linux filesystem partition must be mounted at /"
+        mount_points = [spec.mount_point for spec in self.layout if spec.type in (PartitionType.LINUX, PartitionType.EFI)]
+        for mount_point in mount_points:
+            if not mount_point:
+                return "Set mount point of every EFI system and Linux filesystem partition"
+            if not _MOUNT_POINT.match(mount_point) or "/.." in mount_point or "/./" in mount_point:
+                return f"Invalid mount point {mount_point}"
+        if len(set(mount_points)) != len(mount_points):
+            return "Mount points must be different"
+        for index, spec in enumerate(self.layout):
+            if spec.size is None and index != len(self.layout) - 1:
+                return "Only last partition can use remaining space"
+            if spec.size is not None and spec.size < 1 * MIB:
+                return "Partitions must have at least 1 MiB"
+        if self.remaining_size < (1 * GIB if self.layout[-1].size is None else 0):
+            return f"Partitions don't fit on disk, {format_size(self.usable_size)} available"
+        efi = [spec for spec in self.layout if spec.type == PartitionType.EFI]
+        if self.uefi and not efi:
+            return "UEFI machine needs EFI system partition"
+        if len(efi) > 1:
+            return "Only one EFI system partition can be created"
+        if any(spec.size and spec.size < 64 * MIB for spec in efi):
+            return "EFI system partition needs at least 64 MiB"
+        return None
+
+    def warnings(self, architecture: str) -> list[str]:
+        warnings = []
+        if not self.uefi and architecture in ("x86_64", "i686", "i586", "i486") and not any(spec.type == PartitionType.BIOS_BOOT for spec in self.layout):
+            warnings.append("GRUB on BIOS machine needs BIOS boot partition")
+        root = next((spec for spec in self.layout if spec.mount_point == "/" and spec.type == PartitionType.LINUX), None)
+        if root and self.size_of(root) < 16 * GIB:
+            warnings.append("Root partition is small")
+        return warnings
 
     def partition_device(self, index: int) -> str:
         """Device of partition (1-based), eg. /dev/sda1 or /dev/nvme0n1p1."""
@@ -212,9 +341,10 @@ sfdisk -l {disk}
 
     def mount_script(self) -> str:
         lines = ["set -e", "mkdir -p /mnt/gentoo"]
+        # Parents are mounted before their subdirectories.
         mounted = sorted(
             ((index, partition) for index, partition in enumerate(self.partitions, start=1) if partition.mount_point),
-            key=lambda item: len(item[1].mount_point)
+            key=lambda item: item[1].mount_point.rstrip("/").count("/") if item[1].mount_point != "/" else 0
         )
         for index, partition in mounted:
             target = "/mnt/gentoo" + (partition.mount_point if partition.mount_point != "/" else "")
@@ -234,13 +364,15 @@ sfdisk -l {disk}
                 entry = 'none swap sw 0 0'
             elif partition.mount_point == "/":
                 entry = f"/ {partition.filesystem} defaults,noatime 0 1"
+            elif partition.filesystem == "vfat":
+                entry = f"{partition.mount_point} vfat defaults,noatime,umask=0077 0 2"
             else:
-                entry = f"{partition.mount_point} {partition.filesystem} defaults,noatime,umask=0077 0 2"
+                entry = f"{partition.mount_point} {partition.filesystem} defaults,noatime 0 2"
             lines.append(f'echo "UUID=$(blkid -s UUID -o value {device}) {entry}" >> "$FSTAB"')
         lines.append('cat "$FSTAB"')
         return "\n".join(lines) + "\n"
 
     def required_tools(self) -> list[str]:
         tools = ["wipefs", "sfdisk", "blkid", "tar"]
-        tools += [partition.format_command.split()[0] for partition in self.partitions if partition.format_command]
+        tools += sorted({partition.format_command.split()[0] for partition in self.partitions if partition.format_command})
         return tools

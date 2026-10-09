@@ -7,7 +7,10 @@ from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, de
 from .deploy_system import (
     NetworkService, NetworkSettings, LocalizationSettings, default_network_service, local_localization, local_public_keys
 )
-from .deploy_target import TargetMachine, TargetFilesystem, PartitionPlan, GIB, MIB, format_size, architecture_supported
+from .deploy_target import (
+    TargetMachine, TargetFilesystem, PartitionPlan, PartitionSpec, PartitionType, GIB, MIB, format_size,
+    architecture_supported, default_layout
+)
 from .ssh_connection import SSHConnection
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/deploy/deploy_create_view.ui')
@@ -28,10 +31,8 @@ class DeployCreateView(Gtk.Box):
     connection_status_label = Gtk.Template.Child()
     disk_page = Gtk.Template.Child()
     disks_group = Gtk.Template.Child()
-    filesystem_row = Gtk.Template.Child()
-    swap_row = Gtk.Template.Child()
-    efi_row = Gtk.Template.Child()
     partitions_group = Gtk.Template.Child()
+    partitions_status_label = Gtk.Template.Child()
     system_page = Gtk.Template.Child()
     hostname_row = Gtk.Template.Child()
     ssh_row = Gtk.Template.Child()
@@ -72,7 +73,8 @@ class DeployCreateView(Gtk.Box):
         self.connecting = False
         self.selected_disk = None
         self.disk_rows: list[Adw.ActionRow] = []
-        self.partition_rows: list[Adw.ActionRow] = []
+        self.partition_rows: list[PartitionRow] = []
+        self.layout: list[PartitionSpec] = []
         self.user_rows: list[UserRow] = []
         self.contents: StageContents | None = None # Read from archive in background.
         self.contents_error: str | None = None
@@ -123,7 +125,8 @@ class DeployCreateView(Gtk.Box):
         if page == self.connection_page:
             return self.machine is not None
         if page == self.disk_page:
-            return self.selected_disk is not None
+            plan = self._plan()
+            return plan is not None and plan.error() is None
         if page == self.system_page:
             return self._system_error() is None
         if page == self.users_page:
@@ -197,9 +200,6 @@ class DeployCreateView(Gtk.Box):
             if architecture and architecture_supported(architecture.value, machine.architecture) is False:
                 subtitle += f"\nWarning: build is for {architecture.value}, it won't run on this machine"
             self.machine_row.set_subtitle(GLib.markup_escape_text(subtitle))
-            # Swap equal to memory, up to 8 GiB.
-            self.swap_row.set_value(min(8, max(1, round(machine.memory / GIB))) if machine.memory else 0)
-            self.efi_row.set_visible(machine.uefi)
             if not self.hostname_row.get_text():
                 self.hostname_row.set_text("gentoo")
             # Static address suggested from LiveCD network.
@@ -236,53 +236,81 @@ class DeployCreateView(Gtk.Box):
             row = Adw.ActionRow(title="No disks found")
             self.disks_group.add(row)
             self.disk_rows.append(row)
-        self._update_partitions()
+        self.layout = []
+        self._load_partition_rows()
 
     def _on_disk_toggled(self, check: Gtk.CheckButton, disk):
         if check.get_active():
             self.selected_disk = disk
-            self._update_partitions()
-            self.wizard_view._refresh_buttons_state()
-
-    @Gtk.Template.Callback()
-    def on_partitioning_changed(self, *args):
-        self._update_partitions()
+            self.layout = default_layout(disk, self.machine.uefi, self.machine.memory, self.machine.architecture)
+            self._load_partition_rows()
 
     def _plan(self) -> PartitionPlan | None:
         if self.selected_disk is None or self.machine is None:
             return None
-        return PartitionPlan(
-            disk=self.selected_disk,
-            uefi=self.machine.uefi,
-            efi_size=int(self.efi_row.get_value()) * MIB,
-            swap_size=int(self.swap_row.get_value()) * GIB,
-            filesystem=list(TargetFilesystem)[self.filesystem_row.get_selected()],
-        )
+        return PartitionPlan(disk=self.selected_disk, uefi=self.machine.uefi, layout=self.layout)
 
-    def _update_partitions(self):
+    # Partitions
+
+    @Gtk.Template.Callback()
+    def on_default_layout_clicked(self, button):
+        if self.selected_disk and self.machine:
+            self.layout = default_layout(self.selected_disk, self.machine.uefi, self.machine.memory, self.machine.architecture)
+            self._load_partition_rows()
+
+    @Gtk.Template.Callback()
+    def on_add_partition_clicked(self, button):
+        # New partition uses remaining space when previous last one has fixed size.
+        uses_rest = any(spec.size is None for spec in self.layout)
+        self.layout.append(PartitionSpec(PartitionType.LINUX, 10 * GIB if uses_rest else None, TargetFilesystem.EXT4, ""))
+        self._load_partition_rows(expand=len(self.layout) - 1)
+
+    def _move_partition(self, spec: PartitionSpec, offset: int):
+        index = self.layout.index(spec)
+        target = index + offset
+        if 0 <= target < len(self.layout):
+            self.layout[index], self.layout[target] = self.layout[target], self.layout[index]
+            self._load_partition_rows(expand=target)
+
+    def _remove_partition(self, spec: PartitionSpec):
+        self.layout.remove(spec)
+        self._load_partition_rows()
+
+    def _load_partition_rows(self, expand: int | None = None):
+        """Rows are created again when partitions are added, removed or moved. Edited values update them."""
         for row in self.partition_rows:
             self.partitions_group.remove(row)
         self.partition_rows = []
+        enabled = self.selected_disk is not None
+        self.partitions_group.get_header_suffix().set_sensitive(enabled)
+        for index, spec in enumerate(self.layout):
+            row = PartitionRow(spec, on_changed=self._update_partitions, on_move=self._move_partition, on_remove=self._remove_partition)
+            row.set_expanded(index == expand)
+            self.partitions_group.add(row)
+            self.partition_rows.append(row)
+        self._update_partitions()
+
+    def _update_partitions(self):
         plan = self._plan()
         if plan is None:
             self.partitions_group.set_description("Select disk")
+            self.partitions_status_label.set_visible(False)
+            self.wizard_view._refresh_buttons_state()
             return
-        root_size = plan.root_size
-        # Unpacked stage takes few times more than its archive.
-        archive_size = os.path.getsize(self.build.artifact_path) if self.build and os.path.isfile(self.build.artifact_path or "") else 0
-        needed = max(8 * GIB, archive_size * 4)
-        description = f"New GPT partition table on {plan.disk.path}"
-        if root_size < needed:
-            description += f". Warning: root partition is small, at least {format_size(needed)} is recommended"
+        for index, row in enumerate(self.partition_rows, start=1):
+            row.update(plan.partition_device(index), plan.size_of(row.spec), first=index == 1, last=index == len(self.partition_rows))
+        free = plan.remaining_size if all(spec.size for spec in self.layout) else 0
+        description = f"New GPT partition table on {plan.disk.path}, {format_size(plan.usable_size)}"
+        if free > 0:
+            description += f", {format_size(free)} not used"
         self.partitions_group.set_description(description)
-        for index, partition in enumerate(plan.partitions, start=1):
-            size = format_size(partition.size if partition.size else max(0, root_size))
-            details = [size, partition.filesystem or "no filesystem"]
-            if partition.mount_point:
-                details.append(f"mounted at {partition.mount_point}")
-            row = Adw.ActionRow(title=f"{plan.partition_device(index)} · {partition.name}", subtitle=", ".join(details))
-            self.partitions_group.add(row)
-            self.partition_rows.append(row)
+        messages = []
+        if error := plan.error():
+            messages.append(error)
+        messages += [f"Warning: {warning}" for warning in plan.warnings(self.machine.architecture)]
+        self.partitions_status_label.set_label("\n".join(messages))
+        self.partitions_status_label.set_visible(bool(messages))
+        self.wizard_view._refresh_buttons_state()
 
     # System
 
@@ -551,3 +579,93 @@ class UserRow(Adw.ExpanderRow):
         if any(not re.match(r"^[a-z_][a-z0-9_-]*$", group) for group in user.groups):
             return f"Groups of {user.name} contain invalid name"
         return None
+
+
+class PartitionRow(Adw.ExpanderRow):
+    """Partition of layout: type, filesystem, mount point and size."""
+
+    _TYPES = list(PartitionType)
+    _FILESYSTEMS = [TargetFilesystem.EXT4, TargetFilesystem.XFS, TargetFilesystem.BTRFS, TargetFilesystem.VFAT]
+
+    def __init__(self, spec: PartitionSpec, on_changed, on_move, on_remove):
+        super().__init__()
+        self.spec = spec
+        self.on_changed = on_changed
+        self._loading = True
+        self.type_row = Adw.ComboRow(title="Type", model=Gtk.StringList.new([item.display_name for item in self._TYPES]))
+        self.type_row.set_selected(self._TYPES.index(spec.type))
+        self.filesystem_row = Adw.ComboRow(title="Filesystem", model=Gtk.StringList.new([item.value for item in self._FILESYSTEMS]))
+        self.filesystem_row.set_selected(self._FILESYSTEMS.index(spec.filesystem or TargetFilesystem.EXT4))
+        self.mount_row = Adw.EntryRow(title="Mount point", text=spec.mount_point or "")
+        self.rest_row = Adw.SwitchRow(title="Use remaining space", active=spec.size is None)
+        self.size_row = Adw.SpinRow(title="Size", subtitle="GiB", digits=1,
+                                    adjustment=Gtk.Adjustment(lower=0.1, upper=1024 * 64, step_increment=1, page_increment=10))
+        self.size_row.set_value(round((spec.size or 10 * GIB) / GIB, 1))
+        for row in (self.type_row, self.filesystem_row, self.mount_row, self.rest_row, self.size_row):
+            self.add_row(row)
+        self.type_row.connect("notify::selected", self._on_edited)
+        self.filesystem_row.connect("notify::selected", self._on_edited)
+        self.mount_row.connect("changed", self._on_edited)
+        self.rest_row.connect("notify::active", self._on_edited)
+        self.size_row.connect("notify::value", self._on_edited)
+        buttons = Gtk.Box(spacing=0, valign=Gtk.Align.CENTER)
+        self.up_button = self._button("go-up-symbolic", "Move up", lambda button: on_move(spec, -1))
+        self.down_button = self._button("go-down-symbolic", "Move down", lambda button: on_move(spec, 1))
+        for button in (self.up_button, self.down_button, self._button("user-trash-symbolic", "Remove partition", lambda button: on_remove(spec))):
+            buttons.append(button)
+        self.add_suffix(buttons)
+        self._loading = False
+        self._update_visibility()
+
+    @staticmethod
+    def _button(icon: str, tooltip: str, handler) -> Gtk.Button:
+        button = Gtk.Button(icon_name=icon, tooltip_text=tooltip)
+        button.add_css_class("flat")
+        button.connect("clicked", handler)
+        return button
+
+    def _on_edited(self, *args):
+        if self._loading:
+            return
+        previous_type = self.spec.type
+        self.spec.type = self._TYPES[self.type_row.get_selected()]
+        if self.spec.type != previous_type:
+            # Suggested values for new type.
+            self._loading = True
+            if self.spec.type == PartitionType.EFI:
+                self.mount_row.set_text("/efi")
+                self.rest_row.set_active(False)
+                self.size_row.set_value(1)
+            elif self.spec.type == PartitionType.LINUX and self.mount_row.get_text() == "/efi":
+                self.mount_row.set_text("")
+            self._loading = False
+        self.spec.filesystem = self._FILESYSTEMS[self.filesystem_row.get_selected()]
+        self.spec.mount_point = self.mount_row.get_text().strip() or None
+        if self.spec.type == PartitionType.BIOS_BOOT:
+            self.spec.size = 1 * MIB
+        else:
+            self.spec.size = None if self.rest_row.get_active() else int(self.size_row.get_value() * GIB) // MIB * MIB
+        self._update_visibility()
+        self.on_changed()
+
+    def _update_visibility(self):
+        partition_type = self.spec.type
+        self.filesystem_row.set_visible(partition_type == PartitionType.LINUX)
+        self.mount_row.set_visible(partition_type in (PartitionType.LINUX, PartitionType.EFI))
+        self.rest_row.set_visible(partition_type in (PartitionType.LINUX, PartitionType.SWAP))
+        self.size_row.set_visible(partition_type != PartitionType.BIOS_BOOT and not (self.rest_row.get_visible() and self.rest_row.get_active()))
+
+    def update(self, device: str, size: int, first: bool, last: bool):
+        spec = self.spec
+        purpose = spec.mount_point if spec.type in (PartitionType.LINUX, PartitionType.EFI) and spec.mount_point else spec.type.display_name
+        self.set_title(GLib.markup_escape_text(f"{device} · {purpose}"))
+        details = [format_size(size) + (" (remaining space)" if spec.size is None else "")]
+        if spec.type == PartitionType.LINUX:
+            details.append((spec.filesystem or TargetFilesystem.EXT4).value)
+        elif spec.type == PartitionType.EFI:
+            details.append("EFI system, vfat")
+        else:
+            details.append(spec.type.display_name)
+        self.set_subtitle(GLib.markup_escape_text(", ".join(details)))
+        self.up_button.set_sensitive(not first)
+        self.down_button.set_sensitive(not last)
