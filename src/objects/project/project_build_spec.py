@@ -10,7 +10,7 @@ from .project_stage_compression_mode import StageCompressionMode
 from .project_stage_value_resolver import resolve_stage_argument, load_stage_releng_template_values, UNRESOLVED
 from .project_stage_portage_confdir import (
     StagePortageConfdirSource, portage_confdir_sources, releng_portage_variant, parent_overlay_stages,
-    stage_overlay_path, is_emulated_build
+    stage_overlay_path, is_emulated_build, root_overlay_values, root_overlay_folders
 )
 
 # ------------------------------------------------------------------------------
@@ -26,6 +26,7 @@ class StageSpecContext:
     source_subpath: str     # Seed, relative to catalyst builds directory.
     portage_confdir: str | None # Generated portage configuration, as seen by catalyst.
     cache_paths: dict = field(default_factory=dict) # Enabled caches (pkgcache_path, kerncache_path), as seen by catalyst.
+    root_overlay: str | None = None # Generated root overlay, as seen by catalyst.
 
 def snapshot_treeish(project_directory) -> str | None:
     """Catalyst finds snapshot as snapshots/gentoo-<treeish>.sqfs."""
@@ -73,6 +74,8 @@ def _argument_value(project_directory, stage, name: str, argument, context: Stag
             return context.portage_confdir
         case StageArgumentDetails.pkgcache_path | StageArgumentDetails.kerncache_path:
             return context.cache_paths.get(argument.details)
+        case StageArgumentDetails.stage4_root_overlay | StageArgumentDetails.livecd_root_overlay:
+            return context.root_overlay
     value = resolve_stage_argument(project_directory, stage, name)
     if value is UNRESOLVED and _is_automatic(project_directory, stage, argument):
         value = _automatic_value(project_directory, argument)
@@ -140,6 +143,23 @@ def generate_portage_confdir(project_directory, stage, destination: str) -> bool
     for folder in folders:
         if os.path.isdir(folder):
             shutil.copytree(folder, destination, dirs_exist_ok=True, symlinks=True)
+    return True
+
+# ------------------------------------------------------------------------------
+# Root overlay:
+
+def generate_root_overlay(project_directory, stage, destination: str) -> bool:
+    """Combines selected root overlay sources into destination folder (releng template overlays, parent overlays,
+    stage overlay). Later sources overwrite files of earlier ones. Returns false if stage doesn't use root overlay or
+    none of its folders exists."""
+    if not root_overlay_values(project_directory, stage):
+        return False
+    folders = [folder for folder in root_overlay_folders(project_directory, stage) if os.path.isdir(folder)]
+    if not folders:
+        return False
+    os.makedirs(destination, exist_ok=True)
+    for folder in folders:
+        shutil.copytree(folder, destination, dirs_exist_ok=True, symlinks=True)
     return True
 
 # ------------------------------------------------------------------------------

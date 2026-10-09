@@ -12,8 +12,10 @@ localedir = '@localedir@'
 
 sys.path.insert(1, pkgdatadir)
 signal.signal(signal.SIGINT, signal.SIG_DFL)
-locale.bindtextdomain('catalystlab', localedir)
-locale.textdomain('catalystlab')
+# Python on macOS has no locale.bindtextdomain, gettext is used for translations there.
+if hasattr(locale, 'bindtextdomain'):
+    locale.bindtextdomain('catalystlab', localedir)
+    locale.textdomain('catalystlab')
 gettext.install('catalystlab', localedir)
 
 if __name__ == '__main__':

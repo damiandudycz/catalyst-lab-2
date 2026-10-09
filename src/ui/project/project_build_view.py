@@ -5,6 +5,7 @@ from .project_build import StageBuildPlan, StageBuildMode, load_project_builds, 
 from .project_build_process import ProjectBuild
 from .project_stage import stage_target_icon
 from .rootless import rootless_unsupported_reason
+from .lima import virtual_machines_supported
 from .root_helper_client import RootHelperClient
 from .multistage_process import MultiStageProcessState
 from .wizard_view import WizardView
@@ -24,6 +25,7 @@ class ProjectBuildView(Gtk.Box):
     build_order_group = Gtk.Template.Child()
     reused_group = Gtk.Template.Child()
     location_row = Gtk.Template.Child()
+    runs_on_row = Gtk.Template.Child()
 
     def __init__(self, project_directory: ProjectDirectory, installation_in_progress: ProjectBuild | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -42,6 +44,10 @@ class ProjectBuildView(Gtk.Box):
         self.wizard_view._window = self._window
         self.wizard_view.set_installation(self.installation_in_progress)
         self.location_row.set_subtitle(GLib.markup_escape_text(project_builds_directory(self.project_directory)))
+        toolset = self.project_directory.get_toolset()
+        self.runs_on_row.set_subtitle(GLib.markup_escape_text(
+            f"{toolset.runs_on_name} (toolset {toolset.name})" if toolset else "No toolset"))
+        self.runs_on_row.set_visible(virtual_machines_supported() or (toolset is not None and toolset.machine is not None))
         self.load_stages()
         self.update_plan()
 
@@ -158,7 +164,8 @@ class ProjectBuildView(Gtk.Box):
     @Gtk.Template.Callback()
     def begin_installation(self, view):
         plan = self.plan
-        if rootless_unsupported_reason() is None:
+        toolset = self.project_directory.get_toolset()
+        if (toolset and toolset.machine) or rootless_unsupported_reason() is None:
             # Builds run in user namespace, root privileges are not needed.
             self._start_installation(plan, None, rootless=True)
             return

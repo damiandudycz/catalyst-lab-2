@@ -12,6 +12,7 @@ from .releng_installation   import RelengInstallation
 from .overlay_installation  import OverlayInstallation
 from .project_installation  import ProjectInstallation
 from .project_build_process import ProjectBuild
+from .build_machine_installation import BuildMachineInstallation
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/components/repository_list/repository_list_view.ui')
 class RepositoryListView(Gtk.Box):

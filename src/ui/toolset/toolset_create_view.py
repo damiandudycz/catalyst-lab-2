@@ -1,11 +1,12 @@
 from __future__ import annotations
-import os, re
+import os, re, sys
 from gi.repository import Gtk, GLib, Gio
 from gi.repository import Adw
 from urllib.parse import ParseResult
 from datetime import datetime
 from pathlib import Path
 from .rootless import authorize_toolset_action
+from .lima import virtual_machines_supported
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset_manager import ToolsetManager
 from .architecture import Architecture
@@ -14,6 +15,7 @@ from .multistage_process import MultiStageProcessState
 from .toolset_installation import ToolsetInstallation
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
 from .wizard_view import WizardView
+from .item_select_view import ItemSelectionViewEvent
 from .cl_toggle_group import CLToggle, CLToggleGroup
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset/toolset_create_view.ui')
@@ -24,6 +26,8 @@ class ToolsetCreateView(Gtk.Box):
     wizard_view = Gtk.Template.Child()
     # Setup view elements:
     configuration_page = Gtk.Template.Child()
+    runs_on_page = Gtk.Template.Child()
+    machine_selection_view = Gtk.Template.Child()
     tools_page = Gtk.Template.Child()
     stages_list = Gtk.Template.Child()
     tools_list = Gtk.Template.Child()
@@ -44,6 +48,14 @@ class ToolsetCreateView(Gtk.Box):
         self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile]] = {app: [] for app in ToolsetApplication.ALL}
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
+        # Toolsets run on this computer only on Linux, elsewhere only virtual machines are listed (first one is selected).
+        self.local_unsupported_reason = None if sys.platform.startswith("linux") else "Not available on this system, select virtual machine"
+        self.machine_selection_view.set_property("display_none", self.local_unsupported_reason is None)
+        self.machine_selection_view.set_property("none_subtitle", "Runs directly on this computer")
+        self.machine_selection_view.set_property("autoselect_default", self.local_unsupported_reason is not None)
+        self.machine_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, lambda view: self.wizard_view._refresh_buttons_state())
+        if not virtual_machines_supported():
+            self.wizard_view.remove_page(self.runs_on_page) # Toolsets run on this computer.
         if installation_in_progress is None or installation_in_progress.status == MultiStageProcessState.SETUP:
             ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
         self.connect("realize", self.on_realize)
@@ -56,6 +68,8 @@ class ToolsetCreateView(Gtk.Box):
     @Gtk.Template.Callback()
     def is_page_ready_to_continue(self, sender, page) -> bool:
         match page:
+            case self.runs_on_page:
+                return self.machine_selection_view.selected_item is not None or self.local_unsupported_reason is None
             case self.configuration_page:
                 return self.selected_stage is not None
             case self.tools_page:
@@ -64,7 +78,12 @@ class ToolsetCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
-        authorize_toolset_action(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper))
+        authorize_toolset_action(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper),
+                                 machine=self.machine_selection_view.selected_item)
+
+    @Gtk.Template.Callback()
+    def is_machine_selectable(self, sender, machine) -> bool:
+        return True
 
     @Gtk.Template.Callback()
     def on_allow_binpkgs_toggled(self, checkbox):
@@ -86,7 +105,8 @@ class ToolsetCreateView(Gtk.Box):
             alias=self.environment_name_row.get_text(),
             stage_url=self.selected_stage,
             allow_binpkgs=self.allow_binpkgs,
-            apps_selection=apps_selection
+            apps_selection=apps_selection,
+            machine=self.machine_selection_view.selected_item
         )
         installation_in_progress.start()
         self.wizard_view.set_installation(installation_in_progress)

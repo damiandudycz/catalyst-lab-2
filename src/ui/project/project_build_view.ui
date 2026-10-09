@@ -101,6 +101,12 @@
                   <object class="AdwPreferencesGroup">
                     <property name="title">Location</property>
                     <child>
+                      <object class="AdwActionRow" id="runs_on_row">
+                        <property name="title">Runs on</property>
+                        <property name="icon-name">toolbox-symbolic</property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="AdwActionRow" id="location_row">
                         <property name="title">Builds are stored in</property>
                         <property name="subtitle-selectable">True</property>

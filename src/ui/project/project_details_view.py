@@ -95,6 +95,7 @@ class ProjectDetailsView(Gtk.Box):
                 build.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._on_build_changed)
                 for step in build.stages:
                     step.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, self._on_build_changed)
+                    step.event_bus.subscribe(MultiStageProcessStageEvent.PROGRESS_CHANGED, self._on_build_changed)
         running_build = running_project_build(self.project_directory)
         # Only one build can run at a time, also for different projects.
         self.build_row.set_visible(not running_builds)
@@ -259,7 +260,8 @@ def _running_builds() -> list[ProjectBuild]:
 def _build_step_status(step: ProjectBuildStepBuildStage) -> StageNodeStatus:
     match step.state:
         case MultiStageProcessStageState.IN_PROGRESS:
-            return StageNodeStatus(title="Building", in_progress=True)
+            # Progress of built packages.
+            return StageNodeStatus(title=f"Building {int(step.progress * 100)}%" if step.progress is not None else "Building", in_progress=True)
         case MultiStageProcessStageState.COMPLETED:
             return StageNodeStatus(title="Built", icon_name="check-square-svgrepo-com-symbolic", css_class="success")
         case MultiStageProcessStageState.FAILED if step.build is None:

@@ -125,9 +125,11 @@ class MultiStageProcessStageRow(Adw.ActionRow):
     """Displays stage state. Can be activated to open output of commands executed by stage."""
 
     def __init__(self, step: MultiStageProcessStage, owner: MultistageProcessExecutionView):
-        super().__init__(title=step.name, subtitle=step.description)
+        super().__init__(title=step.name, subtitle=step.description, subtitle_lines=1)
         self.step = step
         self.owner = owner
+        self._last_line: str | None = None # Last output line, shown as subtitle while step runs.
+        self._subtitle_update_id = None
         self.progress_label = Gtk.Label()
         self.progress_label.add_css_class("dim-label")
         self.progress_label.add_css_class("caption")
@@ -168,6 +170,20 @@ class MultiStageProcessStageRow(Adw.ActionRow):
     def _step_output_line_added(self, line: str):
         if not self.get_activatable():
             self._update_output_available()
+        if self.step.state == MultiStageProcessStageState.IN_PROGRESS:
+            segments, _ = parse_ansi_line(line, AnsiStyle())
+            text = "".join(text for text, _ in segments).strip()
+            if text:
+                self._last_line = text
+                # Output can be fast, subtitle is updated a few times per second.
+                if self._subtitle_update_id is None:
+                    self._subtitle_update_id = GLib.timeout_add(250, self._update_subtitle)
+
+    def _update_subtitle(self):
+        self._subtitle_update_id = None
+        running = self.step.state == MultiStageProcessStageState.IN_PROGRESS
+        self.set_subtitle(GLib.markup_escape_text(self._last_line if running and self._last_line else self.step.description))
+        return False
 
     def _step_progress_changed(self, progress: float | None):
         self._update_status_label()
@@ -177,6 +193,8 @@ class MultiStageProcessStageRow(Adw.ActionRow):
         self._set_status_icon(state=state)
         self.owner._scroll_to_installation_step_row(self)
         self._update_status_label()
+        if state != MultiStageProcessStageState.IN_PROGRESS:
+            self._update_subtitle() # Description again.
 
     def _update_status_label(self):
         self.progress_label.set_label(

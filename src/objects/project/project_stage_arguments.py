@@ -240,6 +240,7 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.interpreter: return StageArgumentType.multiselect
             case StageArgumentDetails.repos: return StageArgumentType.multiselect
             case StageArgumentDetails.portage_confdir: return StageArgumentType.multiselect # Sources combined when building.
+            case StageArgumentDetails.stage4_root_overlay | StageArgumentDetails.livecd_root_overlay: return StageArgumentType.multiselect # Like portage_confdir.
             case StageArgumentDetails.update_seed: return StageArgumentType.boolean
             case StageArgumentDetails.keep_repos: return StageArgumentType.boolean
             case (
@@ -320,6 +321,8 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
         argument: [_RELENG]
         for argument in StageArgumentDetails
         if argument.value.split("/")[0] in ("stage4", "livecd", "boot")
+        # Root overlay is combined from its own sources, like portage_confdir.
+        and argument not in (StageArgumentDetails.stage4_root_overlay, StageArgumentDetails.livecd_root_overlay)
     },
 }
 
@@ -368,5 +371,7 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
         argument: [_RELENG]
         for argument in StageArgumentDetails
         if argument.value.split("/")[0] in ("stage4", "livecd", "boot")
+        # Root overlay is combined from its own sources, like portage_confdir.
+        and argument not in (StageArgumentDetails.stage4_root_overlay, StageArgumentDetails.livecd_root_overlay)
     },
 }

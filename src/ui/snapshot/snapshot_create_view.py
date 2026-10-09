@@ -74,7 +74,9 @@ class SnapshotCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def begin_installation(self, view):
-        authorize_toolset_action(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper, selected_toolset=self.toolset_selection_view.selected_item))
+        selected_toolset = self.toolset_selection_view.selected_item
+        authorize_toolset_action(callback=lambda authorization_keeper: self._start_installation(authorization_keeper=authorization_keeper, selected_toolset=selected_toolset),
+                                 machine=selected_toolset.machine if selected_toolset else None)
 
     def _start_installation(self, authorization_keeper: AuthorizationKeeper, selected_toolset: Toolset | None = None, selected_file: Gio.File | None = None):
         if not authorization_keeper:

@@ -1,5 +1,7 @@
+import sys
 from gi.repository import Gtk, Adw, Gio, GLib
 from .rootless import authorize_toolset_action
+from .lima import virtual_machines_supported
 from .toolset import Toolset, ToolsetEvents
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
 from .helper_functions import get_file_size_string
@@ -23,6 +25,7 @@ class ToolsetDetailsView(Gtk.Box):
     applications_group = Gtk.Template.Child()
     status_file_row = Gtk.Template.Child()
     status_size_row = Gtk.Template.Child()
+    runs_on_row = Gtk.Template.Child()
     toolset_date_created_row = Gtk.Template.Child()
     toolset_date_updated_row = Gtk.Template.Child()
     toolset_source_row = Gtk.Template.Child()
@@ -73,6 +76,7 @@ class ToolsetDetailsView(Gtk.Box):
         self.insert_action_group("unmount", self._unmount_action_group)
 
         self.setup_toolset_details()
+        self.setup_runs_on()
         self.load_update_state()
         self.load_bindings()
         self.setup_status()
@@ -114,8 +118,27 @@ class ToolsetDetailsView(Gtk.Box):
             self.load_initial_applications_selection()
             self.load_applications()
 
+    def setup_runs_on(self):
+        """Machine where toolset runs: this computer or virtual machine. Can be changed while toolset is not used."""
+        current = self.toolset.machine
+        self.runs_on_row.set_visible(virtual_machines_supported() or current is not None)
+        # This computer is listed only on Linux (or when toolset still uses it, so it's displayed).
+        local = sys.platform.startswith("linux") or current is None
+        self.runs_on_machines = ([None] if local else []) + list(Repository.BuildMachine.value)
+        self.runs_on_row.set_model(Gtk.StringList.new([machine.name if machine else "This computer" for machine in self.runs_on_machines]))
+        self.runs_on_row.set_selected(self.runs_on_machines.index(current) if current in self.runs_on_machines else 0)
+        self.runs_on_row.connect("notify::selected", self.on_runs_on_changed)
+
+    def on_runs_on_changed(self, row, param):
+        machine = self.runs_on_machines[row.get_selected()]
+        if machine is self.toolset.machine:
+            return
+        self.toolset.machine_id = machine.id if machine else None
+        Repository.Toolset.save()
+
     def setup_status(self, _ = None):
         """Updates controls visibility and sensitivity for current status."""
+        self.runs_on_row.set_sensitive(not self.toolset.spawned and not self.toolset.is_reserved)
         self.toolset_name_row.set_editable(
             not self.toolset.spawned
             and not self.toolset.is_reserved
@@ -446,7 +469,7 @@ class ToolsetDetailsView(Gtk.Box):
                     for app, _ in self.tools_selection.items()
                 ]
                 self.start_update(authorization_keeper=authorization_keeper, update_packages=False, apps_selection=apps_selection)
-        authorize_toolset_action(callback=update)
+        authorize_toolset_action(callback=update, machine=self.toolset.machine)
 
     def start_update(self, authorization_keeper: AuthorizationKeeper, update_packages: bool = True, apps_selection: list[ToolsetApplicationSelection] | None = None):
         if self.update_in_progress:
@@ -477,7 +500,7 @@ class ToolsetDetailsView(Gtk.Box):
         def update(authorization_keeper: AuthorizationKeeper):
             if authorization_keeper:
                 self.start_update(authorization_keeper=authorization_keeper, update_packages=True)
-        authorize_toolset_action(callback=update)
+        authorize_toolset_action(callback=update, machine=self.toolset.machine)
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
@@ -522,7 +545,7 @@ class ToolsetDetailsView(Gtk.Box):
                     print(e)
                 finally:
                     self.toolset.release()
-        authorize_toolset_action(callback=spawn)
+        authorize_toolset_action(callback=spawn, machine=self.toolset.machine)
 
     def unspawn(self, store_changes: bool):
         def unspawn(authorization_keeper: AuthorizationKeeper):
@@ -534,5 +557,5 @@ class ToolsetDetailsView(Gtk.Box):
                     print(e)
                 finally:
                     self.toolset.release()
-        authorize_toolset_action(callback=unspawn)
+        authorize_toolset_action(callback=unspawn, machine=self.toolset.machine)
 

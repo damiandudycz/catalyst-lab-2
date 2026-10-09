@@ -1,0 +1,314 @@
+from __future__ import annotations
+import os, threading, uuid
+from typing import Self
+from .event_bus import EventBus, SharedEvent
+from .repository import Repository
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+from .lima import list_instances, run_limactl, default_lima_home, MACHINE_DATA_DIRECTORY
+from .lima import lima_home as default_new_lima_home
+
+class BuildMachine:
+    """Virtual machine (Lima instance) where toolsets run, on systems that can't build stages themselves (macOS).
+    Toolsets linked to machine are spawned inside it, so their builds, updates and snapshots run there too."""
+
+    STATUS_RUNNING = "Running"
+    STATUS_STOPPED = "Stopped"
+    STATUS_MISSING = "Missing"
+    STATUS_STARTING = "Starting"   # Displayed while machine is being started or stopped by app.
+    STATUS_STOPPING = "Stopping"
+
+    # Delay before stopping unused machine, so it's not restarted between consecutive commands of operation.
+    IDLE_STOP_SECONDS = 15
+    COMMAND_USER = "Command" # User of single commands (not listed as user of machine).
+
+    def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 64,
+                 lima_home: str | None = None):
+        self.id = id or uuid.uuid4()
+        self.name = name
+        self.cpus = cpus
+        self.memory_gib = memory_gib
+        self.workspace_gib = workspace_gib # Maximum size of working space image (it grows only as it's used).
+        self.lima_home = lima_home or default_new_lima_home() # Lima directory containing machine folder.
+        self.event_bus = EventBus()
+        self._status: str | None = None
+        self._lock = threading.Lock()
+        self._workspace_lock = threading.Lock()
+        self._workspace_users = 0
+        # Machines started automatically when used are stopped when nothing uses them (after IDLE_STOP_SECONDS).
+        self._usage_lock = threading.Lock()
+        self._users: list[str] = [] # Names of operations using machine, like reservations of toolsets.
+        self._started_automatically = False
+        self._stop_timer: threading.Timer | None = None
+
+    @property
+    def instance_name(self) -> str:
+        """Name of Lima instance."""
+        return f"catalystlab-{self.id.hex[:8]}" # Short, Lima socket paths are limited to 104 characters.
+
+    def serialize(self) -> dict:
+        return {"id": str(self.id), "name": self.name, "cpus": self.cpus, "memory_gib": self.memory_gib,
+                "workspace_gib": self.workspace_gib, "lima_home": self.lima_home}
+
+    @classmethod
+    def init_from(cls, data: dict) -> Self:
+        return cls(id=uuid.UUID(data["id"]), name=data["name"], cpus=data.get("cpus", 4),
+                   memory_gib=data.get("memory_gib", 4), workspace_gib=data.get("workspace_gib", 64),
+                   # Machines created before machines directory are in ~/.lima.
+                   lima_home=data.get("lima_home") or default_lima_home())
+
+    # Status:
+
+    @property
+    def status(self) -> str:
+        if self._status is None:
+            self.refresh_status()
+        return self._status
+
+    def _set_status(self, status: str):
+        if status != self._status:
+            self._status = status
+            self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    def refresh_status(self, during_transition: bool = False):
+        """Reads status from Lima. While app starts or stops machine, its Starting or Stopping status is kept."""
+        if self._status in (self.STATUS_STARTING, self.STATUS_STOPPING) and not during_transition:
+            return
+        instance = list_instances(self.lima_home).get(self.instance_name)
+        status = instance.get("status", self.STATUS_STOPPED) if instance else self.STATUS_MISSING
+        if status != self._status:
+            self._status = status
+            self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    @property
+    def is_running(self) -> bool:
+        return self.status == self.STATUS_RUNNING
+
+    @property
+    def short_details(self) -> str:
+        return f"{self.status} · {self.cpus} CPUs, {self.memory_gib} GiB memory, up to {self.workspace_gib} GiB working space"
+
+    @property
+    def status_indicator_values(self) -> StatusIndicatorValues:
+        return StatusIndicatorValues(
+            state=StatusIndicatorState.ENABLED if self.status == self.STATUS_RUNNING else StatusIndicatorState.DISABLED,
+            blinking=False
+        )
+
+    # Lifecycle:
+
+    # Usage:
+    # Operations using machine (mounted toolsets, builds, installations, single commands) register themselves while
+    # they run. Machine started automatically for them is stopped when nothing uses it anymore (after short delay, so
+    # it's not restarted between consecutive commands). Machine started by user keeps running.
+
+    @property
+    def users(self) -> list[str]:
+        """Operations using machine, without single commands."""
+        return [user for user in self._users if user != self.COMMAND_USER]
+
+    @property
+    def is_used(self) -> bool:
+        return bool(self._users)
+
+    @property
+    def stops_when_unused(self) -> bool:
+        return self._started_automatically
+
+    @property
+    def stop_scheduled(self) -> bool:
+        return self._stop_timer is not None
+
+    def begin_use(self, user: str = COMMAND_USER):
+        """Marks machine as used by operation, cancels its automatic stop. Call end_use with the same name later."""
+        with self._usage_lock:
+            self._users.append(user)
+            if self._stop_timer:
+                self._stop_timer.cancel()
+                self._stop_timer = None
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    def end_use(self, user: str = COMMAND_USER):
+        """Marks end of usage. Machine started automatically is stopped when nothing uses it."""
+        with self._usage_lock:
+            if user in self._users:
+                self._users.remove(user)
+            if not self._users and self._started_automatically and self._stop_timer is None:
+                self._stop_timer = threading.Timer(self.IDLE_STOP_SECONDS, self._stop_if_idle)
+                self._stop_timer.daemon = True
+                self._stop_timer.start()
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    def _stop_if_idle(self):
+        with self._usage_lock:
+            self._stop_timer = None
+            if self._users or not self._started_automatically:
+                return
+            self._started_automatically = False
+        print(f"Stopping unused virtual machine {self.name}")
+        self.stop()
+
+    def stop_if_started_automatically(self):
+        """Stops machine started automatically (when app quits)."""
+        with self._usage_lock:
+            if self._stop_timer:
+                self._stop_timer.cancel()
+                self._stop_timer = None
+            started_automatically = self._started_automatically
+            self._started_automatically = False
+        if started_automatically and self.is_running:
+            self.stop()
+
+    # Lifecycle:
+
+    def start(self, output_handler=print, process_holder: list | None = None, automatically: bool = False) -> bool:
+        """Starts machine. Machine started automatically (for operation) is stopped when it's no longer used, started
+        by user keeps running."""
+        with self._usage_lock:
+            if not automatically:
+                self._started_automatically = False # User wants it running.
+        with self._lock:
+            self.refresh_status()
+            if self.is_running:
+                return True
+            if self.status == self.STATUS_MISSING:
+                raise RuntimeError(f"Virtual machine {self.name} doesn't exist anymore")
+            output_handler(f"Starting virtual machine {self.name}...")
+            self._set_status(self.STATUS_STARTING)
+            try:
+                success = run_limactl(["start", self.instance_name], output_handler, process_holder, home=self.lima_home)
+            finally:
+                self.refresh_status(during_transition=True)
+            if success and self.is_running and automatically:
+                with self._usage_lock:
+                    self._started_automatically = True
+            return success and self.is_running
+
+    def stop(self, output_handler=print) -> bool:
+        with self._usage_lock:
+            self._started_automatically = False
+            if self._stop_timer:
+                self._stop_timer.cancel()
+                self._stop_timer = None
+        with self._lock:
+            self._set_status(self.STATUS_STOPPING)
+            try:
+                success = run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home)
+            finally:
+                self.refresh_status(during_transition=True)
+            return success
+
+    def ensure_running(self, output_handler=print, process_holder: list | None = None):
+        """Starts machine if needed, raises when it can't be started. Setup of machine is updated once while app runs,
+        when it's older than current one (machines created by previous versions)."""
+        if not self.start(output_handler, process_holder, automatically=True):
+            raise RuntimeError(f"Failed to start virtual machine {self.name}")
+        if not getattr(self, "_setup_checked", False):
+            from .lima import machine_setup_update_script
+            from .rootless import MachineExecutor
+            self._setup_checked = True # Before running, executor ensures machine is running too.
+            if not MachineExecutor(self).run(machine_setup_update_script(), output_handler, process_holder):
+                self._setup_checked = False
+                raise RuntimeError(f"Failed to update setup of virtual machine {self.name}")
+
+    # Settings:
+
+    def rename(self, name: str):
+        self.name = name
+        Repository.BuildMachine.save()
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    def change_resources(self, cpus: int, memory_gib: int, workspace_gib: int, output_handler=print):
+        """Changes resources of stopped machine. Processors and memory are changed in Lima instance, working space limit
+        applies to next working space."""
+        with self._lock:
+            self.refresh_status()
+            if self.status != self.STATUS_STOPPED:
+                raise RuntimeError(f"Virtual machine {self.name} must be stopped to change its resources")
+            if (cpus, memory_gib) != (self.cpus, self.memory_gib):
+                arguments = ["edit", f"--cpus={cpus}", f"--memory={memory_gib}", self.instance_name]
+                if not run_limactl(arguments, output_handler, home=self.lima_home):
+                    raise RuntimeError(f"Failed to change resources of virtual machine {self.name}")
+            self.cpus, self.memory_gib, self.workspace_gib = cpus, memory_gib, workspace_gib
+        Repository.BuildMachine.save()
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    # Working space:
+    # Ext4 image in shared folder, mounted in machine at MACHINE_DATA_DIRECTORY while operations use it (environments,
+    # builds, installations). It's created for first operation and deleted when last one finishes, so data doesn't
+    # stay in machine nor take space on this computer.
+
+    @property
+    def workspace_image_path(self) -> str:
+        """In folder of machine (removed with it). Machines in ~/.lima, which isn't shared with them, keep it in
+        machines directory."""
+        from .lima import machines_directory
+        directory = machines_directory()
+        if self.machine_directory.startswith(directory + os.sep):
+            return os.path.join(self.machine_directory, "workspace.img")
+        return os.path.join(directory, self.instance_name, "workspace.img")
+
+    @property
+    def machine_directory(self) -> str:
+        """Folder of machine (Lima instance directory)."""
+        return os.path.join(self.lima_home, self.instance_name)
+
+    def acquire_workspace(self, output_handler=print, process_holder: list | None = None, user: str = "Operation"):
+        """Prepares working space for operation, call release_workspace with the same user when it finishes. Machine is
+        used by operation until then."""
+        self.begin_use(user)
+        try:
+            self._acquire_workspace(output_handler, process_holder)
+        except Exception:
+            self.end_use(user)
+            raise
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    def _acquire_workspace(self, output_handler, process_holder):
+        with self._workspace_lock:
+            if self._workspace_users == 0:
+                self._create_workspace(output_handler, process_holder)
+            self._workspace_users += 1
+
+    def release_workspace(self, output_handler=print, user: str = "Operation"):
+        with self._workspace_lock:
+            if self._workspace_users == 0:
+                return
+            self._workspace_users -= 1
+            if self._workspace_users == 0:
+                self._delete_workspace(output_handler)
+        self.end_use(user)
+
+    def _create_workspace(self, output_handler, process_holder):
+        from .rootless import MachineExecutor
+        image = self.workspace_image_path
+        os.makedirs(os.path.dirname(image), exist_ok=True)
+        output_handler(f"Preparing working space of {self.name}")
+        # Left by previous session of app (eg. after crash) is replaced.
+        script = f"""
+set -e
+sudo umount -l {MACHINE_DATA_DIRECTORY} 2>/dev/null || true
+rm -f "{image}"
+truncate -s {self.workspace_gib}G "{image}"
+mkfs.ext4 -q -F -m 0 "{image}"
+sudo mount -o loop "{image}" {MACHINE_DATA_DIRECTORY}
+sudo chown "$(id -u):$(id -g)" {MACHINE_DATA_DIRECTORY}
+"""
+        if not MachineExecutor(self).run(script, output_handler, process_holder):
+            raise RuntimeError(f"Failed to prepare working space of {self.name}")
+
+    def _delete_workspace(self, output_handler):
+        from .rootless import MachineExecutor
+        image = self.workspace_image_path
+        output_handler(f"Removing working space of {self.name}")
+        try:
+            if self.is_running:
+                MachineExecutor(self).run(f'sudo umount -l {MACHINE_DATA_DIRECTORY}; rm -f "{image}"', output_handler)
+        except Exception as e:
+            output_handler(f"Failed to unmount working space: {e}")
+        if os.path.exists(image):
+            os.remove(image)
+
+def build_machine_for_id(machine_id: uuid.UUID | None) -> BuildMachine | None:
+    if machine_id is None:
+        return None
+    return next((machine for machine in Repository.BuildMachine.value if machine.id == machine_id), None)

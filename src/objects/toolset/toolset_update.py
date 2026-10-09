@@ -11,7 +11,7 @@ from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .helper_functions import  create_squashfs
 from gi.repository import Gio
-from .toolset_installation import insert_portage_config, insert_portage_patch
+from .toolset_installation import portage_config_path, portage_patch_path, read_patch_content
 
 # ------------------------------------------------------------------------------
 # Toolset update.
@@ -246,13 +246,10 @@ class ToolsetUpdateStepUninstallApp(ToolsetUpdateStep):
             app_install = self.toolset.get_app_install(app=self.app)
             if not app_install:
                 raise RuntimeError(f"App {self.app.name} was not found in toolset")
-            if app_install.variant.config:
-                for config in app_install.variant.config:
-                    if self._cancel_event.is_set():
-                        return
-                    remove_portage_config(config_dir=config.directory, app_name=self.app.name, toolset_root=self.toolset.toolset_root())
-            for patch_file in app_install.patches:
-                remove_portage_patch(patch_filename=patch_file, app_package=self.app.package, toolset_root=self.toolset.toolset_root())
+            self.toolset.remove_portage_files(
+                [portage_config_path(config.directory, self.app.name) for config in (app_install.variant.config or [])]
+                + [portage_patch_path(self.app.package, patch_file) for patch_file in app_install.patches]
+            )
             flags = "-C"
             result = self.run_command_in_toolset(command=f"emerge {flags} {self.app.package}", progress_handler=progress_handler)
             self.complete(MultiStageProcessStageState.COMPLETED if result else MultiStageProcessStageState.FAILED)
@@ -271,34 +268,27 @@ class ToolsetUpdateStepInstallApp(ToolsetUpdateStep):
             # Clean stuff from previous install
             app_install = self.toolset.get_app_install(app=self.app_selection.app)
             if app_install:
-                if app_install.variant.config:
-                    for config in app_install.variant.config:
-                        if self._cancel_event.is_set():
-                            return
-                        remove_portage_config(config_dir=config.directory, app_name=self.app_selection.app.name, toolset_root=self.toolset.toolset_root())
                 removed_patches_filenames = [patch for patch in app_install.patches if patch not in self.app_selection.patches]
-                for patch_file in removed_patches_filenames:
-                    if self._cancel_event.is_set():
-                        return
-                    remove_portage_patch(patch_filename=patch_file, app_package=self.app_selection.app.package, toolset_root=self.toolset.toolset_root())
+                self.toolset.remove_portage_files(
+                    [portage_config_path(config.directory, self.app_selection.app.name) for config in (app_install.variant.config or [])]
+                    + [portage_patch_path(self.app_selection.app.package, patch_file) for patch_file in removed_patches_filenames]
+                )
             def progress_handler(output_line: str) -> float or None:
                 pattern = r"^>>> Completed \((\d+) of (\d+)\)"
                 match = re.match(pattern, output_line)
                 if match:
                     n, m = map(int, match.groups())
                     return n / m
-            if self.app_selection.version.config:
-                for config in self.app_selection.version.config:
-                    if self._cancel_event.is_set():
-                        return
-                    insert_portage_config(config_dir=config.directory, config_entries=config.entries, app_name=self.app_selection.app.name, toolset_root=self.multistage_process.toolset.toolset_root())
-            added_patches_files = [patch for patch in self.app_selection.patches if isinstance(patch, Gio.File)]
-            for patch_file in added_patches_files:
-                file_input_stream = patch_file.read()
-                file_info = file_input_stream.query_info("standard::size", None)
-                file_size = file_info.get_size()
-                patch_content = file_input_stream.read_bytes(file_size, None).get_data().decode()
-                insert_portage_patch(patch_content=patch_content, patch_filename=patch_file.get_basename(), app_package=self.app_selection.app.package, toolset_root=self.multistage_process.toolset.toolset_root())
+            files = {
+                portage_config_path(config.directory, self.app_selection.app.name): "".join(entry + "\n" for entry in config.entries)
+                for config in (self.app_selection.version.config or [])
+            }
+            files.update({
+                portage_patch_path(self.app_selection.app.package, patch_file.get_basename()): read_patch_content(patch_file)
+                for patch_file in self.app_selection.patches if isinstance(patch_file, Gio.File)
+            })
+            if files:
+                self.toolset.write_portage_files(files)
             flags = "--getbinpkg --deep --update --changed-use --newuse" if self.multistage_process.allow_binpkgs else "--deep --update --changed-use --newuse"
             result = self.run_command_in_toolset(command=f"emerge {flags} {self.app_selection.app.package} --reinstall-atoms={self.app_selection.app.package}", progress_handler=progress_handler)
             self.complete(MultiStageProcessStageState.COMPLETED if result else MultiStageProcessStageState.FAILED)
@@ -351,13 +341,14 @@ class ToolsetUpdateStepStepCompress(ToolsetUpdateStep):
         super().start()
         try:
             toolset_tmp_squashfs_path = self.toolset.file_path() + "_tmp"
-            self.squashfs_process = create_squashfs(source_directory=self.toolset.toolset_root(), output_file=toolset_tmp_squashfs_path)
+            self.squashfs_process = self.toolset.create_squashfs(output_file=toolset_tmp_squashfs_path)
             for line in self.squashfs_process.stdout:
                 line = line.strip()
                 if line.isdigit():
                     percent = int(line)
                     self._update_progress(percent / 100.0)
-            self.squashfs_process.wait()
+            if self.squashfs_process.wait() != 0:
+                raise RuntimeError("Failed to create squashfs file")
             self.squashfs_process = None
             shutil.move(toolset_tmp_squashfs_path, self.toolset.file_path())
             self.complete(MultiStageProcessStageState.COMPLETED)
@@ -379,20 +370,10 @@ class ToolsetUpdateStepStepCompress(ToolsetUpdateStep):
         self.squashfs_process = None
 
 @root_function
-def remove_portage_config(config_dir: str, app_name: str, toolset_root: str):
-    portage_dir = os.path.join(toolset_root, "etc", "portage", config_dir)
-    filename = app_name.replace("/", "_")
-    config_file_path = os.path.join(portage_dir, filename)
-    if os.path.isfile(config_file_path):
-        os.remove(config_file_path)
+def remove_portage_file(relative_path: str, toolset_root: str):
+    """Removes file from /etc/portage of toolset."""
+    path = os.path.join(toolset_root, "etc", "portage", relative_path)
+    if os.path.isfile(path):
+        os.remove(path)
 
-@root_function
-def remove_portage_patch(patch_filename: str, app_package: str, toolset_root: str):
-    portage_dir = os.path.join(toolset_root, "etc", "portage", "patches", app_package)
-    patch_file_path = os.path.join(portage_dir, patch_filename)
-    if os.path.isfile(patch_file_path):
-        os.remove(patch_file_path)
-
-remove_portage_config = local_for_rootless_paths(remove_portage_config, path_argument="toolset_root")
-remove_portage_patch = local_for_rootless_paths(remove_portage_patch, path_argument="toolset_root")
-
+remove_portage_file = local_for_rootless_paths(remove_portage_file, path_argument="toolset_root")

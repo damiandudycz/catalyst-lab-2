@@ -19,7 +19,36 @@
         <property name="welcome_screen_description">A toolset is an isolated Gentoo environment used to run Catalyst. It is created from an official stage3 image, with selected tools installed, and stored as a .squashfs file.</property>
         <property name="install_button_label">Install toolset</property>
 
-        <!-- Page 1: Stages screen -->
+        <!-- Page 1: Machine where toolset runs -->
+        <child>
+          <object class="GtkScrolledWindow" id="runs_on_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="ItemSelectionView" id="machine_selection_view">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="title">Runs on</property>
+                <property name="description">Toolset is loaded on this computer or inside a virtual machine. Virtual machines are created in Environments, and are needed on systems that can't build stages themselves, like macOS.</property>
+                <property name="item_class_name">BuildMachine</property>
+                <property name="item_icon">virtual-machine-symbolic</property>
+                <property name="item_title_property_name">name</property>
+                <property name="item_subtitle_property_name">short_details</property>
+                <property name="item_status_property_name">status_indicator_values</property>
+                <property name="display_none">True</property>
+                <property name="none_title">This computer</property>
+                <signal name="is-item-selectable" handler="is_machine_selectable"/>
+                <signal name="is-item-usable" handler="is_machine_selectable"/>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 2: Stages screen -->
         <child>
           <object class="GtkScrolledWindow" id="configuration_page">
             <property name="hscrollbar-policy">never</property>

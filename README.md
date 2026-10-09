@@ -36,6 +36,9 @@ efficiently without requiring in-depth knowledge of the underlying components.
 - [ ] Emerge --sync fails in fedora when using native host install
 - [ ] Flatpak in gentoo doesn't seem to update files it sees in /var/tmp after other process created them, which breaks toolset installation
 
+### Virtual machines.
+- [ ] Support virtual machines on Linux, for systems where toolsets can't run without root (unprivileged user namespaces blocked, eg. AppArmor on Ubuntu or hardened kernels), as alternative to the root helper. Needs Lima configuration for Linux hosts (vmType: qemu with KVM, shared folders mount type that works there, like virtiofs or 9p), install hint without Homebrew, and testing. Offer them only when rootless toolsets are not supported. UI is hidden outside macOS for now, see virtual_machines_supported in lima.py.
+
 ### RootHelperClient.
 - [x] Add structure that collects multiple root calls and keeps root opened while it’s not marked as finished. New calls should be possible to add to these groups live and executed one by one. This can be added to root_function decorator so that it can accept a group to add call to or create and return new one if not provided, but these decorators still need to also return ServerCall itself. These groups should accept also normal functions as user, to create long flow for some larger task.
 - [ ] Add display name property to root_function, to display in ServerCall. It should be provided like @root_call(name).
@@ -70,6 +73,12 @@ efficiently without requiring in-depth knowledge of the underlying components.
  - overlayfs (kernel)
  - squashfs-tools
  - git
+
+## macOS application:
+`packaging/macos/build-app.sh` builds self-contained `dist/Catalyst Lab.app` and `dist/Catalyst Lab.dmg` (Python, GTK,
+libadwaita, squashfs tools and Lima included). It installs missing build dependencies with Homebrew and downloads Lima
+from GitHub. Running the app requires only git (Xcode Command Line Tools) for releng and overlay repositories.
+App icon is `computer` icon from Adwaita icon theme (CC BY-SA 3.0, GNOME Project).
 
 ## Main layout:
 

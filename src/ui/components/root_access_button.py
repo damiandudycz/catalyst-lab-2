@@ -1,3 +1,4 @@
+import sys
 from gi.repository import Gtk, Adw
 from .app_events import AppEvents, app_event_bus
 from .root_helper_client import RootHelperClient, RootHelperClientEvents, ServerCall, ServerCallEvents, AuthorizationKeeper
@@ -114,8 +115,9 @@ class RootAccessButton(Gtk.Overlay):
         """Hidden when everything runs without root (in user namespace). Still shown while root helper is running, eg.
         when some action needed it anyway."""
         client = RootHelperClient.shared()
+        # Root helper works only on Linux, elsewhere toolsets run in virtual machines.
         self.set_visible(
-            rootless_toolset_unsupported_reason() is not None
+            (sys.platform.startswith("linux") and rootless_toolset_unsupported_reason() is not None)
             or client.is_server_process_running
             or bool(client.running_actions)
         )

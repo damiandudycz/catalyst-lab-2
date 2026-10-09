@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, threading, shutil
+import os, re, threading, shutil
 from datetime import datetime, timezone
 from gi.repository import GLib
 from .multistage_process import (
@@ -13,13 +13,11 @@ from .toolset import BindMount
 from .toolset_env_builder import ToolsetEnvBuilder
 from .project_stage_arguments import StageArgumentDetails
 from .project_stage_cache import CACHE_ARGUMENTS, stage_cache_path
-from .rootless import (
-    rootless_unsupported_reason, extracted_squashfs, remove_stale_sessions, distfiles_directory, run_in_namespace
-)
-from .project_build_rootless import stage_build_session_script, CATALYST_WRAPPER
+from .rootless import extracted_squashfs, remove_stale_sessions, distfiles_directory
+from .project_build_rootless import stage_build_session_script, save_interrupted_caches, CATALYST_WRAPPER
 from .project_build import StageBuild, StageBuildStatus, StageBuildPlan, project_builds_directory, stage_builds_directory
 from .project_build_spec import (
-    StageSpecContext, generate_stage_spec, generate_portage_confdir, seed_name_prefix, select_seed_url, snapshot_treeish
+    StageSpecContext, generate_stage_spec, generate_portage_confdir, generate_root_overlay, seed_name_prefix, select_seed_url, snapshot_treeish
 )
 
 # Paths used by catalyst inside toolset.
@@ -47,8 +45,11 @@ class ProjectBuild(MultiStageProcess):
         self.failed_stage_ids: set = set()
         # Builds run without root privileges in user namespace when system supports it, otherwise in toolset spawned
         # by root helper.
-        self.rootless_unsupported_reason = rootless_unsupported_reason()
-        self.rootless = self.rootless_unsupported_reason is None
+        # Builds of toolsets linked to virtual machine run in that machine (always without root privileges).
+        self.machine = self.toolset.machine if self.toolset else None
+        self.executor = self.toolset.executor if self.toolset else None
+        self.rootless_unsupported_reason = self.executor.unsupported_reason() if self.executor and not self.machine else None
+        self.rootless = self.machine is not None or self.rootless_unsupported_reason is None
         self.rootless_toolset_path: str | None = None # Extracted toolset and snapshot, set when preparing toolset.
         self.rootless_snapshot_path: str | None = None
         super().__init__(title=f"Building {project_directory.name}")
@@ -86,11 +87,43 @@ class ProjectBuild(MultiStageProcess):
         return paths
 
     def stage_cache_paths(self, stage) -> dict:
-        """Host folders of enabled caches of stage, by argument."""
-        return {
+        """Folders of enabled caches of stage, by argument. Automatic caches of machine builds are on disk of machine
+        (shared folders can't store owners of files that portage sets), in its cache directory."""
+        paths = {
             argument: path for argument in CACHE_ARGUMENTS
             if (path := stage_cache_path(self.project_directory, stage, argument))
         }
+        if self.machine:
+            # Project id instead of name, paths in spec can't contain spaces.
+            project_caches = os.path.join(self.executor.cache_directory(), "Projects", self.project_directory.id.hex)
+            paths = {
+                argument: os.path.join(project_caches, os.path.relpath(path, self.builds_directory))
+                if path.startswith(self.builds_directory + os.sep) else path
+                for argument, path in paths.items()
+            }
+        return paths
+
+    def synced_caches(self, stage) -> list[tuple[str, str]]:
+        """Caches of machine build kept in shared folders between builds, as (saved path, path in working space).
+        Working space is deleted after build, caches are saved as plain files (shared folders can't store owners)."""
+        if not self.machine:
+            return []
+        caches = [(distfiles_directory(), distfiles_directory(self.executor))]
+        used_paths = self.stage_cache_paths(stage)
+        for argument in CACHE_ARGUMENTS:
+            saved = stage_cache_path(self.project_directory, stage, argument)
+            if saved and saved.startswith(self.builds_directory + os.sep) and argument in used_paths:
+                caches.append((saved, used_paths[argument]))
+        return caches
+
+    def make_directories(self, paths: list[str]):
+        """Creates directories, ones in cache or temporary directory of machine are created in machine."""
+        machine_paths = [path for path in paths if self.machine and self.executor.owns_path(path)]
+        for path in paths:
+            if path not in machine_paths:
+                os.makedirs(path, exist_ok=True)
+        if machine_paths:
+            self.executor.filesystem({"mkdir": machine_paths})
 
     def seed_subpath(self, stage) -> str | None:
         """Seed of stage, relative to builds directory, without extension (as catalyst expects source_subpath)."""
@@ -230,18 +263,24 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
     def _prepare_rootless(self):
         """Extracts toolset and snapshot (once for every version of their files), used by stage builds."""
         process = self.multistage_process
-        self.log("Building without root privileges, in user namespace")
-        remove_stale_sessions(self.log, self.namespace_processes)
+        executor = process.executor
+        if process.machine:
+            self.log(f"Building in virtual machine {process.machine.name}, without root privileges")
+            process.machine.ensure_running(self.log, self.namespace_processes)
+            self.workspace_user = f"Build of {process.project_directory.name}"
+            process.machine.acquire_workspace(self.log, self.namespace_processes, user=self.workspace_user)
+            self.workspace_acquired = True
+        else:
+            self.log("Building without root privileges, in user namespace")
+        remove_stale_sessions(self.log, self.namespace_processes, executor=executor)
         process.rootless_toolset_path = extracted_squashfs(
-            process.toolset.file_path(), "toolsets", self.log, self.namespace_processes, check_path="bin/bash")
+            process.toolset.file_path(), "toolsets", self.log, self.namespace_processes, check_path="bin/bash", executor=executor)
         snapshot = process.project_directory.get_snapshot()
         if snapshot is None:
             raise RuntimeError("Project has no snapshot")
         process.rootless_snapshot_path = extracted_squashfs(
-            snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles")
-        os.makedirs(distfiles_directory(), exist_ok=True)
-        for path in process.mirrored_paths():
-            os.makedirs(path, exist_ok=True)
+            snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles", executor=executor)
+        process.make_directories([distfiles_directory(executor)] + process.mirrored_paths())
     def required_bindings(self) -> list[BindMount]:
         process = self.multistage_process
         bindings = [
@@ -261,6 +300,13 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         toolset = self.multistage_process.toolset
         if self.spawned:
             toolset.unspawn(rebuild_squashfs_if_needed=False)
+        if getattr(self, "workspace_acquired", False):
+            # Working space is deleted with caches changed by cancelled build, they are saved first.
+            try:
+                save_interrupted_caches(self.multistage_process.executor, self.log)
+            except Exception as e:
+                self.log(f"Failed to save caches: {e}")
+            self.multistage_process.machine.release_workspace(self.log, user=self.workspace_user)
         if self.reserved:
             toolset.release()
         return True
@@ -314,11 +360,58 @@ class ProjectBuildStepDownloadSeed(ProjectBuildStep):
             print(f"Error during '{self.name}': {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+class EmergeProgress:
+    """Progress of packages built by catalyst, read from its output: emerge prints "(N of M)" for every package.
+    Catalyst runs every emerge with run_merge, which first prints the command. Update of seed (stage1 with
+    update_seed) is the first emerge after "Updating seed stage...", it has no progress, as it's not part of the
+    stage. Stages run several emerges, progress is of the current one (emerges of single package are skipped)."""
+    _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    _COMPLETED = re.compile(r"^>>> Completed(?: binary)? \((\d+) of (\d+)\)")
+
+    def __init__(self):
+        self.seed_update = False
+        self.seed_update_started = False
+
+    def parse(self, line: str) -> float | None:
+        """Progress when line changes it, otherwise None."""
+        line = self._ANSI.sub("", line).strip()
+        if line.startswith("Updating seed stage"):
+            self.seed_update, self.seed_update_started = True, False
+        elif line.startswith("emerge ") and self.seed_update:
+            if self.seed_update_started:
+                self.seed_update = False # Next emerge after the seed update.
+            else:
+                self.seed_update_started = True
+        elif not self.seed_update and (match := self._COMPLETED.match(line)) and int(match.group(2)) > 1:
+            # Emerges of single package (eg. baselayout before stage1 packages) would show 100% before the real list.
+            return int(match.group(1)) / int(match.group(2))
+        return None
+
 class ProjectBuildStepBuildStage(ProjectBuildStep):
     def __init__(self, stage, multistage_process: ProjectBuild):
         super().__init__(name=f"Build {stage.name}", description=f"Builds {stage.target.replace('_', '-')} with catalyst", multistage_process=multistage_process)
         self.stage = stage
         self.build: StageBuild | None = None
+        self._log_file = None
+        self._emerge_progress = EmergeProgress()
+    def log(self, line: str):
+        """Output is also saved as build.log in build directory, to keep it after app is closed. Packages built by
+        catalyst are shown as progress."""
+        super().log(line)
+        if (progress := self._emerge_progress.parse(line)) is not None:
+            self._update_progress(progress)
+        if self.build and self.build.path:
+            try:
+                if self._log_file is None:
+                    self._log_file = open(os.path.join(self.build.path, "build.log"), "a", encoding="utf-8", buffering=1)
+                self._log_file.write(line + "\n")
+            except OSError as e:
+                print(f"Failed to write build log: {e}")
+    def complete(self, state: MultiStageProcessStageState):
+        super().complete(state) # Can log reason of failure.
+        if self._log_file:
+            self._log_file.close()
+            self._log_file = None
     def start(self):
         super().start()
         process = self.multistage_process
@@ -337,13 +430,15 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             os.makedirs(work_directory)
             portage_path = os.path.join(work_directory, "portage")
             has_confdir = generate_portage_confdir(project, self.stage, portage_path)
+            root_overlay_path = os.path.join(work_directory, "root_overlay")
+            has_root_overlay = generate_root_overlay(project, self.stage, root_overlay_path)
             cache_paths = process.stage_cache_paths(self.stage)
-            for path in cache_paths.values():
-                os.makedirs(path, exist_ok=True)
+            process.make_directories(list(cache_paths.values()))
             spec = generate_stage_spec(project, self.stage, StageSpecContext(
                 timestamp=process.timestamp,
                 source_subpath=source_subpath,
                 portage_confdir=process.container_path(portage_path) if has_confdir else None,
+                root_overlay=process.container_path(root_overlay_path) if has_root_overlay else None,
                 cache_paths={argument: process.container_path(path) for argument, path in cache_paths.items()},
             ))
             spec_path = os.path.join(work_directory, "stage.spec")
@@ -408,16 +503,18 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
         bindings = [
             (process.builds_directory, CATALYST_BUILDS_PATH),
             (process.rootless_snapshot_path, f"{CATALYST_SNAPSHOTS_PATH}/gentoo-{snapshot_treeish(process.project_directory)}.sqfs"),
-            (distfiles_directory(), "/var/cache/distfiles"),
+            (distfiles_directory(process.executor), "/var/cache/distfiles"),
         ] + [(path, path) for path in process.mirrored_paths()]
         script = stage_build_session_script(
+            executor=process.executor,
             toolset_path=process.rootless_toolset_path,
             bindings=bindings,
             command=f'bash "{process.container_path(build_script_path)}"',
             diagnostics_command=f'bash "{process.container_path(diagnostics_path)}"' if diagnostics_path else None,
+            synced_caches=process.synced_caches(self.stage),
         )
         self.log(f"$ bash {process.container_path(build_script_path)}")
-        return run_in_namespace(script, self.log, self.namespace_processes)
+        return process.executor.run_in_namespace(script, self.log, self.namespace_processes)
 
     def _run_diagnostics(self, spec: str, work_directory: str):
         """Collects details about chroot left by failed catalyst build. Catalyst hides errors of some scripts
@@ -477,7 +574,9 @@ def _catalyst_build_script(spec_path: str, config_path: str, caches: set[str], w
     """Runs catalyst with /dev containing real device nodes. Catalyst bind mounts /dev into chroot without submounts,
     but device nodes in toolset /dev are bind mounts made by bwrap, so chroot would get empty files instead (portage
     fails with '/dev/null is not a character device'). Only standard nodes, loop devices and kvm are created.
-    Catalyst uses configuration of toolset, with cache options enabled only for caches used by stage.
+    Catalyst uses configuration of toolset, with cache options enabled only for caches used by stage, and parallel
+    builds using all processors when toolset doesn't configure them. Without jobs, catalyst sets empty MAKEOPTS,
+    which disables default of portage (-j<processors>), so packages would be built one by one with single process.
     In rootless builds (wrapper_path set) /dev is prepared by session script, and catalyst runs through wrapper."""
     enabled = " ".join(sorted(caches))
     disabled = " ".join(sorted(set(_catalyst_cache_options.values()) - caches))
@@ -497,7 +596,7 @@ done
 # used unchanged.
 CONFIG_ARGS=()
 if python3 - "{config_path}" "{enabled}" "{disabled}" <<'PYTHON'
-import json, sys, tomllib
+import json, os, sys, tomllib
 path, enabled, disabled = sys.argv[1], sys.argv[2].split(), sys.argv[3].split()
 with open("/etc/catalyst/catalyst.conf", "rb") as file:
     config = tomllib.load(file)
@@ -505,10 +604,15 @@ if any(isinstance(value, dict) for value in config.values()):
     sys.exit("Unsupported catalyst.conf structure")
 options = [option for option in config.get("options", []) if option not in disabled]
 config["options"] = options + [option for option in enabled if option not in options]
+# emerge --jobs and --load-average, and MAKEOPTS (-j, -l). Load average limits parallel jobs to processors count.
+processors = os.cpu_count() or 1
+config.setdefault("jobs", processors)
+config.setdefault("load-average", float(processors))
 with open(path, "w") as file:
     for key, value in config.items():
         file.write(f"{{key}} = {{json.dumps(value)}}\\n")
 print("Catalyst options: " + ", ".join(config["options"]))
+print(f"Parallel jobs: {{config['jobs']}}, load average: {{config['load-average']}}")
 PYTHON
 then
     CONFIG_ARGS=(-c "{config_path}")
