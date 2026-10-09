@@ -90,8 +90,8 @@
                           <object class="GtkAdjustment">
                             <property name="lower">20</property>
                             <property name="upper">2048</property>
-                            <property name="step-increment">10</property>
-                            <property name="value">100</property>
+                            <property name="step-increment">8</property>
+                            <property name="value">64</property>
                           </object>
                         </property>
                       </object>

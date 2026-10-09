@@ -15,7 +15,7 @@ class BuildMachine:
     STATUS_STOPPED = "Stopped"
     STATUS_MISSING = "Missing"
 
-    def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 100,
+    def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 64,
                  lima_home: str | None = None):
         self.id = id or uuid.uuid4()
         self.name = name
@@ -41,7 +41,7 @@ class BuildMachine:
     @classmethod
     def init_from(cls, data: dict) -> Self:
         return cls(id=uuid.UUID(data["id"]), name=data["name"], cpus=data.get("cpus", 4),
-                   memory_gib=data.get("memory_gib", 4), workspace_gib=data.get("workspace_gib", 100),
+                   memory_gib=data.get("memory_gib", 4), workspace_gib=data.get("workspace_gib", 64),
                    # Machines created before machines directory are in ~/.lima.
                    lima_home=data.get("lima_home") or default_lima_home())
 
