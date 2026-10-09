@@ -47,9 +47,10 @@ class ToolsetCreateView(Gtk.Box):
         self.tools_selection_patches: Dict[ToolsetApplication, list[GLocalFile]] = {app: [] for app in ToolsetApplication.ALL}
         self.allow_binpkgs_checkbox.set_active(self.allow_binpkgs)
         self._load_applications_rows()
-        # Toolsets run on this computer only on Linux, elsewhere virtual machine is selected by default.
+        # Toolsets run on this computer only on Linux, elsewhere only virtual machines are listed (first one is selected).
         self.local_unsupported_reason = None if sys.platform.startswith("linux") else "Not available on this system, select virtual machine"
-        self.machine_selection_view.set_property("none_subtitle", self.local_unsupported_reason or "Runs directly on this computer")
+        self.machine_selection_view.set_property("display_none", self.local_unsupported_reason is None)
+        self.machine_selection_view.set_property("none_subtitle", "Runs directly on this computer")
         self.machine_selection_view.set_property("autoselect_default", self.local_unsupported_reason is not None)
         self.machine_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, lambda view: self.wizard_view._refresh_buttons_state())
         if installation_in_progress is None or installation_in_progress.status == MultiStageProcessState.SETUP:

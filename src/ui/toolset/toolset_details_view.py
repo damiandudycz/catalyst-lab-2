@@ -1,3 +1,4 @@
+import sys
 from gi.repository import Gtk, Adw, Gio, GLib
 from .rootless import authorize_toolset_action
 from .toolset import Toolset, ToolsetEvents
@@ -118,9 +119,11 @@ class ToolsetDetailsView(Gtk.Box):
 
     def setup_runs_on(self):
         """Machine where toolset runs: this computer or virtual machine. Can be changed while toolset is not used."""
-        self.runs_on_machines = [None] + list(Repository.BuildMachine.value)
-        self.runs_on_row.set_model(Gtk.StringList.new(["This computer"] + [machine.name for machine in self.runs_on_machines[1:]]))
         current = self.toolset.machine
+        # This computer is listed only on Linux (or when toolset still uses it, so it's displayed).
+        local = sys.platform.startswith("linux") or current is None
+        self.runs_on_machines = ([None] if local else []) + list(Repository.BuildMachine.value)
+        self.runs_on_row.set_model(Gtk.StringList.new([machine.name if machine else "This computer" for machine in self.runs_on_machines]))
         self.runs_on_row.set_selected(self.runs_on_machines.index(current) if current in self.runs_on_machines else 0)
         self.runs_on_row.connect("notify::selected", self.on_runs_on_changed)
 
