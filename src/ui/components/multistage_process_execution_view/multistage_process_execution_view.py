@@ -198,9 +198,7 @@ class MultiStageProcessStageRow(Adw.ActionRow):
 
     def _update_status_label(self):
         self.progress_label.set_label(
-            "" if self.step.state == MultiStageProcessStageState.SCHEDULED else
-            self.step.progress_text if self.step.progress_text and self.step.state == MultiStageProcessStageState.IN_PROGRESS else
-            ("..." if self.step.progress is None else f"{int(self.step.progress * 100)}%")
+            "" if self.step.state == MultiStageProcessStageState.SCHEDULED else ("..." if self.step.progress is None else f"{int(self.step.progress * 100)}%")
         )
 
     def _set_status_icon(self, state: MultiStageProcessStageState):

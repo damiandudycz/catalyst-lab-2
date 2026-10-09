@@ -260,8 +260,8 @@ def _running_builds() -> list[ProjectBuild]:
 def _build_step_status(step: ProjectBuildStepBuildStage) -> StageNodeStatus:
     match step.state:
         case MultiStageProcessStageState.IN_PROGRESS:
-            # Packages progress, eg. "Building 12 of 300 packages".
-            return StageNodeStatus(title=f"Building {step.progress_text}" if step.progress_text else "Building", in_progress=True)
+            # Progress of built packages.
+            return StageNodeStatus(title=f"Building {int(step.progress * 100)}%" if step.progress is not None else "Building", in_progress=True)
         case MultiStageProcessStageState.COMPLETED:
             return StageNodeStatus(title="Built", icon_name="check-square-svgrepo-com-symbolic", css_class="success")
         case MultiStageProcessStageState.FAILED if step.build is None:
