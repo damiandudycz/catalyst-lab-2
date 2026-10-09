@@ -1,11 +1,24 @@
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, GObject
+gi.require_version("Adw", "1")
+from gi.repository import Gtk, GObject, Adw
+import cairo
+from .project_stage import stage_target_icon
+from dataclasses import dataclass
 
 # Constants for spacing
-NODE_MARGIN_X = 24
-NODE_MARGIN_Y = 24 # Spacing WITHIN a branch
-ROOT_BRANCH_MARGIN_Y = 40 # Larger spacing BETWEEN root branches
+NODE_MARGIN_X = 32
+NODE_MARGIN_Y = 32 # Spacing WITHIN a branch
+ROOT_BRANCH_MARGIN_Y = 48 # Larger spacing BETWEEN root branches
+CONNECTOR_CORNER_RADIUS = 10 # Rounded corners of lines connecting parents with children
+
+@dataclass(frozen=True)
+class StageNodeStatus:
+    """Status shown on stage entry, for example state of stage in running build."""
+    title: str
+    icon_name: str | None = None
+    css_class: str | None = None
+    in_progress: bool = False # Shows spinner instead of icon.
 
 class TreeNode:
     def __init__(self, value):
@@ -29,12 +42,17 @@ class StagesTreeView(Gtk.Fixed):
         self.node_sizes = {}
         self.buttons = {}
         self.separators = []
+        self.statuses: dict = {} # Stage id -> StageNodeStatus.
+
+        # Space for shadows of cards in top and bottom rows.
+        self.set_margin_top(12)
+        self.set_margin_bottom(12)
 
         self.drawing_area = Gtk.DrawingArea()
         self.drawing_area.set_draw_func(self.draw_func)
         self.put(self.drawing_area, 0, 0)
 
-    def on_node_clicked(self, button, node):
+    def on_node_clicked(self, list_box, row, node):
         self.emit("stage-selected", node.value)
 
     def set_root_nodes(self, root_nodes: list[TreeNode]):
@@ -42,9 +60,19 @@ class StagesTreeView(Gtk.Fixed):
         self._layout_tree()
         self.drawing_area.queue_draw()
 
+    def set_statuses(self, statuses: dict):
+        """Statuses of stages by their id, displayed on stage entries."""
+        if statuses == self.statuses:
+            return
+        self.statuses = statuses
+        self._layout_tree()
+        self.drawing_area.queue_draw()
+
     def draw_func(self, area, context, width, height):
         # This drawing logic is robust enough to handle both layout styles
         context.set_line_width(2)
+        context.set_line_cap(cairo.LINE_CAP_ROUND)
+        context.set_line_join(cairo.LINE_JOIN_ROUND)
         context.set_source_rgb(0.5, 0.5, 0.5)
 
         for parent, (px, py) in self.node_positions.items():
@@ -71,8 +99,12 @@ class StagesTreeView(Gtk.Fixed):
                         else:
                             parent_connector_x = parent_visible_start_x
                         child_connector_y = child_y
+                        # Horizontal line from parent, turning down to child with rounded corner.
+                        direction = 1 if child_cx > parent_connector_x else -1
+                        radius = min(CONNECTOR_CORNER_RADIUS, abs(child_cx - parent_connector_x), abs(child_connector_y - parent_connector_y))
                         context.move_to(parent_connector_x, parent_connector_y)
-                        context.line_to(child_cx, parent_connector_y)
+                        context.line_to(child_cx - direction * radius, parent_connector_y)
+                        context.curve_to(child_cx, parent_connector_y, child_cx, parent_connector_y, child_cx, parent_connector_y + radius)
                         context.line_to(child_cx, child_connector_y)
                     context.stroke()
 
@@ -88,11 +120,40 @@ class StagesTreeView(Gtk.Fixed):
             nodes_to_visit.extend(node.children)
         return all_nodes
 
+    def _create_node_widget(self, node) -> Gtk.ListBox:
+        """Stage displayed as list entry (boxed list with single row), with icon, name and target. Also used for
+        measuring nodes, so sizes match."""
+        target = getattr(node.value, "target", None) or ""
+        status = self.statuses.get(getattr(node.value, "id", None))
+        subtitle = target.replace("_", "-")
+        if status:
+            subtitle = f"{subtitle} · {status.title}" if subtitle else status.title
+        row = Adw.ActionRow(title=node.value.name, subtitle=subtitle, activatable=True)
+        row.set_use_markup(False)
+        # Single line labels, wrapping labels would report minimal width and get squeezed in Gtk.Fixed.
+        row.set_title_lines(1)
+        row.set_subtitle_lines(1)
+        row.add_prefix(Gtk.Image.new_from_icon_name(stage_target_icon(target)))
+        if status and status.in_progress:
+            spinner = Adw.Spinner(tooltip_text=status.title)
+            spinner.set_size_request(16, 16)
+            row.add_suffix(spinner)
+        elif status and status.icon_name:
+            icon = Gtk.Image.new_from_icon_name(status.icon_name)
+            icon.set_tooltip_text(status.title)
+            if status.css_class:
+                icon.add_css_class(status.css_class)
+            row.add_suffix(icon)
+        list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        list_box.add_css_class("boxed-list")
+        list_box.append(row)
+        return list_box
+
     def _measure_nodes(self):
         self.node_sizes = {}
         for node in self._get_all_nodes():
-            temp_button = Gtk.Button(label=node.value.name)
-            min_size, nat_size = temp_button.get_preferred_size()
+            temp_widget = self._create_node_widget(node)
+            min_size, nat_size = temp_widget.get_preferred_size()
             self.node_sizes[node] = (nat_size.width, nat_size.height)
 
     def _layout_tree(self):
@@ -183,14 +244,16 @@ class StagesTreeView(Gtk.Fixed):
         self.drawing_area.set_size_request(total_width, total_height)
 
         for node, (x, y) in self.node_positions.items():
-            button = Gtk.Button(label=node.value.name)
-            button.connect("clicked", self.on_node_clicked, node)
-            self.put(button, x, y)
-            self.buttons[node] = button
+            node_widget = self._create_node_widget(node)
+            node_widget.connect("row-activated", self.on_node_clicked, node)
+            node_widget.set_size_request(*self.node_sizes[node])
+            self.put(node_widget, x, y)
+            self.buttons[node] = node_widget
 
         for y_pos in separator_y_positions:
             separator = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
             separator.set_size_request(total_width - NODE_MARGIN_X * 2, -1)
             self.put(separator, NODE_MARGIN_X, y_pos)
             self.separators.append(separator)
+
 

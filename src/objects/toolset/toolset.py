@@ -6,15 +6,19 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from collections import namedtuple
-from .root_function import root_function
+from .root_function import root_function, local_for_rootless_paths
 from .runtime_env import RuntimeEnv
 from .event_bus import EventBus, SharedEvent
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
 from .toolset_application import ToolsetApplication, ToolsetApplicationInstall
-from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs, create_squashfs
+from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs, create_squashfs, loop_mount_squashfs, loop_umount_squashfs
 from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+from .rootless import (
+    rootless_toolset_unsupported_reason, run_in_namespace, NamespaceProcess, extracted_squashfs,
+    writable_squashfs_copy, remove_in_namespace, rootless_directory, squashfs_process
+)
 
 class ToolsetEvents(Enum):
     SPAWNED_CHANGED = auto()
@@ -32,6 +36,7 @@ class Toolset(Serializable):
         self.name = name
         self.metadata = metadata
         self.squashfs_binding_dir = squashfs_binding_dir # Directory used as toolset_root, mounted when setting up or spawning.
+        self.squashfs_loop_mounted = False # squashfs_binding_dir is read only loop mount of squashfs file (not extracted copy).
         match env:
             case ToolsetEnv.SYSTEM:
                 pass
@@ -50,6 +55,10 @@ class Toolset(Serializable):
         self.additional_bindings: list[BindMount] | None = None
         self.hot_fixes: list[HotFix] | None = None
         self.work_dir: str | None = None
+        # Rootless spawn runs bwrap in user namespace instead of root helper. Toolset root is then extracted copy of
+        # squashfs: shared read only copy, or writable copy (rootless_writable_copy) removed when unspawning.
+        self.rootless = False
+        self.rootless_writable_copy: str | None = None
         self.event_bus = EventBus[ToolsetEvents]()
 
     @property
@@ -138,15 +147,34 @@ class Toolset(Serializable):
 
             # Prepare /tmp directories and bind_options
             runtime_env = RuntimeEnv.current()
+            self.rootless = self.env == ToolsetEnv.EXTERNAL and rootless_toolset_unsupported_reason() is None
 
             # Create squashfs mounting if needed.
-            if self.file_path() and os.path.exists(self.file_path()):
-                self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.file_path(), prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.name)}/mount_")
+            if self.file_path() and os.path.exists(self.file_path()) and self.rootless:
+                if store_changes:
+                    self.squashfs_binding_dir = writable_squashfs_copy(squashfs_path=self.file_path(), output_handler=print)
+                    self.rootless_writable_copy = self.squashfs_binding_dir
+                else:
+                    self.squashfs_binding_dir = extracted_squashfs(squashfs_path=self.file_path(), kind="toolsets", output_handler=print, check_path="usr")
+                self.squashfs_loop_mounted = False
+            elif self.file_path() and os.path.exists(self.file_path()):
+                prefix = f"toolsets/{Toolset.sanitized_name_for_name(name=self.name)}/mount_"
+                if store_changes:
+                    # Changes are written directly to toolset files and squashfs is rebuilt from them when unspawning,
+                    # so it needs writable copy.
+                    self.squashfs_binding_dir = mount_squashfs(squashfs_path=self.file_path(), prefix=prefix)
+                    self.squashfs_loop_mounted = False
+                else:
+                    # Read only mount, writes go to overlays created below. Much faster than extracting.
+                    self.squashfs_binding_dir = loop_mount_squashfs(squashfs_path=self.file_path(), prefix=prefix)
+                    self.squashfs_loop_mounted = True
 
             resolved_toolset_root = str(Path(self.toolset_root()).resolve())
             if resolved_toolset_root == "/" and store_changes:
+                self._release_squashfs_binding_dir()
                 raise RuntimeError("Cannot use store_changes with host toolset")
             if not os.path.isdir(resolved_toolset_root):
+                self._release_squashfs_binding_dir()
                 raise RuntimeError(f"Toolset root directory not found: {resolved_toolset_root}")
 
             _system_bindings = [ # System.
@@ -196,7 +224,11 @@ class Toolset(Serializable):
             work_dir: str | None = None
             try:
                 OverlayPaths = namedtuple("OverlayPaths", ["upper", "work"])
-                work_dir = create_temp_workdir(prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.name)}/bwrap_")
+                if self.rootless:
+                    work_dir = os.path.join(rootless_directory(), "sessions", f"toolset-{uuid.uuid4().hex}")
+                    os.makedirs(work_dir)
+                else:
+                    work_dir = create_temp_workdir(prefix=f"toolsets/{Toolset.sanitized_name_for_name(name=self.name)}/bwrap_")
 
                 # Prepare work dirs:
                 fake_root = os.path.join(work_dir, "fake_root")
@@ -272,8 +304,8 @@ class Toolset(Serializable):
                         os.makedirs(os.path.dirname(fake_symlink_path), exist_ok=True)
                         os.symlink(target, fake_symlink_path)
                         continue
-                    # Char devices:
-                    if stat.S_ISCHR(os.stat(resolved_host_path).st_mode):
+                    # Char and block devices (eg. /dev/kvm, /dev/loopN):
+                    if stat.S_ISCHR(os.stat(resolved_host_path).st_mode) or stat.S_ISBLK(os.stat(resolved_host_path).st_mode):
                         flag = "--dev-bind" if binding.store_changes else "--ro-bind"
                         bind_options.extend([flag, binding.host_path, binding.mount_path])
                         continue
@@ -297,7 +329,8 @@ class Toolset(Serializable):
                 error = e
                 try:
                     if work_dir:
-                        delete_temp_workdir(path=work_dir)
+                        self._delete_work_dir(work_dir)
+                    self._release_squashfs_binding_dir()
                 except Exception as e2:
                     error = ExceptionGroup("Multiple errors spawning environment", [error, e2])
                 raise error
@@ -312,14 +345,7 @@ class Toolset(Serializable):
 
             # Set bindings owners if needed
             try:
-                fake_root = os.path.join(self.work_dir, "fake_root")
-                test_result = _start_toolset_command._raw(
-                    work_dir=work_dir,
-                    fake_root=fake_root,
-                    bind_options=bind_options,
-                    command_to_run="echo Hello World"
-                )
-                if test_result.code != ServerResponseStatusCode.OK:
+                if not self._run_command_and_wait("echo Hello World"):
                     raise RuntimeError("Toolset test failed")
                 chmod_commands = [
                     f"chown -R {binding.owner} {binding.mount_path}"
@@ -327,20 +353,54 @@ class Toolset(Serializable):
                     if binding.owner is not None
                 ]
                 if chmod_commands:
-                    chmod_command = " && ".join(chmod_commands)
-                    chmod_result = _start_toolset_command._raw(
-                        work_dir=work_dir,
-                        fake_root=fake_root,
-                        bind_options=bind_options,
-                        command_to_run=chmod_command
-                    )
-                    if chmod_result.code != ServerResponseStatusCode.OK:
+                    if not self._run_command_and_wait(" && ".join(chmod_commands)):
                         raise RuntimeError("Toolset test failed")
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
                 self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
             except Exception as e:
                 print(e)
                 self.unspawn(rebuild_squashfs_if_needed=False)
+
+    def _run_command_and_wait(self, command: str) -> bool:
+        """Runs command in spawned toolset, used while spawning."""
+        if self.rootless:
+            return run_in_namespace(self._bwrap_script(command), print)
+        fake_root = os.path.join(self.work_dir, "fake_root")
+        result = _start_toolset_command._raw(work_dir=self.work_dir, fake_root=fake_root, bind_options=self.bind_options, command_to_run=command)
+        return result.code == ServerResponseStatusCode.OK
+
+    def _bwrap_script(self, command: str) -> str:
+        """Command running in rootless toolset, same environment as _start_toolset_command."""
+        import shlex
+        fake_root = os.path.join(self.work_dir, "fake_root")
+        options = " ".join(shlex.quote(option) for option in self.bind_options)
+        return (
+            f"exec bwrap --die-with-parent --unshare-uts --unshare-ipc --unshare-pid --unshare-cgroup "
+            f"--hostname catalyst-lab --bind {shlex.quote(fake_root)} / --dev /dev --proc /proc "
+            f"--setenv HOME / --setenv LANG C.UTF-8 --setenv LC_ALL C.UTF-8 {options} bash -c {shlex.quote(command)} < /dev/null"
+        )
+
+    def _delete_work_dir(self, work_dir: str):
+        if self.rootless:
+            remove_in_namespace([work_dir], print)
+        else:
+            delete_temp_workdir(path=work_dir)
+
+    def _release_squashfs_binding_dir(self):
+        """Unmounts or deletes squashfs contents prepared by spawn, used when spawning fails."""
+        if self.rootless:
+            if self.rootless_writable_copy:
+                remove_in_namespace([self.rootless_writable_copy], print)
+            self.rootless_writable_copy = None
+            self.squashfs_binding_dir = None
+            return
+        if self.squashfs_binding_dir and self.file_path() and os.path.exists(self.file_path()):
+            if self.squashfs_loop_mounted:
+                loop_umount_squashfs(mount_point=self.squashfs_binding_dir)
+            else:
+                umount_squashfs(mount_point=self.squashfs_binding_dir)
+            self.squashfs_binding_dir = None
+            self.squashfs_loop_mounted = False
 
     def unspawn(self, rebuild_squashfs_if_needed: bool = True, clean_squashfs_binding_dir: bool = True):
         """Clear tmp folders."""
@@ -357,12 +417,20 @@ class Toolset(Serializable):
                     create_squashfs_process.wait()
                     if os.path.isfile(self.file_path()+"_tmp"):
                         shutil.move(self.file_path()+"_tmp", self.file_path())
-                if self.squashfs_binding_dir and clean_squashfs_binding_dir:
-                    umount_squashfs(mount_point=self.squashfs_binding_dir)
+                if self.rootless:
+                    # Shared read only copy is kept, writable one is removed.
+                    if clean_squashfs_binding_dir:
+                        self._release_squashfs_binding_dir()
+                elif self.squashfs_binding_dir and clean_squashfs_binding_dir:
+                    if self.squashfs_loop_mounted:
+                        loop_umount_squashfs(mount_point=self.squashfs_binding_dir)
+                    else:
+                        umount_squashfs(mount_point=self.squashfs_binding_dir)
                 if self.work_dir:
-                    delete_temp_workdir(path=self.work_dir)
+                    self._delete_work_dir(self.work_dir)
                 # Reset spawned settings:
                 self.squashfs_binding_dir = None
+                self.squashfs_loop_mounted = False
                 self.work_dir = None
                 self.hot_fixes = None
                 self.current_bindings = None
@@ -370,6 +438,8 @@ class Toolset(Serializable):
                 self.store_changes = False
                 self.bind_options = None
                 self.spawned = False
+                self.rootless = False
+                self.rootless_writable_copy = None
                 self.event_bus.emit(ToolsetEvents.SPAWNED_CHANGED, self.spawned)
                 self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
             except Exception as e:
@@ -425,6 +495,9 @@ class Toolset(Serializable):
                     except Exception as e:
                         print(f"Completion handler raised exception: {e}")
             try:
+                if self.rootless:
+                    return NamespaceCall(script=self._bwrap_script(command), handler=handler,
+                                         completion_handler=lambda x: on_complete(completion_handler, x))
                 fake_root = os.path.join(self.work_dir, "fake_root")
                 return _start_toolset_command._async_raw(
                     handler=handler,
@@ -556,6 +629,52 @@ class Toolset(Serializable):
             return name.replace('/', '_').replace('\0', '_').replace(' ', '_')
         return sanitize_filename_linux(name=name)
 
+class NamespaceCall:
+    """Command running in rootless toolset. Has the same interface as ServerCall of root helper, so steps can use both."""
+
+    def __init__(self, script: str, handler: callable | None, completion_handler: callable | None):
+        from .root_helper_client import ServerCallEvents
+        self._new_output_line_event = ServerCallEvents.NEW_OUTPUT_LINE
+        self.output: list[str] = []
+        self.output_lock = threading.Lock()
+        self.event_bus = EventBus()
+        self.terminated = False
+        self.handler = handler
+        self.completion_handler = completion_handler
+        self.process = NamespaceProcess(script=script, output_handler=self.output_append)
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        try:
+            success = self.process.run()
+        except Exception as e:
+            self.output_append(f"Error: {e}")
+            success = False
+        code = ServerResponseStatusCode.OK if success else (
+            ServerResponseStatusCode.JOB_WAS_TERMINATED if self.terminated else ServerResponseStatusCode.COMMAND_EXECUTION_FAILED)
+        if self.completion_handler:
+            self.completion_handler(ServerResponse(code=code))
+
+    def output_append(self, line: str):
+        with self.output_lock:
+            self.output.append(line)
+            self.event_bus.emit(self._new_output_line_event, line)
+        if self.handler:
+            self.handler(line)
+
+    def get_output(self) -> list[str]:
+        with self.output_lock:
+            return self.output
+
+    @property
+    def is_cancellable(self) -> bool:
+        return True
+
+    def cancel(self):
+        self.terminated = True
+        self.process.terminate()
+
 @dataclass
 class BindMount:
     mount_path: str                 # Mount location inside the isolated environment.
@@ -568,23 +687,24 @@ class BindMount:
 
 @root_function
 def _start_toolset_command(work_dir: str, fake_root: str, bind_options: list[str], command_to_run: str):
-    import subprocess
+    import subprocess, shlex
     #subprocess.run(["chown", "-R", "root:root", work_dir], check=True) # This could change the ownership of work_dir for root, but probably is not needed.
     run_dir = RootHelperServer.get_runtime_dir(uid=RootHelperServer.shared().uid, runtime_env_name="CL_SERVER_RUNTIME_DIR")
     bwrap_path = os.path.join(run_dir, "bwrap")
     cmd_bwrap = (
-        f"{bwrap_path} "
+        f"{shlex.quote(bwrap_path)} "
         "--die-with-parent "
         "--unshare-uts --unshare-ipc --unshare-pid --unshare-cgroup "
         "--hostname catalyst-lab "
-        "--bind " + fake_root + " / "
+        "--bind " + shlex.quote(fake_root) + " / "
         "--dev /dev "
         "--proc /proc "
         "--setenv HOME / "
         "--setenv LANG C.UTF-8 "
         "--setenv LC_ALL C.UTF-8 "
     )
-    arguments_string = " ".join(bind_options) + " bash -c '" + command_to_run + "'"
+    # Paths in bindings can contain spaces (eg. project names), quote them for shell.
+    arguments_string = " ".join(shlex.quote(option) for option in bind_options) + " bash -c '" + command_to_run + "'"
     exec_call = cmd_bwrap + arguments_string
     print(exec_call)
     try:
@@ -622,3 +742,5 @@ def write_metadata_to_json(toolset_root: str, metadata: dict[str, Any] | None):
                 json.dump(metadata, json_file, indent=4)
     except Exception as e:
         print(f"Failed to write metadata to toolset: {e}")
+
+write_metadata_to_json = local_for_rootless_paths(write_metadata_to_json, path_argument="toolset_root")

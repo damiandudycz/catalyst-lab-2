@@ -6,7 +6,7 @@ from .multistage_process import (
 )
 from .toolset import Toolset
 from .toolset_application import ToolsetApplication
-from .root_function import root_function
+from .root_function import root_function, local_for_rootless_paths
 from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
 from .helper_functions import  create_squashfs
@@ -392,4 +392,7 @@ def remove_portage_patch(patch_filename: str, app_package: str, toolset_root: st
     patch_file_path = os.path.join(portage_dir, patch_filename)
     if os.path.isfile(patch_file_path):
         os.remove(patch_file_path)
+
+remove_portage_config = local_for_rootless_paths(remove_portage_config, path_argument="toolset_root")
+remove_portage_patch = local_for_rootless_paths(remove_portage_patch, path_argument="toolset_root")
 

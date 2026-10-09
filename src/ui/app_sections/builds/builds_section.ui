@@ -6,7 +6,7 @@
   <requires lib="Adw" version="1.0"/>
 
   <!-- Template -->
-  <template class="SnapshotsSection" parent="GtkBox">
+  <template class="BuildsSection" parent="GtkBox">
     <child>
       <object class="GtkScrolledWindow">
         <property name="hscrollbar-policy">automatic</property>
@@ -19,22 +19,21 @@
             <property name="spacing">24</property>
             <property name="margin-start">24</property>
             <property name="margin-end">24</property>
-            <!-- <property name="margin-top">24</property> -->
             <property name="margin-bottom">24</property>
 
             <child>
               <object class="RepositoryListView">
-                <property name="title">Snapshots</property>
-                <property name="item_class_name">Snapshot</property>
-                <property name="add_button_title">Add snapshot</property>
-                <property name="item_installation_class_name">SnapshotInstallation</property>
-                <property name="item_icon">video-frame-svgrepo-com-symbolic</property>
+                <property name="title">Projects</property>
+                <property name="item_class_name">ProjectDirectory</property>
+                <property name="item_installation_class_name">ProjectBuild</property>
+                <property name="item_icon">box-minimalistic-svgrepo-com-symbolic</property>
                 <property name="item_title_property_name">name</property>
-                <property name="item_subtitle_property_name">short_details</property>
-                <!-- <property name="item_status_property_name">status_indicator_values</property> -->
+                <property name="item_subtitle_property_name">builds_summary</property>
+                <property name="item_status_property_name">build_status_indicator_values</property>
+                <property name="show_add_button">False</property>
+                <property name="show_installations">False</property>
                 <signal name="item-row-pressed" handler="on_item_row_pressed"/>
                 <signal name="installation-row-pressed" handler="on_installation_row_pressed"/>
-                <signal name="add-new-item-pressed" handler="on_add_new_item_pressed"/>
               </object>
             </child>
 
@@ -44,7 +43,7 @@
 
             <child>
               <object class="GtkLabel">
-                <property name="label">Snapshots are compressed copies of the Gentoo ebuild repository (.sqfs files), used by Catalyst when building stages. All stages of a project are built from the same snapshot.</property>
+                <property name="label">Builds of project stages, stored in builds location. Select a project to see builds of its stages. Projects being built are marked with blinking indicator.</property>
                 <property name="halign">center</property>
                 <property name="wrap">True</property>
                 <property name="justify">fill</property>
@@ -61,4 +60,3 @@
 
   </template>
 </interface>
-

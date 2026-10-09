@@ -1,5 +1,7 @@
 from __future__ import annotations
-from gi.repository import Gtk, GLib, Adw
+import re
+from dataclasses import dataclass, replace
+from gi.repository import Gtk, GLib, Adw, Pango
 from .multistage_process import (
     # Process
     MultiStageProcess,
@@ -27,10 +29,10 @@ class MultistageProcessExecutionView(Gtk.Box):
     def set_multistage_process(self, multistage_process: MultiStageProcess | None = None):
         """Call when multistage_process is started"""
         if self.multistage_process is not None:
-            raise("multistage_process already set")
+            raise RuntimeError("multistage_process already set")
         if multistage_process:
             if multistage_process.status == MultiStageProcessState.SETUP:
-                raise("multistage_process needs to be started before connecting")
+                raise RuntimeError("multistage_process needs to be started before connecting")
             self.multistage_process = multistage_process
             self.process_steps_list.set_title(title=multistage_process.title)
             self.progress_bar.set_fraction(multistage_process.progress)
@@ -115,9 +117,9 @@ class MultistageProcessExecutionView(Gtk.Box):
             self._scroll_to_installation_steps_bottom()
         match stage:
             case MultiStageProcessState.COMPLETED:
-                display_status(text="Installation completed successfully.", style="success")
+                display_status(text="Completed successfully.", style="success")
             case MultiStageProcessState.FAILED:
-                display_status(text="Installation failed.", style="error")
+                display_status(text="Failed. Open failed steps to see their output.", style="error")
 
 class MultiStageProcessStageRow(Adw.ActionRow):
     """Displays stage state. Can be activated to open output of commands executed by stage."""
@@ -223,7 +225,9 @@ class MultiStageProcessStageOutputView(Gtk.Box):
         self.output_view.set_right_margin(12)
         self.output_view.add_css_class("transparent-bg")
         self.output_buffer = self.output_view.get_buffer()
-        self.output_buffer.set_text("\n".join(self.step.output_lines))
+        self._ansi_style = AnsiStyle()
+        for line in self.step.output_lines:
+            self._append_output_line(line)
         self.output_scrolled_window = Gtk.ScrolledWindow()
         self.output_scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.output_scrolled_window.set_hexpand(True)
@@ -262,8 +266,45 @@ class MultiStageProcessStageOutputView(Gtk.Box):
         )
 
     def _step_output_line_added(self, line: str):
-        end_iter = self.output_buffer.get_end_iter()
-        self.output_buffer.insert(end_iter, line if self.output_buffer.get_char_count() == 0 else "\n" + line)
+        self._append_output_line(line)
+
+    def _append_output_line(self, line: str):
+        """Appends line, with colors and styles from its ANSI escape sequences."""
+        if self.output_buffer.get_char_count() > 0:
+            self.output_buffer.insert(self.output_buffer.get_end_iter(), "\n")
+        segments, self._ansi_style = parse_ansi_line(line, self._ansi_style)
+        for text, style in segments:
+            tag = self._tag_for_style(style)
+            if tag:
+                self.output_buffer.insert_with_tags(self.output_buffer.get_end_iter(), text, tag)
+            else:
+                self.output_buffer.insert(self.output_buffer.get_end_iter(), text)
+
+    def _tag_for_style(self, style: AnsiStyle) -> Gtk.TextTag | None:
+        if style == AnsiStyle():
+            return None
+        name = f"ansi-{style}"
+        tag_table = self.output_buffer.get_tag_table()
+        if tag := tag_table.lookup(name):
+            return tag
+        foreground, background = style.foreground, style.background
+        if style.inverse: # Default colors are unknown here, inverse of them uses grey background.
+            foreground, background = background or "#ffffff", foreground or _ANSI_COLORS[0]
+        tag = Gtk.TextTag(name=name)
+        if foreground:
+            tag.set_property("foreground", foreground)
+        if background:
+            tag.set_property("background", background)
+        if style.bold:
+            tag.set_property("weight", Pango.Weight.BOLD)
+        if style.dim:
+            tag.set_property("foreground-rgba", _dimmed(foreground))
+        if style.italic:
+            tag.set_property("style", Pango.Style.ITALIC)
+        if style.underline:
+            tag.set_property("underline", Pango.Underline.SINGLE)
+        tag_table.add(tag)
+        return tag
 
     def _is_output_at_bottom(self) -> bool:
         adjustment = self.output_scrolled_window.get_vadjustment()
@@ -291,3 +332,93 @@ class MultiStageProcessStageOutputView(Gtk.Box):
             return
         adjustment = self.output_scrolled_window.get_vadjustment()
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+
+# ------------------------------------------------------------------------------
+# ANSI escape sequences in command output:
+# ------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class AnsiStyle:
+    foreground: str | None = None
+    background: str | None = None
+    bold: bool = False
+    dim: bool = False
+    italic: bool = False
+    underline: bool = False
+    inverse: bool = False
+
+# Colors readable on both light and dark background. Black and white are shown as grey, as one of them is
+# always invisible. Bright variants use the same colors.
+_ANSI_COLORS = ["#77767b", "#e01b24", "#26a269", "#c88800", "#3584e4", "#c061cb", "#2aa1b3", "#9a9996"]
+_ANSI_SEQUENCE = re.compile(r"\x1b(?:\[([0-9;:?]*)([@-~])|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Za-z]|[@-Z\\-_])")
+
+def parse_ansi_line(line: str, style: AnsiStyle) -> tuple[list[tuple[str, AnsiStyle]], AnsiStyle]:
+    """Splits line into text segments with their styles. Returns segments and style at the end of line,
+    which continues in next line."""
+    # Carriage return rewrites the line (progress bars), only its last version is shown.
+    if "\r" in line:
+        line = next((part for part in reversed(line.split("\r")) if part), "")
+    segments = []
+    position = 0
+    for match in _ANSI_SEQUENCE.finditer(line):
+        if match.start() > position:
+            segments.append((line[position:match.start()], style))
+        position = match.end()
+        if match.group(2) == "m": # Other sequences (cursor movement, titles, charsets) are dropped.
+            style = _apply_sgr(style, match.group(1))
+    if position < len(line):
+        segments.append((line[position:], style))
+    return segments, style
+
+def _apply_sgr(style: AnsiStyle, parameters: str) -> AnsiStyle:
+    codes = [int(code) if code.isdigit() else 0 for code in re.split("[;:]", parameters)] if parameters else [0]
+    index = 0
+    while index < len(codes):
+        code = codes[index]
+        match code:
+            case 0: style = AnsiStyle()
+            case 1: style = replace(style, bold=True)
+            case 2: style = replace(style, dim=True)
+            case 3: style = replace(style, italic=True)
+            case 4: style = replace(style, underline=True)
+            case 7: style = replace(style, inverse=True)
+            case 22: style = replace(style, bold=False, dim=False)
+            case 23: style = replace(style, italic=False)
+            case 24: style = replace(style, underline=False)
+            case 27: style = replace(style, inverse=False)
+            case 39: style = replace(style, foreground=None)
+            case 49: style = replace(style, background=None)
+            case _ if 30 <= code <= 37: style = replace(style, foreground=_ANSI_COLORS[code - 30])
+            case _ if 90 <= code <= 97: style = replace(style, foreground=_ANSI_COLORS[code - 90])
+            case _ if 40 <= code <= 47: style = replace(style, background=_ANSI_COLORS[code - 40])
+            case _ if 100 <= code <= 107: style = replace(style, background=_ANSI_COLORS[code - 100])
+            case 38 | 48:
+                color, used = _extended_color(codes[index + 1:])
+                index += used
+                if color:
+                    style = replace(style, **{"foreground" if code == 38 else "background": color})
+        index += 1
+    return style
+
+def _extended_color(codes: list[int]) -> tuple[str | None, int]:
+    """Color from 256 colors (5;n) or RGB (2;r;g;b) parameters, and number of parameters used."""
+    if len(codes) >= 2 and codes[0] == 5:
+        number = codes[1]
+        if number < 16:
+            return _ANSI_COLORS[number % 8], 2
+        if number < 232:
+            number -= 16
+            levels = [0, 95, 135, 175, 215, 255]
+            return "#{:02x}{:02x}{:02x}".format(levels[number // 36], levels[number // 6 % 6], levels[number % 6]), 2
+        grey = 8 + (number - 232) * 10
+        return "#{0:02x}{0:02x}{0:02x}".format(grey), 2
+    if len(codes) >= 4 and codes[0] == 2:
+        return "#{:02x}{:02x}{:02x}".format(*(min(max(value, 0), 255) for value in codes[1:4])), 4
+    return None, len(codes)
+
+def _dimmed(color: str | None):
+    from gi.repository import Gdk
+    rgba = Gdk.RGBA()
+    rgba.parse(color or "#808080")
+    rgba.alpha = 0.6
+    return rgba

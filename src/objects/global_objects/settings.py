@@ -12,6 +12,7 @@ class SettingsEvents(Enum):
     RELENG_LOCATION_CHANGED = auto()
     OVERLAY_LOCATION_CHANGED = auto()
     PROJECT_LOCATION_CHANGED = auto()
+    BUILDS_LOCATION_CHANGED = auto()
     INITIAL_SETUP_DONE_CHANGED = auto()
 
 @final
@@ -26,7 +27,8 @@ class Settings(Serializable):
         snapshots_location: str = "~/CatalystLab/Snapshots",
         releng_location: str = "~/CatalystLab/Releng",
         overlay_location: str = "~/CatalystLab/Overlays",
-        project_location: str = "~/CatalystLab/Projects"
+        project_location: str = "~/CatalystLab/Projects",
+        builds_location: str = "~/CatalystLab/Builds"
     ):
         self._initial_setup_done = initial_setup_done
         self._keep_root_unlocked = keep_root_unlocked
@@ -35,6 +37,7 @@ class Settings(Serializable):
         self._releng_location = releng_location
         self._overlay_location = overlay_location
         self._project_location = project_location
+        self._builds_location = builds_location
         self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
@@ -47,7 +50,9 @@ class Settings(Serializable):
                 snapshots_location=data["snapshots_location"],
                 releng_location=data["releng_location"],
                 overlay_location=data["overlay_location"],
-                project_location=data["project_location"]
+                project_location=data["project_location"],
+                # Added later, settings stored by older versions don't contain it.
+                builds_location=data.get("builds_location", "~/CatalystLab/Builds")
             )
         except:
             return cls()
@@ -60,7 +65,8 @@ class Settings(Serializable):
             "snapshots_location": self.snapshots_location,
             "releng_location": self.releng_location,
             "overlay_location": self.overlay_location,
-            "project_location": self.project_location
+            "project_location": self.project_location,
+            "builds_location": self.builds_location
         }
 
     # --------------------------------------------------------------------------
@@ -175,3 +181,19 @@ class Settings(Serializable):
             )
             Repository.Settings.save()
 
+
+    # --------------------------------------------------------------------------
+    # Accessors for builds location:
+
+    @property
+    def builds_location(self) -> str:
+        return self._builds_location
+    @builds_location.setter
+    def builds_location(self, value: str):
+        if self._builds_location != value:
+            self._builds_location = value
+            self.event_bus.emit(
+                SettingsEvents.BUILDS_LOCATION_CHANGED,
+                value
+            )
+            Repository.Settings.save()

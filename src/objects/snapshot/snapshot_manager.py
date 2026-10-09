@@ -54,6 +54,8 @@ class SnapshotManager:
         Repository.Snapshot.value.append(snapshot)
 
     def remove_snapshot(self, snapshot: Snapshot):
+        from .rootless import remove_extracted_squashfs
+        remove_extracted_squashfs(snapshot.file_path(), kind="snapshots")
         if os.path.isfile(snapshot.file_path()):
             os.remove(snapshot.file_path())
         Repository.Snapshot.value.remove(snapshot)

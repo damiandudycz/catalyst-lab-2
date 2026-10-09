@@ -59,6 +59,31 @@ def umount_squashfs(mount_point: str):
     delete_temp_workdir(path=mount_point)
 
 @root_function
+def loop_mount_squashfs(squashfs_path: str, prefix: str) -> str:
+    """Mounts squashfs file read only in new tmp directory. Much faster than extracting it, files are decompressed
+    only when read. Changes need to be stored using overlays on top of it."""
+    import subprocess
+    mount_point = create_temp_workdir(prefix=prefix)
+    try:
+        subprocess.run(['mount', '-t', 'squashfs', '-o', 'ro,loop', squashfs_path, mount_point], check=True)
+    except Exception:
+        os.rmdir(mount_point)
+        raise
+    return mount_point
+
+@root_function
+def loop_umount_squashfs(mount_point: str):
+    """Unmounts squashfs mounted with loop_mount_squashfs and removes its mount point. Mount point is never deleted
+    recursively, so if unmounting fails, contents of squashfs are not touched."""
+    import subprocess
+    resolved_path = os.path.realpath(mount_point)
+    if not resolved_path.startswith("/var/tmp/catalystlab/"):
+        raise ValueError(f"Refusing to unmount path outside /var/tmp/catalystlab: {resolved_path}")
+    if os.path.ismount(resolved_path):
+        subprocess.run(['umount', resolved_path], check=True)
+    os.rmdir(resolved_path)
+
+@root_function
 def extract(tarball: str, directory: str):
     import tarfile
     import signal
@@ -93,8 +118,27 @@ def extract(tarball: str, directory: str):
             # This print must stay, it is used to receive progress by step implementation.
             print(f"PROGRESS: {progress}", flush=True)
 
+def create_work_directory(prefix: str, rootless: bool) -> str:
+    """Work directory for toolset files. Rootless ones are in rootless directory, owned by user and mapped ids."""
+    if rootless:
+        from .rootless import create_work_directory as create_rootless_work_directory
+        return create_rootless_work_directory(prefix=prefix)
+    return create_temp_workdir(prefix=prefix)
+
+def delete_work_directory(path: str):
+    """Deletes directory created with create_work_directory."""
+    from .rootless import is_rootless_path, remove_in_namespace
+    if is_rootless_path(path):
+        remove_in_namespace([path], print)
+    else:
+        delete_temp_workdir(path=path)
+
 def create_squashfs(source_directory: str, output_file: str) -> subprocess.Popen:
-    """Note: Runs as separate process, so need to wait for it to finish when called"""
+    """Note: Runs as separate process, so need to wait for it to finish when called.
+    Rootless toolset files (owned by mapped ids) are packed inside user namespace, to keep their owners."""
+    from .rootless import is_rootless_path, squashfs_process
+    if is_rootless_path(source_directory):
+        return squashfs_process(source_directory=source_directory, output_file=output_file)
     command = ['mksquashfs', source_directory, output_file, '-quiet', '-percentage']
     process = subprocess.Popen(
         command,

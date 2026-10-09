@@ -76,7 +76,7 @@ class GitManager(ABC):
 
     def rename_directory(self, directory: GitDirectory, name: str):
         if not self.is_name_available(name=name):
-            raise RuntimeError(f"GIT directory name {name} is not available")
+            raise RuntimeError(f"Git directory name {name} is not available")
         new_directory = self.__class__.repository()._cls.directory_path_for_name(
             name=name
         )

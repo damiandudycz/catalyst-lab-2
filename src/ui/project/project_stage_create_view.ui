@@ -16,7 +16,8 @@
         <property name="show_welcome_screen">True</property>
         <property name="welcome_screen_icon_name">notes-minimalistic-svgrepo-com-symbolic</property>
         <property name="welcome_screen_title">Create Stage</property>
-        <property name="welcome_screen_description">bla bla bla</property>
+        <property name="welcome_screen_description">Add a stage to the project. Select its Catalyst target, optionally a Releng template providing default settings, and the parent stage used as its seed.</property>
+        <property name="install_button_label">Create stage</property>
 
         <!-- Page 1: Spec type screen -->
         <child>
@@ -35,6 +36,8 @@
                 <property name="spacing">12</property>
                 <child>
                   <object class="ItemSelectionView" id="spec_type_selection_view">
+                    <property name="title">Target</property>
+                    <property name="description">Catalyst target of the stage. Stage targets build stage tarballs, livecd and diskimage targets build installation images.</property>
                     <property name="item_icon">ruler-cross-pen-svgrepo-com-symbolic</property>
                     <property name="autoselect_default">False</property>
                     <signal name="is-item-selectable" handler="is_item_selectable"/>
@@ -66,7 +69,7 @@
                     <property name="title">Releng template</property>
                     <property name="description">You can use a Releng template to prepopulate default settings for your stage. These defaults serve as a starting point and can be overridden by specific stage variables as needed. The architecture specified in the template does not influence the final build—it is used solely for sourcing default values from the Releng repository.
 Catalyst Lab will attempt to locate a matching template based on the selected build architecture. If an exact match is not available, you may still use templates from a different architecture to apply default values.
-If you prefer not to use a template, simply uncheck the "Use Releng Template" option and configure all variables manually.</property>
+If you prefer not to use a template, select None and configure all values manually.</property>
                   </object>
                 </child>
                 <child>
@@ -129,6 +132,8 @@ If you prefer not to use a template, simply uncheck the "Use Releng Template" op
                 </child>
                 <child>
                   <object class="ItemSelectionView" id="seed_list_selection_view">
+                    <property name="title">Parent stage</property>
+                    <property name="description">Stage used as seed. Its build is the starting point for building this stage.</property>
                     <property name="item_title_property_name">name</property>
                     <property name="item_subtitle_property_name">short_details</property>
                     <property name="autoselect_default">False</property>

@@ -101,7 +101,7 @@ class ProjectCreateView(Gtk.Box):
     def is_item_usable(self, sender, item) -> bool:
         match sender:
             case self.toolset_selection_view:
-                return not item.is_reserved
+                return True # Project only refers to toolset, it can be used by other process at this time.
             case self.releng_selection_view:
                 return True
             case self.snapshot_selection_view:

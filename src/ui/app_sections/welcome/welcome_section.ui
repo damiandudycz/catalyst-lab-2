@@ -84,11 +84,11 @@
 
             <child>
               <object class="AdwActionRow">
-                <property name="title">How to use</property>
-                <property name="subtitle">Browse documentation and tutorials</property>
-                <property name="icon-name">question-square-svgrepo-com-symbolic</property>
+                <property name="title">Environments</property>
+                <property name="subtitle">Manage your build environments</property>
+                <property name="icon-name">toolbox-symbolic</property>
                 <property name="activatable">True</property>
-                <signal name="activated" handler="on_help_row_activated"/>
+                <signal name="activated" handler="on_environments_row_activated"/>
               </object>
             </child>
 

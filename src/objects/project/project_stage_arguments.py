@@ -40,6 +40,7 @@ class StageArgumentOption:
     value: Any
     argument: StageArgumentDetails
     unsupported: bool = False
+    icon_name: str | None = None # Shown instead of icon of list, eg. target icon of parent stage.
 
 class StageArgumentType(Enum):
     raw = auto() # Raw text data
@@ -169,9 +170,9 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.install_mask: return "Install mask"
             case StageArgumentDetails.interpreter: return "Interpreter"
             case StageArgumentDetails.keep_repos: return "Keep repos"
-            case StageArgumentDetails.kerncache_path: return "Kernel cache path"
+            case StageArgumentDetails.kerncache_path: return "Kernel cache"
             case StageArgumentDetails.ldflags: return "LDFlags"
-            case StageArgumentDetails.pkgcache_path: return "PKG cache path"
+            case StageArgumentDetails.pkgcache_path: return "Package cache"
             case StageArgumentDetails.portage_confdir: return "Portage confdir"
             case StageArgumentDetails.portage_prefix: return "Portage prefix"
             case StageArgumentDetails.rel_type: return "Rel type"
@@ -309,10 +310,11 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
     StageArgumentDetails.catalyst_use: [_PARENT, _RELENG],
     StageArgumentDetails.decompressor_search_order: [_PARENT, _RELENG],
     StageArgumentDetails.hostuse: [_PARENT, _RELENG],
-    # Cache paths are not inherited from parent, sharing cache between stages built with different flags could mix
-    # incompatible binaries. Template can still define them.
-    StageArgumentDetails.pkgcache_path: [_RELENG],
-    StageArgumentDetails.kerncache_path: [_RELENG],
+    # Caches are automatic (shared by stages with the same rel_type), selected folder or disabled
+    # (project_stage_cache). They are not inherited, sharing cache between stages built with different flags could mix
+    # incompatible binaries.
+    StageArgumentDetails.pkgcache_path: [_AUTO],
+    StageArgumentDetails.kerncache_path: [_AUTO],
     # Target specific (stage4/*, livecd/*, boot/kernel) are defined by releng templates.
     **{
         argument: [_RELENG]
@@ -359,8 +361,8 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
     StageArgumentDetails.catalyst_use: [_RELENG, _PARENT],
     StageArgumentDetails.decompressor_search_order: [_RELENG, _PARENT],
     StageArgumentDetails.hostuse: [_RELENG], # Usually set only for stage that needs it (stage1).
-    StageArgumentDetails.pkgcache_path: [_RELENG],
-    StageArgumentDetails.kerncache_path: [_RELENG],
+    StageArgumentDetails.pkgcache_path: [_AUTO],
+    StageArgumentDetails.kerncache_path: [_AUTO],
     # Target specific:
     **{
         argument: [_RELENG]

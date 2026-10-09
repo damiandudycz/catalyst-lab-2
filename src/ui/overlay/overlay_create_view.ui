@@ -15,8 +15,9 @@
         <signal name="begin-installation" handler="begin_installation"/>
         <property name="show_welcome_screen">True</property>
         <property name="welcome_screen_icon_name">book-minimalistic-svgrepo-com-symbolic</property>
-        <property name="welcome_screen_title">Create Portage overlay</property>
-        <property name="welcome_screen_description">bla bla bla</property>
+        <property name="welcome_screen_title">Create Portage Overlay</property>
+        <property name="welcome_screen_description">Add a Portage overlay by cloning a Git repository, copying a local directory or creating a new one. Overlays can be used as additional repos of project stages.</property>
+        <property name="install_button_label">Create overlay</property>
 
         <!-- Page 1: Config screen -->
         <child>

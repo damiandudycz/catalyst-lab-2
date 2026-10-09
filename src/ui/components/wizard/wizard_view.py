@@ -15,6 +15,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
     welcome_screen_icon_name = GObject.Property(type=str, default=None)
     welcome_screen_title = GObject.Property(type=str, default=None)
     welcome_screen_description = GObject.Property(type=str, default=None)
+    install_button_label = GObject.Property(type=str, default="Start installation") # Next button title on last page.
 
     def __init__(
         self, installation_in_progress: MultiStageProcess | None = None,
@@ -32,6 +33,8 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         # Carousel:
         self.carousel = Adw.Carousel()
         self.carousel.set_vexpand(True)
+        # Pages are changed only with Back / Next buttons, scrolling and swiping could skip pages that are not ready.
+        self.carousel.set_interactive(False)
         self.setup_view.append(self.carousel)
         # Bottom bar:
         self._setup_bottom_bar()
@@ -182,7 +185,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         self.back_button.set_opacity(0.0 if is_first_page else 1.0)
         self.next_button.set_sensitive(displayed_pages_ready and not is_welcome_page)
         self.next_button.set_opacity(0.0 if is_welcome_page else 1.0)
-        self.next_button.set_label("Start installation" if is_last_page else "Next")
+        self.next_button.set_label(self.install_button_label if is_last_page else "Next")
 
     # --------------------------------------------------------------------------
     # Installation management:

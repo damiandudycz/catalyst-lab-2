@@ -15,8 +15,9 @@
         <signal name="begin-installation" handler="begin_installation"/>
         <property name="show_welcome_screen">True</property>
         <property name="welcome_screen_icon_name">video-frame-svgrepo-com-symbolic</property>
-        <property name="welcome_screen_title">Create new snapshot</property>
-        <property name="welcome_screen_description">bla bla bla</property>
+        <property name="welcome_screen_title">Create Snapshot</property>
+        <property name="welcome_screen_description">Generate a new snapshot of the Gentoo ebuild repository with Catalyst from one of your toolsets, or import an existing .sqfs snapshot file.</property>
+        <property name="install_button_label">Create snapshot</property>
 
         <!-- Page 1: Config screen -->
         <child>
@@ -35,8 +36,10 @@
                 <property name="spacing">12</property>
                 <child>
                   <object class="ItemSelectionView" id="toolset_selection_view">
+                    <property name="title">Generate snapshot</property>
+                    <property name="description">Toolset used to generate snapshot of the latest Gentoo ebuild repository with Catalyst.</property>
                     <property name="item_class_name">Toolset</property>
-                    <property name="item_icon">sledgehammer-svgrepo-com-symbolic</property>
+                    <property name="item_icon">toolbox-symbolic</property>
                     <property name="item_title_property_name">name</property>
                     <property name="item_subtitle_property_name">short_details</property>
                     <property name="item_status_property_name">status_indicator_values</property>
@@ -48,11 +51,11 @@
                 </child>
                 <child>
                   <object class="AdwPreferencesGroup">
-                    <!-- <property name="title">Select SQFS file</property> -->
-                    <property name="description">Or upload snapshot .sqfs file.</property>
+                    <property name="title">Import snapshot</property>
+                    <property name="description">Or import an existing snapshot .sqfs file.</property>
                     <child>
                       <object class="AdwButtonRow">
-                        <property name="title">Select sqfs snapshot file</property>
+                        <property name="title">Select .sqfs file</property>
                         <property name="start-icon-name">copy-svgrepo-com-symbolic</property>
                         <property name="activatable">True</property>
                         <signal name="activated" handler="on_select_file_pressed"/>

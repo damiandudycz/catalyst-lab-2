@@ -8,6 +8,7 @@ from .git_installation import GitDirectorySetupConfiguration
 from .toolset_application import ToolsetApplication
 from .toolset import ToolsetEvents
 from .wizard_view import WizardView
+from .project_stage import stage_target_icon
 from .item_select_view import ItemSelectionViewEvent
 from .toolset import Toolset
 from .releng_directory import RelengDirectory
@@ -58,6 +59,7 @@ class ProjectStageCreateView(Gtk.Box):
     def load_targets(self):
         values = load_catalyst_targets(toolset=self.project_directory.get_toolset())
         self.spec_type_selection_view.select(None)
+        self.spec_type_selection_view.item_icon_resolver = stage_target_icon
         self.spec_type_selection_view.set_static_list(values)
 
     def load_releng_templates(self):
@@ -75,7 +77,7 @@ class ProjectStageCreateView(Gtk.Box):
         if is_stage_1:
             self.seed_list_selection_view.display_none = True
             self.seed_list_selection_view.none_title = "Download automatically"
-            self.seed_list_selection_view.none_subtitle = "Downloads newest stage3 from gentoo for seed"
+            self.seed_list_selection_view.none_subtitle = "Latest stage3 from Gentoo mirrors is used as seed"
         values = available_stages
         selected = None
         self.seed_list_selection_view.select(selected)

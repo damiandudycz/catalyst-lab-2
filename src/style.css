@@ -34,3 +34,7 @@
   border-color: @destructive_color;
   color: @destructive_fg_color;
 }
+/* Buttons joined in single boxed list, separated with thin lines. */
+.joined-buttons > row.suggested-action:not(:last-child) {
+  border-bottom: 1px solid alpha(@accent_fg_color, 0.3);
+}

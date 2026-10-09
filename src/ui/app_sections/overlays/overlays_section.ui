@@ -26,6 +26,7 @@
               <object class="RepositoryListView">
                 <property name="title">Portage overlays</property>
                 <property name="item_class_name">OverlayDirectory</property>
+                <property name="add_button_title">Add overlay</property>
                 <property name="item_installation_class_name">OverlayInstallation</property>
                 <property name="item_icon">layers-minimalistic-svgrepo-com-symbolic</property>
                 <property name="item_title_property_name">name</property>
@@ -43,7 +44,7 @@
 
             <child>
               <object class="GtkLabel">
-                <property name="label">Toolset environments are essentially Gentoo-based systems equipped with the necessary tools and configurations for building new Gentoo stage files. These environments can either be the host system itself (if running Gentoo) or isolated external environments packaged in a .squashfs file.</property>
+                <property name="label">Portage overlays are additional ebuild repositories, kept as Git directories. They can be added to project stages as repos, and their profiles can be used by stages.</property>
                 <property name="halign">center</property>
                 <property name="wrap">True</property>
                 <property name="justify">fill</property>

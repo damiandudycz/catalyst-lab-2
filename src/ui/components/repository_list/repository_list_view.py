@@ -11,6 +11,7 @@ from .snapshot_installation import SnapshotInstallation
 from .releng_installation   import RelengInstallation
 from .overlay_installation  import OverlayInstallation
 from .project_installation  import ProjectInstallation
+from .project_build_process import ProjectBuild
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/components/repository_list/repository_list_view.ui')
 class RepositoryListView(Gtk.Box):
@@ -25,6 +26,8 @@ class RepositoryListView(Gtk.Box):
     # View elements:
     items_container  = Gtk.Template.Child()
     preference_group = Gtk.Template.Child()
+    add_item_container = Gtk.Template.Child()
+    add_item_row = Gtk.Template.Child()
     # Properties:
     title                          = GObject.Property(type=str, default=None)
     item_class_name                = GObject.Property(type=str, default=None)
@@ -34,6 +37,9 @@ class RepositoryListView(Gtk.Box):
     item_subtitle_property_name    = GObject.Property(type=str, default=None)
     item_status_property_name      = GObject.Property(type=str, default=None)
     item_unsupported_property_name = GObject.Property(type=str, default=None)
+    show_add_button                = GObject.Property(type=bool, default=True)
+    add_button_title               = GObject.Property(type=str, default="Add item")
+    show_installations             = GObject.Property(type=bool, default=True) # Rows of started processes of item_installation_class.
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -41,6 +47,8 @@ class RepositoryListView(Gtk.Box):
 
     def on_realize(self, widget):
         self.preference_group.set_title(self.title)
+        self.add_item_container.set_visible(self.show_add_button)
+        self.add_item_row.set_title(self.add_button_title)
         self.item_class = globals().get(self.item_class_name)
         self.item_installation_class = globals().get(self.item_installation_class_name)
         self.repository = getattr(Repository, self.item_class_name)
@@ -93,7 +101,7 @@ class RepositoryListView(Gtk.Box):
             self.items_container.insert(item_row, 0)
             self._item_rows.append(item_row)
 
-        for installation in started_processes:
+        for installation in (started_processes if self.show_installations else []):
             installation_row = ItemInstallationRow(installation, self.item_icon)
             installation_row.connect(
                 "activated", self.on_installation_row_pressed
@@ -122,12 +130,15 @@ class ItemRow(Adw.ActionRow):
         item_subtitle_property_name,
         item_status_property_name,
         item_unsupported_property_name,
-        item_icon
+        item_icon,
+        item_icon_resolver = None
     ):
+        # Icon of item itself (icon_name attribute or resolver) is used instead of icon of list.
+        icon_name = item_icon_resolver(item) if item_icon_resolver else None
         super().__init__(
             title     = getattr(item, item_title_property_name, None) if item_title_property_name else item if isinstance(item, str) else None,
             subtitle  = getattr(item, item_subtitle_property_name, None) if item_subtitle_property_name else None,
-            icon_name = item_icon
+            icon_name = icon_name or getattr(item, "icon_name", None) or item_icon
         )
         self.item = item
         self.item_status_property_name = item_status_property_name

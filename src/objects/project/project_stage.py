@@ -59,6 +59,20 @@ class ProjectStage(Serializable):
     def init_from(cls, data: dict) -> Self:
         return cls(data=data)
 
+# Icons of stages by kind of catalyst target (stage1-4, livecd_stage1-2, diskimage_stage1-2, netboot, embedded).
+_STAGE_TARGET_ICONS = {
+    "stage": "stage-archive-symbolic",
+    "livecd": "stage-disc-symbolic",
+    "diskimage": "stage-disk-image-symbolic",
+    "netboot": "stage-netboot-symbolic",
+    "embedded": "stage-embedded-symbolic",
+}
+
+def stage_target_icon(target: str | None) -> str:
+    """Icon of stage with given catalyst target."""
+    kind = (target or "").replace("-", "_").split("_")[0].rstrip("0123456789")
+    return _STAGE_TARGET_ICONS.get(kind, "layers-minimalistic-svgrepo-com-symbolic")
+
 class ProjectStageEvent(Enum):
     NAME_CHANGED = auto()
 
@@ -241,7 +255,7 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
             return [StageArgumentOption(raw=value, display=value, subtitle=None, value=value, argument=arg_details.details) for value in values]
         case StageArgumentDetails.parent:
             values = load_stage_possible_seeds(stage=stage, project_directory=project_directory)
-            return [StageArgumentOption(raw=value, display=value.name, subtitle=None, value=value.id, argument=arg_details.details) for value in values]
+            return [StageArgumentOption(raw=value, display=value.name, subtitle=None, value=value.id, argument=arg_details.details, icon_name=stage_target_icon(value.target)) for value in values]
         case StageArgumentDetails.subarch:
             values = load_catalyst_subarches(toolset=project_directory.get_toolset(), architecture=project_directory.get_architecture())
             return [StageArgumentOption(raw=value.name, display=value.name, subtitle=value.chost or value.common_flags, value=value.name, argument=arg_details.details) for value in values]

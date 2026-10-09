@@ -1,4 +1,5 @@
 from gi.repository import Gtk, Adw, Gio, GLib
+from .rootless import authorize_toolset_action
 from .toolset import Toolset, ToolsetEvents
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
 from .helper_functions import get_file_size_string
@@ -445,7 +446,7 @@ class ToolsetDetailsView(Gtk.Box):
                     for app, _ in self.tools_selection.items()
                 ]
                 self.start_update(authorization_keeper=authorization_keeper, update_packages=False, apps_selection=apps_selection)
-        RootHelperClient.shared().authorize_and_run(callback=update)
+        authorize_toolset_action(callback=update)
 
     def start_update(self, authorization_keeper: AuthorizationKeeper, update_packages: bool = True, apps_selection: list[ToolsetApplicationSelection] | None = None):
         if self.update_in_progress:
@@ -476,7 +477,7 @@ class ToolsetDetailsView(Gtk.Box):
         def update(authorization_keeper: AuthorizationKeeper):
             if authorization_keeper:
                 self.start_update(authorization_keeper=authorization_keeper, update_packages=True)
-        RootHelperClient.shared().authorize_and_run(callback=update)
+        authorize_toolset_action(callback=update)
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
@@ -521,7 +522,7 @@ class ToolsetDetailsView(Gtk.Box):
                     print(e)
                 finally:
                     self.toolset.release()
-        RootHelperClient.shared().authorize_and_run(callback=spawn)
+        authorize_toolset_action(callback=spawn)
 
     def unspawn(self, store_changes: bool):
         def unspawn(authorization_keeper: AuthorizationKeeper):
@@ -533,5 +534,5 @@ class ToolsetDetailsView(Gtk.Box):
                     print(e)
                 finally:
                     self.toolset.release()
-        RootHelperClient.shared().authorize_and_run(callback=unspawn)
+        authorize_toolset_action(callback=unspawn)
 

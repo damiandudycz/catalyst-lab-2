@@ -77,6 +77,46 @@
                         </child>
                       </object>
                     </child>
+                    <child>
+                      <object class="GtkListBox">
+                        <property name="margin-start">24</property>
+                        <property name="margin-end">24</property>
+                        <property name="margin-bottom">12</property>
+                        <property name="selection-mode">none</property>
+                        <style>
+                          <class name="boxed-list"/>
+                          <class name="joined-buttons"/>
+                        </style>
+                        <child>
+                          <object class="AdwButtonRow" id="build_progress_row">
+                            <property name="title">Show build progress</property>
+                            <property name="start-icon-name">checklist-minimalistic-svgrepo-com-symbolic</property>
+                            <property name="activatable">True</property>
+                            <property name="visible">False</property>
+                            <signal name="activated" handler="on_build_progress_activated"/>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwButtonRow">
+                            <property name="title">Builds list</property>
+                            <property name="start-icon-name">box-minimalistic-svgrepo-com-symbolic</property>
+                            <property name="activatable">True</property>
+                            <signal name="activated" handler="on_builds_activated"/>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwButtonRow" id="build_row">
+                            <property name="title">Create build</property>
+                            <property name="start-icon-name">sledgehammer-svgrepo-com-symbolic</property>
+                            <property name="activatable">True</property>
+                            <signal name="activated" handler="on_build_activated"/>
+                            <style>
+                              <class name="suggested-action"/>
+                            </style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>
@@ -106,7 +146,7 @@
                       <object class="ItemSelectionExpanderRow" id="toolset_selection_view">
                         <property name="title">Toolset</property>
                         <property name="item_class_name">Toolset</property>
-                        <property name="item_icon">sledgehammer-svgrepo-com-symbolic</property>
+                        <property name="item_icon">toolbox-symbolic</property>
                         <property name="item_title_property_name">name</property>
                         <property name="item_subtitle_property_name">short_details</property>
                         <property name="item_status_property_name">status_indicator_values</property>
