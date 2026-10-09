@@ -4,7 +4,8 @@ from typing import Self
 from .event_bus import EventBus, SharedEvent
 from .repository import Repository
 from .status_indicator import StatusIndicatorState, StatusIndicatorValues
-from .lima import list_instances, run_limactl, MACHINE_DATA_DIRECTORY
+from .lima import list_instances, run_limactl, default_lima_home, MACHINE_DATA_DIRECTORY
+from .lima import lima_home as default_new_lima_home
 
 class BuildMachine:
     """Virtual machine (Lima instance) where toolsets run, on systems that can't build stages themselves (macOS).
@@ -14,12 +15,14 @@ class BuildMachine:
     STATUS_STOPPED = "Stopped"
     STATUS_MISSING = "Missing"
 
-    def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 100):
+    def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 100,
+                 lima_home: str | None = None):
         self.id = id or uuid.uuid4()
         self.name = name
         self.cpus = cpus
         self.memory_gib = memory_gib
         self.workspace_gib = workspace_gib # Maximum size of working space image (it grows only as it's used).
+        self.lima_home = lima_home or default_new_lima_home() # Lima directory containing machine folder.
         self.event_bus = EventBus()
         self._status: str | None = None
         self._lock = threading.Lock()
@@ -32,12 +35,15 @@ class BuildMachine:
         return f"catalystlab-{self.id.hex[:8]}" # Short, Lima socket paths are limited to 104 characters.
 
     def serialize(self) -> dict:
-        return {"id": str(self.id), "name": self.name, "cpus": self.cpus, "memory_gib": self.memory_gib, "workspace_gib": self.workspace_gib}
+        return {"id": str(self.id), "name": self.name, "cpus": self.cpus, "memory_gib": self.memory_gib,
+                "workspace_gib": self.workspace_gib, "lima_home": self.lima_home}
 
     @classmethod
     def init_from(cls, data: dict) -> Self:
         return cls(id=uuid.UUID(data["id"]), name=data["name"], cpus=data.get("cpus", 4),
-                   memory_gib=data.get("memory_gib", 4), workspace_gib=data.get("workspace_gib", 100))
+                   memory_gib=data.get("memory_gib", 4), workspace_gib=data.get("workspace_gib", 100),
+                   # Machines created before machines directory are in ~/.lima.
+                   lima_home=data.get("lima_home") or default_lima_home())
 
     # Status:
 
@@ -48,7 +54,7 @@ class BuildMachine:
         return self._status
 
     def refresh_status(self):
-        instance = list_instances().get(self.instance_name)
+        instance = list_instances(self.lima_home).get(self.instance_name)
         status = instance.get("status", self.STATUS_STOPPED) if instance else self.STATUS_MISSING
         if status != self._status:
             self._status = status
@@ -79,13 +85,13 @@ class BuildMachine:
             if self.status == self.STATUS_MISSING:
                 raise RuntimeError(f"Virtual machine {self.name} doesn't exist anymore")
             output_handler(f"Starting virtual machine {self.name}...")
-            success = run_limactl(["start", self.instance_name], output_handler, process_holder)
+            success = run_limactl(["start", self.instance_name], output_handler, process_holder, home=self.lima_home)
             self.refresh_status()
             return success and self.is_running
 
     def stop(self, output_handler=print) -> bool:
         with self._lock:
-            success = run_limactl(["stop", self.instance_name], output_handler)
+            success = run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home)
             self.refresh_status()
             return success
 
@@ -101,8 +107,18 @@ class BuildMachine:
 
     @property
     def workspace_image_path(self) -> str:
-        toolsets_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location))
-        return os.path.join(os.path.dirname(toolsets_location), "Machines", self.instance_name, "workspace.img")
+        """In folder of machine (removed with it). Machines in ~/.lima, which isn't shared with them, keep it in
+        machines directory."""
+        from .lima import machines_directory
+        directory = machines_directory()
+        if self.machine_directory.startswith(directory + os.sep):
+            return os.path.join(self.machine_directory, "workspace.img")
+        return os.path.join(directory, self.instance_name, "workspace.img")
+
+    @property
+    def machine_directory(self) -> str:
+        """Folder of machine (Lima instance directory)."""
+        return os.path.join(self.lima_home, self.instance_name)
 
     def acquire_workspace(self, output_handler=print, process_holder: list | None = None):
         """Prepares working space for operation, call release_workspace when it finishes."""

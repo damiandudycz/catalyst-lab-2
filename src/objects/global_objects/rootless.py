@@ -231,12 +231,12 @@ echo "Machine is ready: $(. /etc/os-release; echo $PRETTY_NAME), kernel $(uname 
         process = subprocess.Popen(
             [limactl_path(), "shell", "--workdir", "/", self.machine.instance_name, "setsid", "-w", "bash", "-c", bootstrap],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
-            text=True, errors="replace", bufsize=1, env=lima_environment()
+            text=True, errors="replace", bufsize=1, env=lima_environment(self.machine.lima_home)
         )
         def terminate_remote():
             subprocess.run([limactl_path(), "shell", self.machine.instance_name, "sh", "-c",
                             f"[ -f {pid_file} ] && kill -TERM -- -$(cat {pid_file}); rm -f {pid_file}"],
-                           capture_output=True, timeout=30, env=lima_environment())
+                           capture_output=True, timeout=30, env=lima_environment(self.machine.lima_home))
         return ExecutorProcess(process, on_terminate=terminate_remote)
 
     def run(self, script: str, output_handler, process_holder: list | None = None, namespace: bool = False) -> bool:

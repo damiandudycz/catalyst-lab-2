@@ -20,12 +20,37 @@ MACHINE_DATA_DIRECTORY = "/var/lib/catalystlab"
 # Machine disk contains only Alpine with tools, data of Catalyst Lab is in working space and shared folders.
 SYSTEM_DISK_GIB = 8
 
-def lima_environment() -> dict:
-    """Environment of limactl. Lima directory is in real home of user (not $HOME, which can be changed, eg. for tests),
-    as paths of its sockets are limited to 104 characters."""
+# Lima checks that socket paths in instance directories are shorter than this (UNIX_PATH_MAX of macOS).
+_MAX_SOCKET_PATH = 104
+_INSTANCE_NAME_EXAMPLE = "catalystlab-00000000"
+
+def machines_directory() -> str:
+    """Machines of Catalyst Lab, one folder for each (disks, configuration, logs, working space). Next to toolsets."""
+    from .repository import Repository
+    toolsets_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location))
+    return os.path.join(os.path.dirname(toolsets_location), "Machines")
+
+def default_lima_home() -> str:
+    """~/.lima in real home of user (not $HOME, which can be changed). Used by machines created before machines
+    directory, and when its path is too long."""
     import pwd
+    return os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".lima")
+
+def lima_home() -> str:
+    """Lima directory (LIMA_HOME) for new machines: machines directory, or ~/.lima when socket paths in machines
+    directory would be too long."""
+    import pwd
+    directory = machines_directory()
+    if len(os.path.join(directory, _INSTANCE_NAME_EXAMPLE, "ssh.sock.1234567890123456")) >= _MAX_SOCKET_PATH:
+        print(f"Path of machines directory {directory} is too long for Lima, using ~/.lima")
+        return default_lima_home()
+    return directory
+
+def lima_environment(home: str | None = None) -> dict:
+    """Environment of limactl, with Lima directory of machine (or for new machines)."""
     environment = dict(os.environ)
-    environment.setdefault("LIMA_HOME", os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".lima"))
+    environment["LIMA_HOME"] = home or lima_home()
+    os.makedirs(environment["LIMA_HOME"], exist_ok=True)
     return environment
 
 def limactl_path() -> str | None:
@@ -37,13 +62,13 @@ def lima_unavailable_reason() -> str | None:
         return "Lima is not installed. Install it with Homebrew: brew install lima"
     return None
 
-def list_instances() -> dict[str, dict]:
+def list_instances(home: str | None = None) -> dict[str, dict]:
     """Lima instances by name, with their status (Running, Stopped...)."""
     path = limactl_path()
     if path is None:
         return {}
     try:
-        output = subprocess.run([path, "list", "--json"], capture_output=True, text=True, timeout=30, env=lima_environment()).stdout
+        output = subprocess.run([path, "list", "--json"], capture_output=True, text=True, timeout=30, env=lima_environment(home)).stdout
     except Exception as e:
         print(f"Failed to list Lima instances: {e}")
         return {}
@@ -56,7 +81,7 @@ def list_instances() -> dict[str, dict]:
             pass
     return instances
 
-def run_limactl(arguments: list[str], output_handler, process_holder: list | None = None) -> bool:
+def run_limactl(arguments: list[str], output_handler, process_holder: list | None = None, home: str | None = None) -> bool:
     """Runs limactl with output passed to handler line by line."""
     path = limactl_path()
     if path is None:
@@ -64,7 +89,7 @@ def run_limactl(arguments: list[str], output_handler, process_holder: list | Non
     output_handler(f"$ limactl {' '.join(arguments)}")
     process = subprocess.Popen([path, *arguments, "--tty=false"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                stdin=subprocess.DEVNULL, text=True, errors="replace", bufsize=1, start_new_session=True,
-                               env=lima_environment())
+                               env=lima_environment(home))
     if process_holder is not None:
         process_holder.append(process)
     for line in process.stdout:

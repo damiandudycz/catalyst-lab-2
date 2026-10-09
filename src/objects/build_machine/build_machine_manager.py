@@ -27,7 +27,7 @@ class BuildMachineManager:
             if getattr(toolset, "machine_id", None) == machine.id:
                 toolset.machine_id = None
         Repository.Toolset.save()
-        threading.Thread(target=run_limactl, args=(["delete", "--force", machine.instance_name], print), daemon=True).start()
+        threading.Thread(target=run_limactl, args=(["delete", "--force", machine.instance_name], print), kwargs={"home": machine.lima_home}, daemon=True).start()
 
     def is_name_available(self, name: str) -> bool:
         name = name.strip()

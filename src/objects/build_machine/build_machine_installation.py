@@ -68,7 +68,7 @@ class BuildMachineStepCreate(BuildMachineStep):
                 file.write(configuration)
                 configuration_path = file.name
             try:
-                if not run_limactl(["create", f"--name={machine.instance_name}", configuration_path], self.log, self.processes):
+                if not run_limactl(["create", f"--name={machine.instance_name}", configuration_path], self.log, self.processes, home=machine.lima_home):
                     raise RuntimeError("Failed to create virtual machine")
             finally:
                 os.remove(configuration_path)
@@ -82,7 +82,7 @@ class BuildMachineStepCreate(BuildMachineStep):
             return False
         # Machine is removed when creation didn't finish.
         if self.created and self.multistage_process.status.name != "COMPLETED":
-            run_limactl(["delete", "--force", self.multistage_process.machine.instance_name], print)
+            run_limactl(["delete", "--force", self.multistage_process.machine.instance_name], print, home=self.multistage_process.machine.lima_home)
         return True
 
 class BuildMachineStepStart(BuildMachineStep):
