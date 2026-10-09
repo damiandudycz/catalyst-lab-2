@@ -1,162 +1,293 @@
-# CatalystLab.
+# Catalyst Lab
 
-CatalystLab is a utility designed to simplify the process of building various
-Gentoo Linux stages. It leverages tools such as Catalyst, Releng, QEMU, and 
-others, while providing a streamlined and user-friendly interface. By 
-abstracting the complexity of these tools, CatalystLab enables users to work 
-efficiently without requiring in-depth knowledge of the underlying components.
+**Build custom Gentoo Linux stages, live images and systems with Catalyst, from a friendly GNOME application.**
 
-## Components description.
+Catalyst Lab wraps [Catalyst](https://wiki.gentoo.org/wiki/Catalyst), the Gentoo
+[Release Engineering](https://gitweb.gentoo.org/proj/releng.git/) templates, QEMU and other tools in a
+GTK4 / libadwaita interface. You describe what to build as a tree of stages, and Catalyst Lab prepares the build
+environment, generates spec files, runs the builds and can even install the result on another machine. No deep
+knowledge of Catalyst internals is needed.
 
-## TODOs:
+> **Status:** Catalyst Lab is in active development. Features and file formats can still change. Deploying is
+> currently being tested and might not work correctly.
 
-### General.
-- [x] Create a view for monitoring ServerCall output. Open by clicking on server call on the list from RootButton.
-- [x] Instead of manually registering AppSections, create a decorator that will take all section details and register a class.
-- [ ] In builds store logs - catalyst log, and links to detected bugs
-- [ ] In bugs allow linking to bugzilla issues
-- [x] bwrap: Unknown option --overlay-src in Fedora
-- [ ] Create system checks for host required components - bwrap (including capabilities / version), pkexec etc
-- [ ] When restoring things from Repository it should try to also restore IDs, but only if these are free. Otherwise generate new IDs
-- [ ] When using host env, use tools from env, and not from flatpak container - bwrap, unsquashfs, etc.
+---
 
-### Toolsets.
-- [x] Block environment calls on single env to one command at a time.
-- [x] Create a class for spawning toolset env mountings. This class can keep the spawn mounted and accept next commands to execute. This way we don’t need to spawn new toolset mountings for every call. This class can contain code to spawn, clean, call commands and more. This could also be done in Toolset class itself.
-- [ ] Make it possible to save toolset env calls in files and load by name. These files can contain both - command to execute and Binding configurations. Also add escaping to passed commands, so that we can still use things like “, ‘ in these commands with bwrap calls.
-- [x] Mark as not used after server call is terminated / fails
-- [ ] Add view with output from all steps combined.
-- [x] SquashFS support - pack new toolset into squashfs, load on demand from squashfs
-- [ ] Combine hidden dependencies with first emerge that needs them. Make sure the dependency is always installed first. Dont show dependency in the installer view as step.
-- [ ] Consider scanning and displaying all installed apps from world file
-- [ ] Pass toolset to steps instead of reaching to process (In installer, updater, etc)
-- [x] After installation, created squashfs doesn't contain changes applied, like installed apps. Probably due to some bwrap mappings.
-- [x] In toolset update, metadata for packages is generated and stored in Verify step, but compress step might still fail, leaving wrong metadata
-- [ ] Make bwrap version used depend on runtime environment - for flatpak use flatpak installed version, for host, use host version.
-- [ ] Emerge --sync fails in fedora when using native host install
-- [ ] Flatpak in gentoo doesn't seem to update files it sees in /var/tmp after other process created them, which breaks toolset installation
+## Contents
 
-### Virtual machines.
-- [ ] Support virtual machines on Linux, for systems where toolsets can't run without root (unprivileged user namespaces blocked, eg. AppArmor on Ubuntu or hardened kernels), as alternative to the root helper. Needs Lima configuration for Linux hosts (vmType: qemu with KVM, shared folders mount type that works there, like virtiofs or 9p), install hint without Homebrew, and testing. Offer them only when rootless toolsets are not supported. UI is hidden outside macOS for now, see virtual_machines_supported in lima.py.
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Supported systems](#supported-systems)
+- [Installation](#installation)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [License](#license)
 
-### RootHelperClient.
-- [x] Add structure that collects multiple root calls and keeps root opened while it’s not marked as finished. New calls should be possible to add to these groups live and executed one by one. This can be added to root_function decorator so that it can accept a group to add call to or create and return new one if not provided, but these decorators still need to also return ServerCall itself. These groups should accept also normal functions as user, to create long flow for some larger task.
-- [ ] Add display name property to root_function, to display in ServerCall. It should be provided like @root_call(name).
-- [x] Add timeout to requests, and use timeout for example in watchdog ping, exit
-- [x] Add possibility to call stop_root_helper without sending EXIT. This should be used for example when detecting that server is non responsive
-- [x] It's possible that @root_functions are registered when they are first imported. If that's the case we can sometimes generate a server code with incomplete list of actions. To fix this we need to quickly import all modules containing root_functions or create some auto discovery service.
+---
 
-### RootHelperServer.
-- [ ] Find better way to pass server token to new server instance, as current one sometimes fails, leaving server initialization unresponsive and blocking entire application.
-- [ ] Watchdog needs more complex check, because sometimes client can still work, but pipe gets broken or other issue arises. For example ping based
-- [x] IMPORTANT! When output of running command is generated too fast, the pipe gets blocked, making server unresponsive.
-- [ ] Add timeout for decoding and send decoded as event
-- [ ] Combine handlers into one that also adds Pipe argument
-- [x] For pipes decoding/encoding use simpler format <PipeID>:<Message>
-- [x] Allow receiving calls longer than 4096
-- [x] Job.process doesn't seem to be initiated. Need to check
-- [x] CANCEL_JOB sends a term signal, but stall server process doesn't react to it. Other processes might have similar issue, need to check that
+## Features
 
-### Releng.
-- [ ] GIT commands migh require setting user details and accepting github certificate.
-- [ ] Add view to set commit message, and show changed files
-- [ ] Add possibility to clone using git@, fork branch and to push changes
+### 📁 Projects and stages
+- A project is a **tree of stages** (stage1 → stage3 → stage4, livecd, diskimage, netboot, embedded...), where each
+  stage uses the build of its parent as a seed.
+- Every Catalyst spec option can be edited, with values **inherited** from the parent stage or from a **Releng
+  template**, or set by hand. Missing or unsupported values are marked with warnings.
+- **Portage configuration** and **root overlays** are combined from Releng templates, parent stages and the stage
+  itself.
+- Profiles are listed from the snapshot and from the overlays used by the stage.
+- Projects are **Git directories**, so their changes can be tracked and shared.
 
-### Git directories.
-- [ ] Add installation stage for checking if created GIT directory is correct for given type - eg. contains struct for overlay, releng etc.
-- [ ] Add view for setting commit message and selecting files when commiting git_directory changes.
-- [ ] Handle not configured GIT settings (username, email, missing known_hosts)
+### 🔨 Builds
+- Select the stages to build. Parent stages are **reused** from their latest builds, or built too when they have none.
+- Choose the **snapshot** for each build: the project's own, any other one, or **get the latest** one, generated with
+  the project toolset before building.
+- Builds run **without root privileges** (unprivileged user namespaces) when the system allows it, otherwise through
+  a root helper authorized with polkit.
+- **Live progress**: build order, the last output line of every step, emerge progress as a percentage, colored output
+  and a `build.log` saved for each stage.
+- Package and kernel **caches** are kept between builds, and packages are built in parallel.
+- When a stage fails, **diagnostics** are collected and the stages depending on it are skipped. Other branches of the
+  tree are still built.
+- The **Builds** section lists every build run of every stage, including the ones that were skipped or cancelled.
 
-## App requirements:
- - BWrap >= 0.11
- - pkexec
- - overlayfs (kernel)
- - squashfs-tools
- - git
+### 🧰 Environments
+- **Toolsets** are isolated Gentoo environments with the tools needed for building (Catalyst, QEMU...). They are
+  created from official stage3 images, kept as `.squashfs` files and can be updated from the app.
+- **Virtual machines** (macOS) run toolsets where stages can't be built natively. Catalyst Lab manages them with
+  [Lima](https://lima-vm.io):
+  - they start when needed and stop when nothing uses them;
+  - they emulate other architectures with QEMU;
+  - their processors, memory and working space can be changed.
 
-## macOS application:
-`packaging/macos/build-app.sh` builds self-contained `dist/Catalyst Lab.app` and `dist/Catalyst Lab.dmg` (Python, GTK,
-libadwaita, squashfs tools and Lima included). It installs missing build dependencies with Homebrew and downloads Lima
-from GitHub. Running the app requires only git (Xcode Command Line Tools) for releng and overlay repositories.
-App icon is `computer` icon from Adwaita icon theme (CC BY-SA 3.0, GNOME Project).
+### 📚 Releng, snapshots and overlays
+- **Releng** directories: clones of the Gentoo Release Engineering repository (or your fork), used as defaults for
+  stages.
+- **Snapshots**: compressed copies of the Gentoo ebuild repository, generated with Catalyst or imported from a file.
+  You can browse the packages in each one.
+- **Overlays**: additional ebuild repositories that stages can use, together with their profiles.
 
-## Main layout:
+### 🚀 Deploy *(being tested)*
+Install a built stage3 or stage4 on real hardware:
+- **On another machine** booted from Gentoo LiveCD, through SSH.
+- **On a disk connected to this computer** (SD card, external disk), on Linux.
 
-# CatalystlabApplication
-# ╰── CatalystlabWindow
-#     ╰── AdwNavigationView (navigation_view)
-#         ╰── AdwNavigationPage
-#             ╰── AdwOverlaySplitView (split_view)
-#                 ├── AdwNavigationPage
-#                 |   ╰── AdwToolbarView
-#                 |       ╰── CatalystlabWindowSideMenu (side_menu)
-#                 ╰── CatalystlabWindowContent (content_view)
+The deploy wizard handles:
+- **Disk**: editable partition layout with sensible defaults, GPT or MBR.
+- **System**: hostname, users, root password, network, timezone, locales, keyboard layout and SSH keys.
+- **Boot**: kernel (from the stage or a distribution kernel), linux-firmware and bootloader (GRUB, systemd-boot,
+  rEFInd, EFI stub, or kboot for PS3 petitboot), with warnings about anything that needs manual updates later.
 
-## Navigation:
+---
 
-When presenting main AppSection inside CatalystlabWindowContent, it is embedded
-into structure with NavigationView->ToolbarView. This way it can display header
-and content and also provide own navigation.
+## How it works
 
-To push new view, developer can use either main module NavigationView (created
-automatically) or send an AppEvent.PUSH_SECTION to push on main application
-navigation view.
+1. **Prepare an environment**: create a toolset (on macOS, create a virtual machine first).
+2. **Add sources**: clone a Releng directory and generate a snapshot.
+3. **Create a project**: choose its toolset, Releng directory, snapshot and architecture, then add stages.
+4. **Build**: select stages and start the build. Results appear in the **Builds** section.
+5. **Deploy** *(optional)*: install a stage3/stage4 build on a machine or disk.
 
-When module is embedded into this structure, toggle side menu is also added to
-it. This button visibility is controlled by main_window, and it's action is
-passed back to main_window.
+---
 
-When AppEvent.PUSH_SECTION is received, main_window inserts it embedded into
-structure inside content_view and pushes main navigation view back to root.
+## Supported systems
 
-## App Sections:
+| | Linux | macOS |
+|---|---|---|
+| Building stages | ✅ On the computer, without root when user namespaces are available | ✅ In virtual machines (Lima) |
+| Other architectures | ✅ QEMU user emulation | ✅ QEMU user emulation in the virtual machine |
+| Deploy over SSH | ✅ | ✅ |
+| Deploy to a local disk | ✅ | — Virtual machines can't access disks of the Mac |
 
-Main views of the application are called AppSection. They are definied in
-AppSection enum. AppSectionDetails provides additional information about these
-modules, such as title, label, icon, class and relations to main window
-behavior.
+### Requirements
 
-Every main AppSection must implement this init:
+**Linux**
+- `bwrap` (bubblewrap) 0.11 or newer
+- `squashfs-tools`, `git`
+- Kernel with overlayfs and squashfs support
+- For building without root: `unshare`, `newuidmap` / `newgidmap`, entries for your user in `/etc/subuid` and
+  `/etc/subgid`, and unprivileged user namespaces enabled. Otherwise `pkexec` (polkit) is used.
+- For deploying: `ssh`, and QEMU user emulation (binfmt) when deploying another architecture to a local disk
+
+**macOS**
+- The application bundle includes everything except `git` (install the Xcode Command Line Tools).
+
+---
+
+## Installation
+
+### Linux: Flatpak
+
+```bash
+flatpak-builder --user --install --force-clean .flatpak-build com.damiandudycz.CatalystLab.json
+```
+
+### Linux: directly on the host
+
+```bash
+./install.sh
+```
+
+This builds the app with Meson and installs it system-wide (`sudo ninja install`).
+
+### macOS: application bundle
+
+```bash
+packaging/macos/build-app.sh
+```
+
+Creates `dist/Catalyst Lab.app` and `dist/Catalyst Lab.dmg`. The bundle contains Python, GTK, libadwaita, squashfs
+tools and Lima, so it runs on Macs without Homebrew.
+- Build dependencies come from Homebrew and Lima from GitHub (checksum verified).
+- Homebrew packages missing on your Mac are installed only for the build and removed when it ends.
+- Options:
+  - `--keep-packages` keeps those Homebrew packages installed;
+  - `--no-dmg` skips the disk image;
+  - `--clean` starts from scratch.
+
+---
+
+## Development
+
+### Running from the checkout
+
+- **Linux:** use GNOME Builder, the Flatpak manifest or `install.sh`.
+- **macOS:**
+  ```bash
+  brew install gtk4 libadwaita pygobject3 meson ninja squashfs lima
+  ./run-macos.sh
+  ```
+  It uses your real Catalyst Lab folder and settings. Build files are kept in `.build-macos`.
+
+### Project layout
+
+| Path | Contents |
+|---|---|
+| `src/objects/` | Model and logic: projects, builds, toolsets, virtual machines, snapshots, deploy, root helper |
+| `src/ui/` | Views (`.py` + `.ui` templates) and app sections |
+| `data/` | Icons, desktop file, metainfo and GSettings schema |
+| `packaging/macos/` | macOS application bundle |
+| `dependencies/` | Flatpak modules (bwrap, squashfs-tools, Python packages) |
+
+### Window structure
+
+```
+CatalystlabApplication
+╰── CatalystlabWindow
+    ╰── AdwNavigationView (navigation_view)
+        ╰── AdwNavigationPage
+            ╰── AdwOverlaySplitView (split_view)
+                ├── AdwNavigationPage
+                │   ╰── AdwToolbarView
+                │       ╰── CatalystlabWindowSideMenu (side_menu)
+                ╰── CatalystlabWindowContent (content_view)
+```
+
+### App sections
+
+The main views of the application are **app sections**, registered with the `@app_section` decorator. It takes:
+- **Display details:** title, label and icon.
+- **Order:** position in the side menu.
+- **Window behavior:** whether the section is shown in the side menu, and whether the side menu is shown with it.
+
+Every section implements:
+
+```python
 def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
+```
 
-content_navigation_view is created and passed by main_window_content.
+`content_navigation_view` is created by `CatalystlabWindowContent`. A section can also be created elsewhere with
+`AppSectionDetails.create_section(content_navigation_view)`.
 
-These modules can also be created separately from other places of code if needed
-using:
-AppSectionDetails.create_section(
-    self, 
-    content_navigation_view: Adw.NavigationView
-)
+### Navigation
 
-If no further navigation is required by the module content_navigation_view can
-be set to NULL, but it's better to use main_navigation_view in this situation.
+A section shown in `CatalystlabWindowContent` is embedded in a `NavigationView` → `ToolbarView` structure, so it has
+its own header and navigation. The main window controls the visibility of the side menu toggle that is added there.
 
-## Notes:
+To show a new view, push it on the section's `content_navigation_view`. To push it on the main navigation view, send
+`AppEvents.PUSH_SECTION`.
 
-### Future TODOS:
-- Build bugs module
-    - Automatically collect bugs from builds
-    - Connect with bugzilla
-- Notes module
-    - Allow storing notes for projects
-- Templates module
-    - Allow using templates
-    - Templates could be derived from things like releng default specs or user definied
-    - Templates should be able to use other templates in them
-        - There should be a stack based mechanism to detect circular dependencies
-- Projects
-    - Allow exporting .spec and other catalyst files instead of building in app
-    - Allow modifying final .spec before build
-    - Store both app generated build and user modified and allow showing differences using diff
-- UI
-    - Consider moving module help to AppSection and insert to view when creating module view in AppSectionDetails
-    - Allow a global and local toggles to show/hide module help
-    - Allow passing flag to Environments module when opened from Welcome, to add "Continue" button
-    - Module help section could also link to help pages and videos
-    - Consider alternative layout with top tabs
-        - Tabs can still be hidden based on AppSectionDetails.show_in_side_bar
-    - Change welcome wizard to pagination with dots at bottom
-- Tutorial
-    - Create help module containing text and video helps
-    - Allow opening help for specific subject from various parts of application
+### Root helper
 
+Operations that need root privileges are Python functions marked with `@root_function`. They are sent to a helper
+process started with `pkexec`, which streams their output back and can cancel them. Root access stays unlocked while
+some operation holds an authorization keeper.
+
+---
+
+## Roadmap
+
+### Planned features
+- **Bugs**: collect bugs found in builds and link them with Gentoo Bugzilla.
+- **Notes**: notes for projects.
+- **Templates**: reusable templates derived from Releng specs or defined by the user, able to include other templates
+  (with detection of circular dependencies).
+- **Projects**:
+  - export `.spec` and other Catalyst files instead of building in the app;
+  - edit the final `.spec` before building, and show differences from the generated one.
+- **Help**: text and video help for each section, opened from relevant places in the app.
+- **Virtual machines on Linux**: for systems where toolsets can't run without root (unprivileged user namespaces
+  blocked, eg. by AppArmor on Ubuntu or hardened kernels), as an alternative to the root helper.
+  - Needs Lima configuration for Linux hosts: `vmType: qemu` with KVM, and a shared folder type that works there,
+    like virtiofs or 9p.
+  - See `virtual_machines_supported` in `lima.py`.
+
+### Open tasks
+
+<details>
+<summary>General</summary>
+
+- [ ] Store Catalyst logs and links to detected bugs in builds
+- [ ] Link bugs to Bugzilla issues
+- [ ] System checks for required host components (bwrap version and capabilities, pkexec...)
+- [ ] Restore IDs when restoring items from repository, when they are free
+- [ ] When using host environment, use host tools instead of Flatpak ones (bwrap, unsquashfs...)
+</details>
+
+<details>
+<summary>Toolsets</summary>
+
+- [ ] Save toolset commands with their bindings in files and load them by name, with escaping of passed commands
+- [ ] View with combined output of all steps
+- [ ] Install hidden dependencies together with the first emerge that needs them, without a separate step
+- [ ] Show all installed applications from the world file
+- [ ] Pass toolset to steps instead of reaching to the process (installer, updater...)
+- [ ] Use bwrap matching the runtime environment (Flatpak or host)
+- [ ] `emerge --sync` fails in Fedora when using native host install
+- [ ] Flatpak on Gentoo doesn't see files created in `/var/tmp` by other processes, which breaks toolset installation
+</details>
+
+<details>
+<summary>Root helper</summary>
+
+- [ ] Display name of root functions in server calls, eg. `@root_function(name)`
+- [ ] More reliable way of passing token to new server instance (initialization sometimes hangs)
+- [ ] Better watchdog check (eg. ping based), the pipe can break while client still works
+- [ ] Timeout for decoding, decoded messages sent as events
+- [ ] Combine output handlers into one with pipe argument
+</details>
+
+<details>
+<summary>Releng and Git directories</summary>
+
+- [ ] Handle Git that isn't configured (user name, email, GitHub certificate, known hosts)
+- [ ] View for commit message and changed files when committing
+- [ ] Clone with `git@`, fork branches and push changes
+- [ ] Check that created Git directory has the structure expected for its type (overlay, releng...)
+</details>
+
+<details>
+<summary>UI</summary>
+
+- [ ] Show/hide section help globally and per section, with links to help pages and videos
+- [ ] "Continue" button in Environments when opened from Welcome
+- [ ] Alternative layout with top tabs
+- [ ] Welcome wizard with page dots at the bottom
+</details>
+
+---
+
+## License
+
+Catalyst Lab is free software, licensed under the [GNU General Public License v3.0](COPYING).
+
+The app icon is the `computer` icon from the Adwaita icon theme (CC BY-SA 3.0, GNOME Project).
