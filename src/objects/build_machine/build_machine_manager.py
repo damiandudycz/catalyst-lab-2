@@ -27,7 +27,10 @@ class BuildMachineManager:
             if getattr(toolset, "machine_id", None) == machine.id:
                 toolset.machine_id = None
         Repository.Toolset.save()
-        threading.Thread(target=run_limactl, args=(["delete", "--force", machine.instance_name], print), kwargs={"home": machine.lima_home}, daemon=True).start()
+        def delete():
+            run_limactl(["delete", "--force", machine.instance_name], print, home=machine.lima_home)
+            machine.delete_swap_disk()
+        threading.Thread(target=delete, daemon=True).start()
 
     def is_name_available(self, name: str, machine: BuildMachine | None = None) -> bool:
         """Name is not empty and not used by other machine than given one."""

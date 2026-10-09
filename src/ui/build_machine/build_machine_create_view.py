@@ -17,6 +17,7 @@ class BuildMachineCreateView(Gtk.Box):
     cpus_row = Gtk.Template.Child()
     memory_row = Gtk.Template.Child()
     disk_row = Gtk.Template.Child()
+    swap_row = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: BuildMachineInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -56,6 +57,7 @@ class BuildMachineCreateView(Gtk.Box):
             cpus=int(self.cpus_row.get_value()),
             memory_gib=int(self.memory_row.get_value()),
             workspace_gib=int(self.disk_row.get_value()),
+            swap_gib=int(self.swap_row.get_value()),
         )
         installation_in_progress.start()
         self.wizard_view.set_installation(installation_in_progress)

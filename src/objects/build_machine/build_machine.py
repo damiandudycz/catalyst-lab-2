@@ -4,7 +4,7 @@ from typing import Self
 from .event_bus import EventBus, SharedEvent
 from .repository import Repository
 from .status_indicator import StatusIndicatorState, StatusIndicatorValues
-from .lima import list_instances, run_limactl, default_lima_home, MACHINE_DATA_DIRECTORY
+from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY
 from .lima import lima_home as default_new_lima_home
 
 class BuildMachine:
@@ -17,17 +17,21 @@ class BuildMachine:
     STATUS_STARTING = "Starting"   # Displayed while machine is being started or stopped by app.
     STATUS_STOPPING = "Stopping"
 
-    # Delay before stopping unused machine, so it's not restarted between consecutive commands of operation.
-    IDLE_STOP_SECONDS = 15
+    # Delay before stopping unused machine, so it's not restarted between consecutive commands. Operations (builds,
+    # environments, installations) use machine for their whole duration, so short delay is enough.
+    IDLE_STOP_SECONDS = 2
     COMMAND_USER = "Command" # User of single commands (not listed as user of machine).
 
+    DEFAULT_SWAP_GIB = 16
+
     def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 64,
-                 lima_home: str | None = None):
+                 lima_home: str | None = None, swap_gib: int = DEFAULT_SWAP_GIB):
         self.id = id or uuid.uuid4()
         self.name = name
         self.cpus = cpus
         self.memory_gib = memory_gib
         self.workspace_gib = workspace_gib # Maximum size of working space image (it grows only as it's used).
+        self.swap_gib = swap_gib # Maximum size of swap disk (it grows only as it's used), 0 disables swap.
         self.lima_home = lima_home or default_new_lima_home() # Lima directory containing machine folder.
         self.event_bus = EventBus()
         self._status: str | None = None
@@ -47,12 +51,13 @@ class BuildMachine:
 
     def serialize(self) -> dict:
         return {"id": str(self.id), "name": self.name, "cpus": self.cpus, "memory_gib": self.memory_gib,
-                "workspace_gib": self.workspace_gib, "lima_home": self.lima_home}
+                "workspace_gib": self.workspace_gib, "swap_gib": self.swap_gib, "lima_home": self.lima_home}
 
     @classmethod
     def init_from(cls, data: dict) -> Self:
         return cls(id=uuid.UUID(data["id"]), name=data["name"], cpus=data.get("cpus", 4),
                    memory_gib=data.get("memory_gib", 4), workspace_gib=data.get("workspace_gib", 64),
+                   swap_gib=data.get("swap_gib", cls.DEFAULT_SWAP_GIB),
                    # Machines created before machines directory are in ~/.lima.
                    lima_home=data.get("lima_home") or default_lima_home())
 
@@ -85,14 +90,21 @@ class BuildMachine:
 
     @property
     def short_details(self) -> str:
-        return f"{self.status} · {self.cpus} CPUs, {self.memory_gib} GiB memory, up to {self.workspace_gib} GiB working space"
+        swap = f", up to {self.swap_gib} GiB swap" if self.swap_gib else ""
+        return f"{self.status} · {self.cpus} CPUs, {self.memory_gib} GiB memory{swap}, up to {self.workspace_gib} GiB working space"
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
-        return StatusIndicatorValues(
-            state=StatusIndicatorState.ENABLED if self.status == self.STATUS_RUNNING else StatusIndicatorState.DISABLED,
-            blinking=False
-        )
+        """Like toolsets: active while running, blinking while used by operations. Starting blinks as active, stopping
+        blinks as warning (machine becomes unavailable)."""
+        match self.status:
+            case self.STATUS_RUNNING:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=self.is_used)
+            case self.STATUS_STARTING:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
+            case self.STATUS_STOPPING:
+                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=True)
+        return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
 
     # Lifecycle:
 
@@ -175,9 +187,12 @@ class BuildMachine:
             output_handler(f"Starting virtual machine {self.name}...")
             self._set_status(self.STATUS_STARTING)
             try:
+                self._prepare_swap_disk(output_handler, process_holder)
                 success = run_limactl(["start", self.instance_name], output_handler, process_holder, home=self.lima_home)
             finally:
                 self.refresh_status(during_transition=True)
+            if success and self.is_running and self.swap_gib:
+                self._activate_swap(output_handler)
             if success and self.is_running and automatically:
                 with self._usage_lock:
                     self._started_automatically = True
@@ -195,6 +210,9 @@ class BuildMachine:
                 success = run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home)
             finally:
                 self.refresh_status(during_transition=True)
+            if success and self.status == self.STATUS_STOPPED:
+                # Swapped data is not needed after machine stops, its disk takes no space until next start.
+                self.delete_swap_disk(lambda line: None)
             return success
 
     def ensure_running(self, output_handler=print, process_holder: list | None = None):
@@ -210,6 +228,50 @@ class BuildMachine:
                 self._setup_checked = False
                 raise RuntimeError(f"Failed to update setup of virtual machine {self.name}")
 
+    # Swap:
+    # Raw disk attached to machine (Lima additional disk), used only as swap, so builds needing more memory than
+    # machine has (eg. large C++ projects compiled in parallel) are slower instead of killed. Disk file is sparse, it
+    # takes space on this computer only when machine swaps. It's created before machine starts and deleted when it
+    # stops, so this space is given back.
+
+    @property
+    def swap_disk_name(self) -> str:
+        return f"{self.instance_name}-swap"
+
+    def _prepare_swap_disk(self, output_handler, process_holder: list | None = None):
+        """Creates empty swap disk and attaches it to stopped machine, or detaches and removes it when swap is
+        disabled."""
+        if self.swap_gib:
+            run_limactl(["disk", "delete", "--force", self.swap_disk_name], lambda line: None, home=self.lima_home)
+            if not run_limactl(["disk", "create", self.swap_disk_name, f"--size={self.swap_gib}GiB", "--format=raw"],
+                               output_handler, process_holder, home=self.lima_home):
+                raise RuntimeError(f"Failed to create swap disk of virtual machine {self.name}")
+        if self._swap_disk_attached() != bool(self.swap_gib):
+            expression = (f'.additionalDisks = [{{"name": "{self.swap_disk_name}", "format": false}}]' if self.swap_gib
+                          else "del(.additionalDisks)")
+            if not run_limactl(["edit", "--set", expression, self.instance_name], output_handler, process_holder, home=self.lima_home):
+                raise RuntimeError(f"Failed to configure swap disk of virtual machine {self.name}")
+        if not self.swap_gib:
+            run_limactl(["disk", "delete", "--force", self.swap_disk_name], lambda line: None, home=self.lima_home)
+
+    def _swap_disk_attached(self) -> bool:
+        try:
+            with open(os.path.join(self.machine_directory, "lima.yaml"), encoding="utf-8") as file:
+                return self.swap_disk_name in file.read()
+        except OSError:
+            return False
+
+    def _activate_swap(self, output_handler):
+        """Swap failure doesn't stop machine from being used, it's reported in output."""
+        try:
+            if not run_as_root_in_instance(self.instance_name, swap_activation_script(self.swap_gib * 1024 ** 3), output_handler, home=self.lima_home):
+                output_handler(f"Warning: swap of virtual machine {self.name} is not enabled")
+        except Exception as e:
+            output_handler(f"Warning: failed to enable swap of virtual machine {self.name}: {e}")
+
+    def delete_swap_disk(self, output_handler=print):
+        run_limactl(["disk", "delete", "--force", self.swap_disk_name], output_handler, home=self.lima_home)
+
     # Settings:
 
     def rename(self, name: str):
@@ -217,9 +279,9 @@ class BuildMachine:
         Repository.BuildMachine.save()
         self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
-    def change_resources(self, cpus: int, memory_gib: int, workspace_gib: int, output_handler=print):
+    def change_resources(self, cpus: int, memory_gib: int, workspace_gib: int, swap_gib: int, output_handler=print):
         """Changes resources of stopped machine. Processors and memory are changed in Lima instance, working space limit
-        applies to next working space."""
+        applies to next working space and swap limit to next start."""
         with self._lock:
             self.refresh_status()
             if self.status != self.STATUS_STOPPED:
@@ -228,7 +290,7 @@ class BuildMachine:
                 arguments = ["edit", f"--cpus={cpus}", f"--memory={memory_gib}", self.instance_name]
                 if not run_limactl(arguments, output_handler, home=self.lima_home):
                     raise RuntimeError(f"Failed to change resources of virtual machine {self.name}")
-            self.cpus, self.memory_gib, self.workspace_gib = cpus, memory_gib, workspace_gib
+            self.cpus, self.memory_gib, self.workspace_gib, self.swap_gib = cpus, memory_gib, workspace_gib, swap_gib
         Repository.BuildMachine.save()
         self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 

@@ -76,6 +76,7 @@ catalystlab_sources = [
   'objects/project/project_build_rootless.py',
   'objects/project/project_stage_portage_confdir.py',
   'objects/project/project_build.py',
+  'objects/project/project_build_details.py',
   'objects/project/project_build_spec.py',
   'objects/project/project_build_process.py',
   'objects/releng/releng_directory.py',

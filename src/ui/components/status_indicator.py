@@ -81,3 +81,40 @@ class StatusIndicator(Gtk.DrawingArea):
         ctx.set_line_width(1)
         ctx.stroke()
 
+
+# ------------------------------------------------------------------------------
+# Status of whole section (eg. in side menu): most important state of its items (warning, then enabled), blinking
+# when any item blinks or any of its operations runs. None when there is nothing to show.
+
+_STATE_PRIORITY = [StatusIndicatorState.DISABLED, StatusIndicatorState.ENABLED, StatusIndicatorState.ENABLED_UNSAFE]
+
+def combined_status(values: list[StatusIndicatorValues]) -> StatusIndicatorValues | None:
+    values = [value for value in values if value is not None]
+    if not values:
+        return None
+    state = max((value.state for value in values), key=_STATE_PRIORITY.index)
+    blinking = any(value.blinking for value in values)
+    if state == StatusIndicatorState.DISABLED and not blinking:
+        return None
+    # Running operation without other state is shown as active.
+    return StatusIndicatorValues(state=StatusIndicatorState.ENABLED if state == StatusIndicatorState.DISABLED else state,
+                                 blinking=blinking)
+
+def items_status(items, property_name: str = "status_indicator_values") -> list[StatusIndicatorValues]:
+    result = []
+    for item in items:
+        try:
+            result.append(getattr(item, property_name))
+        except Exception as e:
+            print(f"Failed to read status of {item}: {e}")
+    return result
+
+def processes_status(*process_classes) -> list[StatusIndicatorValues]:
+    """Running processes (installations, updates, builds) of given classes, as blinking indicators."""
+    from .multistage_process import MultiStageProcess, MultiStageProcessState
+    return [
+        StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
+        for process_class in process_classes
+        for process in MultiStageProcess.get_started_processes_by_class(process_class)
+        if process.status == MultiStageProcessState.IN_PROGRESS
+    ]

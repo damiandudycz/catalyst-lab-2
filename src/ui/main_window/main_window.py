@@ -31,6 +31,17 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         self.sidebar_toggle_breakpoint.connect("unapply", self._on_sidebar_toggle_breakpoint_unapply)
         # Observe AppEvents.TOGGLE_SIDEBAR
         app_event_bus.subscribe(AppEvents.TOGGLE_SIDEBAR, self.toggle_sidebar)
+        # Files of Git directories can change outside of app (other editors, Finder), their statuses are read again
+        # when window becomes active.
+        self.connect("notify::is-active", self._on_active_changed)
+
+    def _on_active_changed(self, window, param):
+        if not self.is_active():
+            return
+        from .repository import Repository
+        for repository in (Repository.ProjectDirectory, Repository.RelengDirectory, Repository.OverlayDirectory):
+            for directory in repository.value:
+                directory.update_status()
 
     def toggle_sidebar(self, _ = None):
         if self.allow_side_menu:

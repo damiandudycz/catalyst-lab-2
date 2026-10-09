@@ -45,6 +45,8 @@ step "Homebrew packages"
 BREW=$(command -v brew || true)
 [ -n "$BREW" ] || for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do [ -x "$candidate" ] && BREW=$candidate; done
 [ -n "$BREW" ] || { echo "Homebrew is required to build the app: https://brew.sh"; exit 1; }
+# Homebrew 7 asks for confirmation before installing by default, packages are installed without asking.
+export HOMEBREW_NO_ASK=1
 BREW_PREFIX=$("$BREW" --prefix)
 export PATH="$BREW_PREFIX/bin:$PATH"
 missing=()

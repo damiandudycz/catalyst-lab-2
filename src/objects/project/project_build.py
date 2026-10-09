@@ -37,8 +37,22 @@ class StageBuild:
     path: str | None = None # Build directory, set when loaded or saved.
     artifact: str | None = None # Filename of built stage archive, inside build directory.
     order: int | None = None # Position of stage in build order of its run.
+    finished: datetime | None = None # When build completed or failed.
+    # What was built and how, for reproducing builds and reporting bugs (see BUILD_DETAILS): inputs (spec, snapshot,
+    # toolset, catalyst, project commit, seed), environment (where it ran, resources), failure (failed packages,
+    # reason) and output (archive size, installed packages).
+    details: dict = field(default_factory=dict)
 
     METADATA_FILE = "build.json"
+    SPEC_FILE = "stage.spec" # Spec used by catalyst, copied to build directory.
+    PORTAGE_DIRECTORY = "portage" # Portage configuration used by catalyst (portage_confdir).
+    PACKAGES_FILE = "packages.txt" # Packages installed in built stage.
+    FAILURE_DIRECTORY = "failure" # Logs of failed packages (build.log, environment, emerge --info...) for bug reports.
+
+    @property
+    def duration(self):
+        """Time of building, None when build didn't finish."""
+        return self.finished - self.date if self.finished else None
 
     @property
     def is_usable(self) -> bool:
@@ -55,6 +69,8 @@ class StageBuild:
             "date": self.date.isoformat(),
             "artifact": self.artifact,
             "order": self.order,
+            "finished": self.finished.isoformat() if self.finished else None,
+            "details": self.details,
         }
 
     @classmethod
@@ -69,7 +85,17 @@ class StageBuild:
             path=path,
             artifact=data.get("artifact"),
             order=data.get("order"),
+            finished=datetime.fromisoformat(data["finished"]) if data.get("finished") else None,
+            details=data.get("details") or {},
         )
+
+    @property
+    def failure_summary(self) -> str | None:
+        """Failed packages and reason, eg. "net-libs/webkit-gtk-2.54.0 (compile phase), out of memory"."""
+        failure = self.details.get("failure") or {}
+        packages = ", ".join(f"{item['package']} ({item['phase']} phase)" for item in failure.get("packages", []))
+        reason = failure.get("reason")
+        return ", ".join(part for part in (packages, reason) if part) or None
 
     @property
     def artifact_path(self) -> str | None:

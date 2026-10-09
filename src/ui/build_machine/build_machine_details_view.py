@@ -76,7 +76,8 @@ class BuildMachineDetailsView(Gtk.Box):
         self.cpus_row = self._spin_row("Processors", "Cores used by machine, builds run as many jobs in parallel", 1, max(1, os.cpu_count() or 1))
         self.memory_row = self._spin_row("Memory", "GiB, taken from this computer while machine runs", 2, 256)
         self.workspace_row = self._spin_row("Working space limit", "GiB, created while toolsets run and deleted when they finish", 20, 2048)
-        for row in (self.cpus_row, self.memory_row, self.workspace_row):
+        self.swap_row = self._spin_row("Swap limit", "GiB, used when builds need more memory, takes space only while used. 0 disables swap", 0, 512)
+        for row in (self.cpus_row, self.memory_row, self.swap_row, self.workspace_row):
             self.resources_group.add(row)
         resources_container.append(self.resources_group)
         self.resources_actions = Gtk.Box(homogeneous=True, hexpand=True, spacing=8)
@@ -158,7 +159,7 @@ class BuildMachineDetailsView(Gtk.Box):
         self.delete_button.set_sensitive(self.working is None and not running)
         # Resources
         editable = self.working is None and stopped
-        for row in (self.cpus_row, self.memory_row, self.workspace_row):
+        for row in (self.cpus_row, self.memory_row, self.swap_row, self.workspace_row):
             row.set_sensitive(editable)
         self.resources_group.set_description(None if editable else "Stop the machine to change its resources")
         self.resources_actions.set_visible(self._resources_changed())
@@ -216,21 +217,23 @@ class BuildMachineDetailsView(Gtk.Box):
 
     # Resources
 
-    def _edited_resources(self) -> tuple[int, int, int]:
-        return int(self.cpus_row.get_value()), int(self.memory_row.get_value()), int(self.workspace_row.get_value())
+    def _edited_resources(self) -> tuple[int, int, int, int]:
+        return (int(self.cpus_row.get_value()), int(self.memory_row.get_value()), int(self.workspace_row.get_value()),
+                int(self.swap_row.get_value()))
 
     def _resources_changed(self) -> bool:
-        return self._edited_resources() != (self.machine.cpus, self.machine.memory_gib, self.machine.workspace_gib)
+        return self._edited_resources() != (self.machine.cpus, self.machine.memory_gib, self.machine.workspace_gib, self.machine.swap_gib)
 
     def _load_resources(self):
         self.cpus_row.set_value(self.machine.cpus)
         self.memory_row.set_value(self.machine.memory_gib)
         self.workspace_row.set_value(self.machine.workspace_gib)
+        self.swap_row.set_value(self.machine.swap_gib)
         self._update_display()
 
     def on_apply_clicked(self, button):
-        cpus, memory_gib, workspace_gib = self._edited_resources()
-        self._run_action("Applying changes", lambda: self.machine.change_resources(cpus, memory_gib, workspace_gib))
+        cpus, memory_gib, workspace_gib, swap_gib = self._edited_resources()
+        self._run_action("Applying changes", lambda: self.machine.change_resources(cpus, memory_gib, workspace_gib, swap_gib))
 
     # Delete
 

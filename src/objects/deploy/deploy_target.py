@@ -55,12 +55,14 @@ class TargetMachine:
     # are referenced by UUIDs, as device names differ there.
     local: bool = False
     firmware: TargetFirmware | None = None
+    model: str = "" # Device tree model (eg. Raspberry Pi 5 Model B Rev 1.0), empty on machines without device tree.
 
     _SCRIPT = r'''
 echo "architecture=$(uname -m)"
 [ -d /sys/firmware/efi ] && echo "firmware=uefi" || echo "firmware=bios"
 echo "memory_kib=$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
 echo "hostname=$(hostname)"
+echo "model=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)"
 echo "disks=$(lsblk -J -b -o NAME,PATH,SIZE,MODEL,TYPE,RO,RM,TRAN,MOUNTPOINTS | tr -d '\n')"
 INTERFACE=$(ip -o route get "${SSH_CLIENT%% *}" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p')
 echo "interface=$INTERFACE"
@@ -81,6 +83,7 @@ echo "dns=$(awk '/^nameserver/ {print $2}' /etc/resolv.conf | tr '\n' ' ')"
             address=values.get("address", ""),
             gateway=values.get("gateway", ""),
             dns=values.get("dns", "").strip(),
+            model=values.get("model", "").strip(),
         )
         for device in json.loads(values.get("disks") or "{}").get("blockdevices", []):
             if device.get("type") != "disk" or _flag(device.get("ro")) or int(device.get("size") or 0) == 0:
@@ -127,7 +130,16 @@ echo "dns=$(awk '/^nameserver/ {print $2}' /etc/resolv.conf | tr '\n' ' ')"
     def description(self) -> str:
         if self.local:
             return f"Installed system runs on {self.architecture} machine with {self.firmware.display_name(self.architecture)} firmware"
-        return f"{self.architecture}, {'UEFI' if self.uefi else 'BIOS'} firmware, {format_size(self.memory)} memory"
+        firmware = "Raspberry Pi" if self.raspberry_pi else "UEFI" if self.uefi else "BIOS"
+        model = f"{self.model}, " if self.model else ""
+        return f"{model}{self.architecture}, {firmware} firmware, {format_size(self.memory)} memory"
+
+    @property
+    def raspberry_pi(self) -> bool:
+        """Machine boots with Raspberry Pi firmware (config.txt, kernel and device tree on FAT /boot partition)."""
+        if self.local:
+            return self.firmware == TargetFirmware.RASPBERRY_PI
+        return "Raspberry Pi" in self.model and not self.uefi
 
     @property
     def ps3(self) -> bool | None:
@@ -140,6 +152,7 @@ class TargetFirmware(Enum):
     BIOS = "bios"
     PS3 = "ps3"
     PETITBOOT = "petitboot"
+    RASPBERRY_PI = "raspberry-pi"
     OTHER = "other"
 
     def display_name(self, architecture: str) -> str:
@@ -148,6 +161,7 @@ class TargetFirmware(Enum):
             TargetFirmware.BIOS: "BIOS (legacy boot)",
             TargetFirmware.PS3: "PS3 petitboot",
             TargetFirmware.PETITBOOT: "petitboot",
+            TargetFirmware.RASPBERRY_PI: "Raspberry Pi",
             TargetFirmware.OTHER: "other",
         }[self]
 
@@ -159,7 +173,12 @@ class TargetFirmware(Enum):
             return [TargetFirmware.PS3, TargetFirmware.PETITBOOT]
         if architecture == "ppc64le":
             return [TargetFirmware.PETITBOOT]
+        if architecture in RASPBERRY_PI_ARCHITECTURES:
+            return [TargetFirmware.UEFI, TargetFirmware.RASPBERRY_PI, TargetFirmware.OTHER]
         return [TargetFirmware.UEFI, TargetFirmware.OTHER]
+
+# Architectures (uname -m) of Raspberry Pi models, where Raspberry Pi firmware boot is offered.
+RASPBERRY_PI_ARCHITECTURES = ("aarch64", "armv7l", "armv6l")
 
 # Where desktops mount removable media, such mounts are unmounted before installation. Other mounts mean disk is used
 # by this computer.
@@ -235,11 +254,12 @@ class PartitionType(Enum):
     BIOS_BOOT = "bios-boot"
     LINUX = "linux"
     SWAP = "swap"
+    FIRMWARE = "firmware" # FAT partition read by firmware (Raspberry Pi), mounted at /boot.
 
     @property
     def display_name(self) -> str:
         return {PartitionType.EFI: "EFI system", PartitionType.BIOS_BOOT: "BIOS boot", PartitionType.LINUX: "Linux filesystem",
-                PartitionType.SWAP: "Swap"}[self]
+                PartitionType.SWAP: "Swap", PartitionType.FIRMWARE: "Firmware boot (FAT)"}[self]
 
     @property
     def gpt_type(self) -> str:
@@ -248,11 +268,15 @@ class PartitionType(Enum):
             PartitionType.BIOS_BOOT: "21686148-6449-6E6F-744E-656564454649",
             PartitionType.LINUX: "0FC63DAF-8483-4772-8E79-3D69D7984743",
             PartitionType.SWAP: "0657FD6D-A4AB-43C4-84E5-0933C84B4F4F",
+            PartitionType.FIRMWARE: "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7", # Basic data, FAT.
         }[self]
 
     @property
     def mbr_type(self) -> str | None:
-        return {PartitionType.EFI: "ef", PartitionType.LINUX: "83", PartitionType.SWAP: "82"}.get(self)
+        return {PartitionType.EFI: "ef", PartitionType.LINUX: "83", PartitionType.SWAP: "82", PartitionType.FIRMWARE: "c"}.get(self)
+
+# Partitions with filesystem mounted in installed system.
+MOUNTED_TYPES = (PartitionType.LINUX, PartitionType.EFI, PartitionType.FIRMWARE)
 
 class TargetFilesystem(Enum):
     EXT4 = "ext4"
@@ -280,7 +304,7 @@ class PartitionSpec:
     @property
     def effective_filesystem(self) -> TargetFilesystem | None:
         match self.type:
-            case PartitionType.EFI: return TargetFilesystem.VFAT
+            case PartitionType.EFI | PartitionType.FIRMWARE: return TargetFilesystem.VFAT
             case PartitionType.LINUX: return self.filesystem or TargetFilesystem.EXT4
         return None
 
@@ -289,6 +313,7 @@ class PartitionSpec:
         """Name of partition and filesystem label."""
         match self.type:
             case PartitionType.EFI: return "EFI"
+            case PartitionType.FIRMWARE: return "boot"
             case PartitionType.BIOS_BOOT: return "BIOS boot"
             case PartitionType.SWAP: return "swap"
         return "root" if self.mount_point == "/" else (self.mount_point or "data").strip("/").replace("/", "-")
@@ -306,16 +331,19 @@ class TargetPartition:
 _MOUNT_POINT = re.compile(r"^/([A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*)?$")
 
 def default_layout(disk: TargetDisk, uefi: bool, memory: int, architecture: str,
-                   table: PartitionTable = PartitionTable.GPT) -> list[PartitionSpec]:
+                   table: PartitionTable = PartitionTable.GPT, raspberry_pi: bool = False) -> list[PartitionSpec]:
     """EFI system (UEFI) or BIOS boot partition (x86 BIOS with GPT), /boot, swap (size of memory, up to 8 GiB), root
     and /home. Small disks, and MBR tables without space for more partitions, get no /home, root uses remaining space
-    then."""
+    then. Raspberry Pi firmware reads /boot, which is FAT partition then."""
     layout = []
-    if uefi:
+    if raspberry_pi:
+        layout.append(PartitionSpec(PartitionType.FIRMWARE, 512 * MIB, mount_point="/boot"))
+    elif uefi:
         layout.append(PartitionSpec(PartitionType.EFI, 1 * GIB, mount_point="/efi"))
     elif architecture in ("x86_64", "i686", "i586", "i486") and table == PartitionTable.GPT:
         layout.append(PartitionSpec(PartitionType.BIOS_BOOT, 1 * MIB))
-    layout.append(PartitionSpec(PartitionType.LINUX, 1 * GIB, TargetFilesystem.EXT4, "/boot"))
+    if not raspberry_pi:
+        layout.append(PartitionSpec(PartitionType.LINUX, 1 * GIB, TargetFilesystem.EXT4, "/boot"))
     swap = min(8 * GIB, max(1 * GIB, round(memory / GIB) * GIB)) if memory else 2 * GIB
     disk_size = min(disk.size, MBR_MAX_SIZE) if table == PartitionTable.MBR else disk.size
     available = disk_size - sum(partition.size for partition in layout) - 8 * MIB
@@ -341,6 +369,7 @@ class PartitionPlan:
     layout: list[PartitionSpec] = field(default_factory=list)
     table: PartitionTable = PartitionTable.GPT
     root: str = "/mnt/gentoo" # Where root filesystem is mounted during installation.
+    raspberry_pi: bool = False # Boots with Raspberry Pi firmware from FAT /boot partition.
     local: bool = False # Disk of this computer, only its own partitions are unmounted (not all swap and mounts).
 
     @property
@@ -355,7 +384,7 @@ class PartitionPlan:
                 command = filesystem.format_command(spec.label)
             else:
                 command = None
-            mount_point = spec.mount_point if spec.type in (PartitionType.LINUX, PartitionType.EFI) else None
+            mount_point = spec.mount_point if spec.type in MOUNTED_TYPES else None
             partition_type = spec.type.gpt_type if self.table == PartitionTable.GPT else spec.type.mbr_type
             partitions.append(TargetPartition(spec.label, spec.size, partition_type, mount_point, fstab_type, command, spec))
         return partitions
@@ -391,10 +420,10 @@ class PartitionPlan:
         roots = [spec for spec in self.layout if spec.type == PartitionType.LINUX and spec.mount_point == "/"]
         if len(roots) != 1:
             return "Exactly one Linux filesystem partition must be mounted at /"
-        mount_points = [spec.mount_point for spec in self.layout if spec.type in (PartitionType.LINUX, PartitionType.EFI)]
+        mount_points = [spec.mount_point for spec in self.layout if spec.type in MOUNTED_TYPES]
         for mount_point in mount_points:
             if not mount_point:
-                return "Set mount point of every EFI system and Linux filesystem partition"
+                return "Set mount point of every partition with filesystem"
             if not _MOUNT_POINT.match(mount_point) or "/.." in mount_point or "/./" in mount_point:
                 return f"Invalid mount point {mount_point}"
         if len(set(mount_points)) != len(mount_points):
@@ -406,6 +435,8 @@ class PartitionPlan:
                 return "Partitions must have at least 1 MiB"
         if self.remaining_size < (1 * GIB if self.layout[-1].size is None else 0):
             return f"Partitions don't fit on disk, {format_size(self.usable_size)} available"
+        if self.raspberry_pi and not any(spec.type == PartitionType.FIRMWARE and spec.mount_point == "/boot" for spec in self.layout):
+            return "Raspberry Pi needs firmware boot (FAT) partition mounted at /boot"
         efi = [spec for spec in self.layout if spec.type == PartitionType.EFI]
         if self.uefi and not efi:
             return "UEFI machine needs EFI system partition"
@@ -499,9 +530,12 @@ sfdisk -l {disk}
         )
         for index, partition in mounted:
             target = self.root + (partition.mount_point if partition.mount_point != "/" else "")
+            device = self.partition_device(index)
             lines.append(f"mkdir -p {quote(target)}")
-            lines.append(f"mount {quote(self.partition_device(index))} {quote(target)}")
-        lines.append(f"df -h {quote(self.root)}")
+            lines.append(f'echo "Mounting {device} ({partition.mount_point}) at {target}"')
+            lines.append(f"mount {quote(device)} {quote(target)}")
+        # All mounted filesystems of installed system, not only root.
+        lines.append(f"df -h $(findmnt -R -n -o TARGET {quote(self.root)})")
         return "\n".join(lines) + "\n"
 
     def fstab_script(self) -> str:
@@ -524,6 +558,6 @@ sfdisk -l {disk}
         return "\n".join(lines) + "\n"
 
     def required_tools(self) -> list[str]:
-        tools = ["wipefs", "sfdisk", "blkid", "tar", "chroot"] + (["lsblk", "findmnt"] if self.local else [])
+        tools = ["wipefs", "sfdisk", "blkid", "tar", "chroot", "findmnt"] + (["lsblk"] if self.local else [])
         tools += sorted({partition.format_command.split()[0] for partition in self.partitions if partition.format_command})
         return tools

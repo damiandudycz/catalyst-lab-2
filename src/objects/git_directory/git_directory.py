@@ -2,6 +2,7 @@
 # OverlayDirectory.
 from __future__ import annotations
 import os, threading, subprocess, uuid
+from gi.repository import GLib
 from enum import Enum, auto
 from datetime import datetime
 from .repository import Serializable
@@ -47,6 +48,10 @@ class GitDirectory(Serializable, ABC):
         self.metadata = metadata
         self.logs: list[dict] = []
         self.event_bus = EventBus[GitDirectoryEvent]()
+        # Changes made by app (eg. stages of project saved, renamed or removed) change Git status. Several changes come
+        # together (eg. stage added and its file written), status is read once after them.
+        self._status_update_id = None
+        self.event_bus.subscribe(GitDirectoryEvent.CONTENT_CHANGED, self._on_content_changed)
 
     @property
     def short_details(self) -> str:
@@ -120,6 +125,15 @@ class GitDirectory(Serializable, ABC):
             has_remote_changes=has_remote_changes,
             metadata=metadata
         )
+
+    def _on_content_changed(self, *args):
+        if self._status_update_id is not None:
+            GLib.source_remove(self._status_update_id)
+        def update():
+            self._status_update_id = None
+            self.update_status()
+            return False
+        self._status_update_id = GLib.timeout_add(300, update)
 
     def update_status(self, wait: bool = False):
         def worker():
@@ -287,16 +301,22 @@ class GitDirectory(Serializable, ABC):
                     cwd=self.directory_path(),
                     check=True
                 )
-                self.update_status(wait=wait)
-                self.update_logs(wait=wait)
             except Exception as e:
                 print(f"DISCARD EXCEPTION: {e}")
+            finally:
+                # Status is read again also after failure, it could be outdated.
+                self.update_status(wait=wait)
+                self.update_logs(wait=wait)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:
             thread.join()
 
-    def commit_changes(self, wait: bool = False):
+    DEFAULT_COMMIT_MESSAGE = "Save changes"
+
+    def commit_changes(self, message: str | None = None, wait: bool = False):
+        """Commits all changes of directory, with given message (default one when empty)."""
+        message = (message or "").strip() or self.DEFAULT_COMMIT_MESSAGE
         def worker():
             try:
                 subprocess.run(
@@ -304,15 +324,20 @@ class GitDirectory(Serializable, ABC):
                     cwd=self.directory_path(),
                     check=True
                 )
-                subprocess.run(
-                    ["git", "commit", "-m", "Save changes"],
-                    cwd=self.directory_path(),
-                    check=True
-                )
-                self.update_status(wait=wait)
-                self.update_logs(wait=wait)
+                # Nothing to commit when changes were reverted outside of app (status shown was outdated).
+                staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=self.directory_path())
+                if staged.returncode != 0:
+                    subprocess.run(
+                        ["git", "commit", "-m", message],
+                        cwd=self.directory_path(),
+                        check=True
+                    )
             except Exception as e:
                 print(f"COMMIT EXCEPTION: {e}")
+            finally:
+                # Status is read again also after failure, it could be outdated.
+                self.update_status(wait=wait)
+                self.update_logs(wait=wait)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:

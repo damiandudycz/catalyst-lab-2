@@ -13,8 +13,8 @@ from .rootless import MachineExecutor
 class BuildMachineInstallation(MultiStageProcess):
     """Creates Alpine Linux virtual machine with Lima, prepared for building without root privileges."""
 
-    def __init__(self, name: str, cpus: int, memory_gib: int, workspace_gib: int):
-        self.machine = BuildMachine(name=name, cpus=cpus, memory_gib=memory_gib, workspace_gib=workspace_gib)
+    def __init__(self, name: str, cpus: int, memory_gib: int, workspace_gib: int, swap_gib: int = BuildMachine.DEFAULT_SWAP_GIB):
+        self.machine = BuildMachine(name=name, cpus=cpus, memory_gib=memory_gib, workspace_gib=workspace_gib, swap_gib=swap_gib)
         super().__init__(title="Virtual machine creation")
 
     def setup_stages(self):
@@ -83,6 +83,7 @@ class BuildMachineStepCreate(BuildMachineStep):
         # Machine is removed when creation didn't finish.
         if self.created and self.multistage_process.status.name != "COMPLETED":
             run_limactl(["delete", "--force", self.multistage_process.machine.instance_name], print, home=self.multistage_process.machine.lima_home)
+            self.multistage_process.machine.delete_swap_disk()
         return True
 
 class BuildMachineStepStart(BuildMachineStep):

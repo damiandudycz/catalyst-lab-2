@@ -84,6 +84,20 @@
                       </object>
                     </child>
                     <child>
+                      <object class="AdwSpinRow" id="swap_row">
+                        <property name="title">Swap limit (GiB)</property>
+                        <property name="subtitle">Used when builds need more memory, takes space only while used. 0 disables swap</property>
+                        <property name="adjustment">
+                          <object class="GtkAdjustment">
+                            <property name="lower">0</property>
+                            <property name="upper">512</property>
+                            <property name="step-increment">4</property>
+                            <property name="value">16</property>
+                          </object>
+                        </property>
+                      </object>
+                    </child>
+                    <child>
                       <object class="AdwSpinRow" id="disk_row">
                         <property name="title">Working space limit (GiB)</property>
                         <property name="adjustment">

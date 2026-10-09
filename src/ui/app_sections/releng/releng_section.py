@@ -1,5 +1,8 @@
 from gi.repository import Gtk, Adw
 from .app_section import app_section
+from .releng_installation import RelengInstallation
+from .repository import Repository
+from .status_indicator import combined_status, items_status, processes_status
 from .releng_create_view import RelengCreateView
 from .releng_manager import RelengManager
 from .releng_update import RelengUpdate
@@ -10,6 +13,11 @@ from .git_directory_details_view import GitDirectoryDetailsView
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/releng/releng_section.ui')
 class RelengSection(Gtk.Box):
     __gtype_name__ = "RelengSection"
+
+    @staticmethod
+    def section_status():
+        """Unsaved changes of releng directories, clones or updates running (side menu)."""
+        return combined_status(items_status(Repository.RelengDirectory.value) + processes_status(RelengInstallation, RelengUpdate))
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)

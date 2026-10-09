@@ -1,5 +1,10 @@
 from gi.repository import Gtk, Adw
 from .app_section import app_section
+from .build_machine_installation import BuildMachineInstallation
+from .toolset_update import ToolsetUpdate
+from .toolset_installation import ToolsetInstallation
+from .repository import Repository
+from .status_indicator import combined_status, items_status, processes_status
 from .toolset_details_view import ToolsetDetailsView
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
@@ -11,6 +16,13 @@ from .lima import virtual_machines_supported
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
     __gtype_name__ = "EnvironmentsSection"
+
+    @staticmethod
+    def section_status():
+        """Running virtual machines, mounted or used toolsets, environments being created or updated (side menu)."""
+        machines = Repository.BuildMachine.value if virtual_machines_supported() else []
+        return combined_status(items_status(machines) + items_status(Repository.Toolset.value)
+                               + processes_status(ToolsetInstallation, ToolsetUpdate, BuildMachineInstallation))
 
     machines_list = Gtk.Template.Child()
     machines_description_label = Gtk.Template.Child()

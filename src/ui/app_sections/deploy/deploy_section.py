@@ -1,5 +1,7 @@
 from gi.repository import Gtk, Adw
 from .app_section import app_section
+from .deploy_installation import DeployInstallation
+from .status_indicator import combined_status, items_status, processes_status
 from .app_events import app_event_bus, AppEvents
 from .deploy_create_view import DeployCreateView
 from .project_deploy_view import ProjectDeployView
@@ -8,6 +10,11 @@ from .project_deploy_view import ProjectDeployView
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/deploy/deploy_section.ui')
 class DeploySection(Gtk.Box):
     __gtype_name__ = "DeploySection"
+
+    @staticmethod
+    def section_status():
+        """Deployment running (side menu)."""
+        return combined_status(processes_status(DeployInstallation))
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
