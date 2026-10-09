@@ -40,6 +40,7 @@ class StageArgumentOption:
     value: Any
     argument: StageArgumentDetails
     unsupported: bool = False
+    icon_name: str | None = None # Shown instead of icon of list, eg. target icon of parent stage.
 
 class StageArgumentType(Enum):
     raw = auto() # Raw text data

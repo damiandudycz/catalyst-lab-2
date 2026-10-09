@@ -3,6 +3,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, GObject, Adw
 import cairo
+from .project_stage import stage_target_icon
 from dataclasses import dataclass
 
 # Constants for spacing
@@ -132,7 +133,7 @@ class StagesTreeView(Gtk.Fixed):
         # Single line labels, wrapping labels would report minimal width and get squeezed in Gtk.Fixed.
         row.set_title_lines(1)
         row.set_subtitle_lines(1)
-        row.add_prefix(Gtk.Image.new_from_icon_name(_target_icon(target)))
+        row.add_prefix(Gtk.Image.new_from_icon_name(stage_target_icon(target)))
         if status and status.in_progress:
             spinner = Adw.Spinner(tooltip_text=status.title)
             spinner.set_size_request(16, 16)
@@ -256,11 +257,3 @@ class StagesTreeView(Gtk.Fixed):
             self.separators.append(separator)
 
 
-# Icons of stages by kind of catalyst target.
-_target_icons: dict[str, str] = {
-    "livecd": "archive-up-minimlistic-svgrepo-com-symbolic",
-    "diskimage": "archive-down-minimlistic-svgrepo-com-symbolic",
-}
-
-def _target_icon(target: str) -> str:
-    return _target_icons.get(target.split("_")[0], "layers-minimalistic-svgrepo-com-symbolic")

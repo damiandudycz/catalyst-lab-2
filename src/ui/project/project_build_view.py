@@ -3,6 +3,7 @@ from gi.repository import Gtk, Adw, GLib
 from .project_directory import ProjectDirectory
 from .project_build import StageBuildPlan, StageBuildMode, load_project_builds, project_builds_directory
 from .project_build_process import ProjectBuild
+from .project_stage import stage_target_icon
 from .rootless import rootless_unsupported_reason
 from .root_helper_client import RootHelperClient
 from .multistage_process import MultiStageProcessState
@@ -53,6 +54,7 @@ class ProjectBuildView(Gtk.Box):
             check_button = Gtk.CheckButton(valign=Gtk.Align.CENTER, margin_start=depth * 24)
             check_button.connect("toggled", self.on_stage_toggled, stage)
             row.add_prefix(check_button)
+            row.add_prefix(Gtk.Image.new_from_icon_name(stage_target_icon(stage.target)))
             row.set_activatable_widget(check_button)
             self.stages_group.add(row)
             self.rows[stage.id] = (row, check_button)
@@ -99,10 +101,10 @@ class ProjectBuildView(Gtk.Box):
             self.summary_rows.append((group, row))
         for index, stage in enumerate(self.plan.build_order(), start=1):
             entry = self.plan.entries[stage.id]
-            add(self.build_order_group, f"{index}. {stage.name}", self._entry_description(entry), "sledgehammer-svgrepo-com-symbolic")
+            add(self.build_order_group, f"{index}. {stage.name}", self._entry_description(entry), stage_target_icon(stage.target))
         reused = [entry for entry in self.plan.entries.values() if entry.mode == StageBuildMode.REUSE]
         for entry in reused:
-            add(self.reused_group, entry.stage.name, f"Build from {_format_date(entry.reused_build.date)}", "archive-minimalistic-svgrepo-com-symbolic")
+            add(self.reused_group, entry.stage.name, f"Build from {_format_date(entry.reused_build.date)}", stage_target_icon(entry.stage.target))
         self.reused_group.set_visible(bool(reused))
 
     def _entry_description(self, entry) -> str:

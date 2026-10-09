@@ -130,12 +130,15 @@ class ItemRow(Adw.ActionRow):
         item_subtitle_property_name,
         item_status_property_name,
         item_unsupported_property_name,
-        item_icon
+        item_icon,
+        item_icon_resolver = None
     ):
+        # Icon of item itself (icon_name attribute or resolver) is used instead of icon of list.
+        icon_name = item_icon_resolver(item) if item_icon_resolver else None
         super().__init__(
             title     = getattr(item, item_title_property_name, None) if item_title_property_name else item if isinstance(item, str) else None,
             subtitle  = getattr(item, item_subtitle_property_name, None) if item_subtitle_property_name else None,
-            icon_name = item_icon
+            icon_name = icon_name or getattr(item, "icon_name", None) or item_icon
         )
         self.item = item
         self.item_status_property_name = item_status_property_name

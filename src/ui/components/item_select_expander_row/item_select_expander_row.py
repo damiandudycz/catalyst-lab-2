@@ -150,7 +150,8 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
                 item_subtitle_property_name=self.item_subtitle_property_name,
                 item_status_property_name=self.item_status_property_name,
                 item_unsupported_property_name=self.item_unsupported_property_name,
-                item_icon=self.item_icon
+                item_icon=self.item_icon,
+                item_icon_resolver=getattr(self, "item_icon_resolver", None)
             )
             check_button = Gtk.CheckButton()
             if self.allow_multiselect:
