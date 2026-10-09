@@ -9,7 +9,7 @@ from .deploy_target import format_size
 from .project_stage import stage_target_icon
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
 
-@app_section(title="Deploy", icon="deploy-symbolic", order=2_700)
+@app_section(title="Deploy", icon="deploy-symbolic", order=7_000)
 class DeploySection(Gtk.Box):
     """Builds of stage3 and stage4 that can be installed on another machine, and deployments started in this session.
     Selecting build opens deploy wizard."""
