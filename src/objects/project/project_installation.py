@@ -100,9 +100,11 @@ class ProjectInstallationStepApplyTemplate(MultiStageProcessStage):
             directory = self.multistage_process.directory
             selection = self.multistage_process.configuration.data
             template = selection.template
+            temporary_directory = None
             if selection.repository_url:
                 # Options were read from template.toml downloaded alone, files come from cloned repository.
-                template = load_cloned_template(directory.directory_path(), selection.repository_url)
+                template, temporary_directory = load_cloned_template(directory.directory_path(), selection.repository_url,
+                                                                     template.repository_path)
             try:
                 names = template.resolve(selection.selected, project_name=directory.name)
                 self.log(f"Template: {template.name}")
@@ -112,8 +114,8 @@ class ProjectInstallationStepApplyTemplate(MultiStageProcessStage):
                 apply_project_template(project_directory=directory, template=template, names=names, log=self.log,
                                        replace_content=selection.repository_url is not None)
             finally:
-                if selection.repository_url:
-                    shutil.rmtree(os.path.dirname(template.path), ignore_errors=True)
+                if temporary_directory:
+                    shutil.rmtree(temporary_directory, ignore_errors=True)
             if selection.repository_url:
                 path = directory.directory_path()
                 self._run(["git", "-C", path, "add", "--all"])

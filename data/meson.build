@@ -33,9 +33,4 @@ test('Validate schema file',
      compile_schemas,
      args: ['--strict', '--dry-run', meson.current_source_dir()])
 
-# Project templates included in app (share/catalystlab/project_templates).
-# List of template repositories is downloaded from main branch, so it's not installed.
-install_subdir('project_templates', install_dir: get_option('datadir') / meson.project_name(),
-  exclude_files: ['repositories.txt'])
-
 subdir('icons')

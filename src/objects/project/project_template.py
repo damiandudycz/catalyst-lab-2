@@ -1,8 +1,7 @@
 """Project templates: directories with template.toml describing stages, options and files of new project.
 
-Local templates are directories in data/project_templates of the app, templates from Git repositories have the same
-layout in root of repository. Repositories offered in the app are listed in data/project_templates/repositories.txt,
-downloaded from main branch of Catalyst Lab repository.
+Templates come from Git repositories listed in data/project_templates/repositories.txt, downloaded from main branch of
+Catalyst Lab repository. Repository has one template in its root, or many templates in its directories.
 Format of templates is described in docs/project-templates.md.
 
 Templates can't run code. Values in template.toml can contain {{ expressions }} and "when" conditions, evaluated by
@@ -17,7 +16,6 @@ from .architecture import Architecture
 
 TEMPLATE_FILE = "template.toml"
 TEMPLATE_FORMAT = 1
-REPOSITORIES_FILE = "repositories.txt"
 RENDERED_FILE_SUFFIX = ".template"
 
 class TemplateError(Exception):
@@ -316,13 +314,16 @@ class ProjectTemplate:
     groups: list[TemplateGroup] = field(default_factory=list)
     groups_title: str = "Additional configuration"
     architecture: Architecture | None = None # Fixed architecture of projects, for templates without architecture variable.
-    repository_url: str | None = None # Git repository of template, None for templates included in app.
+    repository_url: str | None = None # Git repository of template.
+    repository_path: str = "" # Directory of template in repository, empty for template in root of repository.
+    min_app_version: str | None = None # Oldest version of Catalyst Lab that supports template.
     # False for definition downloaded without other files of repository (to show options), files are checked when
     # template is applied from cloned repository.
     files_available: bool = True
 
     @classmethod
-    def load(cls, path: str, repository_url: str | None = None, files_available: bool = True) -> ProjectTemplate:
+    def load(cls, path: str, repository_url: str | None = None, repository_path: str = "",
+             files_available: bool = True) -> ProjectTemplate:
         file_path = os.path.join(path, TEMPLATE_FILE)
         if not os.path.isfile(file_path):
             raise TemplateError(f"{TEMPLATE_FILE} not found")
@@ -333,6 +334,14 @@ class ProjectTemplate:
                 data = tomllib.load(file)
         except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
             raise TemplateError(f"Invalid {TEMPLATE_FILE}: {e}") from None
+        # Checked first, templates for newer versions can use things this version doesn't know.
+        min_app_version = data.get("min_app_version")
+        if min_app_version is not None:
+            from . import app_info
+            if not isinstance(min_app_version, str) or not re.match(r"^\d+(\.\d+)*$", min_app_version):
+                raise TemplateError("Template: min_app_version must be version like 0.2.0")
+            if app_info.version_tuple(app_info.APP_VERSION) < app_info.version_tuple(min_app_version):
+                raise TemplateError(f"Requires Catalyst Lab {min_app_version} or newer (this is {app_info.APP_VERSION})")
         if data.get("format", TEMPLATE_FORMAT) != TEMPLATE_FORMAT:
             raise TemplateError(f"Template format {data.get('format')} is not supported, update Catalyst Lab")
         name = _text(data, "name", "Template")
@@ -460,6 +469,7 @@ class ProjectTemplate:
         return cls(path=path, name=name, description=description, variables=variables, values=values, stages=stages,
                    files=files, groups=groups, groups_title=groups_title,
                    architecture=Architecture[architecture_name] if architecture_name else None, repository_url=repository_url,
+                   repository_path=repository_path, min_app_version=min_app_version,
                    files_available=files_available)
 
     @property
@@ -626,34 +636,8 @@ def _stage_argument_value(value, context: str):
     raise TemplateError(f"{context}: unsupported value {value!r}")
 
 # ------------------------------------------------------------------------------
-# Available templates.
+# Template repositories.
 # ------------------------------------------------------------------------------
-
-def templates_directory() -> str | None:
-    """data/project_templates installed with app (share/catalystlab/project_templates)."""
-    import sys
-    from gi.repository import GLib
-    candidates = [os.path.join(directory, "catalystlab", "project_templates") for directory in GLib.get_system_data_dirs()]
-    # Installed modules are in share/catalystlab/catalystlab, macOS bundle has data in share/catalystlab.
-    candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "project_templates"))
-    if hasattr(sys, "_MEIPASS"):
-        candidates.append(os.path.join(sys._MEIPASS, "share", "catalystlab", "project_templates"))
-    return next((path for path in candidates if os.path.isdir(path)), None)
-
-def local_templates() -> list[ProjectTemplate | tuple[str, TemplateError]]:
-    """Templates included in app, sorted by name. Templates that fail to load are returned as (path, error)."""
-    directory = templates_directory()
-    if directory is None:
-        return []
-    templates = []
-    for entry in sorted(os.listdir(directory)):
-        path = os.path.join(directory, entry)
-        if os.path.isfile(os.path.join(path, TEMPLATE_FILE)):
-            try:
-                templates.append(ProjectTemplate.load(path))
-            except TemplateError as e:
-                templates.append((path, e))
-    return sorted(templates, key=lambda item: item.name.lower() if isinstance(item, ProjectTemplate) else item[0])
 
 @dataclass
 class TemplateRepository:
@@ -702,18 +686,23 @@ def _run_git(command: list[str], timeout: int = 300):
         output = result.stdout.strip()
         raise TemplateError(output.splitlines()[-1] if output else f"{' '.join(command[:2])} failed")
 
-# Template repositories can contain only template: template.toml, files used by it and few common repository files.
-_REPOSITORY_ALLOWED_FILES = re.compile(r"^(template\.toml|\.gitignore|\.gitattributes|(README|LICENSE|LICENCE|COPYING)(\.[A-Za-z0-9]+)?)$")
+# Template repositories can contain only templates: one in root of repository, or many in its directories. Template
+# has template.toml, files used by it in files directory and README. Root of repository can also have common
+# repository files.
+_REPOSITORY_ROOT_FILES = re.compile(r"^(\.gitignore|\.gitattributes|(README|LICENSE|LICENCE|COPYING)(\.[A-Za-z0-9]+)?)$")
+_TEMPLATE_FILES = re.compile(r"^(template\.toml|README(\.[A-Za-z0-9]+)?)$")
+_TEMPLATE_DIRECTORY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REPOSITORY_FILES_DIRECTORY = "files"
 _REPOSITORY_MAX_FILES = 2_000
 _REPOSITORY_MAX_FILE_SIZE = 10 * 1024 * 1024
 _REPOSITORY_MAX_TOTAL_SIZE = 50 * 1024 * 1024
 
-def validate_template_repository(path: str, check_sizes: bool):
-    """Checks that latest commit of template repository contains only template: template.toml in root, optionally
-    README, LICENSE, COPYING, .gitignore and .gitattributes files, and other files in files directory. Symbolic links,
-    submodules and executable files are not allowed. Sizes of files are checked when they were downloaded
-    (check_sizes), listing of files doesn't need their contents."""
+def validate_template_repository(path: str, check_sizes: bool) -> list[str]:
+    """Checks that latest commit of template repository contains only templates, and returns their directories in
+    repository ("" for template in root). Template is template.toml, optional README and files directory. Root of
+    repository can also have LICENSE, COPYING, README, .gitignore and .gitattributes. Symbolic links, submodules and
+    executable files are not allowed. Sizes of files are checked when they were downloaded (check_sizes), listing of
+    files doesn't need their contents."""
     command = ["git", "-C", path, "ls-tree", "-r", "-z"] + (["-l"] if check_sizes else []) + ["HEAD"]
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
     if result.returncode != 0:
@@ -721,7 +710,7 @@ def validate_template_repository(path: str, check_sizes: bool):
     entries = [entry for entry in result.stdout.decode("utf-8", errors="replace").split("\0") if entry]
     if len(entries) > _REPOSITORY_MAX_FILES:
         raise TemplateError(f"Repository has more than {_REPOSITORY_MAX_FILES} files")
-    has_template = False
+    files = []
     total_size = 0
     for entry in entries:
         details, _, file_path = entry.partition("\t")
@@ -732,26 +721,46 @@ def validate_template_repository(path: str, check_sizes: bool):
             raise TemplateError(f"Repository can't contain symbolic links ({file_path})")
         if mode != "100644":
             raise TemplateError(f"Repository can't contain executable or special files ({file_path})")
-        if "/" in file_path:
-            if file_path.split("/")[0] != _REPOSITORY_FILES_DIRECTORY:
-                raise TemplateError(f"Files of template must be in {_REPOSITORY_FILES_DIRECTORY} directory ({file_path})")
-        elif not _REPOSITORY_ALLOWED_FILES.match(file_path):
-            raise TemplateError(f"Repository can contain only template ({file_path} is not allowed)")
-        has_template = has_template or file_path == TEMPLATE_FILE
+        files.append(file_path)
         if check_sizes:
             size = int(rest[1]) if len(rest) > 1 and rest[1].isdigit() else 0
             if size > _REPOSITORY_MAX_FILE_SIZE:
                 raise TemplateError(f"{file_path} is larger than {_REPOSITORY_MAX_FILE_SIZE // 1024 // 1024} MB")
             total_size += size
-    if not has_template:
-        raise TemplateError(f"Repository has no {TEMPLATE_FILE}")
     if total_size > _REPOSITORY_MAX_TOTAL_SIZE:
         raise TemplateError(f"Files of repository are larger than {_REPOSITORY_MAX_TOTAL_SIZE // 1024 // 1024} MB")
+    single_template = TEMPLATE_FILE in files
+    templates = set()
+    for file_path in files:
+        parts = file_path.split("/")
+        if not single_template and len(parts) > 1:
+            # Directory of template.
+            if not _TEMPLATE_DIRECTORY.match(parts[0]):
+                raise TemplateError(f"Invalid name of template directory ({parts[0]})")
+            if parts[1:] == [TEMPLATE_FILE]:
+                templates.add(parts[0])
+            parts = parts[1:]
+        elif len(parts) == 1 and _REPOSITORY_ROOT_FILES.match(parts[0]):
+            continue
+        if len(parts) == 1:
+            if not _TEMPLATE_FILES.match(parts[0]):
+                raise TemplateError(f"Repository can contain only templates ({file_path} is not allowed)")
+        elif parts[0] != _REPOSITORY_FILES_DIRECTORY:
+            raise TemplateError(f"Files of template must be in {_REPOSITORY_FILES_DIRECTORY} directory ({file_path})")
+    if single_template:
+        return [""]
+    directories = {file_path.split("/")[0] for file_path in files if "/" in file_path}
+    if missing := sorted(directories - templates):
+        raise TemplateError(f"Directory {missing[0]} has no {TEMPLATE_FILE}")
+    if not templates:
+        raise TemplateError(f"Repository has no {TEMPLATE_FILE}")
+    return sorted(templates)
 
-def fetch_template_repository(url: str) -> ProjectTemplate:
-    """Downloads only template.toml from latest commit of template repository, to show its options. Other files are
-    used from repository cloned when project is created. Uses partial clone without contents of files, servers that
-    don't support it send whole latest commit."""
+def fetch_template_repository(url: str) -> list[ProjectTemplate | tuple[str, TemplateError]]:
+    """Downloads only template.toml files from latest commit of template repository, to show templates and their
+    options. Other files are used from repository cloned when project is created. Uses partial clone without contents
+    of files, servers that don't support it send whole latest commit. Templates that can't be used are returned as
+    (directory, error)."""
     from .repository import Repository
     temporary = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
     path = os.path.join(temporary, "Project templates", hashlib.sha1(url.encode()).hexdigest()[:16])
@@ -759,21 +768,38 @@ def fetch_template_repository(url: str) -> ProjectTemplate:
         shutil.rmtree(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     _run_git(["git", "clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--quiet", url, path])
-    validate_template_repository(path, check_sizes=False)
-    _run_git(["git", "-C", path, "sparse-checkout", "set", "--no-cone", "/" + TEMPLATE_FILE])
+    directories = validate_template_repository(path, check_sizes=False)
+    _run_git(["git", "-C", path, "sparse-checkout", "set", "--no-cone"]
+             + [f"/{directory}/{TEMPLATE_FILE}" if directory else f"/{TEMPLATE_FILE}" for directory in directories])
     _run_git(["git", "-C", path, "checkout", "--quiet"])
-    return ProjectTemplate.load(path, repository_url=url, files_available=False)
+    templates = []
+    for directory in directories:
+        try:
+            templates.append(ProjectTemplate.load(os.path.join(path, directory), repository_url=url,
+                                                  repository_path=directory, files_available=False))
+        except TemplateError as e:
+            templates.append((directory, e))
+    return templates
 
-def load_cloned_template(path: str, repository_url: str) -> ProjectTemplate:
-    """Template of repository cloned as project directory. Its files are copied to temporary directory first, as
-    project directory is replaced with generated content. Remove returned template path when done."""
+def load_cloned_template(path: str, repository_url: str, repository_path: str) -> tuple[ProjectTemplate, str]:
+    """Template from repository cloned as project directory. Files of repository are copied to temporary directory
+    first, as project directory is replaced with generated content. Returns template and temporary directory, remove
+    it when done."""
     from .repository import Repository
-    validate_template_repository(path, check_sizes=True)
+    if repository_path not in validate_template_repository(path, check_sizes=True):
+        raise TemplateError(f"Template {repository_path or TEMPLATE_FILE} is not in repository anymore")
     temporary = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
     os.makedirs(temporary, exist_ok=True)
-    copy_path = os.path.join(tempfile.mkdtemp(prefix="project-template-", dir=temporary), "template")
+    temporary_directory = tempfile.mkdtemp(prefix="project-template-", dir=temporary)
+    copy_path = os.path.join(temporary_directory, "repository")
     shutil.copytree(path, copy_path, symlinks=True, ignore=shutil.ignore_patterns(".git"))
-    return ProjectTemplate.load(copy_path, repository_url=repository_url)
+    try:
+        template = ProjectTemplate.load(os.path.join(copy_path, repository_path), repository_url=repository_url,
+                                        repository_path=repository_path)
+    except Exception:
+        shutil.rmtree(temporary_directory, ignore_errors=True)
+        raise
+    return template, temporary_directory
 
 # ------------------------------------------------------------------------------
 # Creating project.

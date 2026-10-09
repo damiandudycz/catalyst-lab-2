@@ -36,8 +36,9 @@ knowledge of Catalyst internals is needed.
   itself.
 - Profiles are listed from the snapshot and from the overlays used by the stage.
 - Projects are **Git directories**, so their changes can be tracked and shared.
-- New projects can be created from **templates**, included in the app or from Git repositories, with options like
-  architecture, init system and additional software. See [Project templates](docs/project-templates.md) to create
+- New projects can be created from **templates** from Git repositories (like
+  [catalystlab-templates](https://github.com/damiandudycz/catalystlab-templates)), with options like architecture,
+  init system and additional software. See [Project templates](docs/project-templates.md) to create
   and publish one.
 
 ### 🔨 Builds
@@ -183,7 +184,7 @@ tools and Lima, so it runs on Macs without Homebrew.
 |---|---|
 | `src/objects/` | Model and logic: projects, builds, toolsets, virtual machines, snapshots, deploy, root helper |
 | `src/ui/` | Views (`.py` + `.ui` templates) and app sections |
-| `data/` | Icons, desktop file, metainfo, GSettings schema and project templates |
+| `data/` | Icons, desktop file, metainfo, GSettings schema and list of project template repositories |
 | `docs/` | Documentation, eg. [project templates](docs/project-templates.md) |
 | `packaging/flatpak/` | Flatpak manifest, its modules (bubblewrap, squashfs-tools, Python packages) and build scripts |
 | `packaging/macos/` | macOS application bundle |

@@ -7,6 +7,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Gio, Adw, Gdk
 from .main_window import CatalystlabWindow
 from .modules_scanner import scan_all_submodules
+from . import app_info
 from .root_helper_client import RootHelperClient
 from .toolset_manager import ToolsetManager
 from .snapshot_manager import SnapshotManager
@@ -62,7 +63,7 @@ class CatalystlabApplication(Adw.Application):
                                 application_name='catalystlab',
                                 application_icon='com.damiandudycz.CatalystLab',
                                 developer_name='Unknown',
-                                version='0.1.0',
+                                version=app_info.APP_VERSION,
                                 developers=['Unknown'],
                                 copyright='© 2025 Unknown')
         about.present()
@@ -88,5 +89,6 @@ class CatalystlabApplication(Adw.Application):
 
 def main(version):
     """The application's entry point."""
+    app_info.set_app_version(version)
     app = CatalystlabApplication()
     return app.run(sys.argv)
