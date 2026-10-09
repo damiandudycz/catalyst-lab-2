@@ -16,6 +16,7 @@ from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, run
 from .project_builds_view import ProjectBuildsView
 from .multistage_process import MultiStageProcess, MultiStageProcessState, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState
 from .architecture import Architecture
+from .cl_toggle_group import CLToggle, CLToggleGroup
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_details_view.ui')
@@ -23,6 +24,7 @@ class ProjectDetailsView(Gtk.Box):
     __gtype_name__ = "ProjectDetailsView"
 
     stages_tree_view = Gtk.Template.Child()
+    stages_view_mode_container = Gtk.Template.Child()
     build_row = Gtk.Template.Child()
     build_progress_row = Gtk.Template.Child()
     directory_details_view = Gtk.Template.Child()
@@ -42,6 +44,7 @@ class ProjectDetailsView(Gtk.Box):
         self.monitor_information_changes()
         self.monitor_configuration_changes()
         self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
+        self._setup_stages_view_mode()
         self._observed_builds: set[int] = set() # Ids of builds whose changes are observed.
         self._observed_toolset = None # Toolset (and its machine) whose state allows building.
         self._build_refresh_scheduled = False
@@ -136,6 +139,17 @@ class ProjectDetailsView(Gtk.Box):
             self._refresh_build_state()
             return False
         GLib.idle_add(refresh)
+
+    def _setup_stages_view_mode(self):
+        """Compact stages (short names, expanded while hovered) or full ones."""
+        toggle_group = CLToggleGroup()
+        toggle_group.add_css_class("round")
+        toggle_group.add_css_class("caption")
+        toggle_group.add(CLToggle(label="Compact"))
+        toggle_group.add(CLToggle(label="Full"))
+        toggle_group.set_active(1 if self.stages_tree_view.expand_all else 0)
+        toggle_group.connect("notify::active", lambda group, _: self.stages_tree_view.set_expand_all(group.get_active() == 1))
+        self.stages_view_mode_container.append(toggle_group)
 
     def monitor_stages_changes(self):
         self.project_directory.event_bus.subscribe(

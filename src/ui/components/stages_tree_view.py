@@ -7,8 +7,9 @@ from .project_stage import stage_target_icon, stage_target_short_name
 from dataclasses import dataclass
 
 # Constants for spacing
-NODE_MARGIN_X = 16 # Spacing between nodes of a branch
-SIDE_MARGIN = 8 # Space on left and right, expanded nodes are moved to fit in view
+NODE_MARGIN_X = 16 # Spacing between compact nodes of a branch
+EXPANDED_NODE_MARGIN_X = 32 # Spacing between nodes of a branch when all are expanded
+SIDE_MARGIN = 32 # Space on left and right, nodes expanded while hovered are moved to fit in view
 NODE_MARGIN_Y = 32 # Spacing WITHIN a branch
 ROOT_BRANCH_MARGIN_Y = 48 # Larger spacing BETWEEN root branches
 CONNECTOR_CORNER_RADIUS = 10 # Rounded corners of lines connecting parents with children
@@ -76,6 +77,7 @@ class StagesTreeNode(Gtk.Widget):
         self.status: StageNodeStatus | None = None
         self._content_key = None # Displayed name, target and status, card is created again when they change.
         self.progress = 0.0
+        self.always_expanded = False # All nodes of tree shown in full, without animations.
         self.compact_rect = self.expanded_rect = (0, 0, 0, 0) # x, y, width, height in tree.
         self._size = (0, 0)
         self.animation = Adw.TimedAnimation.new(self, 0, 1, NODE_EXPAND_DURATION, Adw.CallbackAnimationTarget.new(self._on_animation_value))
@@ -86,11 +88,26 @@ class StagesTreeNode(Gtk.Widget):
         motion.connect("leave", lambda *args: self._animate_to(0.0))
         self.add_controller(motion)
 
+    def set_always_expanded(self, always_expanded: bool):
+        if always_expanded == self.always_expanded:
+            return
+        self.always_expanded = always_expanded
+        if self.animation.get_state() == Adw.AnimationState.PLAYING:
+            self.animation.skip()
+        self.progress = 1.0 if always_expanded else 0.0
+        if self.card is not None and self.expanded_content != always_expanded:
+            self._set_card(expanded=always_expanded)
+
+    @property
+    def layout_size(self) -> tuple[int, int]:
+        """Size of node used for layout of tree."""
+        return self.expanded_size if self.always_expanded else self.compact_size
+
     def set_status(self, status: StageNodeStatus | None):
-        """Sets status and measures compact and expanded sizes of card, returning compact size."""
+        """Sets status and measures compact and expanded sizes of card, returning size used for layout."""
         content_key = (self.node.value.name, getattr(self.node.value, "target", None), status)
         if content_key == self._content_key:
-            return self.compact_size
+            return self.layout_size
         self._content_key = content_key
         self.status = status
         self._set_card(expanded=self.progress > 0)
@@ -99,11 +116,15 @@ class StagesTreeNode(Gtk.Widget):
         # Expanded content is shown while card grows, so compact card is not smaller than its minimum size.
         self.compact_size = (max(compact[1].width, expanded[0].width), max(compact[1].height, expanded[0].height))
         self.expanded_size = (max(expanded[1].width, self.compact_size[0]), max(expanded[1].height, self.compact_size[1]))
-        return self.compact_size
+        return self.layout_size
 
     def set_geometry(self, compact_rect: tuple, bounds: tuple[float, float]):
         """Position of compact card. Expanded card has the same center, moved to fit in bounds (width, height)."""
         self.compact_rect = compact_rect
+        if self.always_expanded:
+            self.expanded_rect = compact_rect # Laid out with expanded size.
+            self._apply_progress()
+            return
         x, y, width, height = compact_rect
         expanded_width, expanded_height = self.expanded_size
         expanded_x = min(max(x + width / 2 - expanded_width / 2, SIDE_MARGIN), bounds[0] - SIDE_MARGIN - expanded_width)
@@ -120,6 +141,8 @@ class StagesTreeNode(Gtk.Widget):
         self.card.set_parent(self)
 
     def _animate_to(self, value: float):
+        if self.always_expanded:
+            return
         if value > 0:
             # Drawn over other nodes.
             self.insert_before(self.get_parent(), None)
@@ -134,7 +157,7 @@ class StagesTreeNode(Gtk.Widget):
         self._apply_progress()
 
     def _on_animation_done(self, animation):
-        if self.progress == 0 and self.expanded_content:
+        if self.progress == 0 and self.expanded_content and not self.always_expanded:
             self._set_card(expanded=False)
 
     def _apply_progress(self):
@@ -177,6 +200,7 @@ class StagesTreeView(Gtk.Fixed):
         self.buttons = {}
         self.separators = []
         self.statuses: dict = {} # Stage id -> StageNodeStatus.
+        self.expand_all = StagesTreeView.expand_all_default
 
         # Space for shadows of cards in top and bottom rows.
         self.set_margin_top(12)
@@ -188,6 +212,19 @@ class StagesTreeView(Gtk.Fixed):
 
     def set_root_nodes(self, root_nodes: list[TreeNode]):
         self.root_nodes = root_nodes
+        self._layout_tree()
+        self.drawing_area.queue_draw()
+
+    expand_all_default = False # Last choice, used by new trees while app runs.
+
+    def set_expand_all(self, expand_all: bool):
+        """Shows all nodes in full instead of compact nodes expanded while hovered."""
+        StagesTreeView.expand_all_default = expand_all
+        if expand_all == self.expand_all:
+            return
+        self.expand_all = expand_all
+        for widget in self.buttons.values():
+            widget.set_always_expanded(expand_all)
         self._layout_tree()
         self.drawing_area.queue_draw()
 
@@ -263,6 +300,7 @@ class StagesTreeView(Gtk.Fixed):
                 if widget is not None:
                     self.remove(widget)
                 widget = StagesTreeNode(self, node)
+                widget.set_always_expanded(self.expand_all)
                 self.put(widget, 0, 0)
             widget.node = node
             widgets[stage_id] = widget
@@ -287,6 +325,7 @@ class StagesTreeView(Gtk.Fixed):
         for sep in self.separators: self.remove(sep)
         self.separators.clear()
 
+        node_margin_x = EXPANDED_NODE_MARGIN_X if self.expand_all else NODE_MARGIN_X
         all_positions = {}
         current_y = 0
         total_max_x = 0
@@ -305,7 +344,7 @@ class StagesTreeView(Gtk.Fixed):
                 for child in node.children:
                     min_x, max_x = layout_node_centered(child, current_x, child_y, branch_positions)
                     children_ranges.append((min_x, max_x))
-                    current_x = max_x + NODE_MARGIN_X
+                    current_x = max_x + node_margin_x
                 children_min_x, children_max_x = children_ranges[0][0], children_ranges[-1][1]
                 children_center_x = (children_min_x + children_max_x) / 2
                 node_x = children_center_x - node_width / 2
@@ -338,7 +377,7 @@ class StagesTreeView(Gtk.Fixed):
                     _min, max_x_child, max_y_child = layout_node_left(child, current_child_x, child_y)
                     child_max_extents.append(max_x_child)
                     child_max_y_positions.append(max_y_child)
-                    current_child_x = max_x_child + NODE_MARGIN_X
+                    current_child_x = max_x_child + node_margin_x
                 subtree_max_x = max(x + node_width, max(child_max_extents)) if child_max_extents else x + node_width
                 subtree_max_y = max(y + node_height, max(child_max_y_positions)) if child_max_y_positions else y + node_height
                 return (x, subtree_max_x, subtree_max_y)

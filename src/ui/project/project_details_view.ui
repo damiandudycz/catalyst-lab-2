@@ -41,6 +41,14 @@
                 <child>
                   <object class="GtkBox">
                     <property name="orientation">vertical</property>
+                    <!-- Compact / Full view of stages, toggle group added in code -->
+                    <child>
+                      <object class="GtkBox" id="stages_view_mode_container">
+                        <property name="halign">end</property>
+                        <property name="margin-top">8</property>
+                        <property name="margin-end">24</property>
+                      </object>
+                    </child>
                     <child>
                       <object class="GtkScrolledWindow">
                         <property name="hscrollbar-policy">automatic</property>
