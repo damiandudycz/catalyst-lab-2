@@ -6,6 +6,7 @@ from urllib.parse import ParseResult
 from datetime import datetime
 from pathlib import Path
 from .rootless import authorize_toolset_action
+from .lima import virtual_machines_supported
 from .toolset_env_builder import ToolsetEnvBuilder
 from .toolset_manager import ToolsetManager
 from .architecture import Architecture
@@ -53,6 +54,8 @@ class ToolsetCreateView(Gtk.Box):
         self.machine_selection_view.set_property("none_subtitle", "Runs directly on this computer")
         self.machine_selection_view.set_property("autoselect_default", self.local_unsupported_reason is not None)
         self.machine_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, lambda view: self.wizard_view._refresh_buttons_state())
+        if not virtual_machines_supported():
+            self.wizard_view.remove_page(self.runs_on_page) # Toolsets run on this computer.
         if installation_in_progress is None or installation_in_progress.status == MultiStageProcessState.SETUP:
             ToolsetEnvBuilder.get_stage3_urls(architecture=self.architecture, completion_handler=self._update_stages_result)
         self.connect("realize", self.on_realize)

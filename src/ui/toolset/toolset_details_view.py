@@ -1,6 +1,7 @@
 import sys
 from gi.repository import Gtk, Adw, Gio, GLib
 from .rootless import authorize_toolset_action
+from .lima import virtual_machines_supported
 from .toolset import Toolset, ToolsetEvents
 from .toolset_application import ToolsetApplication, ToolsetApplicationSelection
 from .helper_functions import get_file_size_string
@@ -120,6 +121,7 @@ class ToolsetDetailsView(Gtk.Box):
     def setup_runs_on(self):
         """Machine where toolset runs: this computer or virtual machine. Can be changed while toolset is not used."""
         current = self.toolset.machine
+        self.runs_on_row.set_visible(virtual_machines_supported() or current is not None)
         # This computer is listed only on Linux (or when toolset still uses it, so it's displayed).
         local = sys.platform.startswith("linux") or current is None
         self.runs_on_machines = ([None] if local else []) + list(Repository.BuildMachine.value)

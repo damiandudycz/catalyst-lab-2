@@ -5,6 +5,7 @@ from .project_build import StageBuildPlan, StageBuildMode, load_project_builds, 
 from .project_build_process import ProjectBuild
 from .project_stage import stage_target_icon
 from .rootless import rootless_unsupported_reason
+from .lima import virtual_machines_supported
 from .root_helper_client import RootHelperClient
 from .multistage_process import MultiStageProcessState
 from .wizard_view import WizardView
@@ -46,6 +47,7 @@ class ProjectBuildView(Gtk.Box):
         toolset = self.project_directory.get_toolset()
         self.runs_on_row.set_subtitle(GLib.markup_escape_text(
             f"{toolset.runs_on_name} (toolset {toolset.name})" if toolset else "No toolset"))
+        self.runs_on_row.set_visible(virtual_machines_supported() or (toolset is not None and toolset.machine is not None))
         self.load_stages()
         self.update_plan()
 

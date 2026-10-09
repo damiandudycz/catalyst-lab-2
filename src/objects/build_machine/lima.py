@@ -1,9 +1,19 @@
 from __future__ import annotations
-import json, os, shutil, subprocess
+import json, os, shutil, subprocess, sys
 
 # ------------------------------------------------------------------------------
 # Lima (https://lima-vm.io) runs virtual machines used to build on systems other than Linux. On macOS it uses
 # Virtualization.framework. Folders of Catalyst Lab are shared with machines at the same paths.
+
+def virtual_machines_supported() -> bool:
+    """Virtual machines are available only on macOS, where toolsets can't run on the computer itself. Elsewhere
+    (Linux) UI for them is hidden.
+    TODO: Virtual machines could be supported on Linux too, for systems where toolsets can't run without root
+    (unprivileged user namespaces blocked, eg. by AppArmor on Ubuntu or hardened kernels), as alternative to the root
+    helper. It needs machine configuration for Linux hosts (vmType: qemu with KVM instead of vz, and shared folders
+    mount type working there, eg. virtiofs or 9p), install hint not mentioning Homebrew, and testing. Machines could
+    then be offered on Linux only when rootless toolsets are not supported (rootless_toolset_unsupported_reason)."""
+    return sys.platform == "darwin"
 
 # GUI apps on macOS don't get PATH of shell, so Homebrew locations are checked too.
 _LIMACTL_LOCATIONS = ["/opt/homebrew/bin/limactl", "/usr/local/bin/limactl"]

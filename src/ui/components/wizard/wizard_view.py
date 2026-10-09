@@ -151,6 +151,12 @@ class WizardView(Adw.Bin, Gtk.Buildable):
             self.pages.append(child)
         self._refresh_buttons_state()
 
+    def remove_page(self, page: Gtk.Widget):
+        """Removes page that is not needed (eg. on given system)."""
+        self.carousel.remove(page)
+        self.pages.remove(page)
+        self._refresh_buttons_state()
+
     # --------------------------------------------------------------------------
     # Switching pages:
 

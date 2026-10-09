@@ -5,15 +5,22 @@ from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
 from .build_machine_create_view import BuildMachineCreateView
 from .build_machine_details_view import BuildMachineDetailsView
+from .lima import virtual_machines_supported
 
 @app_section(title="Environments", icon="toolbox-symbolic", order=3_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/environments/environments_section.ui')
 class EnvironmentsSection(Gtk.Box):
     __gtype_name__ = "EnvironmentsSection"
 
+    machines_list = Gtk.Template.Child()
+    machines_description_label = Gtk.Template.Child()
+
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
         self.content_navigation_view = content_navigation_view
+        # Virtual machines are used only where toolsets can't run on this computer (see virtual_machines_supported).
+        self.machines_list.set_visible(virtual_machines_supported())
+        self.machines_description_label.set_visible(virtual_machines_supported())
 
     @Gtk.Template.Callback()
     def on_item_row_pressed(self, sender, item):
