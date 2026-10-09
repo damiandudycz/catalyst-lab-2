@@ -106,6 +106,7 @@ def _clean_log_line(line: str) -> str:
 def machine_configuration(cpus: int, memory_gib: int, shared_paths: list[str]) -> str:
     """Lima configuration (YAML) of build machine."""
     mounts = "\n".join(f'- location: "{path}"\n  writable: true' for path in shared_paths)
+    indented_setup = "\n".join("    " + line for line in machine_setup_script().splitlines())
     return f"""minimumLimaVersion: 2.0.0
 base:
 - {LIMA_TEMPLATE}
@@ -121,13 +122,46 @@ mounts:
 provision:
 - mode: system
   script: |
-    #!/bin/sh
-    set -eux
-    apk add --no-cache bash coreutils findutils grep sed tar xz zstd bubblewrap util-linux util-linux-misc \\
-        shadow-subids squashfs-tools python3 curl e2fsprogs
-    # User of machine (same uid as on host) gets subordinate ids for files of toolsets.
-    user=$(getent passwd | awk -F: '$3 >= 500 && $3 < 60000 {{ print $1; exit }}')
-    grep -q "^$user:" /etc/subuid || echo "$user:100000:65536" >> /etc/subuid
-    grep -q "^$user:" /etc/subgid || echo "$user:100000:65536" >> /etc/subgid
-    install -d -o "$user" {MACHINE_DATA_DIRECTORY}
+{indented_setup}
 """
+
+# Version of machine setup, increased when setup script changes. Existing machines are updated when started.
+MACHINE_SETUP_VERSION = 2
+_MACHINE_SETUP_VERSION_FILE = "/etc/catalystlab-setup-version"
+
+# QEMU user emulators, to build stages for other architectures (like on Linux hosts, binfmt_misc with F flag makes
+# them work in chroots and namespaces).
+_QEMU_ARCHITECTURES = "x86_64 i386 arm armeb aarch64 riscv64 ppc ppc64 ppc64le s390x mips mipsel mips64 mips64el sparc sparc64 alpha m68k loongarch64 hppa sh4"
+
+def machine_setup_script() -> str:
+    """Prepares machine (as root, idempotent): tools for working without root, subordinate ids of user, working space
+    mount point and emulators of other architectures."""
+    return f"""#!/bin/sh
+set -eux
+apk add --no-cache bash coreutils findutils grep sed tar xz zstd bubblewrap util-linux util-linux-misc \\
+    shadow-subids squashfs-tools python3 curl e2fsprogs qemu-openrc
+host=$(uname -m)
+for arch in {_QEMU_ARCHITECTURES}; do
+    [ "$arch" = "$host" ] || apk add --no-cache "qemu-$arch" || echo "qemu-$arch is not available"
+done
+rc-update add qemu-binfmt default
+rc-service qemu-binfmt restart || rc-service qemu-binfmt start
+# User of machine (same uid as on host) gets subordinate ids for files of toolsets.
+user=$(getent passwd | awk -F: '$3 >= 500 && $3 < 60000 {{ print $1; exit }}')
+grep -q "^$user:" /etc/subuid || echo "$user:100000:65536" >> /etc/subuid
+grep -q "^$user:" /etc/subgid || echo "$user:100000:65536" >> /etc/subgid
+mountpoint -q {MACHINE_DATA_DIRECTORY} || install -d -o "$user" {MACHINE_DATA_DIRECTORY}
+echo {MACHINE_SETUP_VERSION} > {_MACHINE_SETUP_VERSION_FILE}
+"""
+
+def machine_setup_update_script() -> str:
+    """Runs setup in existing machine when its version is older."""
+    return f"""[ "$(cat {_MACHINE_SETUP_VERSION_FILE} 2>/dev/null || echo 0)" -ge {MACHINE_SETUP_VERSION} ] && exit 0
+echo "Updating machine setup to version {MACHINE_SETUP_VERSION}"
+echo {_shell_base64(machine_setup_script())} | base64 -d | sudo sh
+"""
+
+def _shell_base64(text: str) -> str:
+    import base64
+    return base64.b64encode(text.encode()).decode()
+

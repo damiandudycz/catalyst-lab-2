@@ -96,9 +96,17 @@ class BuildMachine:
             return success
 
     def ensure_running(self, output_handler=print, process_holder: list | None = None):
-        """Starts machine if needed, raises when it can't be started."""
+        """Starts machine if needed, raises when it can't be started. Setup of machine is updated once while app runs,
+        when it's older than current one (machines created by previous versions)."""
         if not self.start(output_handler, process_holder):
             raise RuntimeError(f"Failed to start virtual machine {self.name}")
+        if not getattr(self, "_setup_checked", False):
+            from .lima import machine_setup_update_script
+            from .rootless import MachineExecutor
+            self._setup_checked = True # Before running, executor ensures machine is running too.
+            if not MachineExecutor(self).run(machine_setup_update_script(), output_handler, process_holder):
+                self._setup_checked = False
+                raise RuntimeError(f"Failed to update setup of virtual machine {self.name}")
 
     # Working space:
     # Ext4 image in shared folder, mounted in machine at MACHINE_DATA_DIRECTORY while operations use it (environments,
