@@ -55,7 +55,7 @@ class BuildMachineCreateView(Gtk.Box):
             name=self.name_row.get_text().strip(),
             cpus=int(self.cpus_row.get_value()),
             memory_gib=int(self.memory_row.get_value()),
-            disk_gib=int(self.disk_row.get_value()),
+            workspace_gib=int(self.disk_row.get_value()),
         )
         installation_in_progress.start()
         self.wizard_view.set_installation(installation_in_progress)

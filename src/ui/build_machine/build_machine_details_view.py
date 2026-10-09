@@ -29,7 +29,11 @@ class BuildMachineDetailsView(Gtk.Box):
         status_group.add(self.status_row)
         status_group.add(Adw.ActionRow(
             title="Resources",
-            subtitle=f"{machine.cpus} CPUs, {machine.memory_gib} GiB memory, {machine.disk_gib} GiB disk"
+            subtitle=f"{machine.cpus} CPUs, {machine.memory_gib} GiB memory"
+        ))
+        status_group.add(Adw.ActionRow(
+            title="Working space",
+            subtitle=f"Up to {machine.workspace_gib} GiB, created while toolsets run and deleted when they finish",
         ))
         instance_row = Adw.ActionRow(title="Lima instance", subtitle=machine.instance_name, subtitle_selectable=True)
         status_group.add(instance_row)

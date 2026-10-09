@@ -56,7 +56,7 @@
                 <child>
                   <object class="AdwPreferencesGroup">
                     <property name="title">Resources</property>
-                    <property name="description">Disk grows only as it's used. Building stages needs a lot of space for toolsets, snapshots and package caches.</property>
+                    <property name="description">Machine itself takes only few hundred MB. While toolsets run, their working files are kept in working space, an image in Catalyst Lab folder that grows only as it's used and is deleted when they finish. Builds need space for extracted toolset, snapshot and stage.</property>
                     <child>
                       <object class="AdwSpinRow" id="cpus_row">
                         <property name="title">CPUs</property>
@@ -85,7 +85,7 @@
                     </child>
                     <child>
                       <object class="AdwSpinRow" id="disk_row">
-                        <property name="title">Disk (GiB)</property>
+                        <property name="title">Working space limit (GiB)</property>
                         <property name="adjustment">
                           <object class="GtkAdjustment">
                             <property name="lower">20</property>

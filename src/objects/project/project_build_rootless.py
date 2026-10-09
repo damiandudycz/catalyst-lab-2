@@ -69,12 +69,20 @@ main(sys.argv[1:])
 '''
 
 def stage_build_session_script(executor, toolset_path: str, bindings: list[tuple[str, str]], command: str,
-                               diagnostics_command: str | None = None) -> str:
+                               diagnostics_command: str | None = None, synced_caches: list[tuple[str, str]] | None = None) -> str:
     """Script running command in toolset root (overlay over extracted toolset, changes are discarded), with host
-    folders bound at given paths (host path, path in toolset). Diagnostics command runs after failure."""
+    folders bound at given paths (host path, path in toolset). Diagnostics command runs after failure.
+    Synced caches (saved path, path used by build) are copied to used path before build, and their new files back to
+    saved path after it (also when it fails, to keep downloaded files). Saved caches are plain files, without owners."""
     session = os.path.join(sessions_directory(executor), f"build-{uuid.uuid4().hex}")
     q = shlex.quote
     binds = "\n".join(f"bind {q(host)} {q(target)}" for host, target in bindings)
+    sync_in = "\n".join(
+        f'mkdir -p {q(saved)} {q(used)} && cp -an --no-preserve=ownership {q(saved)}/. {q(used)}/ || echo "Failed to restore cache {saved}"'
+        for saved, used in synced_caches or [])
+    sync_out = "\n".join(
+        f'cp -an --no-preserve=ownership {q(used)}/. {q(saved)}/ 2>/dev/null || echo "Failed to save cache {saved}"'
+        for saved, used in synced_caches or [])
     diagnostics = f'[ $status != 0 ] && chroot "$ROOT" /usr/bin/env -i HOME=/tmp TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin {diagnostics_command} < /dev/null' if diagnostics_command else ""
     return f"""set -u
 SESSION={q(session)}
@@ -96,9 +104,11 @@ cp -L /etc/resolv.conf "$ROOT/etc/resolv.conf" 2>/dev/null
 bind() {{
     mkdir -p "$ROOT$2" && mount --rbind "$1" "$ROOT$2" || {{ echo "Failed to bind $1"; exit 1; }}
 }}
+{sync_in}
 {binds}
 chroot "$ROOT" /usr/bin/env -i HOME=/tmp TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin {command} < /dev/null
 status=$?
+{sync_out}
 {diagnostics}
 exit $status
 """

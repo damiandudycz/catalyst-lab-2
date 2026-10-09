@@ -354,7 +354,9 @@ mv {q(temporary_path)} {q(path)} && echo "$STAMP" > {q(path + '.stamp')}
 def remove_extracted_squashfs(squashfs_path: str, kind: str, executor: Executor | None = None):
     """Removes extracted copy of squashfs file (eg. when toolset or snapshot is deleted), in background."""
     executor = executor or LOCAL_EXECUTOR
-    if not executor.is_machine and rootless_unsupported_reason() is not None:
+    if executor.is_machine:
+        return # Working space of machine is temporary, extracted copies are deleted with it.
+    if rootless_unsupported_reason() is not None:
         return
     path = os.path.join(executor.rootless_directory(), kind, os.path.basename(squashfs_path) + ".d")
     threading.Thread(target=remove_in_namespace, args=([path, path + ".stamp"], print, None, executor), daemon=True).start()

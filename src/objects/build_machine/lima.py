@@ -12,9 +12,13 @@ _LIMACTL_LOCATIONS = ["/opt/homebrew/bin/limactl", "/usr/local/bin/limactl"]
 # overlayfs, squashfs), and its packages provide bubblewrap and newuidmap.
 LIMA_TEMPLATE = "template:_images/alpine-3.23"
 
-# Data that needs Linux file ownership (extracted toolsets, sessions, caches) is kept on disk of machine, shared
-# folders can't store owners and are case insensitive on macOS.
+# Data that needs Linux file ownership (extracted toolsets, sessions, caches in use) can't be in shared folders (they
+# can't store owners and are case insensitive on macOS). It's kept in working space of machine: ext4 image file in
+# shared folder, mounted here while some operation needs it and deleted when no operation uses it.
 MACHINE_DATA_DIRECTORY = "/var/lib/catalystlab"
+
+# Machine disk contains only Alpine with tools, data of Catalyst Lab is in working space and shared folders.
+SYSTEM_DISK_GIB = 8
 
 def lima_environment() -> dict:
     """Environment of limactl. Lima directory is in real home of user (not $HOME, which can be changed, eg. for tests),
@@ -74,7 +78,7 @@ def _clean_log_line(line: str) -> str:
         return message[:-1].replace('\\"', '"') if message.endswith('"') else message
     return line
 
-def machine_configuration(cpus: int, memory_gib: int, disk_gib: int, shared_paths: list[str]) -> str:
+def machine_configuration(cpus: int, memory_gib: int, shared_paths: list[str]) -> str:
     """Lima configuration (YAML) of build machine."""
     mounts = "\n".join(f'- location: "{path}"\n  writable: true' for path in shared_paths)
     return f"""minimumLimaVersion: 2.0.0
@@ -83,7 +87,7 @@ base:
 vmType: vz
 cpus: {cpus}
 memory: {memory_gib}GiB
-disk: {disk_gib}GiB
+disk: {SYSTEM_DISK_GIB}GiB
 containerd:
   system: false
   user: false
@@ -95,7 +99,7 @@ provision:
     #!/bin/sh
     set -eux
     apk add --no-cache bash coreutils findutils grep sed tar xz zstd bubblewrap util-linux util-linux-misc \\
-        shadow-subids squashfs-tools python3 curl
+        shadow-subids squashfs-tools python3 curl e2fsprogs
     # User of machine (same uid as on host) gets subordinate ids for files of toolsets.
     user=$(getent passwd | awk -F: '$3 >= 500 && $3 < 60000 {{ print $1; exit }}')
     grep -q "^$user:" /etc/subuid || echo "$user:100000:65536" >> /etc/subuid

@@ -102,6 +102,20 @@ class ProjectBuild(MultiStageProcess):
             }
         return paths
 
+    def synced_caches(self, stage) -> list[tuple[str, str]]:
+        """Caches of machine build kept in shared folders between builds, as (saved path, path in working space).
+        Working space is deleted after build, caches are saved as plain files (shared folders can't store owners)."""
+        if not self.machine:
+            return []
+        toolsets_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.toolsets_location))
+        caches = [(os.path.join(os.path.dirname(toolsets_location), "Distfiles"), distfiles_directory(self.executor))]
+        used_paths = self.stage_cache_paths(stage)
+        for argument in CACHE_ARGUMENTS:
+            saved = stage_cache_path(self.project_directory, stage, argument)
+            if saved and saved.startswith(self.builds_directory + os.sep) and argument in used_paths:
+                caches.append((saved, used_paths[argument]))
+        return caches
+
     def make_directories(self, paths: list[str]):
         """Creates directories, ones in rootless directory of machine are created in machine."""
         machine_paths = [path for path in paths if self.machine and path.startswith(self.executor.rootless_directory() + os.sep)]
@@ -253,6 +267,8 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         if process.machine:
             self.log(f"Building in virtual machine {process.machine.name}, without root privileges")
             process.machine.ensure_running(self.log, self.namespace_processes)
+            process.machine.acquire_workspace(self.log, self.namespace_processes)
+            self.workspace_acquired = True
         else:
             self.log("Building without root privileges, in user namespace")
         remove_stale_sessions(self.log, self.namespace_processes, executor=executor)
@@ -283,6 +299,8 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         toolset = self.multistage_process.toolset
         if self.spawned:
             toolset.unspawn(rebuild_squashfs_if_needed=False)
+        if getattr(self, "workspace_acquired", False):
+            self.multistage_process.machine.release_workspace(self.log)
         if self.reserved:
             toolset.release()
         return True
@@ -437,6 +455,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             bindings=bindings,
             command=f'bash "{process.container_path(build_script_path)}"',
             diagnostics_command=f'bash "{process.container_path(diagnostics_path)}"' if diagnostics_path else None,
+            synced_caches=process.synced_caches(self.stage),
         )
         self.log(f"$ bash {process.container_path(build_script_path)}")
         return process.executor.run_in_namespace(script, self.log, self.namespace_processes)

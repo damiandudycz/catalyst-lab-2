@@ -177,6 +177,8 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
         try:
             prefix = f"toolsets/{Toolset.sanitized_name_for_name(name=self.multistage_process.alias)}/setup_"
             if self.multistage_process.machine:
+                self.multistage_process.machine.acquire_workspace(self.log, self.namespace_processes)
+                self.workspace_acquired = True
                 self.multistage_process.tmp_stage_extract_dir = create_rootless_work_directory(prefix=prefix, executor=self.multistage_process.executor)
             else:
                 self.multistage_process.tmp_stage_extract_dir = create_work_directory(prefix=prefix, rootless=self.multistage_process.rootless)
@@ -220,13 +222,13 @@ class ToolsetInstallationStepExtract(ToolsetInstallationStep):
     def cleanup(self) -> bool:
         if not super().cleanup():
             return False
-        if hasattr(self.multistage_process, "tmp_stage_extract_dir") and self.multistage_process.tmp_stage_extract_dir:
-            if self.multistage_process.machine:
-                remove_in_namespace([self.multistage_process.tmp_stage_extract_dir], print, executor=self.multistage_process.executor)
-            else:
-                delete_work_directory(self.multistage_process.tmp_stage_extract_dir)
-            return True
-        return False
+        if getattr(self.multistage_process, "tmp_stage_extract_dir", None) and not self.multistage_process.machine:
+            delete_work_directory(self.multistage_process.tmp_stage_extract_dir)
+        # Working space of machine is deleted with all its files.
+        if getattr(self, "workspace_acquired", False):
+            self.multistage_process.machine.release_workspace()
+            self.workspace_acquired = False
+        return True
 
 @final
 class ToolsetInstallationStepSpawn(ToolsetInstallationStep):
