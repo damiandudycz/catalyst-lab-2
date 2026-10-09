@@ -29,9 +29,10 @@ class BuildMachineManager:
         Repository.Toolset.save()
         threading.Thread(target=run_limactl, args=(["delete", "--force", machine.instance_name], print), kwargs={"home": machine.lima_home}, daemon=True).start()
 
-    def is_name_available(self, name: str) -> bool:
+    def is_name_available(self, name: str, machine: BuildMachine | None = None) -> bool:
+        """Name is not empty and not used by other machine than given one."""
         name = name.strip()
-        return bool(name) and all(machine.name != name for machine in Repository.BuildMachine.value)
+        return bool(name) and all(item.name != name for item in Repository.BuildMachine.value if item is not machine)
 
 def shared_paths() -> list[str]:
     """Folders of Catalyst Lab shared with machines, mounted at the same paths. Locations inside other ones are skipped."""

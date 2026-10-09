@@ -1,5 +1,5 @@
 from __future__ import annotations
-import threading
+import os, threading
 from gi.repository import Gtk, Adw, GLib
 from .build_machine import BuildMachine
 from .build_machine_manager import BuildMachineManager
@@ -7,37 +7,81 @@ from .repository import Repository
 from .event_bus import SharedEvent
 
 class BuildMachineDetailsView(Gtk.Box):
-    """Status of virtual machine, starting and stopping it, toolsets running in it, removing it."""
+    """Details of virtual machine, laid out like toolset details: basic information, status, actions (start, stop,
+    delete), resources (changed while machine is stopped) and toolsets running in it."""
 
     def __init__(self, machine: BuildMachine, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.machine = machine
         self.content_navigation_view = content_navigation_view
-        self.working = False
-        page = Adw.PreferencesPage()
-        page.set_vexpand(True)
-        self.append(page)
+        self.working: str | None = None # Description of running action (Starting, Stopping, Applying settings).
+
+        scrolled_window = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_bottom=24)
+        scrolled_window.set_child(content)
+        self.append(scrolled_window)
+
+        # Basic information
+        information_group = Adw.PreferencesGroup(title="Basic information")
+        self.name_row = Adw.EntryRow(title="Machine name", show_apply_button=True, text=machine.name)
+        self.name_row.connect("changed", self.on_name_changed)
+        self.name_row.connect("apply", self.on_name_apply)
+        information_group.add(self.name_row)
+        self.name_used_row = Adw.ActionRow(title="This machine name is already used.", visible=False)
+        self.name_used_row.add_css_class("error")
+        information_group.add(self.name_used_row)
+        information_group.add(Adw.ActionRow(title="Lima instance", subtitle=machine.instance_name, subtitle_selectable=True))
+        location = machine.machine_directory
+        home = os.path.expanduser("~")
+        information_group.add(Adw.ActionRow(
+            title="Location", subtitle_selectable=True,
+            subtitle="~" + location[len(home):] if location.startswith(home + os.sep) else location,
+        ))
+        content.append(information_group)
 
         # Status
-        status_group = Adw.PreferencesGroup(title="Status")
-        self.status_row = Adw.ActionRow(title="State", icon_name="virtual-machine-symbolic")
+        status_group = Adw.PreferencesGroup()
+        status_row = Adw.ActionRow(title="Status")
+        tags = Gtk.Box(valign=Gtk.Align.CENTER, spacing=8)
         self.spinner = Adw.Spinner(visible=False)
-        self.status_row.add_suffix(self.spinner)
-        self.action_button = Gtk.Button(valign=Gtk.Align.CENTER)
-        self.action_button.connect("clicked", self.on_action_clicked)
-        self.status_row.add_suffix(self.action_button)
-        status_group.add(self.status_row)
-        status_group.add(Adw.ActionRow(
-            title="Resources",
-            subtitle=f"{machine.cpus} CPUs, {machine.memory_gib} GiB memory"
-        ))
-        status_group.add(Adw.ActionRow(
-            title="Working space",
-            subtitle=f"Up to {machine.workspace_gib} GiB, created while toolsets run and deleted when they finish",
-        ))
-        instance_row = Adw.ActionRow(title="Lima instance", subtitle=machine.instance_name, subtitle_selectable=True)
-        status_group.add(instance_row)
-        page.add(status_group)
+        tags.append(self.spinner)
+        self.tag_state = self._tag(tags)
+        self.tag_in_use = self._tag(tags, "In use", "accent")
+        self.tag_automatic = self._tag(tags, "Started automatically")
+        self.tag_workspace = self._tag(tags, "Working space mounted")
+        status_row.add_suffix(tags)
+        status_group.add(status_row)
+        content.append(status_group)
+
+        # Actions
+        actions_group = Adw.PreferencesGroup(title="Actions")
+        actions = Gtk.Box(spacing=6, hexpand=True, homogeneous=True)
+        self.start_button = self._action_button("Start", "media-playback-start-symbolic", self.on_start_clicked)
+        self.stop_button = self._action_button("Stop", "media-playback-stop-symbolic", self.on_stop_clicked)
+        self.delete_button = self._action_button("Delete", "trash-bin-trash-svgrepo-com-symbolic", self.on_delete_clicked)
+        self.delete_button.add_css_class("destructive-action")
+        for button in (self.start_button, self.stop_button, self.delete_button):
+            actions.append(button)
+        actions_group.add(actions)
+        content.append(actions_group)
+
+        # Resources
+        resources_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.resources_group = Adw.PreferencesGroup(title="Resources")
+        self.cpus_row = self._spin_row("Processors", "Cores used by machine, builds run as many jobs in parallel", 1, max(1, os.cpu_count() or 1))
+        self.memory_row = self._spin_row("Memory", "GiB, taken from this computer while machine runs", 2, 256)
+        self.workspace_row = self._spin_row("Working space limit", "GiB, created while toolsets run and deleted when they finish", 20, 2048)
+        for row in (self.cpus_row, self.memory_row, self.workspace_row):
+            self.resources_group.add(row)
+        resources_container.append(self.resources_group)
+        self.resources_actions = Gtk.Box(homogeneous=True, hexpand=True, spacing=8)
+        discard_button = self._action_button("Discard changes", "edit-undo-symbolic", lambda button: self._load_resources())
+        self.apply_button = self._action_button("Apply changes", "check-circle-svgrepo-com-symbolic", self.on_apply_clicked)
+        self.apply_button.add_css_class("suggested-action")
+        self.resources_actions.append(discard_button)
+        self.resources_actions.append(self.apply_button)
+        resources_container.append(self.resources_actions)
+        content.append(resources_container)
 
         # Toolsets
         toolsets_group = Adw.PreferencesGroup(title="Toolsets", description="Toolsets loaded inside this machine. Select machine in toolset details to move toolset here.")
@@ -46,20 +90,36 @@ class BuildMachineDetailsView(Gtk.Box):
             toolsets_group.add(Adw.ActionRow(title=GLib.markup_escape_text(toolset.name), subtitle=GLib.markup_escape_text(toolset.short_details), icon_name="toolbox-symbolic"))
         if not toolsets:
             toolsets_group.add(Adw.ActionRow(title="No toolsets run in this machine yet"))
-        page.add(toolsets_group)
-
-        # Delete
-        delete_group = Adw.PreferencesGroup()
-        delete_button = Gtk.Button(label="Delete virtual machine", halign=Gtk.Align.CENTER)
-        delete_button.add_css_class("destructive-action")
-        delete_button.add_css_class("pill")
-        delete_button.connect("clicked", self.on_delete_clicked)
-        delete_group.add(delete_button)
-        page.add(delete_group)
+        content.append(toolsets_group)
 
         machine.event_bus.subscribe(SharedEvent.STATE_UPDATED, self._on_machine_updated)
         self.connect("map", lambda widget: self._refresh_in_background())
+        self._load_resources()
         self._update_display()
+
+    # Widgets
+
+    @staticmethod
+    def _tag(box: Gtk.Box, label: str = "", style: str | None = None) -> Gtk.Label:
+        tag = Gtk.Label(label=label)
+        tag.add_css_class("tag-label")
+        tag.add_css_class("caption-heading")
+        if style:
+            tag.add_css_class(style)
+        box.append(tag)
+        return tag
+
+    @staticmethod
+    def _action_button(label: str, icon_name: str, handler) -> Gtk.Button:
+        button = Gtk.Button(child=Adw.ButtonContent(label=label, icon_name=icon_name))
+        button.connect("clicked", handler)
+        return button
+
+    def _spin_row(self, title: str, subtitle: str, lower: int, upper: int) -> Adw.SpinRow:
+        row = Adw.SpinRow(title=title, subtitle=subtitle,
+                          adjustment=Gtk.Adjustment(lower=lower, upper=upper, step_increment=1, page_increment=4))
+        row.connect("notify::value", lambda row, param: self._update_display())
+        return row
 
     # Status
 
@@ -70,30 +130,90 @@ class BuildMachineDetailsView(Gtk.Box):
         self._update_display()
 
     def _update_display(self):
-        status = self.machine._status or "Checking..."
-        self.status_row.set_subtitle(status)
-        self.spinner.set_visible(self.working)
-        self.action_button.set_sensitive(not self.working and self.machine._status in (BuildMachine.STATUS_RUNNING, BuildMachine.STATUS_STOPPED))
-        self.action_button.set_label("Stop" if self.machine._status == BuildMachine.STATUS_RUNNING else "Start")
+        status = self.machine._status
+        running = status == BuildMachine.STATUS_RUNNING
+        stopped = status == BuildMachine.STATUS_STOPPED
+        # Status
+        self.spinner.set_visible(self.working is not None or status is None)
+        self.tag_state.set_label(self.working or status or "Checking")
+        for style in ("success", "error"):
+            self.tag_state.remove_css_class(style)
+        if not self.working and (running or status == BuildMachine.STATUS_MISSING):
+            self.tag_state.add_css_class("success" if running else "error")
+        self.tag_in_use.set_visible(running and self.machine._users > 0)
+        self.tag_automatic.set_visible(running and self.machine._started_automatically)
+        self.tag_workspace.set_visible(running and self.machine._workspace_users > 0)
+        # Actions
+        self.start_button.set_visible(not running)
+        self.start_button.set_sensitive(self.working is None and stopped)
+        self.stop_button.set_visible(running)
+        self.stop_button.set_sensitive(self.working is None and self.machine._users == 0)
+        self.delete_button.set_sensitive(self.working is None and not running)
+        # Resources
+        editable = self.working is None and stopped
+        for row in (self.cpus_row, self.memory_row, self.workspace_row):
+            row.set_sensitive(editable)
+        self.resources_group.set_description(None if editable else "Stop the machine to change its resources")
+        self.resources_actions.set_visible(self._resources_changed())
+        self.apply_button.set_sensitive(editable)
 
-    def on_action_clicked(self, button):
-        running = self.machine._status == BuildMachine.STATUS_RUNNING
-        self.working = True
-        self.status_row.set_subtitle("Stopping..." if running else "Starting...")
+    def _run_action(self, description: str, action):
+        """Runs machine action in background, showing it in status until it finishes."""
+        self.working = description
         self._update_display()
         def work():
+            error = None
             try:
-                if running:
-                    self.machine.stop()
-                else:
-                    self.machine.start()
+                action()
             except Exception as e:
-                print(f"Failed to change state of machine: {e}")
+                error = str(e)
             def done():
-                self.working = False
+                self.working = None
                 self._update_display()
+                if error:
+                    dialog = Adw.AlertDialog(heading=f"{description} failed", body=error)
+                    dialog.add_response("ok", "OK")
+                    dialog.present(self.get_root())
             GLib.idle_add(done)
         threading.Thread(target=work, daemon=True).start()
+
+    def on_start_clicked(self, button):
+        self._run_action("Starting", self.machine.start)
+
+    def on_stop_clicked(self, button):
+        self._run_action("Stopping", self.machine.stop)
+
+    # Name
+
+    def on_name_changed(self, row):
+        name = row.get_text().strip()
+        self.name_used_row.set_visible(name != self.machine.name and not BuildMachineManager.shared().is_name_available(name, machine=self.machine))
+
+    def on_name_apply(self, row):
+        name = row.get_text().strip()
+        if name == self.machine.name or not BuildMachineManager.shared().is_name_available(name, machine=self.machine):
+            row.set_text(self.machine.name)
+            self.name_used_row.set_visible(False)
+            return
+        self.machine.rename(name)
+
+    # Resources
+
+    def _edited_resources(self) -> tuple[int, int, int]:
+        return int(self.cpus_row.get_value()), int(self.memory_row.get_value()), int(self.workspace_row.get_value())
+
+    def _resources_changed(self) -> bool:
+        return self._edited_resources() != (self.machine.cpus, self.machine.memory_gib, self.machine.workspace_gib)
+
+    def _load_resources(self):
+        self.cpus_row.set_value(self.machine.cpus)
+        self.memory_row.set_value(self.machine.memory_gib)
+        self.workspace_row.set_value(self.machine.workspace_gib)
+        self._update_display()
+
+    def on_apply_clicked(self, button):
+        cpus, memory_gib, workspace_gib = self._edited_resources()
+        self._run_action("Applying changes", lambda: self.machine.change_resources(cpus, memory_gib, workspace_gib))
 
     # Delete
 

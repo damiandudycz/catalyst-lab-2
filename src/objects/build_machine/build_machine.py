@@ -94,6 +94,7 @@ class BuildMachine:
             if self._stop_timer:
                 self._stop_timer.cancel()
                 self._stop_timer = None
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
     def end_use(self):
         """Marks end of usage. Machine started automatically is stopped when nothing uses it for a while."""
@@ -103,6 +104,7 @@ class BuildMachine:
                 self._stop_timer = threading.Timer(self.IDLE_STOP_SECONDS, self._stop_if_idle)
                 self._stop_timer.daemon = True
                 self._stop_timer.start()
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
     def _stop_if_idle(self):
         with self._usage_lock:
@@ -170,6 +172,28 @@ class BuildMachine:
                 self._setup_checked = False
                 raise RuntimeError(f"Failed to update setup of virtual machine {self.name}")
 
+    # Settings:
+
+    def rename(self, name: str):
+        self.name = name
+        Repository.BuildMachine.save()
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    def change_resources(self, cpus: int, memory_gib: int, workspace_gib: int, output_handler=print):
+        """Changes resources of stopped machine. Processors and memory are changed in Lima instance, working space limit
+        applies to next working space."""
+        with self._lock:
+            self.refresh_status()
+            if self.status != self.STATUS_STOPPED:
+                raise RuntimeError(f"Virtual machine {self.name} must be stopped to change its resources")
+            if (cpus, memory_gib) != (self.cpus, self.memory_gib):
+                arguments = ["edit", f"--cpus={cpus}", f"--memory={memory_gib}", self.instance_name]
+                if not run_limactl(arguments, output_handler, home=self.lima_home):
+                    raise RuntimeError(f"Failed to change resources of virtual machine {self.name}")
+            self.cpus, self.memory_gib, self.workspace_gib = cpus, memory_gib, workspace_gib
+        Repository.BuildMachine.save()
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
     # Working space:
     # Ext4 image in shared folder, mounted in machine at MACHINE_DATA_DIRECTORY while operations use it (environments,
     # builds, installations). It's created for first operation and deleted when last one finishes, so data doesn't
@@ -198,6 +222,7 @@ class BuildMachine:
         except Exception:
             self.end_use()
             raise
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
     def _acquire_workspace(self, output_handler, process_holder):
         with self._workspace_lock:
