@@ -486,6 +486,13 @@ def _catalyst_build_script(spec_path: str, config_path: str, caches: set[str], w
     else:
         run = _CATALYST_DEV_SETUP + f'exec catalyst "${{CONFIG_ARGS[@]}}" -f "{spec_path}"'
     return f"""#!/bin/bash
+# Fix of older catalyst: stage1 build.py concatenates portage Atom with str (TypeError with current portage). Fixed
+# upstream, applied to toolset copy of this build session only (changes are not stored in toolset).
+for build_py in /usr/share/catalyst/targets/stage1/build.py; do
+    [ -f "$build_py" ] && grep -q 'sys.stdout.write(b + " ")' "$build_py" \
+        && sed -i 's/sys.stdout.write(b + " ")/sys.stdout.write(str(b) + " ")/' "$build_py" \
+        && echo "Applied stage1 build.py fix to catalyst"
+done
 # Catalyst configuration with cache options matching stage settings. Configuration of older catalyst (not TOML) is
 # used unchanged.
 CONFIG_ARGS=()
