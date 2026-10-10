@@ -958,7 +958,8 @@ def ensure_template_overlays(overlays: list[TemplateOverlay], log: Callable[[str
 
 def apply_project_template(project_directory, template: ProjectTemplate, names: dict[str, Any],
                            log: Callable[[str], None], replace_content: bool = False,
-                           overlay_ids: dict[str, uuid.UUID] | None = None):
+                           overlay_ids: dict[str, uuid.UUID] | None = None,
+                           stage_ids: dict[str, uuid.UUID] | None = None) -> dict[str, uuid.UUID]:
     """Creates files and stages of template in project directory. Project needs configuration (toolset, releng) set
     already, default arguments of stages are set like for stages added in app. With replace_content other files of
     directory (eg. cloned template repository) are removed first, Git directory is kept."""
@@ -988,6 +989,9 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
         del project_directory._stages # Loaded again with files copied from template.
     releng_directory = project_directory.get_releng_directory()
     architecture = project_directory.get_architecture()
+    # Ids of stages by their ids in template. Given ids are used again (template applied again when it's updated), so
+    # versions of project can be compared.
+    known_stage_ids = dict(stage_ids or {})
     stage_ids: dict[str, uuid.UUID] = {}
     for generated_stage in generated.stages:
         # Stage directory can exist already, with files copied from template.
@@ -995,6 +999,7 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
                 os.path.join(project_directory.stage_directory_path(generated_stage.name), "stage.json")):
             raise TemplateError(f"Stage {generated_stage.name} already exists")
         stage = ProjectStage(
+            id=known_stage_ids.get(generated_stage.template_id),
             parent_id=stage_ids[generated_stage.parent] if generated_stage.parent else None,
             name=generated_stage.name, target_name=generated_stage.target,
             releng_template_name=generated_stage.releng_template
@@ -1020,3 +1025,4 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
         project_directory.stages.append(stage)
         stage_ids[generated_stage.template_id] = stage.id
         log(f"Created stage {stage.name} ({stage.target})")
+    return stage_ids

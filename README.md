@@ -39,7 +39,8 @@ knowledge of Catalyst internals is needed.
 - Projects are **Git directories**, so their changes can be tracked and shared.
 - New projects can be created from **templates** from Git repositories (like
   [catalystlab-templates](https://github.com/damiandudycz/catalystlab-templates)), with options like architecture,
-  init system and additional software. See [Project templates](docs/project-templates.md) to create
+  init system and additional software. Projects can be updated when their template or Git repository changes, with
+  your own changes kept or replaced one by one. See [Project templates](docs/project-templates.md) to create
   and publish one.
 
 ### 🔨 Builds

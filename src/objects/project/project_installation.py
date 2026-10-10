@@ -9,6 +9,7 @@ from .snapshot import Snapshot
 from .project_directory import ProjectConfiguration
 from .architecture import Architecture
 from .project_template import apply_project_template, load_cloned_template, ensure_template_overlays
+from .project_template_update import record_template_state, repository_commit
 import os, shutil
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
@@ -131,6 +132,8 @@ class ProjectInstallationStepApplyTemplate(MultiStageProcessStage):
             selection = self.multistage_process.configuration.data
             template = selection.template
             temporary_directory = None
+            # Commit of template repository (cloned as project), recorded for updates of template.
+            template_commit = repository_commit(directory.directory_path()) if selection.repository_url else None
             if selection.repository_url:
                 # Options were read from template.toml downloaded alone, files come from cloned repository.
                 template, temporary_directory = load_cloned_template(directory.directory_path(), selection.repository_url,
@@ -141,14 +144,19 @@ class ProjectInstallationStepApplyTemplate(MultiStageProcessStage):
                 for variable in template.visible_variables(names):
                     self.log(f"{variable.title}: {names[variable.id]}")
                 # Cloned template repository is replaced with generated content, its history is kept.
-                apply_project_template(project_directory=directory, template=template, names=names, log=self.log,
-                                       replace_content=selection.repository_url is not None,
-                                       overlay_ids=getattr(self.multistage_process, "template_overlay_ids", None))
+                stage_ids = apply_project_template(project_directory=directory, template=template, names=names, log=self.log,
+                                                   replace_content=selection.repository_url is not None,
+                                                   overlay_ids=getattr(self.multistage_process, "template_overlay_ids", None))
+                # Template and generated files are remembered, so project can be updated when template changes.
+                record_template_state(directory.directory_path(), template, dict(selection.selected), template_commit, stage_ids)
             finally:
                 if temporary_directory:
                     shutil.rmtree(temporary_directory, ignore_errors=True)
             if selection.repository_url:
                 path = directory.directory_path()
+                # Remote is template repository: project is updated from template (not by pulling template commits),
+                # and its changes aren't pushed to template repository.
+                self._run(["git", "-C", path, "remote", "remove", "origin"])
                 self._run(["git", "-C", path, "add", "--all"])
                 if subprocess.run(["git", "-C", path, "diff", "--cached", "--quiet"]).returncode != 0:
                     self._run(["git", "-C", path, "commit", "--quiet", "-m", f"Create project from template {template.name}"])

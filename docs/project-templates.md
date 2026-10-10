@@ -204,6 +204,29 @@ when = "init == 'openrc'"               # Optional.
   the stage uses them: **Stage overlay** is added to its Portage confdir or root overlay sources (after Releng and
   parent sources). Groups are an easy way to add them only to selected stages.
 
+## Updating projects
+
+Projects remember the template they were created from: `project-template.json` in the project has its repository,
+commit, selected options and stages created from template stages, and files generated from the template are stored in
+the Git repository of the project (`refs/catalystlab/template-base`, not on its branch). The project page shows the
+template, with **Update template** button.
+
+Update generates the project again from the latest version of the template, with the same options, and compares three
+versions: generated before, the project now (with not saved changes and local commits), and generated now. Settings
+of stages are compared one by one (stages are matched by ids, so renamed stages are compared too), other files as
+whole:
+
+- changed only in the template: applied,
+- changed only in the project: kept,
+- changed in both differently: you choose to keep the project version or use the template version.
+
+Changes are applied as not saved changes of the project, so they can be reviewed before saving. The template
+repository isn't a remote of the project, projects get changes of templates only this way.
+
+Projects cloned from Git repositories are updated the same way (**Update from repository**): changes of the remote
+branch since the last shared commit are compared with the project. Applied update is a merge of the remote commit,
+finished by saving changes. Projects without own changes are moved to the remote commit.
+
 ## Expressions
 
 Texts in `template.toml` can contain expressions in `{{ }}`. A text that is a single expression gets its value (which

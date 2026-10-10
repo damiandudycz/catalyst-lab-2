@@ -17,6 +17,8 @@ from .project_builds_view import ProjectBuildsView
 from .multistage_process import MultiStageProcess, MultiStageProcessState, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState
 from .architecture import Architecture
 from .cl_toggle_group import CLToggle, CLToggleGroup
+from .project_template_update import TemplateState, repository_origin, pending_repository_update
+from .project_update_view import ProjectUpdateView
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_details_view.ui')
@@ -45,6 +47,7 @@ class ProjectDetailsView(Gtk.Box):
         self.monitor_configuration_changes()
         self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
         self._setup_stages_view_mode()
+        self._setup_source_banner()
         # Result of last build is seen, project is not marked anymore in projects list.
         project_directory.mark_build_result_seen()
         self._observed_builds: set[int] = set() # Ids of builds whose changes are observed.
@@ -144,6 +147,41 @@ class ProjectDetailsView(Gtk.Box):
             self._refresh_build_state()
             return False
         GLib.idle_add(refresh)
+
+    def _setup_source_banner(self):
+        """Template or Git repository project was created from, with button updating project from it."""
+        self.source_banner = Adw.Banner()
+        self.source_banner.connect("button-clicked", self._on_update_source_clicked)
+        self.prepend(self.source_banner)
+        self.project_directory.event_bus.subscribe(SharedEvent.STATE_UPDATED, self._update_source_banner)
+        self._update_source_banner()
+
+    def _update_source_banner(self, *args):
+        path = self.project_directory.directory_path()
+        self._source = None
+        if state := TemplateState.load(path):
+            self._source = "template"
+            title = f"Created from template {state.template_name}"
+            button = "Update template"
+        elif origin := repository_origin(path):
+            self._source = "repository"
+            branch = f" ({origin.branch})" if origin.branch else ""
+            if pending_repository_update(path):
+                title, button = f"Update from {origin.url}{branch} is applied, save changes to finish it", ""
+            else:
+                title, button = f"Cloned from {origin.url}{branch}", "Update from repository"
+        if self._source is None:
+            self.source_banner.set_revealed(False)
+            return
+        self.source_banner.set_title(GLib.markup_escape_text(title))
+        self.source_banner.set_button_label(button or None)
+        self.source_banner.set_revealed(True)
+
+    def _on_update_source_clicked(self, banner):
+        if self._source is None:
+            return
+        title = "Update template" if self._source == "template" else "Update from repository"
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectUpdateView(self.project_directory, self._source), title, 640, 560)
 
     def _setup_stages_view_mode(self):
         """Compact stages (short names, expanded while hovered) or full ones, switched in header bar while stages are
