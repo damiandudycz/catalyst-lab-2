@@ -7,6 +7,7 @@ from .project_template import (
     download_template_repositories, fetch_template_repository, find_overlay_for_url
 )
 from .project_stage import stage_target_icon
+from .scroll_position import preserved_scroll_position
 
 class ProjectTemplateChooser(Gtk.Box):
     """Templates from Git repositories. Latest list of repositories is downloaded every time (so templates removed from
@@ -151,6 +152,13 @@ class ProjectTemplateOptionsView(Gtk.Box):
 
     def _rebuild(self):
         self._rebuild_scheduled = False
+        with preserved_scroll_position(self):
+            self._rebuild_rows()
+        if self.on_changed:
+            self.on_changed()
+        return False
+
+    def _rebuild_rows(self):
         for row in self._option_rows:
             self.options_group.remove(row)
         for row in self._group_rows:
@@ -201,9 +209,6 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self.stages_group.set_visible(self.generated is not None and bool(self.generated.stages))
         self.error_label.set_label(f"Template can't be used: {error}" if error else "")
         self.error_label.set_visible(error is not None)
-        if self.on_changed:
-            self.on_changed()
-        return False
 
     def _expander_row(self, key: str, title: str, subtitle: str | None) -> Adw.ExpanderRow:
         row = Adw.ExpanderRow(title=GLib.markup_escape_text(title))

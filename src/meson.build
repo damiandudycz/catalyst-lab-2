@@ -134,6 +134,7 @@ catalystlab_sources = [
   'ui/project/project_builds_view.py',
   'ui/project/project_stage_create_view.py',
   'ui/project/project_template_views.py',
+  'ui/components/scroll_position/scroll_position.py',
   'ui/project/project_update_view.py',
   'ui/project/project_stage_details_view.py',
   'ui/releng/releng_create_view.py',
