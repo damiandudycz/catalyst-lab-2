@@ -495,10 +495,10 @@ class ProjectTemplate:
             url = _text(overlay_data, "url", context)
             if not re.match(r"^(https://|file://)\S+$", url):
                 raise TemplateError(f"{context}: url must be https:// URL of Git repository")
-            name = _text(overlay_data, "name", context, required=False) or url.rstrip("/").split("/")[-1].removesuffix(".git")
-            if "/" in name or name.startswith(".") or not name.strip():
-                raise TemplateError(f"{context}: invalid name {name!r}")
-            overlays.append(TemplateOverlay(id=overlay_id, url=url, name=name, when=_condition(overlay_data, context)))
+            overlay_name = _text(overlay_data, "name", context, required=False) or url.rstrip("/").split("/")[-1].removesuffix(".git")
+            if "/" in overlay_name or overlay_name.startswith(".") or not overlay_name.strip():
+                raise TemplateError(f"{context}: invalid name {overlay_name!r}")
+            overlays.append(TemplateOverlay(id=overlay_id, url=url, name=overlay_name, when=_condition(overlay_data, context)))
         return cls(path=path, name=name, description=description, variables=variables, values=values, stages=stages,
                    files=files, groups=groups, groups_title=groups_title, overlays=overlays,
                    architecture=Architecture[architecture_name] if architecture_name else None, repository_url=repository_url,
