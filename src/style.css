@@ -19,6 +19,13 @@
   border-color: @warning_color;
   color: @warning_fg_color;
 }
+/* Toned yellow tag, worth noticing but not a problem, eg. own commits of project. Warning color of theme (adapts to
+   light and dark style) as text, tint of it as background. */
+.tag-label.notice {
+  background-color: alpha(@warning_color, 0.15);
+  border-color: alpha(@warning_color, 0.5);
+  color: @warning_color;
+}
 .tag-label.error {
   background-color: @error_bg_color;
   border-color: @error_color;
@@ -44,4 +51,11 @@
 .stages-tree-node {
   background-color: var(--window-bg-color);
   border-radius: 12px;
+}
+
+/* Small button, eg. next to caption text (Update template in project page). */
+button.small-button {
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: 6px;
 }

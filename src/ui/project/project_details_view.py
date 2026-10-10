@@ -1,4 +1,4 @@
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Pango
 from .git_directory import GitDirectoryEvent
 from .project_manager import ProjectManager
 from .project_directory import ProjectDirectory, ProjectConfiguration
@@ -17,6 +17,10 @@ from .project_builds_view import ProjectBuildsView
 from .multistage_process import MultiStageProcess, MultiStageProcessState, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState
 from .architecture import Architecture
 from .cl_toggle_group import CLToggle, CLToggleGroup
+from .project_template_update import (
+    TemplateState, repository_origin, has_unsaved_changes, own_commits_count, template_update_available, project_overlays
+)
+from .project_update_view import ProjectUpdateView
 import threading
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_details_view.ui')
@@ -45,6 +49,7 @@ class ProjectDetailsView(Gtk.Box):
         self.monitor_configuration_changes()
         self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
         self._setup_stages_view_mode()
+        self._setup_source_banner()
         # Result of last build is seen, project is not marked anymore in projects list.
         project_directory.mark_build_result_seen()
         self._observed_builds: set[int] = set() # Ids of builds whose changes are observed.
@@ -144,6 +149,119 @@ class ProjectDetailsView(Gtk.Box):
             self._refresh_build_state()
             return False
         GLib.idle_add(refresh)
+
+    def _setup_source_banner(self):
+        """Template or Git repository project was created from, own changes of project, and button updating project
+        (blue when there are updates)."""
+        self.source_banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_start=24,
+                                     margin_end=24, margin_top=6, margin_bottom=6, visible=False)
+        self.source_label = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        self.source_label.add_css_class("caption")
+        self.source_label.add_css_class("dimmed")
+        self.source_badges = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4, hexpand=True, valign=Gtk.Align.CENTER)
+        self.source_button = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.source_button.add_css_class("caption")
+        self.source_button.add_css_class("small-button")
+        self.source_button.connect("clicked", self._on_update_source_clicked)
+        for widget in (self.source_label, self.source_badges, self.source_button):
+            self.source_banner.append(widget)
+        self.prepend(self.source_banner)
+        self._updates_available = None # Checked in background when project is opened.
+        self.project_directory.event_bus.subscribe(SharedEvent.STATE_UPDATED, self._update_source_banner)
+        self._update_source_banner()
+        self._check_updates()
+
+    def _check_updates(self):
+        """Template is checked for changes when project is opened (repositories are fetched with Git status)."""
+        path = self.project_directory.directory_path()
+        if TemplateState.load(path) is None:
+            return
+        def check():
+            available = template_update_available(path)
+            def show():
+                self._updates_available = available
+                self._update_source_banner()
+                return False
+            GLib.idle_add(show)
+        threading.Thread(target=check, daemon=True).start()
+
+    def _update_source_banner(self, *args):
+        path = self.project_directory.directory_path()
+        self._source = None
+        if state := TemplateState.load(path):
+            self._source = "template"
+            title, button = "Generated from template", "Update template"
+            details = f"{state.template_name}\n{state.repository_url}" + (f" ({state.repository_path})" if state.repository_path else "")
+            updates = self._updates_available
+        elif origin := repository_origin(path):
+            self._source = "repository"
+            title, button = "Cloned from repository", "Update from repository"
+            details = origin.url + (f" ({origin.branch})" if origin.branch else "")
+            updates = self.project_directory.has_remote_changes
+        self.source_banner.set_visible(self._source is not None)
+        if self._source is None:
+            return
+        self.source_label.set_label(title)
+        self.source_label.set_tooltip_text(details)
+        # Own changes of project, not in template or repository:
+        while badge := self.source_badges.get_first_child():
+            self.source_badges.remove(badge)
+        unsaved = has_unsaved_changes(path)
+        badges = []
+        if commits := own_commits_count(path):
+            badges.append((f"{commits} own commit{'s' if commits != 1 else ''}",
+                           f"Commits of project that are not in {self._source}, they are kept when updating", "notice"))
+        if unsaved:
+            badges.append(("Not saved changes", "Save or discard changes before updating", None))
+        for text, tooltip, css_class in badges:
+            badge = Gtk.Label(label=text, tooltip_text=tooltip)
+            badge.add_css_class("tag-label")
+            badge.add_css_class("caption")
+            if css_class:
+                badge.add_css_class(css_class)
+            self.source_badges.append(badge)
+        # Update button, blue when there are updates, disabled with not saved changes:
+        self.source_button.set_label(button)
+        self.source_button.set_sensitive(not unsaved)
+        if updates:
+            self.source_button.add_css_class("suggested-action")
+        else:
+            self.source_button.remove_css_class("suggested-action")
+        self.source_button.set_tooltip_text(
+            "Save or discard changes first" if unsaved
+            else f"There are changes in {self._source}" if updates
+            else f"No changes in {self._source} found" if updates is False
+            else f"Check {self._source} for changes")
+
+    def _on_update_source_clicked(self, button):
+        if self._source is None:
+            return
+        title = "Update template" if self._source == "template" else "Update from repository"
+        source = self._source
+        overlays = project_overlays(self.project_directory)
+        def present(update_overlays: bool):
+            view = ProjectUpdateView(self.project_directory, source, overlays=overlays if update_overlays else [])
+            app_event_bus.emit(AppEvents.PRESENT_VIEW, view, title, 640, 560)
+        if not overlays:
+            present(False)
+            return
+        # Overlays used by project can be updated too.
+        dialog = Adw.AlertDialog(heading=title, body=f"Latest version of {source} is downloaded and compared with project.")
+        check_button = Gtk.CheckButton(label="Also update overlays used by project", active=True)
+        names = Gtk.Label(label=", ".join(overlay.name for overlay in overlays), xalign=0, wrap=True, margin_start=28)
+        names.add_css_class("caption")
+        names.add_css_class("dimmed")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.append(check_button)
+        box.append(names)
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("update", "Update")
+        dialog.set_response_appearance("update", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("update")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda _, response: present(check_button.get_active()) if response == "update" else None)
+        dialog.present(self.get_root())
 
     def _setup_stages_view_mode(self):
         """Compact stages (short names, expanded while hovered) or full ones, switched in header bar while stages are

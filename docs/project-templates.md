@@ -204,6 +204,32 @@ when = "init == 'openrc'"               # Optional.
   the stage uses them: **Stage overlay** is added to its Portage confdir or root overlay sources (after Releng and
   parent sources). Groups are an easy way to add them only to selected stages.
 
+## Updating projects
+
+Projects remember the template they were created from: `project-template.json` in the project has its repository,
+commit, selected options and stages created from template stages. Commits that generate the project ("Create project
+from template", "Update from template") change this file. The project page shows the template, own commits of the
+project (not in the template), not saved changes, and **Update template** button. It's blue when the template has
+changes: when the project is opened, only listing of files of the latest template is downloaded to check it.
+
+Changes of the project have to be saved before updating. Update generates the project again from the latest version of
+the template, with the same options, as a new commit on top of the last generation. Then it compares three versions:
+the last generation, the project, and the new generation. Settings of stages are compared one by one (stages are
+matched by ids, so renamed stages are compared too), other files as whole:
+
+- changed only in the template: applied,
+- changed only in the project: kept,
+- changed in both differently: you choose to keep the project version or use the template version.
+
+Own commits of the project are then replayed on top of the new generation, with these decisions, so the history of the
+project has its own commits on top of the latest template. Commits keep their messages and authors. The template
+repository isn't a remote of the project, projects get changes of templates only this way.
+
+Projects cloned from Git repositories are updated the same way (**Update from repository**): the remote branch is
+compared with the project since the last shared commit, and own commits are replayed on top of the remote branch, so
+the history of the project stays the history of its repository with own commits on top. Projects without own commits
+are moved to the latest version. As commits are replayed (rebased), commits already pushed elsewhere get new ids.
+
 ## Expressions
 
 Texts in `template.toml` can contain expressions in `{{ }}`. A text that is a single expression gets its value (which
