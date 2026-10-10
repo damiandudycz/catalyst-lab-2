@@ -108,7 +108,7 @@ Hovering the dot lists items and their states.
 |---|---|---|---|---|---|---|
 | Toolset | | Environment is open | | Catalyst is not installed | File or virtual machine is missing | Mounting, unmounting, used by operation or command |
 | Virtual machine | | Running | | | Missing | Starting, stopping, used by operation |
-| Project | | | Not saved changes | Last build failed | Toolset, Releng directory or snapshot is missing, Git error or conflicts | Building, updating, saving or discarding changes |
+| Project | | | Not saved changes | | Last build failed (until project is opened), toolset, Releng directory or snapshot is missing, Git error or conflicts | Building, updating, saving or discarding changes |
 | Releng directory, overlay | | | Not saved changes | | Git error or conflicts | Updating, saving or discarding changes |
 | Project in Builds (also Builds in side menu) | Last build completed | | | Last build stopped | Last build failed | Building |
 | Project in Deploy | | | | | | Deploying |

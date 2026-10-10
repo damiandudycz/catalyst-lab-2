@@ -157,10 +157,17 @@ class BuildRunResult(Enum):
 def last_build_run_result(project_directory, running_timestamp: str | None = None) -> BuildRunResult | None:
     """Result of newest build run of project, None when project has no builds. Stages of run that is still running
     (running_timestamp) are not interrupted."""
+    return last_build_run(project_directory, running_timestamp)[1]
+
+def last_build_run(project_directory, running_timestamp: str | None = None) -> tuple[str | None, BuildRunResult | None]:
+    """Timestamp and result of newest build run of project, (None, None) when project has no builds."""
     builds = load_project_builds(project_directory)
     if not builds:
-        return None
+        return None, None
     timestamp = max(builds, key=lambda build: build.date).timestamp
+    return timestamp, _build_run_result(builds, timestamp, running_timestamp)
+
+def _build_run_result(builds: list, timestamp: str, running_timestamp: str | None) -> BuildRunResult:
     statuses = {build.status for build in builds if build.timestamp == timestamp}
     if StageBuildStatus.FAILED in statuses:
         return BuildRunResult.FAILED

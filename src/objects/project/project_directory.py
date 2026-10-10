@@ -82,10 +82,27 @@ class ProjectDirectory(GitDirectory):
         return None
 
     def _last_build_run_result(self):
-        from .project_build import last_build_run_result
+        result, building, _ = self._last_build_run()
+        return result, building
+
+    def _last_build_run(self):
+        """Result of newest build run, whether project is being built, and timestamp of newest run."""
+        from .project_build import last_build_run
         from .project_build_process import running_project_build
         running = running_project_build(self)
-        return last_build_run_result(self, running_timestamp=running.timestamp if running else None), running is not None
+        timestamp, result = last_build_run(self, running_timestamp=running.timestamp if running else None)
+        return result, running is not None, timestamp
+
+    def mark_build_result_seen(self):
+        """Failure of newest build run was seen (project was opened), it's not shown in projects list anymore."""
+        _, _, timestamp = self._last_build_run()
+        if timestamp is None or self.metadata is None or self.metadata.seen_build_timestamp == timestamp:
+            return
+        self.metadata.seen_build_timestamp = timestamp
+        from .repository import Repository
+        Repository.ProjectDirectory.save()
+        from .event_bus import SharedEvent
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
 
     @property
     def build_status_indicator_values(self):
@@ -104,16 +121,16 @@ class ProjectDirectory(GitDirectory):
 
     @property
     def status_indicator_values(self):
-        """Projects list: configuration error (error), failed last build (warning), Git status (changes, errors),
-        blinking while building."""
+        """Projects list: configuration error, failed last build (until project is opened), Git status (changes,
+        errors), blinking while building."""
         from .project_build import BuildRunResult
         from .status_indicator import StatusIndicatorState, StatusDetail, item_status
-        result, building = self._last_build_run_result()
+        result, building, timestamp = self._last_build_run()
         details = []
         if configuration_error := self.configuration_error:
             details.append(StatusDetail(StatusIndicatorState.ERROR, configuration_error))
-        if result == BuildRunResult.FAILED:
-            details.append(StatusDetail(StatusIndicatorState.WARNING, "Last build failed"))
+        if result == BuildRunResult.FAILED and (self.metadata is None or self.metadata.seen_build_timestamp != timestamp):
+            details.append(StatusDetail(StatusIndicatorState.ERROR, "Last build failed"))
         details += self.status_details()
         if building:
             details.append(StatusDetail(StatusIndicatorState.LOADED, "Building"))
@@ -194,6 +211,7 @@ class ProjectConfiguration(Serializable):
     releng_directory_id: uuid.UUID | None = None
     snapshot_id: str | None = None
     architecture: Architecture | None = None
+    seen_build_timestamp: str | None = None # Newest build run whose result was seen (project was opened).
 
     def serialize(self) -> dict:
         return {
@@ -201,6 +219,7 @@ class ProjectConfiguration(Serializable):
             "releng_directory_id": str(self.releng_directory_id) if self.releng_directory_id else None,
             "snapshot_id": self.snapshot_id,
             "architecture": self.architecture.value if self.architecture else None,
+            "seen_build_timestamp": self.seen_build_timestamp,
         }
 
     @classmethod
@@ -216,6 +235,7 @@ class ProjectConfiguration(Serializable):
             toolset_id=toolset_id,
             releng_directory_id=releng_directory_id,
             snapshot_id=snapshot_id,
-            architecture=architecture
+            architecture=architecture,
+            seen_build_timestamp=data.get("seen_build_timestamp")
         )
 
