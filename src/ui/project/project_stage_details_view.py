@@ -30,7 +30,7 @@ from .project_stage_portage_confdir import (
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 from .project_stage_kernels import (
     KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_kernel_names, kernel_setting, own_kernel_settings,
-    set_kernel_setting
+    set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel
 )
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -93,10 +93,11 @@ class ProjectStageDetailsView(Gtk.Box):
             if not visible and _has_own_value(self.stage, row.argument.attribute_name):
                 hidden_custom.append(row.argument.display_name)
         for row in getattr(self, "kernel_rows", []):
-            hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
-        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group, self.kernels_pref_group,
-                      self.configuration_pref_group):
+            if isinstance(row, StageKernelRow):
+                hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
+        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group, self.configuration_pref_group):
             group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
+        self.kernels_pref_group.set_visible(getattr(self, "boot_kernel_argument", None) is not None)
         self.hidden_settings_label.set_label(
             f"Advanced settings set by this stage: {', '.join(hidden_custom)}. Switch to Advanced to see them." if hidden_custom else "")
         self.hidden_settings_label.set_visible(bool(hidden_custom))
@@ -121,12 +122,17 @@ class ProjectStageDetailsView(Gtk.Box):
             for row in self.configuration_rows:
                 row.pref_group.remove(row)
         self.configuration_rows = []
+        self.boot_kernel_argument = None
         # Load arguments rows
         arguments_details = load_catalyst_stage_arguments_details(
             toolset=self.project_directory.get_toolset(),
             target_name=self.stage.target
         )
         for name, arg in arguments_details.items():
+            if arg.details == StageArgumentDetails.boot_kernel:
+                # Edited as list of kernels in Kernels group (load_kernel_rows).
+                self.boot_kernel_argument = arg
+                continue
             group = self.pref_group_for_argument(argument=arg)
             if group:
                 row = self.create_row_for_argument(argument=arg)
@@ -145,19 +151,69 @@ class ProjectStageDetailsView(Gtk.Box):
         self.apply_mode()
 
     def load_kernel_rows(self, *args):
-        """Kernels of stage (boot/kernel) with their settings (boot/kernel/<name>/...). Expanded kernels stay expanded."""
-        expanded = {row.kernel_name for row in getattr(self, "kernel_rows", []) if row.get_expanded()}
+        """Kernels of stage (boot/kernel of catalyst, list of names) with settings of each (boot/kernel/<name>/...).
+        Kernels are added and removed one by one. Stage uses kernels of releng template until it changes them.
+        Expanded kernels stay expanded."""
+        expanded = {row.kernel_name for row in getattr(self, "kernel_rows", []) if isinstance(row, StageKernelRow) and row.get_expanded()}
+        expanded |= getattr(self, "_expand_kernel", set())
+        self._expand_kernel = set()
         for row in getattr(self, "kernel_rows", []):
             self.kernels_pref_group.remove(row)
         self.kernel_rows = []
-        # Kernels follow Boot / kernel row in the group, which lists their names.
-        for name in stage_kernel_names(self.project_directory, self.stage):
+        if self.boot_kernel_argument is None:
+            return # Target doesn't build kernels.
+        names = stage_kernel_names(self.project_directory, self.stage)
+        inherits = stage_inherits_kernels(self.stage)
+        releng_names = releng_kernel_names(self.project_directory, self.stage)
+        for name in names:
             row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name)
             row.set_expanded(name in expanded)
-            self.kernels_pref_group.add(row)
-            self.kernel_rows.append(row)
+            remove_button = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove kernel", valign=Gtk.Align.CENTER)
+            remove_button.add_css_class("flat")
+            remove_button.connect("clicked", lambda _, name=name: self._remove_kernel(name))
+            row.add_suffix(remove_button)
+            self._add_kernel_row(row)
+        add_row = Adw.EntryRow(title="Add kernel", show_apply_button=True)
+        add_row.set_tooltip_text("Name of kernel, eg. gentoo. Catalyst builds it and installs to /boot")
+        add_row.connect("apply", self._on_add_kernel)
+        add_row.connect("changed", lambda row: row.remove_css_class("error"))
+        if self.boot_kernel_argument.required and not names:
+            warning = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
+            warning.add_css_class("warning")
+            warning.set_tooltip_text("This stage needs at least one kernel")
+            add_row.add_suffix(warning)
+        self._add_kernel_row(add_row)
+        if not inherits and releng_names:
+            releng_row = Adw.ButtonRow(title=f"Use kernels of releng spec ({', '.join(releng_names)})")
+            releng_row.connect("activated", lambda _: self._set_kernel_names(None))
+            self._add_kernel_row(releng_row)
+        self.kernels_pref_group.set_description(
+            ("Kernels of releng spec, adding or removing kernel makes stage use its own list. " if inherits and names else "")
+            + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
         if args:
             self.apply_mode() # Kernel rows changed after argument was saved.
+
+    def _add_kernel_row(self, row):
+        self.kernels_pref_group.add(row)
+        self.kernel_rows.append(row)
+
+    def _on_add_kernel(self, row: Adw.EntryRow):
+        name = row.get_text().strip()
+        names = stage_kernel_names(self.project_directory, self.stage)
+        if error := kernel_name_error(name, names):
+            row.add_css_class("error")
+            row.set_tooltip_text(error)
+            return
+        self._expand_kernel = {name} # Its settings are shown.
+        self._set_kernel_names(names + [name])
+
+    def _remove_kernel(self, name: str):
+        remove_kernel(self.project_directory, self.stage, name)
+        self.load_kernel_rows(True)
+
+    def _set_kernel_names(self, names: list[str] | None):
+        set_kernel_names(self.project_directory, self.stage, names)
+        self.load_kernel_rows(True)
 
     def create_row_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesRow:
         if argument.details in CACHE_ARGUMENTS:
@@ -226,8 +282,6 @@ class ProjectStageDetailsView(Gtk.Box):
                 StageArgumentDetails.compression_mode
             ):
                 return self.release_pref_group
-            case StageArgumentDetails.boot_kernel:
-                return self.kernels_pref_group # Names of kernels, their settings are listed after it.
             case (
                 StageArgumentDetails.repos |
                 StageArgumentDetails.keep_repos |

@@ -1,7 +1,9 @@
 from __future__ import annotations
+import re
 from dataclasses import dataclass
 from typing import Any
 from .project_stage_arguments import StageArgumentDetails, StageArgumentLevel
+from .project_stage_automatic_option import StageAutomaticOption
 
 # ------------------------------------------------------------------------------
 # Kernels of stages (livecd-stage2, stage4...): catalyst builds kernels listed in boot/kernel, each configured with
@@ -93,6 +95,46 @@ def set_kernel_setting(project_directory, stage, name: str, key: str, value):
     else:
         kernel[key] = value
     settings = {kernel: values for kernel, values in settings.items() if values}
+    ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
+                                                  value=settings or None)
+
+# Names of kernels are used by catalyst in file names (/boot/<name>, boot/kernel/<name>/... options).
+_KERNEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+def kernel_name_error(name: str, names: list[str]) -> str | None:
+    if not _KERNEL_NAME.match(name):
+        return "Kernel name can contain letters, digits, dots, underscores and hyphens"
+    if name in names:
+        return f"Kernel {name} is already added"
+    return None
+
+def stage_inherits_kernels(stage) -> bool:
+    """Stage uses kernels of its releng template (boot/kernel isn't set by stage)."""
+    value = getattr(stage, StageArgumentDetails.boot_kernel.name, None)
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return isinstance(value, StageAutomaticOption)
+
+def releng_kernel_names(project_directory, stage) -> list[str]:
+    """Kernels defined by releng template of stage."""
+    from .project_stage_value_resolver import resolve_stage_argument
+    value = resolve_stage_argument(project_directory, stage, StageArgumentDetails.boot_kernel.value,
+                                   option=StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE)
+    names = value if isinstance(value, list) else [value]
+    return [name.strip() for name in names if isinstance(name, str) and name.strip()]
+
+def set_kernel_names(project_directory, stage, names: list[str] | None):
+    """Kernels of stage (boot/kernel), None uses kernels of releng template again."""
+    from .project_manager import ProjectManager
+    value = StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE if names is None else (names or None)
+    ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage,
+                                                  argument=StageArgumentDetails.boot_kernel, value=value)
+
+def remove_kernel(project_directory, stage, name: str):
+    """Removes kernel from stage, with settings stage set for it."""
+    from .project_manager import ProjectManager
+    set_kernel_names(project_directory, stage, [kernel for kernel in stage_kernel_names(project_directory, stage) if kernel != name])
+    settings = {kernel: values for kernel, values in own_kernel_settings(stage).items() if kernel != name}
     ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
                                                   value=settings or None)
 
