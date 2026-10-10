@@ -19,7 +19,7 @@ class ProjectDeployView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         # Same layout as other views: groups use whole width of window.
         scrolled_window = Gtk.ScrolledWindow(hexpand=True, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_bottom=24)
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_top=6, margin_bottom=24)
         scrolled_window.set_child(self.content)
         self.append(scrolled_window)
         self.groups: list[Adw.PreferencesGroup] = []

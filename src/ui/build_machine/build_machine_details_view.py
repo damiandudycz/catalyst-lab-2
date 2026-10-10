@@ -17,7 +17,7 @@ class BuildMachineDetailsView(Gtk.Box):
         self.working: str | None = None # Description of running action (Starting, Stopping, Applying settings).
 
         scrolled_window = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_bottom=24)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_top=6, margin_bottom=24)
         scrolled_window.set_child(content)
         self.append(scrolled_window)
 

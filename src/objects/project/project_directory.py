@@ -94,7 +94,8 @@ class ProjectDirectory(GitDirectory):
         return result, running is not None, timestamp
 
     def mark_build_result_seen(self):
-        """Failure of newest build run was seen (project was opened), it's not shown in projects list anymore."""
+        """Result of newest build run was seen (project or its builds were opened), it's not marked in projects and
+        builds lists anymore."""
         _, _, timestamp = self._last_build_run()
         if timestamp is None or self.metadata is None or self.metadata.seen_build_timestamp == timestamp:
             return
@@ -106,16 +107,18 @@ class ProjectDirectory(GitDirectory):
 
     @property
     def build_status_indicator_values(self):
-        """Builds list: last build run completed (succeeded), failed (error) or stopped (warning), blinking while
-        building."""
+        """Builds list: last build run completed (succeeded), failed (error) or stopped (warning), until builds or
+        project were opened. Blinking while building."""
         from .project_build import BuildRunResult
         from .status_indicator import StatusIndicatorState, StatusDetail, item_status
-        result, building = self._last_build_run_result()
+        result, building, timestamp = self._last_build_run()
         match result:
             case BuildRunResult.FAILED: state, description = StatusIndicatorState.ERROR, "Last build failed"
             case BuildRunResult.STOPPED: state, description = StatusIndicatorState.WARNING, "Last build was stopped"
             case BuildRunResult.COMPLETED: state, description = StatusIndicatorState.SUCCEEDED, "Last build completed"
             case _: state, description = StatusIndicatorState.IDLE, "No builds"
+        if self.metadata is not None and self.metadata.seen_build_timestamp == timestamp:
+            state = StatusIndicatorState.IDLE # Result was seen, it's still described.
         return item_status([StatusDetail(state, description),
                             StatusDetail(StatusIndicatorState.LOADED, "Building") if building else None], blinking=building)
 

@@ -36,7 +36,7 @@ class ProjectBuildsView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         # Same layout as other views: groups use whole width of window.
         scrolled_window = Gtk.ScrolledWindow(hexpand=True, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_bottom=24)
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_top=6, margin_bottom=24)
         scrolled_window.set_child(self.content)
         self.append(scrolled_window)
         # Starts new build of project, or shows progress of running one (like Create build in project page).
@@ -56,6 +56,10 @@ class ProjectBuildsView(Gtk.Box):
     # --------------------------------------------------------------------------
 
     def load_builds(self):
+        # Result of newest build is seen when builds are displayed (opened, or build finished while open).
+        if self.get_mapped() or not getattr(self, "_result_seen", False):
+            self._result_seen = True
+            self.project_directory.mark_build_result_seen()
         for group in self.groups:
             self.content.remove(group)
         self.groups = []
