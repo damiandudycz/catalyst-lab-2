@@ -127,135 +127,37 @@ def run_limactl(arguments: list[str], output_handler, process_holder: list | Non
         return False
     return result == 0
 
-def kill_instance_processes(instance_name: str, output_handler, home: str | None = None):
-    """Last resort when limactl can't stop instance: kills its host agent with processes it started (driver of virtual
-    machine) and removes their pid and socket files, so instance is stopped."""
+def instance_process_ids(instance_name: str, home: str | None = None) -> list[int]:
+    """Host agent of instance and processes it started (driver of virtual machine), from its pid files."""
     directory = os.path.join(home or lima_home(), instance_name)
+    pids = []
     for pid_file in ("ha.pid", "vz.pid"):
         try:
             with open(os.path.join(directory, pid_file), encoding="utf-8") as file:
                 pid = int(file.read().strip())
         except (OSError, ValueError):
             continue
-        output_handler(f"Killing process {pid} of {instance_name} ({pid_file})")
-        subprocess.run(["pkill", "-KILL", "-P", str(pid)], capture_output=True)
+        children = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True).stdout.split()
+        pids += [pid] + [int(child) for child in children if child.isdigit()]
+    return list(dict.fromkeys(pids))
+
+def kill_processes(pids: list[int], output_handler):
+    """Kills processes that are still running."""
+    for pid in pids:
         try:
             os.kill(pid, signal.SIGKILL)
+            output_handler(f"Killed process {pid}")
         except OSError:
-            pass
+            pass # Already exited.
+
+def kill_instance_processes(instance_name: str, output_handler, home: str | None = None, pids: list[int] | None = None):
+    """Last resort when limactl can't stop instance: kills its host agent with processes it started (driver of virtual
+    machine), also given ones (found before limactl removed pid files), and removes their pid and socket files, so
+    instance is stopped."""
+    kill_processes(list(dict.fromkeys((pids or []) + instance_process_ids(instance_name, home))), output_handler)
+    directory = os.path.join(home or lima_home(), instance_name)
     for name in ("ha.pid", "ha.sock", "vz.pid", "default_ep.sock", "default_fd.sock"):
         try:
             os.remove(os.path.join(directory, name))
         except OSError:
             pass
-
-def run_as_root_in_instance(instance_name: str, script: str, output_handler, home: str | None = None) -> bool:
-    """Runs shell script as root in running instance, output goes to handler line by line."""
-    path = limactl_path()
-    if path is None:
-        raise RuntimeError(lima_unavailable_reason())
-    process = subprocess.Popen([path, "shell", "--workdir", "/", instance_name, "sudo", "sh", "-c", script],
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True,
-                               errors="replace", bufsize=1, start_new_session=True, env=lima_environment(home))
-    for line in process.stdout:
-        line = line.rstrip("\n")
-        if not (line.startswith("time=") and "level=" in line): # Lima warnings.
-            output_handler(line)
-    return process.wait() == 0
-
-def swap_activation_script(size_bytes: int) -> str:
-    """Turns on swap on additional disk of machine (as root). Disk is found by its size, only empty disk without
-    partitions, filesystem or mounts is used, so system disk is never formatted."""
-    return f"""set -e
-SIZE={size_bytes}
-DEVICE=""
-for NAME in $(lsblk -dnro NAME,TYPE | awk '$2 == "disk" {{ print $1 }}'); do
-    [ "$(lsblk -dnbro SIZE "/dev/$NAME")" = "$SIZE" ] || continue
-    [ "$(lsblk -dnro RO "/dev/$NAME")" = "0" ] || continue
-    [ "$(lsblk -nro NAME "/dev/$NAME" | wc -l)" = "1" ] || continue # Has partitions.
-    findmnt -rn -S "/dev/$NAME" > /dev/null && continue
-    if command -v blkid > /dev/null; then
-        TYPE=$(blkid -p -o value -s TYPE "/dev/$NAME" 2>/dev/null || true)
-        PTTYPE=$(blkid -p -o value -s PTTYPE "/dev/$NAME" 2>/dev/null || true)
-        [ -z "$PTTYPE" ] || continue
-        [ -z "$TYPE" ] || [ "$TYPE" = swap ] || continue
-    fi
-    DEVICE="/dev/$NAME"
-    break
-done
-[ -n "$DEVICE" ] || {{ echo "Swap disk was not found in machine"; exit 1; }}
-grep -q "^$DEVICE " /proc/swaps && {{ echo "Swap is on $DEVICE"; exit 0; }}
-mkswap -L catalystlab-swap "$DEVICE" > /dev/null
-swapon "$DEVICE"
-echo "Swap: $((SIZE / 1073741824)) GiB on $DEVICE"
-"""
-
-def _clean_log_line(line: str) -> str:
-    """Lima logs as time="..." level=info msg="...", only message is shown."""
-    if line.startswith("time=") and ' msg="' in line:
-        message = line.split(' msg="', 1)[1]
-        return message[:-1].replace('\\"', '"') if message.endswith('"') else message
-    return line
-
-def machine_configuration(cpus: int, memory_gib: int, shared_paths: list[str]) -> str:
-    """Lima configuration (YAML) of build machine."""
-    mounts = "\n".join(f'- location: "{path}"\n  writable: true' for path in shared_paths)
-    indented_setup = "\n".join("    " + line for line in machine_setup_script().splitlines())
-    return f"""minimumLimaVersion: 2.0.0
-base:
-- {LIMA_TEMPLATE}
-vmType: vz
-cpus: {cpus}
-memory: {memory_gib}GiB
-disk: {SYSTEM_DISK_GIB}GiB
-containerd:
-  system: false
-  user: false
-mounts:
-{mounts}
-provision:
-- mode: system
-  script: |
-{indented_setup}
-"""
-
-# Version of machine setup, increased when setup script changes. Existing machines are updated when started.
-MACHINE_SETUP_VERSION = 2
-_MACHINE_SETUP_VERSION_FILE = "/etc/catalystlab-setup-version"
-
-# QEMU user emulators, to build stages for other architectures (like on Linux hosts, binfmt_misc with F flag makes
-# them work in chroots and namespaces).
-_QEMU_ARCHITECTURES = "x86_64 i386 arm armeb aarch64 riscv64 ppc ppc64 ppc64le s390x mips mipsel mips64 mips64el sparc sparc64 alpha m68k loongarch64 hppa sh4"
-
-def machine_setup_script() -> str:
-    """Prepares machine (as root, idempotent): tools for working without root, subordinate ids of user, working space
-    mount point and emulators of other architectures."""
-    return f"""#!/bin/sh
-set -eux
-apk add --no-cache bash coreutils findutils grep sed tar xz zstd bubblewrap util-linux util-linux-misc \\
-    shadow-subids squashfs-tools python3 curl e2fsprogs qemu-openrc
-host=$(uname -m)
-for arch in {_QEMU_ARCHITECTURES}; do
-    [ "$arch" = "$host" ] || apk add --no-cache "qemu-$arch" || echo "qemu-$arch is not available"
-done
-rc-update add qemu-binfmt default
-rc-service qemu-binfmt restart || rc-service qemu-binfmt start
-# User of machine (same uid as on host) gets subordinate ids for files of toolsets.
-user=$(getent passwd | awk -F: '$3 >= 500 && $3 < 60000 {{ print $1; exit }}')
-grep -q "^$user:" /etc/subuid || echo "$user:100000:65536" >> /etc/subuid
-grep -q "^$user:" /etc/subgid || echo "$user:100000:65536" >> /etc/subgid
-mountpoint -q {MACHINE_DATA_DIRECTORY} || install -d -o "$user" {MACHINE_DATA_DIRECTORY}
-echo {MACHINE_SETUP_VERSION} > {_MACHINE_SETUP_VERSION_FILE}
-"""
-
-def machine_setup_update_script() -> str:
-    """Runs setup in existing machine when its version is older."""
-    return f"""[ "$(cat {_MACHINE_SETUP_VERSION_FILE} 2>/dev/null || echo 0)" -ge {MACHINE_SETUP_VERSION} ] && exit 0
-echo "Updating machine setup to version {MACHINE_SETUP_VERSION}"
-echo {_shell_base64(machine_setup_script())} | base64 -d | sudo sh
-"""
-
-def _shell_base64(text: str) -> str:
-    import base64
-    return base64.b64encode(text.encode()).decode()
-

@@ -4,7 +4,7 @@ from typing import Self
 from .event_bus import EventBus, SharedEvent
 from .repository import Repository
 from .status_indicator import StatusIndicatorState, StatusIndicatorValues, StatusDetail, item_status, status_values
-from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY, kill_instance_processes
+from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY, kill_instance_processes, instance_process_ids
 from .lima import lima_home as default_new_lima_home
 
 class BuildMachine:
@@ -229,11 +229,11 @@ class BuildMachine:
         if run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home, timeout=self.STOP_TIMEOUT):
             return True
         output_handler(f"Virtual machine {self.name} didn't stop, stopping it with force")
-        if run_limactl(["stop", "--force", self.instance_name], output_handler, home=self.lima_home, timeout=self.FORCE_STOP_TIMEOUT):
-            return True
-        instance = list_instances(self.lima_home).get(self.instance_name)
-        if instance and instance.get("status") != self.STATUS_STOPPED:
-            kill_instance_processes(self.instance_name, output_handler, home=self.lima_home)
+        # Forced stop can leave processes started by host agent running (eg. driver of crashed machine), they are
+        # found before it removes pid files and killed after it.
+        pids = instance_process_ids(self.instance_name, self.lima_home)
+        run_limactl(["stop", "--force", self.instance_name], output_handler, home=self.lima_home, timeout=self.FORCE_STOP_TIMEOUT)
+        kill_instance_processes(self.instance_name, output_handler, home=self.lima_home, pids=pids)
         instance = list_instances(self.lima_home).get(self.instance_name)
         return instance is not None and instance.get("status") == self.STATUS_STOPPED
 
