@@ -1123,7 +1123,30 @@ class KernelPackageRow(Adw.ExpanderRow):
             value if own else f"From releng spec: {inherited}" if inherited
             else "Not set, catalyst uses sys-kernel/gentoo-kernel (distribution kernel) or sys-kernel/gentoo-sources"))
         if self.packages is not None:
-            self._build_rows()
+            # Rows are updated in place, rebuilding them would move the page (its height and focus change).
+            if self._options_key() == getattr(self, "_built_key", None):
+                self._update_rows()
+            else:
+                self._build_rows()
+
+    def _options_key(self):
+        return (self.inherited, tuple(package.atom for package in self.packages))
+
+    def _selected_option(self):
+        """Option checked for current value: None (releng), package atom, or "" (custom value)."""
+        known = {package.atom for package in self.packages}
+        if not self.own:
+            return None if self.inherited else "-" # Nothing checked when catalyst default is used.
+        return self.own if self.own in known else ""
+
+    def _update_rows(self):
+        self._building = True
+        selected = self._selected_option()
+        for value, check in self.checks.items():
+            check.set_active(value == selected)
+        if selected == "": # Text typed but not applied stays otherwise.
+            self.custom_row.set_text(self.own)
+        self._building = False
 
     def _on_expanded(self, row, _param):
         if not self.get_expanded() or self.packages is not None or self._loading:
@@ -1153,11 +1176,12 @@ class KernelPackageRow(Adw.ExpanderRow):
 
     def _build_rows(self):
         rows, group = [], None
-        known = {package.atom for package in self.packages}
-        selected_custom = bool(self.own) and self.own not in known
-        def option(title, subtitle, active, on_activate, sensitive=True):
+        self.checks = {} # Option value (None for releng, atom) -> its check button.
+        selected = self._selected_option()
+        def option(title, subtitle, value, on_activate, sensitive=True):
             nonlocal group
-            check = Gtk.CheckButton(valign=Gtk.Align.CENTER, active=active)
+            check = Gtk.CheckButton(valign=Gtk.Align.CENTER, active=value == selected)
+            self.checks[value] = check
             if group:
                 check.set_group(group)
             group = group or check
@@ -1170,18 +1194,20 @@ class KernelPackageRow(Adw.ExpanderRow):
             rows.append(row)
         self._building = True
         if self.inherited:
-            option(f"From releng spec: {self.inherited}", "Package set by releng template of stage", not self.own,
+            option(f"From releng spec: {self.inherited}", "Package set by releng template of stage", None,
                    lambda: self.on_select(None, None))
         for package in self.packages:
-            option(package.atom, package.details, self.own == package.atom,
+            option(package.atom, package.details, package.atom,
                    lambda package=package: self.on_select(package.atom, package.kind), sensitive=package.supported)
         if not self.packages:
             rows.append(Adw.ActionRow(title="No kernel packages found", subtitle="Project has no snapshot yet, and overlays of stage don't have kernels"))
         custom = Adw.EntryRow(title="Custom package, eg. =sys-kernel/gentoo-kernel-6.12.8", show_apply_button=True,
-                              text=self.own if selected_custom else "")
+                              text=self.own if selected == "" else "")
+        self.custom_row = custom
         custom.connect("apply", lambda row: row.get_text().strip() and GLib.idle_add(lambda: self.on_select(row.get_text().strip(), None) and False))
         rows.append(custom)
         self._replace_rows(rows)
+        self._built_key = self._options_key()
         self._building = False
 
 class KernelListRow(Adw.ExpanderRow):
@@ -1192,6 +1218,7 @@ class KernelListRow(Adw.ExpanderRow):
         super().__init__(title=GLib.markup_escape_text(setting.title))
         self.on_apply = on_apply
         self.values: list[str] = []
+        self._loaded = False
         self.text_view = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
                                       top_margin=8, bottom_margin=8, left_margin=8, right_margin=8)
         self.text_view.set_size_request(-1, 72)
@@ -1215,8 +1242,11 @@ class KernelListRow(Adw.ExpanderRow):
         self.add_row(Gtk.ListBoxRow(activatable=False, selectable=False, child=editor))
 
     def load(self, values: list[str], inherited: list[str] | None):
+        # Text is replaced only when value changed, edits not applied yet stay (and page doesn't move).
+        if list(values) != self.values or not self._loaded:
+            self._set_text(list(values))
+        self._loaded = True
         self.values = list(values)
-        self._set_text(self.values)
         if self.values:
             subtitle = ", ".join(self.values)
         elif inherited:
