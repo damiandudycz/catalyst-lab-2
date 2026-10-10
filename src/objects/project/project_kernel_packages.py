@@ -83,6 +83,20 @@ def load_kernel_packages(project_directory, stage) -> list[KernelPackage]:
             package.repositories.append(repository)
     return sorted(packages.values(), key=lambda package: (not package.supported, package.atom))
 
+# Distribution kernel catalyst uses when kernel doesn't set package (and releng templates use).
+DEFAULT_KERNEL_PACKAGE = "sys-kernel/gentoo-kernel"
+
+def default_kernel_package(project_directory, stage) -> str:
+    """Package of added kernel: distribution kernel of overlay used by stage (made for its hardware, eg. PS3), or
+    distribution kernel of Gentoo."""
+    try:
+        for package in load_kernel_packages(project_directory, stage):
+            if package.kind == KernelPackageKind.DISTRIBUTION and any(repository != "gentoo" for repository in package.repositories):
+                return package.atom
+    except Exception as e:
+        print(f"Failed to read kernel packages: {e}")
+    return DEFAULT_KERNEL_PACKAGE
+
 def _stage_overlays(project_directory, stage) -> list[tuple[str, str]]:
     """Overlays used by stage (repos, own or inherited): names and folders."""
     from .project_stage_arguments import StageArgumentDetails

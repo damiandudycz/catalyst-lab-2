@@ -33,7 +33,7 @@ from .project_stage_kernels import (
     set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
-from .project_kernel_packages import load_kernel_packages, KernelPackageKind
+from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package
 
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -196,11 +196,15 @@ class ProjectStageDetailsView(Gtk.Box):
         self.kernel_rows.append(row)
 
     def _on_add_kernel(self, row):
-        """New kernel with free name (renamed in its settings), its settings are shown."""
+        """New kernel with free name (renamed in its settings), its settings are shown. It's distribution kernel, of
+        overlay used by stage when it has one, or of Gentoo."""
         names = stage_kernel_names(self.project_directory, self.stage)
         name = new_kernel_name(names)
         self._expand_kernel = {name}
-        self._set_kernel_names(names + [name])
+        set_kernel_names(self.project_directory, self.stage, names + [name])
+        set_kernel_setting(self.project_directory, self.stage, name, "sources", default_kernel_package(self.project_directory, self.stage))
+        set_kernel_setting(self.project_directory, self.stage, name, "distkernel", "yes")
+        self.load_kernel_rows(True)
 
     def _rename_kernel(self, old_name: str, new_name: str) -> str | None:
         """Returns error when name can't be used."""
