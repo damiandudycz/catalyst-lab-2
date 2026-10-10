@@ -375,3 +375,104 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
         and argument not in (StageArgumentDetails.stage4_root_overlay, StageArgumentDetails.livecd_root_overlay)
     },
 }
+
+# ------------------------------------------------------------------------------
+# Basic and advanced settings of stages: stage details show basic settings, or all of them in advanced mode.
+
+class StageArgumentLevel(Enum):
+    BASIC = "basic"       # Shown in basic and advanced mode.
+    ADVANCED = "advanced" # Shown only in advanced mode.
+
+_BASIC = StageArgumentLevel.BASIC
+_ADVANCED = StageArgumentLevel.ADVANCED
+
+# Level of every argument known to the app. Arguments of catalyst which app doesn't describe are advanced.
+STAGE_ARGUMENT_LEVELS: dict[StageArgumentDetails, StageArgumentLevel] = {
+    # Stage and its source:
+    StageArgumentDetails.parent: _BASIC,
+    StageArgumentDetails.target: _BASIC,
+    StageArgumentDetails.releng_template: _BASIC,
+    StageArgumentDetails.profile: _BASIC,
+    # Architecture and compiler flags (common flags apply to all languages):
+    StageArgumentDetails.subarch: _BASIC,
+    StageArgumentDetails.common_flags: _BASIC,
+    StageArgumentDetails.chost: _ADVANCED,
+    StageArgumentDetails.cbuild: _ADVANCED,
+    StageArgumentDetails.cflags: _ADVANCED,
+    StageArgumentDetails.cxxflags: _ADVANCED,
+    StageArgumentDetails.fcflags: _ADVANCED,
+    StageArgumentDetails.fflags: _ADVANCED,
+    StageArgumentDetails.asflags: _ADVANCED,
+    StageArgumentDetails.ldflags: _ADVANCED,
+    StageArgumentDetails.interpreter: _ADVANCED,
+    # Release:
+    StageArgumentDetails.rel_type: _BASIC,
+    StageArgumentDetails.version_stamp: _BASIC,
+    StageArgumentDetails.compression_mode: _ADVANCED,
+    StageArgumentDetails.decompressor_search_order: _ADVANCED,
+    # Packages and Portage:
+    StageArgumentDetails.repos: _BASIC,
+    StageArgumentDetails.portage_confdir: _BASIC,
+    StageArgumentDetails.keep_repos: _ADVANCED,
+    StageArgumentDetails.binrepo_path: _ADVANCED,
+    StageArgumentDetails.pkgcache_path: _ADVANCED,
+    StageArgumentDetails.kerncache_path: _ADVANCED,
+    StageArgumentDetails.catalyst_use: _ADVANCED,
+    StageArgumentDetails.hostuse: _ADVANCED,
+    StageArgumentDetails.install_mask: _ADVANCED,
+    StageArgumentDetails.portage_prefix: _ADVANCED,
+    StageArgumentDetails.update_seed: _ADVANCED,
+    StageArgumentDetails.update_seed_command: _ADVANCED,
+    StageArgumentDetails.rename_regexp: _ADVANCED,
+    # Set by app, not shown (listed so the map covers all arguments):
+    StageArgumentDetails.name: _BASIC,
+    StageArgumentDetails.snapshot_treeish: _ADVANCED,
+    StageArgumentDetails.source_subpath: _ADVANCED,
+    # Kernels:
+    StageArgumentDetails.boot_kernel: _BASIC,
+    # Stage4: what system contains and how it starts.
+    StageArgumentDetails.stage4_packages: _BASIC,
+    StageArgumentDetails.stage4_use: _BASIC,
+    StageArgumentDetails.stage4_rcadd: _BASIC,
+    StageArgumentDetails.stage4_users: _BASIC,
+    StageArgumentDetails.stage4_root_overlay: _BASIC,
+    StageArgumentDetails.stage4_fsscript: _BASIC,
+    StageArgumentDetails.stage4_ssh_public_keys: _BASIC,
+    StageArgumentDetails.stage4_rcdel: _ADVANCED,
+    StageArgumentDetails.stage4_groups: _ADVANCED,
+    StageArgumentDetails.stage4_unmerge: _ADVANCED,
+    StageArgumentDetails.stage4_empty: _ADVANCED,
+    StageArgumentDetails.stage4_rm: _ADVANCED,
+    StageArgumentDetails.stage4_gk_mainargs: _ADVANCED,
+    StageArgumentDetails.stage4_linuxrc: _ADVANCED,
+    # LiveCD: contents and ISO.
+    StageArgumentDetails.livecd_packages: _BASIC,
+    StageArgumentDetails.livecd_use: _BASIC,
+    StageArgumentDetails.livecd_iso: _BASIC,
+    StageArgumentDetails.livecd_volid: _BASIC,
+    StageArgumentDetails.livecd_type: _BASIC,
+    StageArgumentDetails.livecd_fstype: _BASIC,
+    StageArgumentDetails.livecd_bootargs: _BASIC,
+    StageArgumentDetails.livecd_rcadd: _BASIC,
+    StageArgumentDetails.livecd_root_overlay: _BASIC,
+    StageArgumentDetails.livecd_overlay: _BASIC,
+    StageArgumentDetails.livecd_rcdel: _ADVANCED,
+    StageArgumentDetails.livecd_users: _ADVANCED,
+    StageArgumentDetails.livecd_fsscript: _ADVANCED,
+    StageArgumentDetails.livecd_unmerge: _ADVANCED,
+    StageArgumentDetails.livecd_empty: _ADVANCED,
+    StageArgumentDetails.livecd_rm: _ADVANCED,
+    StageArgumentDetails.livecd_depclean: _ADVANCED,
+    StageArgumentDetails.livecd_cdtar: _ADVANCED,
+    StageArgumentDetails.livecd_fsops: _ADVANCED,
+    StageArgumentDetails.livecd_gk_mainargs: _ADVANCED,
+    StageArgumentDetails.livecd_linuxrc: _ADVANCED,
+    StageArgumentDetails.livecd_modblacklist: _ADVANCED,
+    StageArgumentDetails.livecd_motd: _ADVANCED,
+    StageArgumentDetails.livecd_readme: _ADVANCED,
+    StageArgumentDetails.livecd_verify: _ADVANCED,
+}
+
+def stage_argument_level(details: StageArgumentDetails | None) -> StageArgumentLevel:
+    """Arguments not known to app (read from catalyst) are advanced."""
+    return STAGE_ARGUMENT_LEVELS.get(details, StageArgumentLevel.ADVANCED) if details else StageArgumentLevel.ADVANCED

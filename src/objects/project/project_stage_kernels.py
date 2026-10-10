@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
-from .project_stage_arguments import StageArgumentDetails
+from .project_stage_arguments import StageArgumentDetails, StageArgumentLevel
 
 # ------------------------------------------------------------------------------
 # Kernels of stages (livecd-stage2, stage4...): catalyst builds kernels listed in boot/kernel, each configured with
@@ -38,6 +38,23 @@ KERNEL_SETTINGS = [
     KernelSetting("softlevel", "Soft level", "OpenRC runlevel used when booting"),
 ]
 _SETTINGS_BY_KEY = {setting.key: setting for setting in KERNEL_SETTINGS}
+
+# Kernel settings shown in basic mode of stage details (others only in advanced mode), like STAGE_ARGUMENT_LEVELS.
+KERNEL_SETTING_LEVELS: dict[str, StageArgumentLevel] = {
+    "sources": StageArgumentLevel.BASIC,
+    "distkernel": StageArgumentLevel.BASIC,
+    "config": StageArgumentLevel.BASIC,
+    "dracut_args": StageArgumentLevel.ADVANCED,
+    "extraversion": StageArgumentLevel.ADVANCED,
+    "packages": StageArgumentLevel.ADVANCED,
+    "use": StageArgumentLevel.ADVANCED,
+    "gk_kernargs": StageArgumentLevel.ADVANCED,
+    "gk_action": StageArgumentLevel.ADVANCED,
+    "aliases": StageArgumentLevel.ADVANCED,
+    "console": StageArgumentLevel.ADVANCED,
+    "initramfs_overlay": StageArgumentLevel.ADVANCED,
+    "softlevel": StageArgumentLevel.ADVANCED,
+}
 
 def stage_supports_kernels(project_directory, stage) -> bool:
     """Target of stage has boot/kernel option."""

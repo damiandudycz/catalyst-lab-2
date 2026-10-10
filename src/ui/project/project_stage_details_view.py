@@ -10,8 +10,9 @@ from .project_stage import (
 )
 from .project_stage_arguments import (
     StageArguments, StageArgumentTargetDetails, StageArgumentOption,
-    StageArgumentType, StageArgumentDetails
+    StageArgumentType, StageArgumentDetails, StageArgumentLevel, stage_argument_level
 )
+from .cl_toggle_group import CLToggle, CLToggleGroup
 from .project_manager import ProjectManager
 from .git_directory import GitDirectoryEvent
 from .project_stage import ProjectStageEvent
@@ -28,7 +29,8 @@ from .project_stage_portage_confdir import (
 )
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 from .project_stage_kernels import (
-    KERNEL_SETTINGS, stage_supports_kernels, stage_kernel_names, kernel_setting, own_kernel_settings, set_kernel_setting
+    KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_supports_kernels, stage_kernel_names, kernel_setting, own_kernel_settings,
+    set_kernel_setting
 )
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -44,12 +46,60 @@ class ProjectStageDetailsView(Gtk.Box):
     configuration_pref_group = Gtk.Template.Child()
     kernels_pref_group = Gtk.Template.Child()
 
+    # Basic or advanced settings (STAGE_ARGUMENT_LEVELS), last choice is used by stages opened later while app runs.
+    advanced_default = False
+
     def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.project_directory = project_directory
         self.stage = stage
         self.content_navigation_view = content_navigation_view
+        self.advanced = ProjectStageDetailsView.advanced_default
+        self._setup_mode_toggle()
         self.connect("realize", self.on_realize)
+
+    # Basic and advanced mode
+    # --------------------------------------------------------------------------
+
+    def _setup_mode_toggle(self):
+        """Basic / Advanced toggle in header bar, like Compact / Full of stages. Basic mode hides advanced settings,
+        note under them lists hidden settings with values set by stage."""
+        self.mode_toggle = CLToggleGroup(valign=Gtk.Align.CENTER)
+        self.mode_toggle.add_css_class("round")
+        self.mode_toggle.add_css_class("caption")
+        self.mode_toggle.add(CLToggle(label="Basic"))
+        self.mode_toggle.add(CLToggle(label="Advanced"))
+        self.mode_toggle.set_active(1 if self.advanced else 0)
+        self.mode_toggle.connect("notify::active", self._on_mode_changed)
+        self.hidden_settings_label = Gtk.Label(wrap=True, xalign=0, margin_start=12, margin_end=12, visible=False)
+        self.hidden_settings_label.add_css_class("caption")
+        self.hidden_settings_label.add_css_class("dimmed")
+        self.configuration_pref_group.get_parent().insert_child_after(self.hidden_settings_label, self.configuration_pref_group)
+
+    def header_bar_end_widgets(self) -> list[Gtk.Widget]:
+        return [self.mode_toggle]
+
+    def _on_mode_changed(self, group, _param):
+        self.advanced = group.get_active() == 1
+        ProjectStageDetailsView.advanced_default = self.advanced
+        self.apply_mode()
+
+    def apply_mode(self):
+        """Shows rows of current mode, and groups which have any of them."""
+        hidden_custom = []
+        for row in getattr(self, "configuration_rows", []):
+            visible = self.advanced or row.level == StageArgumentLevel.BASIC
+            row.set_visible(visible)
+            if not visible and _has_own_value(self.stage, row.argument.attribute_name):
+                hidden_custom.append(row.argument.display_name)
+        for row in getattr(self, "kernel_rows", []):
+            if isinstance(row, StageKernelRow):
+                hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
+        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group, self.configuration_pref_group):
+            group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
+        self.hidden_settings_label.set_label(
+            f"Advanced settings set by this stage: {', '.join(hidden_custom)}. Switch to Advanced to see them." if hidden_custom else "")
+        self.hidden_settings_label.set_visible(bool(hidden_custom))
 
     def on_realize(self, widget):
         self.get_root().set_focus(None)
@@ -81,6 +131,7 @@ class ProjectStageDetailsView(Gtk.Box):
             if group:
                 row = self.create_row_for_argument(argument=arg)
                 row.pref_group = group
+                row.level = stage_argument_level(arg.details)
                 row.event_bus.subscribe(
                     ItemSelectionViewEvent.ITEM_CHANGED,
                     self.argument_changed,
@@ -91,6 +142,7 @@ class ProjectStageDetailsView(Gtk.Box):
                 # Kernels depend on boot/kernel and releng template, refreshed after argument is saved.
                 row.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.load_kernel_rows, "kernels")
         self.load_kernel_rows()
+        self.apply_mode()
 
     def load_kernel_rows(self, *args):
         """Kernels of stage (boot/kernel) with their settings (boot/kernel/<name>/...). Expanded kernels stay expanded."""
@@ -114,6 +166,8 @@ class ProjectStageDetailsView(Gtk.Box):
             row.get_expanded = lambda: False
             self.kernels_pref_group.add(row)
             self.kernel_rows.append(row)
+        if args:
+            self.apply_mode() # Kernel rows changed after argument was saved.
 
     def create_row_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesRow:
         if argument.details in CACHE_ARGUMENTS:
@@ -898,6 +952,17 @@ class StageKernelRow(Adw.ExpanderRow):
             self.entry_rows.append((setting, row))
         self.load_state()
 
+    def set_advanced(self, advanced: bool) -> list[str]:
+        """Shows settings of mode, returns titles of hidden settings set by stage."""
+        own = own_kernel_settings(self.stage).get(self.kernel_name, {})
+        hidden = []
+        for setting, row in self.entry_rows:
+            visible = advanced or KERNEL_SETTING_LEVELS[setting.key] == StageArgumentLevel.BASIC
+            row.set_visible(visible)
+            if not visible and own.get(setting.key) not in (None, "", []):
+                hidden.append(setting.title)
+        return hidden
+
     def load_state(self):
         own = own_kernel_settings(self.stage).get(self.kernel_name, {})
         summary = []
@@ -923,3 +988,12 @@ class StageKernelRow(Adw.ExpanderRow):
         if value is None:
             return ""
         return " ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+
+def _has_own_value(stage: ProjectStage, attribute: str) -> bool:
+    """Stage sets value itself (not automatic option like inheriting from parent or releng spec)."""
+    value = getattr(stage, attribute, None)
+    if value is None or value == "" or value == []:
+        return False
+    if isinstance(value, list):
+        return not all(isinstance(item, StageAutomaticOption) for item in value)
+    return not isinstance(value, StageAutomaticOption)
