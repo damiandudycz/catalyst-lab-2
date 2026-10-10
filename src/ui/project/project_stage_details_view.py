@@ -30,7 +30,8 @@ from .project_stage_portage_confdir import (
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 from .project_stage_kernels import (
     KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_kernel_names, kernel_setting, own_kernel_settings,
-    set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel
+    set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
+    new_kernel_name, rename_kernel
 )
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -166,30 +167,25 @@ class ProjectStageDetailsView(Gtk.Box):
         inherits = stage_inherits_kernels(self.stage)
         releng_names = releng_kernel_names(self.project_directory, self.stage)
         for name in names:
-            row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name)
+            row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name,
+                                 on_rename=self._rename_kernel)
             row.set_expanded(name in expanded)
             remove_button = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove kernel", valign=Gtk.Align.CENTER)
             remove_button.add_css_class("flat")
             remove_button.connect("clicked", lambda _, name=name: self._remove_kernel(name))
             row.add_suffix(remove_button)
             self._add_kernel_row(row)
-        add_row = Adw.EntryRow(title="Add kernel", show_apply_button=True)
-        add_row.set_tooltip_text("Name of kernel, eg. gentoo. Catalyst builds it and installs to /boot")
-        add_row.connect("apply", self._on_add_kernel)
-        add_row.connect("changed", lambda row: row.remove_css_class("error"))
-        if self.boot_kernel_argument.required and not names:
-            warning = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
-            warning.add_css_class("warning")
-            warning.set_tooltip_text("This stage needs at least one kernel")
-            add_row.add_suffix(warning)
+        add_row = Adw.ButtonRow(title="Add kernel", start_icon_name="add-square-svgrepo-com-symbolic")
+        add_row.connect("activated", self._on_add_kernel)
         self._add_kernel_row(add_row)
         if not inherits and releng_names:
             releng_row = Adw.ButtonRow(title=f"Use kernels of releng spec ({', '.join(releng_names)})")
             releng_row.connect("activated", lambda _: self._set_kernel_names(None))
             self._add_kernel_row(releng_row)
+        required = "This stage needs at least one kernel. " if self.boot_kernel_argument.required and not names else ""
+        releng = "Kernels of releng spec, adding, removing or renaming kernel makes stage use its own list. " if inherits and names else ""
         self.kernels_pref_group.set_description(
-            ("Kernels of releng spec, adding or removing kernel makes stage use its own list. " if inherits and names else "")
-            + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
+            required + releng + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
         if args:
             self.apply_mode() # Kernel rows changed after argument was saved.
 
@@ -197,15 +193,24 @@ class ProjectStageDetailsView(Gtk.Box):
         self.kernels_pref_group.add(row)
         self.kernel_rows.append(row)
 
-    def _on_add_kernel(self, row: Adw.EntryRow):
-        name = row.get_text().strip()
+    def _on_add_kernel(self, row):
+        """New kernel with free name (renamed in its settings), its settings are shown."""
         names = stage_kernel_names(self.project_directory, self.stage)
-        if error := kernel_name_error(name, names):
-            row.add_css_class("error")
-            row.set_tooltip_text(error)
-            return
-        self._expand_kernel = {name} # Its settings are shown.
+        name = new_kernel_name(names)
+        self._expand_kernel = {name}
         self._set_kernel_names(names + [name])
+
+    def _rename_kernel(self, old_name: str, new_name: str) -> str | None:
+        """Returns error when name can't be used."""
+        if new_name == old_name:
+            return None
+        names = stage_kernel_names(self.project_directory, self.stage)
+        if error := kernel_name_error(new_name, names):
+            return error
+        rename_kernel(self.project_directory, self.stage, old_name, new_name)
+        self._expand_kernel = {new_name}
+        GLib.idle_add(lambda: self.load_kernel_rows(True) and False) # After apply signal of row being replaced.
+        return None
 
     def _remove_kernel(self, name: str):
         remove_kernel(self.project_directory, self.stage, name)
@@ -984,12 +989,19 @@ class _StageWithValue:
 class StageKernelRow(Adw.ExpanderRow):
     """Kernel of stage with its settings. Settings not set by stage show value of releng template, used when empty."""
 
-    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, kernel_name: str):
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, kernel_name: str, on_rename=None):
         super().__init__(title=GLib.markup_escape_text(kernel_name))
         self.project_directory = project_directory
         self.stage = stage
         self.kernel_name = kernel_name
         self.entry_rows = []
+        # Name is used by catalyst in file names (/boot/<name>) and names of settings (boot/kernel/<name>/...).
+        self.name_row = Adw.EntryRow(title="Name", text=kernel_name, show_apply_button=True)
+        self.name_row.set_tooltip_text("Name of kernel, used in names of its files in /boot")
+        self.name_row.connect("changed", lambda row: (row.remove_css_class("error"), row.set_tooltip_text("Name of kernel, used in names of its files in /boot")))
+        if on_rename:
+            self.name_row.connect("apply", lambda row: self._on_rename(row, on_rename))
+        self.add_row(self.name_row)
         for setting in KERNEL_SETTINGS:
             row = Adw.EntryRow(show_apply_button=True)
             row.set_tooltip_text(setting.description)
@@ -997,6 +1009,11 @@ class StageKernelRow(Adw.ExpanderRow):
             self.add_row(row)
             self.entry_rows.append((setting, row))
         self.load_state()
+
+    def _on_rename(self, row: Adw.EntryRow, on_rename):
+        if error := on_rename(self.kernel_name, row.get_text().strip()):
+            row.add_css_class("error")
+            row.set_tooltip_text(error)
 
     def set_advanced(self, advanced: bool) -> list[str]:
         """Shows settings of mode, returns titles of hidden settings set by stage."""

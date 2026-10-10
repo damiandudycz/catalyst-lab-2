@@ -25,7 +25,7 @@ class KernelSetting:
     is_list: bool = False
 
 KERNEL_SETTINGS = [
-    KernelSetting("sources", "Sources", "Kernel package, eg. sys-kernel/gentoo-kernel-bin or kernel from overlay"),
+    KernelSetting("sources", "Kernel package", "Package with kernel sources, eg. sys-kernel/gentoo-kernel (distribution kernel) or sys-kernel/gentoo-sources. Prebuilt kernels without sources (eg. raspberrypi-image) are installed as packages of stage instead"),
     KernelSetting("distkernel", "Distribution kernel", "yes: kernel package builds kernel and initramfs itself (gentoo-kernel)"),
     KernelSetting("config", "Configuration", "Kernel .config file, @STAGE_DIR@ and @REPO_DIR@ can be used"),
     KernelSetting("dracut_args", "Dracut arguments", "Arguments of dracut creating initramfs of distribution kernel"),
@@ -135,6 +135,22 @@ def remove_kernel(project_directory, stage, name: str):
     from .project_manager import ProjectManager
     set_kernel_names(project_directory, stage, [kernel for kernel in stage_kernel_names(project_directory, stage) if kernel != name])
     settings = {kernel: values for kernel, values in own_kernel_settings(stage).items() if kernel != name}
+    ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
+                                                  value=settings or None)
+
+def new_kernel_name(names: list[str]) -> str:
+    """Name of added kernel, not used by other kernels of stage (kernel, kernel-2...). It can be renamed."""
+    name, number = "kernel", 2
+    while name in names:
+        name, number = f"kernel-{number}", number + 1
+    return name
+
+def rename_kernel(project_directory, stage, old_name: str, new_name: str):
+    """Renames kernel, keeping its position and settings."""
+    from .project_manager import ProjectManager
+    set_kernel_names(project_directory, stage, [new_name if name == old_name else name
+                                                for name in stage_kernel_names(project_directory, stage)])
+    settings = {new_name if kernel == old_name else kernel: values for kernel, values in own_kernel_settings(stage).items()}
     ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
                                                   value=settings or None)
 
