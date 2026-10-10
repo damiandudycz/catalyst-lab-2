@@ -4,7 +4,7 @@ from typing import Self
 from .event_bus import EventBus, SharedEvent
 from .repository import Repository
 from .status_indicator import StatusIndicatorState, StatusIndicatorValues, StatusDetail, item_status, status_values
-from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY
+from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY, kill_instance_processes
 from .lima import lima_home as default_new_lima_home
 
 class BuildMachine:
@@ -211,13 +211,31 @@ class BuildMachine:
         with self._lock:
             self._set_status(self.STATUS_STOPPING)
             try:
-                success = run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home)
+                success = self._stop_instance(output_handler)
             finally:
                 self.refresh_status(during_transition=True)
             if success and self.status == self.STATUS_STOPPED:
                 # Swapped data is not needed after machine stops, its disk takes no space until next start.
                 self.delete_swap_disk(lambda line: None)
             return success
+
+    # Time for limactl to stop machine normally, and to force stop it.
+    STOP_TIMEOUT = 60
+    FORCE_STOP_TIMEOUT = 30
+
+    def _stop_instance(self, output_handler) -> bool:
+        """Stops Lima instance, with force when it doesn't stop normally (eg. machine crashed and its host agent doesn't
+        exit), killing its processes as last resort."""
+        if run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home, timeout=self.STOP_TIMEOUT):
+            return True
+        output_handler(f"Virtual machine {self.name} didn't stop, stopping it with force")
+        if run_limactl(["stop", "--force", self.instance_name], output_handler, home=self.lima_home, timeout=self.FORCE_STOP_TIMEOUT):
+            return True
+        instance = list_instances(self.lima_home).get(self.instance_name)
+        if instance and instance.get("status") != self.STATUS_STOPPED:
+            kill_instance_processes(self.instance_name, output_handler, home=self.lima_home)
+        instance = list_instances(self.lima_home).get(self.instance_name)
+        return instance is not None and instance.get("status") == self.STATUS_STOPPED
 
     def ensure_running(self, output_handler=print, process_holder: list | None = None):
         """Starts machine if needed, raises when it can't be started. Setup of machine is updated once while app runs,

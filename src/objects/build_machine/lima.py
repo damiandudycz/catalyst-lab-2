@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, os, shutil, subprocess, sys
+import json, os, shutil, signal, subprocess, sys, threading
 
 # ------------------------------------------------------------------------------
 # Lima (https://lima-vm.io) runs virtual machines used to build on systems other than Linux. On macOS it uses
@@ -91,8 +91,10 @@ def list_instances(home: str | None = None) -> dict[str, dict]:
             pass
     return instances
 
-def run_limactl(arguments: list[str], output_handler, process_holder: list | None = None, home: str | None = None) -> bool:
-    """Runs limactl with output passed to handler line by line."""
+def run_limactl(arguments: list[str], output_handler, process_holder: list | None = None, home: str | None = None,
+                timeout: float | None = None) -> bool:
+    """Runs limactl with output passed to handler line by line. With timeout, limactl (and processes it started) is
+    killed when it doesn't finish in time, and False is returned."""
     path = limactl_path()
     if path is None:
         raise RuntimeError(lima_unavailable_reason())
@@ -102,9 +104,50 @@ def run_limactl(arguments: list[str], output_handler, process_holder: list | Non
                                env=lima_environment(home))
     if process_holder is not None:
         process_holder.append(process)
-    for line in process.stdout:
-        output_handler(_clean_log_line(line.rstrip("\n")))
-    return process.wait() == 0
+    timed_out = threading.Event()
+    def kill():
+        timed_out.set()
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    timer = threading.Timer(timeout, kill) if timeout else None
+    if timer:
+        timer.daemon = True
+        timer.start()
+    try:
+        for line in process.stdout:
+            output_handler(_clean_log_line(line.rstrip("\n")))
+        result = process.wait()
+    finally:
+        if timer:
+            timer.cancel()
+    if timed_out.is_set():
+        output_handler(f"limactl {arguments[0]} didn't finish in {int(timeout)} seconds")
+        return False
+    return result == 0
+
+def kill_instance_processes(instance_name: str, output_handler, home: str | None = None):
+    """Last resort when limactl can't stop instance: kills its host agent with processes it started (driver of virtual
+    machine) and removes their pid and socket files, so instance is stopped."""
+    directory = os.path.join(home or lima_home(), instance_name)
+    for pid_file in ("ha.pid", "vz.pid"):
+        try:
+            with open(os.path.join(directory, pid_file), encoding="utf-8") as file:
+                pid = int(file.read().strip())
+        except (OSError, ValueError):
+            continue
+        output_handler(f"Killing process {pid} of {instance_name} ({pid_file})")
+        subprocess.run(["pkill", "-KILL", "-P", str(pid)], capture_output=True)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    for name in ("ha.pid", "ha.sock", "vz.pid", "default_ep.sock", "default_fd.sock"):
+        try:
+            os.remove(os.path.join(directory, name))
+        except OSError:
+            pass
 
 def run_as_root_in_instance(instance_name: str, script: str, output_handler, home: str | None = None) -> bool:
     """Runs shell script as root in running instance, output goes to handler line by line."""
