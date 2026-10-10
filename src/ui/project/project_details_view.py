@@ -234,10 +234,12 @@ class ProjectDetailsView(Gtk.Box):
         self._check_updates()
 
     def _check_updates(self):
-        """Template is checked for changes when project is opened (repositories are fetched with Git status)."""
+        """Template is checked for changes when project is opened (repositories are fetched with Git status), and again
+        when project gets other version of template (after update)."""
         path = self.project_directory.directory_path()
-        if TemplateState.load(path) is None:
+        if (state := TemplateState.load(path)) is None:
             return
+        self._checked_template_version = (state.commit, state.template_tree)
         def check():
             available = template_update_available(path)
             def show():
@@ -254,6 +256,10 @@ class ProjectDetailsView(Gtk.Box):
             self._source = "template"
             title, button = "Generated from template", "Update template"
             details = f"{state.template_name}\n{state.repository_url}" + (f" ({state.repository_path})" if state.repository_path else "")
+            if (state.commit, state.template_tree) != getattr(self, "_checked_template_version", None):
+                # Template version of project changed (updated), result of previous check doesn't apply anymore.
+                self._updates_available = None
+                self._check_updates()
             updates = self._updates_available
         elif origin := repository_origin(path):
             self._source = "repository"
