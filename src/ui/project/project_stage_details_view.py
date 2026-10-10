@@ -1,5 +1,5 @@
 import threading, uuid, os
-from gi.repository import Gtk, Gdk, Adw, GLib, Gio
+from gi.repository import Gtk, Gdk, Adw, GLib, Gio, Pango
 from dataclasses import dataclass
 from .project_directory import ProjectDirectory
 from .project_stage import (
@@ -10,8 +10,10 @@ from .project_stage import (
 )
 from .project_stage_arguments import (
     StageArguments, StageArgumentTargetDetails, StageArgumentOption,
-    StageArgumentType, StageArgumentDetails
+    StageArgumentType, StageArgumentDetails, StageArgumentLevel, stage_argument_level
 )
+from .cl_toggle_group import CLToggle, CLToggleGroup
+from .combo_row_popup import fit_popup_to_items
 from .project_manager import ProjectManager
 from .git_directory import GitDirectoryEvent
 from .project_stage import ProjectStageEvent
@@ -28,8 +30,12 @@ from .project_stage_portage_confdir import (
 )
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 from .project_stage_kernels import (
-    KERNEL_SETTINGS, stage_supports_kernels, stage_kernel_names, kernel_setting, own_kernel_settings, set_kernel_setting
+    KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_kernel_names, kernel_setting, own_kernel_settings,
+    set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
+    new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
+from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package, derived_distkernel
+
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
@@ -44,12 +50,61 @@ class ProjectStageDetailsView(Gtk.Box):
     configuration_pref_group = Gtk.Template.Child()
     kernels_pref_group = Gtk.Template.Child()
 
+    # Basic or advanced settings (STAGE_ARGUMENT_LEVELS), last choice is used by stages opened later while app runs.
+    advanced_default = False
+
     def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
         self.project_directory = project_directory
         self.stage = stage
         self.content_navigation_view = content_navigation_view
+        self.advanced = ProjectStageDetailsView.advanced_default
+        self._setup_mode_toggle()
         self.connect("realize", self.on_realize)
+
+    # Basic and advanced mode
+    # --------------------------------------------------------------------------
+
+    def _setup_mode_toggle(self):
+        """Basic / Advanced toggle in header bar, like Compact / Full of stages. Basic mode hides advanced settings,
+        note under them lists hidden settings with values set by stage."""
+        self.mode_toggle = CLToggleGroup(valign=Gtk.Align.CENTER)
+        self.mode_toggle.add_css_class("round")
+        self.mode_toggle.add_css_class("caption")
+        self.mode_toggle.add(CLToggle(label="Basic"))
+        self.mode_toggle.add(CLToggle(label="Advanced"))
+        self.mode_toggle.set_active(1 if self.advanced else 0)
+        self.mode_toggle.connect("notify::active", self._on_mode_changed)
+        self.hidden_settings_label = Gtk.Label(wrap=True, xalign=0, margin_start=12, margin_end=12, visible=False)
+        self.hidden_settings_label.add_css_class("caption")
+        self.hidden_settings_label.add_css_class("dimmed")
+        self.configuration_pref_group.get_parent().insert_child_after(self.hidden_settings_label, self.configuration_pref_group)
+
+    def header_bar_end_widgets(self) -> list[Gtk.Widget]:
+        return [self.mode_toggle]
+
+    def _on_mode_changed(self, group, _param):
+        self.advanced = group.get_active() == 1
+        ProjectStageDetailsView.advanced_default = self.advanced
+        self.apply_mode()
+
+    def apply_mode(self):
+        """Shows rows of current mode, and groups which have any of them."""
+        hidden_custom = []
+        for row in getattr(self, "configuration_rows", []):
+            visible = self.advanced or row.level == StageArgumentLevel.BASIC
+            row.set_visible(visible)
+            if not visible and _has_own_value(self.stage, row.argument.attribute_name):
+                hidden_custom.append(row.argument.display_name)
+        for row in getattr(self, "kernel_rows", []):
+            if isinstance(row, StageKernelRow):
+                hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
+        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group, self.configuration_pref_group):
+            group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
+        self.kernels_pref_group.set_visible(getattr(self, "boot_kernel_argument", None) is not None)
+        self.hidden_settings_label.set_label(
+            f"Advanced settings set by this stage: {', '.join(hidden_custom)}. Switch to Advanced to see them." if hidden_custom else "")
+        self.hidden_settings_label.set_visible(bool(hidden_custom))
 
     def on_realize(self, widget):
         self.get_root().set_focus(None)
@@ -71,16 +126,22 @@ class ProjectStageDetailsView(Gtk.Box):
             for row in self.configuration_rows:
                 row.pref_group.remove(row)
         self.configuration_rows = []
+        self.boot_kernel_argument = None
         # Load arguments rows
         arguments_details = load_catalyst_stage_arguments_details(
             toolset=self.project_directory.get_toolset(),
             target_name=self.stage.target
         )
         for name, arg in arguments_details.items():
+            if arg.details == StageArgumentDetails.boot_kernel:
+                # Edited as list of kernels in Kernels group (load_kernel_rows).
+                self.boot_kernel_argument = arg
+                continue
             group = self.pref_group_for_argument(argument=arg)
             if group:
                 row = self.create_row_for_argument(argument=arg)
                 row.pref_group = group
+                row.level = stage_argument_level(arg.details)
                 row.event_bus.subscribe(
                     ItemSelectionViewEvent.ITEM_CHANGED,
                     self.argument_changed,
@@ -91,29 +152,80 @@ class ProjectStageDetailsView(Gtk.Box):
                 # Kernels depend on boot/kernel and releng template, refreshed after argument is saved.
                 row.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.load_kernel_rows, "kernels")
         self.load_kernel_rows()
+        self.apply_mode()
 
     def load_kernel_rows(self, *args):
-        """Kernels of stage (boot/kernel) with their settings (boot/kernel/<name>/...). Expanded kernels stay expanded."""
-        expanded = {row.kernel_name for row in getattr(self, "kernel_rows", []) if row.get_expanded()}
+        """Kernels of stage (boot/kernel of catalyst, list of names) with settings of each (boot/kernel/<name>/...).
+        Kernels are added and removed one by one. Stage uses kernels of releng template until it changes them.
+        Expanded kernels stay expanded."""
+        expanded = {row.kernel_name for row in getattr(self, "kernel_rows", []) if isinstance(row, StageKernelRow) and row.get_expanded()}
+        expanded |= getattr(self, "_expand_kernel", set())
+        self._expand_kernel = set()
         for row in getattr(self, "kernel_rows", []):
             self.kernels_pref_group.remove(row)
         self.kernel_rows = []
-        if not stage_supports_kernels(self.project_directory, self.stage):
-            self.kernels_pref_group.set_visible(False)
-            return
-        self.kernels_pref_group.set_visible(True)
+        if self.boot_kernel_argument is None:
+            return # Target doesn't build kernels.
         names = stage_kernel_names(self.project_directory, self.stage)
+        inherits = stage_inherits_kernels(self.stage)
+        releng_names = releng_kernel_names(self.project_directory, self.stage)
         for name in names:
-            row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name)
+            row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name,
+                                 on_rename=self._rename_kernel)
             row.set_expanded(name in expanded)
-            self.kernels_pref_group.add(row)
-            self.kernel_rows.append(row)
-        if not names:
-            row = Adw.ActionRow(title="No kernels", subtitle="Add names of kernels in Boot / kernel")
-            row.kernel_name = None
-            row.get_expanded = lambda: False
-            self.kernels_pref_group.add(row)
-            self.kernel_rows.append(row)
+            remove_button = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove kernel", valign=Gtk.Align.CENTER)
+            remove_button.add_css_class("flat")
+            remove_button.connect("clicked", lambda _, name=name: self._remove_kernel(name))
+            row.add_suffix(remove_button)
+            self._add_kernel_row(row)
+        add_row = Adw.ButtonRow(title="Add kernel", start_icon_name="add-square-svgrepo-com-symbolic")
+        add_row.connect("activated", self._on_add_kernel)
+        self._add_kernel_row(add_row)
+        if not inherits and releng_names:
+            releng_row = Adw.ButtonRow(title=f"Use kernels of releng spec ({', '.join(releng_names)})")
+            releng_row.connect("activated", lambda _: self._set_kernel_names(None))
+            self._add_kernel_row(releng_row)
+        required = "This stage needs at least one kernel. " if self.boot_kernel_argument.required and not names else ""
+        releng = "Kernels of releng spec, adding, removing or renaming kernel makes stage use its own list. " if inherits and names else ""
+        self.kernels_pref_group.set_description(
+            required + releng + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
+        if args:
+            self.apply_mode() # Kernel rows changed after argument was saved.
+
+    def _add_kernel_row(self, row):
+        self.kernels_pref_group.add(row)
+        self.kernel_rows.append(row)
+
+    def _on_add_kernel(self, row):
+        """New kernel with free name (renamed in its settings), its settings are shown. It's distribution kernel, of
+        overlay used by stage when it has one, or of Gentoo."""
+        names = stage_kernel_names(self.project_directory, self.stage)
+        name = new_kernel_name(names)
+        self._expand_kernel = {name}
+        set_kernel_names(self.project_directory, self.stage, names + [name])
+        set_kernel_setting(self.project_directory, self.stage, name, "sources", default_kernel_package(self.project_directory, self.stage))
+        set_kernel_setting(self.project_directory, self.stage, name, "distkernel", "yes")
+        self.load_kernel_rows(True)
+
+    def _rename_kernel(self, old_name: str, new_name: str) -> str | None:
+        """Returns error when name can't be used."""
+        if new_name == old_name:
+            return None
+        names = stage_kernel_names(self.project_directory, self.stage)
+        if error := kernel_name_error(new_name, names):
+            return error
+        rename_kernel(self.project_directory, self.stage, old_name, new_name)
+        self._expand_kernel = {new_name}
+        GLib.idle_add(lambda: self.load_kernel_rows(True) and False) # After apply signal of row being replaced.
+        return None
+
+    def _remove_kernel(self, name: str):
+        remove_kernel(self.project_directory, self.stage, name)
+        self.load_kernel_rows(True)
+
+    def _set_kernel_names(self, names: list[str] | None):
+        set_kernel_names(self.project_directory, self.stage, names)
+        self.load_kernel_rows(True)
 
     def create_row_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesRow:
         if argument.details in CACHE_ARGUMENTS:
@@ -128,6 +240,8 @@ class ProjectStageDetailsView(Gtk.Box):
                 )
             case StageArgumentType.string_list | StageArgumentType.raw:
                 return StageTextListRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
+            case _ if argument.details in SCRIPT_ARGUMENTS:
+                return StageScriptRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
             case _:
                 # Stored automatic option is shown as unsupported value even if argument doesn't allow any.
                 if (argument.details and argument.details.automatic_options) or isinstance(getattr(self.stage, argument.attribute_name, None), StageAutomaticOption):
@@ -674,6 +788,136 @@ class StageTextEntrySourceRow(StageTextSourceRow):
     def custom_value_display(self, value) -> str:
         return value
 
+# Arguments with path of script run by catalyst in stage (fsscript). Scripts in stage folder are edited in the app.
+SCRIPT_ARGUMENTS = (StageArgumentDetails.stage4_fsscript, StageArgumentDetails.livecd_fsscript)
+_STAGE_DIR = "@STAGE_DIR@/"
+
+class StageScriptRow(StageTextEntrySourceRow):
+    """Path of script catalyst copies into stage and runs (fsscript). Script in stage folder (path @STAGE_DIR@/...) is
+    written in the app: its text is saved to the file, which is part of the project, and @STAGE_DIR@ is replaced with the
+    folder when building. Without script, one can be written in stage folder."""
+
+    _NEW_SCRIPT = "#!/bin/bash\n# Runs in stage after its packages are installed.\nset -e\n\n"
+
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, argument: StageArgumentTargetDetails):
+        self.project_directory = project_directory
+        self.stage = stage
+        self._script_rows_created = False
+        super().__init__(project_directory=project_directory, stage=stage, argument=argument)
+        self._create_script_rows()
+        self.update_display()
+
+    def _create_script_rows(self):
+        self.text_view = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=True,
+                                      top_margin=8, bottom_margin=8, left_margin=8, right_margin=8)
+        self.text_view.set_size_request(-1, 240)
+        self.text_view.get_buffer().connect("changed", lambda buffer: self._update_script_state())
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        self.text_view.add_controller(key_controller)
+        self.script_label = Gtk.Label(halign=Gtk.Align.START, hexpand=True, ellipsize=Pango.EllipsizeMode.START)
+        self.script_label.add_css_class("dimmed")
+        self.script_label.add_css_class("caption")
+        self.revert_button = Gtk.Button(label="Revert")
+        self.revert_button.connect("clicked", lambda _: self._load_script())
+        self.save_button = Gtk.Button(label="Save")
+        self.save_button.add_css_class("suggested-action")
+        self.save_button.connect("clicked", lambda _: self._save_script())
+        buttons = Gtk.Box(spacing=6)
+        for widget in (self.script_label, self.revert_button, self.save_button):
+            buttons.append(widget)
+        editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.append(Gtk.Frame(child=Gtk.ScrolledWindow(child=self.text_view, min_content_height=240, max_content_height=480,
+                                                          propagate_natural_height=True, hscrollbar_policy=Gtk.PolicyType.NEVER)))
+        editor.append(buttons)
+        self.script_row = Gtk.ListBoxRow(activatable=False, selectable=False, child=editor)
+        self.add_row(self.script_row)
+        self.write_row = Adw.ButtonRow(title="Write script in stage folder", start_icon_name="document-edit-symbolic")
+        self.write_row.connect("activated", lambda _: self._write_new_script())
+        self.add_row(self.write_row)
+        self.outside_row = Adw.ActionRow(title="Script is outside of project", subtitle="Only scripts in stage folder (@STAGE_DIR@/...) are edited in the app")
+        self.add_row(self.outside_row)
+        self._script_rows_created = True
+        self._loaded_path = None
+
+    def _script_file(self, path) -> str | None:
+        """File of script in stage folder, None for other paths."""
+        if not isinstance(path, str) or not path.startswith(_STAGE_DIR):
+            return None
+        relative = os.path.normpath(path[len(_STAGE_DIR):])
+        if relative.startswith("..") or os.path.isabs(relative):
+            return None
+        return os.path.join(self.project_directory.stage_directory_path(self.stage.name), relative)
+
+    def update_display(self):
+        super().update_display()
+        if not getattr(self, "_script_rows_created", False):
+            return
+        custom = self.is_custom()
+        path = self.value if custom else None
+        file = self._script_file(path)
+        self.script_row.set_visible(custom and file is not None)
+        self.write_row.set_visible(custom and not path)
+        self.outside_row.set_visible(custom and bool(path) and file is None)
+        if file is not None and path != self._loaded_path:
+            self._load_script()
+
+    def _load_script(self):
+        file = self._script_file(self.value if self.is_custom() else None)
+        try:
+            with open(file, encoding="utf-8") as script:
+                text = script.read()
+        except (OSError, TypeError):
+            text = ""
+        self._loaded_path = self.value
+        self._saved_text = text
+        self.text_view.get_buffer().set_text(text)
+        self._update_script_state()
+
+    def _text(self) -> str:
+        buffer = self.text_view.get_buffer()
+        return buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+
+    def _update_script_state(self):
+        changed = self._text() != getattr(self, "_saved_text", None)
+        self.save_button.set_sensitive(changed)
+        self.revert_button.set_sensitive(changed)
+        file = self._script_file(self.value if self.is_custom() else None)
+        name = os.path.relpath(file, self.project_directory.directory_path()) if file else ""
+        self.script_label.set_label(f"{name} · not saved" if changed else name)
+
+    def _save_script(self):
+        file = self._script_file(self.value if self.is_custom() else None)
+        if file is None:
+            return
+        text = self._text()
+        os.makedirs(os.path.dirname(file), exist_ok=True)
+        with open(file, "w", encoding="utf-8") as script:
+            script.write(text)
+        self._saved_text = text
+        self._update_script_state()
+        # Script is file of project, its Git status changes.
+        self.project_directory.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, self.project_directory)
+
+    def _write_new_script(self):
+        """New script in stage folder, its path is set as value."""
+        name = "fsscript.sh"
+        number = 2
+        folder = self.project_directory.stage_directory_path(self.stage.name)
+        while os.path.exists(os.path.join(folder, name)):
+            name, number = f"fsscript-{number}.sh", number + 1
+        self.set_editor_value(_STAGE_DIR + name)
+        self.apply_custom_value()
+        self.text_view.get_buffer().set_text(self._NEW_SCRIPT)
+        self._save_script()
+        GLib.idle_add(lambda: self.text_view.grab_focus() and False)
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        if keyval == Gdk.KEY_s and state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
+            self._save_script()
+            return True
+        return False
+
 class StageTextListRow(StageTextSourceRow):
     """Edits list arguments (packages, use, rcadd...) one entry per line. Custom value is stored as list[str]."""
 
@@ -882,40 +1126,153 @@ class _StageWithValue:
         return self._value if name == self._attribute_name else getattr(self._stage, name)
 
 class StageKernelRow(Adw.ExpanderRow):
-    """Kernel of stage with its settings. Settings not set by stage show value of releng template, used when empty."""
+    """Kernel of stage with its settings. Settings not set by stage use values of releng template, which are shown
+    with them. Settings are edited by their type: switches, lists (one entry per line) and texts."""
 
-    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, kernel_name: str):
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, kernel_name: str, on_rename=None):
         super().__init__(title=GLib.markup_escape_text(kernel_name))
         self.project_directory = project_directory
         self.stage = stage
         self.kernel_name = kernel_name
+        self._loading = False
+        # Name is used by catalyst in file names (/boot/<name>) and names of settings (boot/kernel/<name>/...).
+        self.name_row = Adw.EntryRow(title="Name", text=kernel_name, show_apply_button=True)
+        self.name_row.set_tooltip_text("Name of kernel, used in names of its files in /boot")
+        self.name_row.connect("changed", lambda row: (row.remove_css_class("error"), row.set_tooltip_text("Name of kernel, used in names of its files in /boot")))
+        if on_rename:
+            self.name_row.connect("apply", lambda row: self._on_rename(row, on_rename))
+        self.add_row(self.name_row)
         self.entry_rows = []
         for setting in KERNEL_SETTINGS:
-            row = Adw.EntryRow(show_apply_button=True)
+            match setting.type:
+                case _ if setting.key == "sources":
+                    row = KernelPackageRow(setting, on_select=self._on_package_selected)
+                case KernelSettingType.BOOLEAN:
+                    row = Adw.SwitchRow(title=GLib.markup_escape_text(setting.title))
+                    row.connect("notify::active", self._on_switch_toggled, setting)
+                case KernelSettingType.LIST:
+                    row = KernelListRow(setting, on_apply=lambda values, setting=setting: self._set(setting, values))
+                case _:
+                    row = Adw.EntryRow(show_apply_button=True)
+                    row.connect("apply", lambda row, setting=setting: self._set(setting, row.get_text().strip()))
             row.set_tooltip_text(setting.description)
-            row.connect("apply", self._on_apply, setting)
             self.add_row(row)
             self.entry_rows.append((setting, row))
+            if isinstance(row, KernelPackageRow):
+                self.add_row(row.custom_row)
+        # Distribution kernel is set by kind of package, switch is shown only when it isn't known. Kinds of packages
+        # are read in background (cached), switch is hidden until then.
+        self.packages = None
+        self._advanced = True
+        self._switch_needed = False
         self.load_state()
+        def load_packages():
+            try:
+                packages = load_kernel_packages(project_directory, stage)
+            except Exception as e:
+                print(f"Failed to read kernel packages: {e}")
+                packages = []
+            GLib.idle_add(lambda: self._packages_loaded(packages) and False)
+        threading.Thread(target=load_packages, daemon=True).start()
+
+    def _packages_loaded(self, packages):
+        self.packages = packages
+        for setting, row in self.entry_rows:
+            if isinstance(row, KernelPackageRow):
+                row.set_packages(packages)
+        self.load_state()
+        self._update_switch_visibility()
+
+    def _derived_distkernel(self) -> bool | None:
+        package, _ = kernel_setting(self.project_directory, self.stage, self.kernel_name, "sources")
+        return derived_distkernel(package, self.packages) if self.packages is not None else None
+
+    def _update_switch_visibility(self):
+        for setting, row in self.entry_rows:
+            if setting.key == "distkernel":
+                level_visible = self._advanced or KERNEL_SETTING_LEVELS[setting.key] == StageArgumentLevel.BASIC
+                row.set_visible(level_visible and self._switch_needed)
+
+    def _on_rename(self, row: Adw.EntryRow, on_rename):
+        if error := on_rename(self.kernel_name, row.get_text().strip()):
+            row.add_css_class("error")
+            row.set_tooltip_text(error)
+
+    def set_advanced(self, advanced: bool) -> list[str]:
+        """Shows settings of mode, returns titles of hidden settings set by stage."""
+        own = own_kernel_settings(self.stage).get(self.kernel_name, {})
+        hidden = []
+        self._advanced = advanced
+        for setting, row in self.entry_rows:
+            visible = advanced or KERNEL_SETTING_LEVELS[setting.key] == StageArgumentLevel.BASIC
+            row.set_visible(visible)
+            if not visible and own.get(setting.key) not in (None, "", []) and setting.key != "distkernel":
+                hidden.append(setting.title)
+        self._update_switch_visibility()
+        return hidden
 
     def load_state(self):
+        self._loading = True
         own = own_kernel_settings(self.stage).get(self.kernel_name, {})
         summary = []
         for setting, row in self.entry_rows:
             value, is_own = kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key)
-            text = self._text(own.get(setting.key))
-            row.set_text(text)
-            # Empty entry shows title as placeholder, with value of releng template used then.
-            inherited = self._text(value) if value is not None and not is_own else ""
-            row.set_title(GLib.markup_escape_text(f"{setting.title} (releng: {inherited})" if inherited else setting.title))
-            if value is not None and setting.key in ("sources", "distkernel", "config"):
-                summary.append(f"{setting.key}: {self._text(value)}")
-        self.set_subtitle(GLib.markup_escape_text(" · ".join(summary) or "Default settings of catalyst"))
+            inherited = value is not None and not is_own
+            match setting.type:
+                case _ if setting.key == "sources":
+                    row.load(own.get(setting.key), value if inherited else None)
+                case KernelSettingType.BOOLEAN:
+                    derived = self._derived_distkernel() if setting.key == "distkernel" else None
+                    if setting.key == "distkernel":
+                        self._switch_needed = derived is None and self.packages is not None
+                    if derived is not None:
+                        value = "yes" if derived else None
+                    row.set_active(kernel_setting_enabled(value))
+                    row.set_subtitle("Kind of package is not known, set how catalyst builds it" if setting.key == "distkernel"
+                                     else "From releng spec" if inherited else "Set by this stage" if is_own else "")
+                case KernelSettingType.LIST:
+                    row.load(own.get(setting.key) or [], value if inherited else None)
+                case _:
+                    row.set_text(self._text(own.get(setting.key)))
+                    # Empty entry shows title as placeholder, with value of releng template used then.
+                    row.set_title(GLib.markup_escape_text(f"{setting.title} (releng: {self._text(value)})" if inherited else setting.title))
+            if setting.key == "sources" and value:
+                summary.append(self._text(value))
+            elif setting.key == "distkernel":
+                summary.append("distribution kernel" if kernel_setting_enabled(value) else "genkernel")
+        if hasattr(self, "_advanced"):
+            self._update_switch_visibility()
+        self.set_subtitle(GLib.markup_escape_text(" · ".join(summary)))
+        self._loading = False
 
-    def _on_apply(self, row: Adw.EntryRow, setting):
-        text = row.get_text().strip()
-        value = text.split() if setting.is_list else text
+    def _on_switch_toggled(self, row: Adw.SwitchRow, _param, setting):
+        if self._loading:
+            return
+        # Stage stores value only when it differs from releng template (no turns off releng yes, and isn't written).
+        releng = kernel_setting_enabled(releng_kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key))
+        enabled = row.get_active()
+        self._set(setting, None if enabled == releng else "yes" if enabled else "no")
+
+    def _set(self, setting, value):
         set_kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key, value or None)
+        self.load_state()
+
+    def _own_value_for(self, key: str, value):
+        """Value stored by stage: none when it's the same as value of releng template."""
+        releng = releng_kernel_setting(self.project_directory, self.stage, self.kernel_name, key)
+        if key == "distkernel":
+            return None if value == kernel_setting_enabled(releng) else "yes" if value else "no"
+        return None if value == releng else value
+
+    def _on_package_selected(self, atom: str | None, kind: KernelPackageKind | None):
+        """Package of kernel (None uses releng template), Distribution kernel follows kind of package (also typed one,
+        recognized by its name)."""
+        set_kernel_setting(self.project_directory, self.stage, self.kernel_name, "sources",
+                           None if atom is None else self._own_value_for("sources", atom))
+        derived = self._derived_distkernel()
+        if derived is not None:
+            set_kernel_setting(self.project_directory, self.stage, self.kernel_name, "distkernel",
+                               self._own_value_for("distkernel", derived))
         self.load_state()
 
     @staticmethod
@@ -923,3 +1280,154 @@ class StageKernelRow(Adw.ExpanderRow):
         if value is None:
             return ""
         return " ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+
+class KernelPackageRow(Adw.ComboRow):
+    """Package of kernel, chosen in popup from kernels of snapshot and overlays of stage which catalyst can build (with
+    package of releng template), or typed in entry shown under it when Custom package is chosen (eg. with version).
+    Packages are given by kernel row when they are read."""
+
+    _CUSTOM = object() # Option of custom package.
+    _NOT_SET = object() # Option shown when package isn't set (catalyst uses its default).
+
+    def __init__(self, setting, on_select):
+        super().__init__(title=GLib.markup_escape_text(setting.title), enable_search=True)
+        fit_popup_to_items(self)
+        self.on_select = on_select
+        self.packages = None
+        self.own = None
+        self.inherited = None
+        self.options = []
+        self._building = False
+        self._custom_chosen = False # Custom option chosen, entry is shown before package is typed.
+        self.custom_row = Adw.EntryRow(title="Custom package, eg. =sys-kernel/gentoo-kernel-6.12.8", show_apply_button=True, visible=False)
+        self.custom_row.connect("apply", self._on_custom_apply)
+        self.connect("notify::selected", self._on_selected)
+
+    def set_packages(self, packages):
+        self.packages = [package for package in packages if package.supported]
+        self._build()
+
+    def load(self, own, inherited):
+        self.own, self.inherited = own, inherited
+        self._build()
+
+    def _build(self):
+        """Options of popup and selected one, rebuilt only when they change (popup and page don't move)."""
+        known = {package.atom: package for package in self.packages or []}
+        options = []
+        if self.inherited:
+            options.append((None, f"From releng spec: {self.inherited}"))
+        elif not self.own:
+            options.append((self._NOT_SET, "Not set (catalyst default)"))
+        for atom, package in known.items():
+            overlays = [repository for repository in package.repositories if repository != "gentoo"]
+            options.append((atom, f"{atom} ({', '.join(overlays)})" if overlays else atom))
+        if self.packages is None and self.own and self.own not in known:
+            options.append((self.own, self.own)) # Until packages are read.
+        options.append((self._CUSTOM, "Custom package..."))
+        if self.own and self.own in known:
+            selected = self.own
+        elif self.own and self.packages is not None:
+            selected = self._CUSTOM
+        elif self.own:
+            selected = self.own
+        else:
+            selected = self._CUSTOM if self._custom_chosen else None if self.inherited else self._NOT_SET
+        self._building = True
+        if [label for _, label in options] != [label for _, label in self.options]:
+            self.options = options
+            self.set_model(Gtk.StringList.new([label for _, label in options]))
+        self.set_selected(next((index for index, (value, _) in enumerate(self.options) if value is selected or value == selected), 0))
+        self._building = False
+        custom = selected is self._CUSTOM
+        self.custom_row.set_visible(custom)
+        if custom and self.own and self.custom_row.get_text() != self.own:
+            self.custom_row.set_text(self.own)
+        package = known.get(self.own or self.inherited or "")
+        self.set_subtitle(GLib.markup_escape_text(
+            package.details if package else
+            "Custom package" if self.own else
+            "Catalyst uses sys-kernel/gentoo-kernel (distribution kernel) or sys-kernel/gentoo-sources" if not self.inherited else ""))
+
+    def _on_selected(self, row, _param):
+        if self._building or not 0 <= self.get_selected() < len(self.options):
+            return
+        value = self.options[self.get_selected()][0]
+        self._custom_chosen = value is self._CUSTOM
+        if value is self._CUSTOM:
+            self.custom_row.set_visible(True)
+            GLib.idle_add(lambda: self.custom_row.grab_focus() and False)
+        elif value is not self._NOT_SET:
+            GLib.idle_add(lambda: self.on_select(value, None) and False)
+
+    def _on_custom_apply(self, row):
+        if text := row.get_text().strip():
+            GLib.idle_add(lambda: self.on_select(text, None) and False)
+
+class KernelListRow(Adw.ExpanderRow):
+    """List setting of kernel, edited one entry per line like list settings of stage. Empty list uses value of
+    releng template, shown in subtitle."""
+
+    def __init__(self, setting, on_apply):
+        super().__init__(title=GLib.markup_escape_text(setting.title))
+        self.on_apply = on_apply
+        self.values: list[str] = []
+        self._loaded = False
+        self.text_view = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                                      top_margin=8, bottom_margin=8, left_margin=8, right_margin=8)
+        self.text_view.set_size_request(-1, 72)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        self.text_view.add_controller(key_controller)
+        hint = Gtk.Label(label="One entry per line. Ctrl+Enter to apply.", halign=Gtk.Align.START, hexpand=True)
+        hint.add_css_class("dimmed")
+        hint.add_css_class("caption")
+        revert_button = Gtk.Button(label="Revert")
+        revert_button.connect("clicked", lambda _: self._set_text(self.values))
+        apply_button = Gtk.Button(label="Apply")
+        apply_button.add_css_class("suggested-action")
+        apply_button.connect("clicked", lambda _: self._apply())
+        buttons = Gtk.Box(spacing=6)
+        for widget in (hint, revert_button, apply_button):
+            buttons.append(widget)
+        editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.append(Gtk.Frame(child=self.text_view))
+        editor.append(buttons)
+        self.add_row(Gtk.ListBoxRow(activatable=False, selectable=False, child=editor))
+
+    def load(self, values: list[str], inherited: list[str] | None):
+        # Text is replaced only when value changed, edits not applied yet stay (and page doesn't move).
+        if list(values) != self.values or not self._loaded:
+            self._set_text(list(values))
+        self._loaded = True
+        self.values = list(values)
+        if self.values:
+            subtitle = ", ".join(self.values)
+        elif inherited:
+            subtitle = f"From releng spec: {', '.join(inherited)}"
+        else:
+            subtitle = "None"
+        self.set_subtitle(GLib.markup_escape_text(subtitle))
+
+    def _set_text(self, values: list[str]):
+        self.text_view.get_buffer().set_text("\n".join(values))
+
+    def _apply(self):
+        buffer = self.text_view.get_buffer()
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        self.on_apply([line.strip() for line in text.splitlines() if line.strip()])
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.CONTROL_MASK:
+            self._apply()
+            return True
+        return False
+
+def _has_own_value(stage: ProjectStage, attribute: str) -> bool:
+    """Stage sets value itself (not automatic option like inheriting from parent or releng spec)."""
+    value = getattr(stage, attribute, None)
+    if value is None or value == "" or value == []:
+        return False
+    if isinstance(value, list):
+        return not all(isinstance(item, StageAutomaticOption) for item in value)
+    return not isinstance(value, StageAutomaticOption)

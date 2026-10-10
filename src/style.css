@@ -59,3 +59,8 @@ button.small-button {
   padding: 2px 10px;
   border-radius: 6px;
 }
+/* Expander rows nested in expanded expander row (eg. list settings of kernel): Adwaita styles arrows of all rows
+   inside expanded row as expanded, collapsed nested rows get normal arrow again. */
+row.expander:checked row.expander:not(:checked) image.expander-row-arrow { opacity: var(--dim-opacity); color: inherit; }
+row.expander:checked row.expander:not(:checked) image.expander-row-arrow:dir(ltr) { -gtk-icon-transform: rotate(0.5turn); }
+row.expander:checked row.expander:not(:checked) image.expander-row-arrow:dir(rtl) { -gtk-icon-transform: rotate(-0.5turn); }
