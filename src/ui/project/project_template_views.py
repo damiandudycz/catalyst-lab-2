@@ -238,6 +238,12 @@ class ProjectTemplateOptionsView(Gtk.Box):
             if stage is None:
                 continue # Not created for selected options.
             stage_row = Adw.ActionRow(title=GLib.markup_escape_text(stage.name))
+            if inherited_from := self.template.group_inherited_from(group.id, stage_id, names):
+                # Built from stage that gets group, it has its packages and files already.
+                stage_row.set_subtitle(GLib.markup_escape_text(f"Included from {generated[inherited_from].name}"))
+                stage_row.add_prefix(Gtk.CheckButton(active=True, sensitive=False))
+                row.add_row(stage_row)
+                continue
             check_button = Gtk.CheckButton(active=stage_id in selected_stages)
             check_button.connect("toggled", lambda button, stage_id=stage_id: self._set_group_stage(group.id, stage_id, button.get_active()))
             stage_row.add_prefix(check_button)
