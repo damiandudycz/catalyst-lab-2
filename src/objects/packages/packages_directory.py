@@ -78,6 +78,10 @@ class PackagesDirectory(Serializable):
         if self.architecture == architecture and flags != self.cpu_flags:
             problems.append(StatusDetail(StatusIndicatorState.WARNING,
                                          f"Made for CPU flags {self.cpu_flags or '(defaults)'}, project uses {flags or '(defaults)'}"))
+        for stage, stage_flags, root_flags in stages_with_other_cpu_flags(project):
+            problems.append(StatusDetail(StatusIndicatorState.WARNING,
+                                         f"Stage {stage.name} uses CPU flags {stage_flags or '(defaults)'}, other than its root "
+                                         f"stage ({root_flags or '(defaults)'}). Its packages are kept in this folder too."))
         return problems
 
     def is_usable_by(self, project) -> bool:
@@ -121,6 +125,33 @@ def project_cpu_flags(project) -> str | None:
                     and isinstance(value := getattr(stage, StageArgumentDetails.common_flags.name, None), str)
                     and value.strip()})
     return " | ".join(flags) or None
+
+def stages_with_other_cpu_flags(project) -> list[tuple]:
+    """Stages built with other common flags than root stage they are built from (stage, its flags, flags of root).
+    CPU flags of project (and of its binary packages folder) are flags of root stages, packages of these stages are kept
+    in the same folder. Flags that can't be determined before building are skipped."""
+    from .project_stage_arguments import StageArgumentDetails
+    from .project_stage_value_resolver import resolve_stage_argument, parent_stage, UNRESOLVED
+    def flags_of(stage):
+        value = resolve_stage_argument(project, stage, StageArgumentDetails.common_flags.value)
+        if value is UNRESOLVED:
+            return UNRESOLVED
+        return (value.strip() or None) if isinstance(value, str) else None
+    def root_of(stage):
+        visited = set()
+        while (parent := parent_stage(project_directory=project, stage=stage)) is not None and parent.id not in visited:
+            visited.add(stage.id)
+            stage = parent
+        return stage
+    result = []
+    for stage in project.stages:
+        root = root_of(stage)
+        if root is stage:
+            continue
+        stage_flags, root_flags = flags_of(stage), flags_of(root)
+        if UNRESOLVED not in (stage_flags, root_flags) and stage_flags != root_flags:
+            result.append((stage, stage_flags, root_flags))
+    return result
 
 def packages_directory_for_id(directory_id) -> PackagesDirectory | None:
     return next((directory for directory in Repository.PackagesDirectory.value if directory.id == directory_id), None)

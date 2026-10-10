@@ -4,6 +4,7 @@ from gi.repository import Gtk, GLib, Adw
 from .repository import Repository, RepositoryEvent
 from .architecture import Architecture
 from .event_bus import SharedEvent
+from .status_indicator import StatusIndicatorState
 from .packages_directory import (
     PackagesDirectory, create_packages_directory, delete_packages_directory, is_packages_name_available
 )
@@ -93,9 +94,16 @@ class PackagesDirectoryDetailsView(Gtk.Box):
             row = Adw.ActionRow(title=GLib.markup_escape_text(project.name), icon_name="notes-minimalistic-svgrepo-com-symbolic")
             problems = directory.compatibility(project)
             if problems:
-                row.set_subtitle(GLib.markup_escape_text("\n".join(problem.text for problem in problems)))
+                # Like wrong values in stage details: highlighted row, details of problems in tooltip of icon.
+                error = any(problem.state == StatusIndicatorState.ERROR for problem in problems)
+                style = "error" if error else "warning"
+                row.add_css_class(style)
+                row.set_subtitle("Packages can't be used by this project" if error else
+                                 f"Packages might not run on machines of this project ({len(problems)} "
+                                 f"{'issue' if len(problems) == 1 else 'issues'})")
                 icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
-                icon.add_css_class("warning")
+                icon.add_css_class(style)
+                icon.set_tooltip_text("\n\n".join(problem.text for problem in problems))
                 row.add_suffix(icon)
             projects.add(row)
         if not directory.projects:
