@@ -2,6 +2,7 @@ from gi.repository import Gtk, Adw
 from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection, app_section
 from .repository import Repository, RepositoryEvent
+from .initial_setup_page import InitialSetupPage
 
 @app_section(title="Welcome", label="Home", icon="go-home-symbolic", show_in_side_bar=False, show_side_bar=False, order=1_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/welcome/welcome_section.ui')
@@ -30,10 +31,8 @@ class WelcomeSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_start_row_activated(self, _):
-        self.content_navigation_view.push_section(
-            AppSection.EnvironmentsSection
-        )
-        Repository.Settings.value.initial_setup_done = True
+        # Setup is done when its last step is finished.
+        InitialSetupPage.push(self.content_navigation_view)
 
     @Gtk.Template.Callback()
     def on_projects_row_activated(self, _):
