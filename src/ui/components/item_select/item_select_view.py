@@ -4,6 +4,7 @@ from enum import Enum, auto
 from .repository import Repository, RepositoryEvent
 from .repository_list_view import ItemRow
 from .event_bus import EventBus
+from .scroll_position import preserved_scroll_position
 
 class ItemSelectionViewEvent(Enum):
     ITEM_CHANGED = auto() # Means selection was changed or currently selected state changed.
@@ -61,7 +62,8 @@ class ItemSelectionView(Gtk.Box):
                 self.repository.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self._on_repository_changed)
 
     def _on_repository_changed(self, *args):
-        self._load_items()
+        with preserved_scroll_position(self):
+            self._load_items()
 
     def items(self) -> list:
         return self.static_list if hasattr(self, 'static_list') else self.repository.value

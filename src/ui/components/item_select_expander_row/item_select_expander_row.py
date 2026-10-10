@@ -4,6 +4,7 @@ from enum import Enum, auto
 from .repository import Repository, RepositoryEvent
 from .repository_list_view import ItemRow
 from .event_bus import EventBus
+from .scroll_position import preserved_scroll_position
 from .item_select_view import ItemSelectionViewEvent
 
 class ItemSelectionExpanderRow(Adw.ExpanderRow):
@@ -63,7 +64,8 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         self.add_suffix(self.warning_icon)
 
     def _on_repository_changed(self, *args):
-        self._load_items()
+        with preserved_scroll_position(self):
+            self._load_items()
 
     def items(self) -> list:
         return self.static_list if hasattr(self, 'static_list') else self.repository.value
