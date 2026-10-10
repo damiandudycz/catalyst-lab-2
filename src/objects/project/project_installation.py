@@ -8,7 +8,7 @@ from .releng_directory import RelengDirectory
 from .snapshot import Snapshot
 from .project_directory import ProjectConfiguration
 from .architecture import Architecture
-from .project_template import apply_project_template, load_cloned_template
+from .project_template import apply_project_template, load_cloned_template, ensure_template_overlays
 import os, shutil
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage,
@@ -50,7 +50,12 @@ class ProjectInstallation(GitInstallation):
         if self.configuration.source == GitDirectorySource.TEMPLATE:
             # Stages of template get default values from configuration, so it's saved before. Content is created before
             # Git repository is configured, so new repository has it in first commit.
-            self.stages[1:1] = [save_config, ProjectInstallationStepApplyTemplate(multistage_process=self)]
+            # Overlays used by template are added first, as separate step (they can be cloned).
+            template_steps = [save_config]
+            if self.configuration.data.template.overlays:
+                template_steps.append(ProjectInstallationStepAddOverlays(multistage_process=self))
+            template_steps.append(ProjectInstallationStepApplyTemplate(multistage_process=self))
+            self.stages[1:1] = template_steps
         else:
             self.stages.append(save_config)
 
@@ -87,6 +92,31 @@ class ProjectInstallationStepSaveConfig(MultiStageProcessStage):
             print(f"Error during '{self.name}': {e}")
             self.complete(MultiStageProcessStageState.FAILED)
 
+class ProjectInstallationStepAddOverlays(MultiStageProcessStage):
+    """Adds overlays used by template for selected options: overlays already added from the same URLs are used, others
+    are cloned to overlays."""
+    def __init__(self, multistage_process: MultiStageProcess):
+        super().__init__(
+            name="Add overlays",
+            description="Adds overlays used by template",
+            multistage_process=multistage_process
+        )
+    def start(self):
+        super().start()
+        try:
+            process = self.multistage_process
+            template = process.configuration.data.template
+            names = template.resolve(process.configuration.data.selected, project_name=process.directory.name)
+            overlays = template.generate(names).overlays
+            if not overlays:
+                self.log("No overlays are used for selected options")
+            process.template_overlay_ids = ensure_template_overlays(overlays, log=self.log, progress=self._update_progress)
+            self.complete(MultiStageProcessStageState.COMPLETED)
+        except Exception as e:
+            self.log(f"Error: {e}")
+            print(f"Error during '{self.name}': {e}")
+            self.complete(MultiStageProcessStageState.FAILED)
+
 class ProjectInstallationStepApplyTemplate(MultiStageProcessStage):
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(
@@ -112,7 +142,8 @@ class ProjectInstallationStepApplyTemplate(MultiStageProcessStage):
                     self.log(f"{variable.title}: {names[variable.id]}")
                 # Cloned template repository is replaced with generated content, its history is kept.
                 apply_project_template(project_directory=directory, template=template, names=names, log=self.log,
-                                       replace_content=selection.repository_url is not None)
+                                       replace_content=selection.repository_url is not None,
+                                       overlay_ids=getattr(self.multistage_process, "template_overlay_ids", None))
             finally:
                 if temporary_directory:
                     shutil.rmtree(temporary_directory, ignore_errors=True)

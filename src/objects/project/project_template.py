@@ -926,13 +926,16 @@ def find_overlay_for_url(url: str):
     return next((overlay for overlay in Repository.OverlayDirectory.value
                  if overlay.remote_url and _normalized_git_url(overlay.remote_url) == _normalized_git_url(url)), None)
 
-def ensure_template_overlays(overlays: list[TemplateOverlay], log: Callable[[str], None]) -> dict[str, uuid.UUID]:
+def ensure_template_overlays(overlays: list[TemplateOverlay], log: Callable[[str], None],
+                             progress: Callable[[float], None] | None = None) -> dict[str, uuid.UUID]:
     """Ids of overlays used by template, by template ids of overlays. Overlays that were not added yet are cloned and
     added to overlays of app."""
     from .overlay_directory import OverlayDirectory
     from .overlay_manager import OverlayManager
     overlay_ids = {}
-    for overlay in overlays:
+    for index, overlay in enumerate(overlays):
+        if progress:
+            progress(index / len(overlays))
         if existing := find_overlay_for_url(overlay.url):
             log(f"Using overlay {existing.name} ({overlay.url})")
             overlay_ids[overlay.id] = existing.id
@@ -954,14 +957,18 @@ def ensure_template_overlays(overlays: list[TemplateOverlay], log: Callable[[str
     return overlay_ids
 
 def apply_project_template(project_directory, template: ProjectTemplate, names: dict[str, Any],
-                           log: Callable[[str], None], replace_content: bool = False):
+                           log: Callable[[str], None], replace_content: bool = False,
+                           overlay_ids: dict[str, uuid.UUID] | None = None):
     """Creates files and stages of template in project directory. Project needs configuration (toolset, releng) set
     already, default arguments of stages are set like for stages added in app. With replace_content other files of
     directory (eg. cloned template repository) are removed first, Git directory is kept."""
     from .project_stage import ProjectStage, apply_default_stage_arguments
     from .project_manager import ProjectManager
     generated = template.generate(names)
-    overlay_ids = ensure_template_overlays(generated.overlays, log)
+    if overlay_ids is None:
+        overlay_ids = ensure_template_overlays(generated.overlays, log)
+    elif missing := [overlay.id for overlay in generated.overlays if overlay.id not in overlay_ids]:
+        raise TemplateError(f"Overlays {', '.join(missing)} were not added")
     path = project_directory.directory_path()
     if replace_content:
         for entry in os.listdir(path):
