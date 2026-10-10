@@ -72,6 +72,8 @@ class StagesTreeNode(Gtk.Widget):
         super().__init__()
         self.tree = tree
         self.node = node
+        # Opaque base under card (cards are translucent), expanded node covers nodes and lines below it.
+        self.add_css_class("stages-tree-node")
         self.card: Gtk.ListBox | None = None
         self.expanded_content = False
         self.status: StageNodeStatus | None = None
