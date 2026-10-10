@@ -4,7 +4,7 @@ from typing import Any, Callable
 from gi.repository import Gtk, GLib, Adw
 from .project_template import (
     ProjectTemplate, TemplateError, TemplateVariableType, GeneratedProject, _GROUP_STAGES_NAME,
-    download_template_repositories, fetch_template_repository
+    download_template_repositories, fetch_template_repository, find_overlay_for_url
 )
 from .project_stage import stage_target_icon
 
@@ -119,15 +119,18 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self._rebuild_scheduled = False
         self.options_group = Adw.PreferencesGroup(title="Options")
         self.groups_group = Adw.PreferencesGroup(description="Enabled configuration is added to selected stages.")
+        self.overlays_group = Adw.PreferencesGroup(title="Overlays", description="Ebuild repositories used by stages. Overlays that are not added yet are downloaded to Overlays.")
         self.stages_group = Adw.PreferencesGroup(title="Stages", description="Stages created in project for selected options. Their settings can be changed later.")
         self.error_label = Gtk.Label(wrap=True, xalign=0)
         self.error_label.add_css_class("error")
         self.append(self.options_group)
         self.append(self.groups_group)
+        self.append(self.overlays_group)
         self.append(self.error_label)
         self.append(self.stages_group)
         self._option_rows: list[Gtk.Widget] = []
         self._group_rows: list[Gtk.Widget] = []
+        self._overlay_rows: list[Gtk.Widget] = []
         self._stage_rows: list[Gtk.Widget] = []
         self._expanded_rows: set[str] = set() # Expander rows kept expanded when rows are rebuilt.
         self._rebuild()
@@ -152,6 +155,9 @@ class ProjectTemplateOptionsView(Gtk.Box):
             self.options_group.remove(row)
         for row in self._group_rows:
             self.groups_group.remove(row)
+        for row in self._overlay_rows:
+            self.overlays_group.remove(row)
+        self._overlay_rows = []
         for row in self._stage_rows:
             self.stages_group.remove(row)
         self._option_rows, self._group_rows, self._stage_rows = [], [], []
@@ -169,6 +175,13 @@ class ProjectTemplateOptionsView(Gtk.Box):
                 self.generated = self.template.generate(names)
                 for group in self.template.available_groups(names):
                     self._add_group_row(group, names)
+                for overlay in self.generated.overlays:
+                    existing = find_overlay_for_url(overlay.url)
+                    row = Adw.ActionRow(title=GLib.markup_escape_text(overlay.name),
+                                        subtitle=GLib.markup_escape_text(f"Already added as {existing.name}" if existing else f"Will be downloaded from {overlay.url}"))
+                    row.add_prefix(Gtk.Image.new_from_icon_name("layers-minimalistic-svgrepo-com-symbolic"))
+                    self.overlays_group.add(row)
+                    self._overlay_rows.append(row)
                 for stage in self.generated.stages:
                     details = [stage.target.replace("_", "-")]
                     if stage.releng_template:
@@ -184,6 +197,7 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self.options_group.set_visible(bool(self._option_rows))
         self.groups_group.set_title(GLib.markup_escape_text(self.template.groups_title) if self.template else "")
         self.groups_group.set_visible(bool(self._group_rows))
+        self.overlays_group.set_visible(bool(self._overlay_rows))
         self.stages_group.set_visible(self.generated is not None and bool(self.generated.stages))
         self.error_label.set_label(f"Template can't be used: {error}" if error else "")
         self.error_label.set_visible(error is not None)

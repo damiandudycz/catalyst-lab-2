@@ -117,6 +117,27 @@ destination = "portage"                 # Relative to the stage directory.
 - Enabled groups are available in expressions as list `groups`, for example `'kernel' in groups`. Groups can use
   variables in `when` and expressions, `[values]` can use `groups`.
 
+### Overlays: `[[overlays]]`
+
+Overlays (Gentoo ebuild repositories) used by stages, for example with packages or kernels for specific hardware.
+
+```toml
+[[overlays]]
+id = "ps3"                              # Used in stage arguments.
+url = "https://github.com/damiandudycz/ps3-gentoo-overlay.git"
+name = "ps3-gentoo-overlay"             # Optional, name of overlay in Catalyst Lab when it's added.
+when = "..."                            # Optional, overlay is used only when this is true.
+
+[[stages]]
+...
+[stages.arguments]
+repos = [{ type = "Overlay", value = "ps3" }]
+```
+
+When the project is created, an overlay already added to Catalyst Lab from the same URL is used. Otherwise it's
+cloned to Overlays. The options page lists overlays and whether they will be downloaded. Children of the stage inherit
+`repos` like other arguments.
+
 ### Computed values: `[values]`
 
 Values computed from variables, available in expressions below (and in later values), in this order. Useful when the

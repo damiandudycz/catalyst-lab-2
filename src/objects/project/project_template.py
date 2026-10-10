@@ -228,6 +228,20 @@ class TemplateFiles:
     when: str | None
 
 @dataclass
+class TemplateOverlay:
+    """Overlay (Gentoo ebuild repository) used by template. Overlay with the same URL that was already added is used,
+    otherwise it's cloned to overlays when project is created."""
+    id: str # Used in stage arguments: { type = "Overlay", value = "<id>" }.
+    url: str
+    name: str # Name of overlay directory when it's cloned.
+    when: str | None
+
+@dataclass(frozen=True)
+class TemplateOverlayReference:
+    """Overlay of template in stage arguments (eg. repos), replaced with id of overlay when project is created."""
+    id: str
+
+@dataclass
 class TemplateGroup:
     """Configuration that can be enabled when creating project and applied to selected stages: arguments added to
     stages (lists are extended) and files copied to their directories."""
@@ -267,6 +281,7 @@ class GeneratedProject:
     stages: list[GeneratedStage]
     files: list[tuple[str, str]] # Absolute source path in template, destination path relative to project.
     architecture: Architecture | None
+    overlays: list[TemplateOverlay] = field(default_factory=list) # Overlays used by project.
 
 def _table(data: dict, key: str, context: str) -> dict:
     value = data.get(key, {})
@@ -313,6 +328,7 @@ class ProjectTemplate:
     files: list[TemplateFiles]
     groups: list[TemplateGroup] = field(default_factory=list)
     groups_title: str = "Additional configuration"
+    overlays: list[TemplateOverlay] = field(default_factory=list)
     architecture: Architecture | None = None # Fixed architecture of projects, for templates without architecture variable.
     repository_url: str | None = None # Git repository of template.
     repository_path: str = "" # Directory of template in repository, empty for template in root of repository.
@@ -466,8 +482,25 @@ class ProjectTemplate:
                 arguments=arguments, files=_parse_files(group_data.get("files", []), f"{context} files")
             ))
         groups_title = _text(data, "groups_title", "Template", required=False) or "Additional configuration"
+        # Overlays:
+        overlays = []
+        for index, overlay_data in enumerate(data.get("overlays", [])):
+            context = f"Overlay {index + 1}"
+            if not isinstance(overlay_data, dict):
+                raise TemplateError(f"{context} must be a table")
+            overlay_id = _text(overlay_data, "id", context)
+            context = f"Overlay {overlay_id}"
+            if not _IDENTIFIER_PATTERN.match(overlay_id) or any(overlay.id == overlay_id for overlay in overlays):
+                raise TemplateError(f"{context}: invalid or duplicated id")
+            url = _text(overlay_data, "url", context)
+            if not re.match(r"^(https://|file://)\S+$", url):
+                raise TemplateError(f"{context}: url must be https:// URL of Git repository")
+            name = _text(overlay_data, "name", context, required=False) or url.rstrip("/").split("/")[-1].removesuffix(".git")
+            if "/" in name or name.startswith(".") or not name.strip():
+                raise TemplateError(f"{context}: invalid name {name!r}")
+            overlays.append(TemplateOverlay(id=overlay_id, url=url, name=name, when=_condition(overlay_data, context)))
         return cls(path=path, name=name, description=description, variables=variables, values=values, stages=stages,
-                   files=files, groups=groups, groups_title=groups_title,
+                   files=files, groups=groups, groups_title=groups_title, overlays=overlays,
                    architecture=Architecture[architecture_name] if architecture_name else None, repository_url=repository_url,
                    repository_path=repository_path, min_app_version=min_app_version,
                    files_available=files_available)
@@ -599,7 +632,14 @@ class ProjectTemplate:
                         files.append(self._files_paths(entry, names, base=os.path.join("stages", stage_names[stage_id])))
         architecture_variable = self.architecture_variable
         architecture_name = names.get(architecture_variable.id) if architecture_variable else None
-        return GeneratedProject(stages=stages, files=files,
+        # Overlays: used ones have to be available for selected options.
+        overlays = [overlay for overlay in self.overlays if evaluate_condition(overlay.when, names)]
+        available_ids = {overlay.id for overlay in overlays}
+        for stage in stages:
+            for reference in _overlay_references(stage.arguments):
+                if reference.id not in available_ids:
+                    raise TemplateError(f"Stage {stage.template_id}: overlay {reference.id} is not available for selected options")
+        return GeneratedProject(stages=stages, files=files, overlays=overlays,
                                 architecture=Architecture[architecture_name] if architecture_name else self.architecture)
 
 def _template_files_paths(template: ProjectTemplate, entry: TemplateFiles, names: dict[str, Any], base: str) -> tuple[str, str]:
@@ -618,6 +658,22 @@ def _template_files_paths(template: ProjectTemplate, entry: TemplateFiles, names
         raise TemplateError(f"Files source {entry.source} doesn't exist")
     return source, destination
 
+def _overlay_references(value) -> list[TemplateOverlayReference]:
+    if isinstance(value, TemplateOverlayReference):
+        return [value]
+    if isinstance(value, dict):
+        return [reference for item in value.values() for reference in _overlay_references(item)]
+    if isinstance(value, list):
+        return [reference for item in value for reference in _overlay_references(item)]
+    return []
+
+def _replace_overlay_references(value, overlay_ids: dict[str, Any]):
+    if isinstance(value, TemplateOverlayReference):
+        return overlay_ids[value.id]
+    if isinstance(value, list):
+        return [_replace_overlay_references(item, overlay_ids) for item in value]
+    return value
+
 def _stage_argument_value(value, context: str):
     """Value of stage argument from template: texts, numbers, booleans and their lists are used directly, tables
     with type and value use format of stage.json."""
@@ -627,6 +683,10 @@ def _stage_argument_value(value, context: str):
         # Items that are none (also tables with none value) are skipped, so expressions can leave them out.
         return [_stage_argument_value(item, context) for item in value
                 if item is not None and not (isinstance(item, dict) and item.get("value") is None)]
+    if isinstance(value, dict) and value.get("type") == "Overlay" and set(value) == {"type", "value"}:
+        if not isinstance(value["value"], str):
+            raise TemplateError(f"{context}: overlay must be id of overlay")
+        return TemplateOverlayReference(value["value"])
     if isinstance(value, dict) and set(value) == {"type", "value"}:
         from .project_stage_argument_serialization import ProjectStageArgumentSerialization
         try:
@@ -857,6 +917,42 @@ def _enable_stage_overlays(project_directory, stage, log: Callable[[str], None])
             setattr(stage, attribute, [source for source in PORTAGE_CONFDIR_SOURCES_ORDER if source in sources])
             log(f"Using {os.path.basename(path)} of {stage.name} from template")
 
+def _normalized_git_url(url: str) -> str:
+    return url.strip().rstrip("/").removesuffix(".git").lower()
+
+def find_overlay_for_url(url: str):
+    """Overlay already added to app, cloned from given repository."""
+    from .repository import Repository
+    return next((overlay for overlay in Repository.OverlayDirectory.value
+                 if overlay.remote_url and _normalized_git_url(overlay.remote_url) == _normalized_git_url(url)), None)
+
+def ensure_template_overlays(overlays: list[TemplateOverlay], log: Callable[[str], None]) -> dict[str, uuid.UUID]:
+    """Ids of overlays used by template, by template ids of overlays. Overlays that were not added yet are cloned and
+    added to overlays of app."""
+    from .overlay_directory import OverlayDirectory
+    from .overlay_manager import OverlayManager
+    overlay_ids = {}
+    for overlay in overlays:
+        if existing := find_overlay_for_url(overlay.url):
+            log(f"Using overlay {existing.name} ({overlay.url})")
+            overlay_ids[overlay.id] = existing.id
+            continue
+        name, suffix = overlay.name, 2
+        while not OverlayManager.shared().is_name_available(name):
+            name, suffix = f"{overlay.name}-{suffix}", suffix + 1
+        directory = OverlayDirectory(name=name)
+        log(f"Cloning overlay {overlay.url} to {name}")
+        try:
+            _run_git(["git", "clone", "--quiet", overlay.url, directory.directory_path()], timeout=1800)
+        except Exception:
+            shutil.rmtree(directory.directory_path(), ignore_errors=True)
+            raise
+        directory.update_status(wait=True)
+        directory.update_logs(wait=True)
+        OverlayManager.shared().add_directory(directory)
+        overlay_ids[overlay.id] = directory.id
+    return overlay_ids
+
 def apply_project_template(project_directory, template: ProjectTemplate, names: dict[str, Any],
                            log: Callable[[str], None], replace_content: bool = False):
     """Creates files and stages of template in project directory. Project needs configuration (toolset, releng) set
@@ -865,6 +961,7 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
     from .project_stage import ProjectStage, apply_default_stage_arguments
     from .project_manager import ProjectManager
     generated = template.generate(names)
+    overlay_ids = ensure_template_overlays(generated.overlays, log)
     path = project_directory.directory_path()
     if replace_content:
         for entry in os.listdir(path):
@@ -900,7 +997,7 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
             if valid_arguments is not None and key not in valid_arguments:
                 # Groups can set arguments of different targets (eg. stage4_packages and livecd_packages).
                 continue
-            setattr(stage, key, value)
+            setattr(stage, key, _replace_overlay_references(value, overlay_ids))
         if generated_stage.releng_template and releng_directory and architecture:
             spec_path = os.path.join(releng_directory.directory_path(), "releases", "specs",
                                      architecture.releng_base_arch().value, generated_stage.releng_template)
