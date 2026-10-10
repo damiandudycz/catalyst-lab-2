@@ -17,6 +17,7 @@ class SettingsEvents(Enum):
     TEMPORARY_LOCATION_CHANGED = auto()
     PACKAGES_LOCATION_CHANGED = auto()
     INITIAL_SETUP_DONE_CHANGED = auto()
+    AUTO_CLEAN_SNAPSHOTS_CHANGED = auto()
 
 @final
 class Settings(Serializable):
@@ -34,7 +35,8 @@ class Settings(Serializable):
         builds_location: str = "~/CatalystLab/Builds",
         cache_location: str = "~/CatalystLab/Cache",
         temporary_location: str = "~/CatalystLab/Temporary",
-        packages_location: str = "~/CatalystLab/Packages"
+        packages_location: str = "~/CatalystLab/Packages",
+        auto_clean_snapshots: bool = False
     ):
         self._initial_setup_done = initial_setup_done
         self._keep_root_unlocked = keep_root_unlocked
@@ -47,6 +49,7 @@ class Settings(Serializable):
         self._cache_location = cache_location # Reusable data, safe to delete (distfiles, extracted squashfs files).
         self._temporary_location = temporary_location # Data of running operations, emptied when app starts.
         self._packages_location = packages_location # Binary packages folders, shared by projects.
+        self._auto_clean_snapshots = auto_clean_snapshots # Snapshots not used by projects are removed (except newest).
         self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
@@ -64,7 +67,8 @@ class Settings(Serializable):
                 builds_location=data.get("builds_location", "~/CatalystLab/Builds"),
                 cache_location=data.get("cache_location", "~/CatalystLab/Cache"),
                 temporary_location=data.get("temporary_location", "~/CatalystLab/Temporary"),
-                packages_location=data.get("packages_location", "~/CatalystLab/Packages")
+                packages_location=data.get("packages_location", "~/CatalystLab/Packages"),
+                auto_clean_snapshots=data.get("auto_clean_snapshots", False)
             )
         except:
             return cls()
@@ -81,7 +85,8 @@ class Settings(Serializable):
             "builds_location": self.builds_location,
             "cache_location": self.cache_location,
             "temporary_location": self.temporary_location,
-            "packages_location": self.packages_location
+            "packages_location": self.packages_location,
+            "auto_clean_snapshots": self.auto_clean_snapshots
         }
 
     # --------------------------------------------------------------------------
@@ -257,6 +262,22 @@ class Settings(Serializable):
             self._packages_location = value
             self.event_bus.emit(
                 SettingsEvents.PACKAGES_LOCATION_CHANGED,
+                value
+            )
+            Repository.Settings.save()
+
+    # --------------------------------------------------------------------------
+    # Accessors for auto clean snapshots:
+
+    @property
+    def auto_clean_snapshots(self) -> bool:
+        return self._auto_clean_snapshots
+    @auto_clean_snapshots.setter
+    def auto_clean_snapshots(self, value: bool):
+        if self._auto_clean_snapshots != value:
+            self._auto_clean_snapshots = value
+            self.event_bus.emit(
+                SettingsEvents.AUTO_CLEAN_SNAPSHOTS_CHANGED,
                 value
             )
             Repository.Settings.save()

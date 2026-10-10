@@ -180,7 +180,7 @@ class SnapshotInstallationStepCopyFile(SnapshotInstallationStep):
                     dst.write(buf)
                     copied_size += len(buf)
                     self._update_progress(progress=copied_size / total_size)
-            self.multistage_process.snapshot = Snapshot(filename=filename, date=creation_date)
+            self.multistage_process.snapshot = Snapshot(filename=filename, date=creation_date, from_file=True)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during toolset copying: {e}")
