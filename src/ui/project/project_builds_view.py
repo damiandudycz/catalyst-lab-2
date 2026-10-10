@@ -22,6 +22,7 @@ class BuildRowState(Enum):
     SCHEDULED = "Scheduled"
     SKIPPED = "Skipped" # Stage it depends on failed.
     CANCELLED = "Cancelled" # Build was cancelled before stage started.
+    STOPPED = "Stopped" # Build was cancelled while stage was building.
     INTERRUPTED = "Interrupted" # Not finished, but its build is not running anymore (eg. app was closed).
     NOT_STARTED = "Not started" # Scheduled, but its build is not running anymore (eg. app was closed).
 
@@ -277,6 +278,7 @@ def _record_state(build) -> BuildRowState:
         case StageBuildStatus.FAILED: return BuildRowState.FAILED
         case StageBuildStatus.SKIPPED: return BuildRowState.SKIPPED
         case StageBuildStatus.CANCELLED: return BuildRowState.CANCELLED
+        case StageBuildStatus.STOPPED: return BuildRowState.STOPPED
         case StageBuildStatus.SCHEDULED: return BuildRowState.NOT_STARTED
     # Running builds are handled separately, so not finished build here is not running anymore.
     return BuildRowState.INTERRUPTED
@@ -301,7 +303,7 @@ def _state_icon(state: BuildRowState) -> str:
         case BuildRowState.COMPLETED: return "check-square-svgrepo-com-symbolic"
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error-box-svgrepo-com-symbolic"
         case BuildRowState.BUILDING: return "menu-dots-square-svgrepo-com-symbolic"
-        case BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
+        case BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.STOPPED | BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
         case _: return "clock-square-svgrepo-com-symbolic"
 
 def _state_css_class(state: BuildRowState) -> str | None:
@@ -309,7 +311,7 @@ def _state_css_class(state: BuildRowState) -> str | None:
         case BuildRowState.COMPLETED: return "success"
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error"
         case BuildRowState.BUILDING: return "accent"
-        case BuildRowState.SCHEDULED | BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.NOT_STARTED: return "dimmed"
+        case BuildRowState.SCHEDULED | BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.STOPPED | BuildRowState.NOT_STARTED: return "dimmed"
     return None
 
 def _failure_summary(build) -> str | None:

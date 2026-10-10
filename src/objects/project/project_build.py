@@ -19,11 +19,12 @@ class StageBuildStatus(Enum):
     FAILED = "failed"
     SKIPPED = "skipped" # Not built, because stage it depends on failed.
     CANCELLED = "cancelled" # Not built, because build run was cancelled.
+    STOPPED = "stopped" # Building started, but build run was cancelled.
 
     @property
     def is_attempt(self) -> bool:
         """Stage was built (or building started)."""
-        return self in (StageBuildStatus.IN_PROGRESS, StageBuildStatus.COMPLETED, StageBuildStatus.FAILED)
+        return self in (StageBuildStatus.IN_PROGRESS, StageBuildStatus.COMPLETED, StageBuildStatus.FAILED, StageBuildStatus.STOPPED)
 
 @dataclass
 class StageBuild:

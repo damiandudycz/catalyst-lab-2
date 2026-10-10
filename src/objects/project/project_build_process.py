@@ -616,12 +616,15 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during '{self.name}': {e}")
+            # Cancelling build run terminates catalyst, which isn't failure of stage.
+            stopped = getattr(process, "cancelled", False)
             if self.build:
-                self.build.status = StageBuildStatus.FAILED
+                self.build.status = StageBuildStatus.STOPPED if stopped else StageBuildStatus.FAILED
                 self.build.finished = datetime.now()
                 try:
-                    failure_directory = os.path.join(self.build.path, StageBuild.FAILURE_DIRECTORY) if self.build.path else None
-                    self.build.details["failure"] = failure_details(self.output_lines + [str(e)], failure_directory)
+                    if not stopped:
+                        failure_directory = os.path.join(self.build.path, StageBuild.FAILURE_DIRECTORY) if self.build.path else None
+                        self.build.details["failure"] = failure_details(self.output_lines + [str(e)], failure_directory)
                 except Exception as details_error:
                     print(f"Failed to read failure details: {details_error}")
                 try:
