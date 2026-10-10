@@ -10,11 +10,13 @@ class ProjectUpdateView(Gtk.Box):
     """Updates project from its template or Git repository: downloads latest version, lists changes and lets user
     decide about changes made also in project (keep project version or use new one)."""
 
-    def __init__(self, project_directory, source: str):
-        """Source is "template" or "repository"."""
+    def __init__(self, project_directory, source: str, overlays: list | None = None):
+        """Source is "template" or "repository". Given overlays are updated first."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.project_directory = project_directory
         self.source = source
+        self.overlays = overlays or []
+        self.overlay_errors: list[str] = []
         self.source_name = "template" if source == "template" else "repository"
         self.update = None
         self._window = None
@@ -46,6 +48,14 @@ class ProjectUpdateView(Gtk.Box):
         def log(line: str):
             print(line)
             GLib.idle_add(self.loading_label.set_label, line)
+        from .git_update import update_git_directory
+        for overlay in self.overlays:
+            log(f"Updating overlay {overlay.name}")
+            try:
+                update_git_directory(overlay, log)
+            except Exception as e:
+                # Project is still updated, failure is shown with changes.
+                self.overlay_errors.append(f"{overlay.name}: {e}")
         try:
             if self.source == "template":
                 update = prepare_template_update(self.project_directory, log)
@@ -63,12 +73,17 @@ class ProjectUpdateView(Gtk.Box):
             self._show_message("dialog-error-symbolic", "Update failed", str(error))
             return False
         if update is None:
+            if self.overlay_errors:
+                self._show_message("dialog-error-symbolic", "Overlays were not updated", "\n".join(self.overlay_errors))
+                return False
             self._show_message("check-square-svgrepo-com-symbolic", "Project is up to date",
                                f"There are no changes in {self.source_name} to apply.")
             return False
         automatic = [change for change in update.changes if not change.conflict]
         conflicts = [change for change in update.changes if change.conflict]
         widgets = []
+        if self.overlay_errors:
+            widgets.append(self._label("Overlays were not updated: " + "; ".join(self.overlay_errors)))
         if update.fast_forward:
             widgets.append(self._label(f"Project has no own commits, it's moved to the latest version of {self.source_name}."))
         else:

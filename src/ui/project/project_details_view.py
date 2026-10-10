@@ -18,7 +18,7 @@ from .multistage_process import MultiStageProcess, MultiStageProcessState, Multi
 from .architecture import Architecture
 from .cl_toggle_group import CLToggle, CLToggleGroup
 from .project_template_update import (
-    TemplateState, repository_origin, has_unsaved_changes, own_commits_count, template_update_available
+    TemplateState, repository_origin, has_unsaved_changes, own_commits_count, template_update_available, project_overlays
 )
 from .project_update_view import ProjectUpdateView
 import threading
@@ -235,7 +235,31 @@ class ProjectDetailsView(Gtk.Box):
         if self._source is None:
             return
         title = "Update template" if self._source == "template" else "Update from repository"
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectUpdateView(self.project_directory, self._source), title, 640, 560)
+        source = self._source
+        overlays = project_overlays(self.project_directory)
+        def present(update_overlays: bool):
+            view = ProjectUpdateView(self.project_directory, source, overlays=overlays if update_overlays else [])
+            app_event_bus.emit(AppEvents.PRESENT_VIEW, view, title, 640, 560)
+        if not overlays:
+            present(False)
+            return
+        # Overlays used by project can be updated too.
+        dialog = Adw.AlertDialog(heading=title, body=f"Latest version of {source} is downloaded and compared with project.")
+        check_button = Gtk.CheckButton(label="Also update overlays used by project", active=True)
+        names = Gtk.Label(label=", ".join(overlay.name for overlay in overlays), xalign=0, wrap=True, margin_start=28)
+        names.add_css_class("caption")
+        names.add_css_class("dimmed")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.append(check_button)
+        box.append(names)
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("update", "Update")
+        dialog.set_response_appearance("update", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("update")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda _, response: present(check_button.get_active()) if response == "update" else None)
+        dialog.present(self.get_root())
 
     def _setup_stages_view_mode(self):
         """Compact stages (short names, expanded while hovered) or full ones, switched in header bar while stages are

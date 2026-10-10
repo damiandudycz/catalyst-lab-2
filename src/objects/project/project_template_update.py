@@ -551,3 +551,14 @@ def own_commits_count(project_path: str) -> int:
         return 0
     count = _git(project_path, "rev-list", "--count", f"{base}..HEAD", check=False)
     return int(count) if count.isdigit() else 0
+
+def project_overlays(project_directory) -> list:
+    """Overlays used by stages of project (repos argument)."""
+    from .repository import Repository
+    overlay_ids = set()
+    for stage in project_directory.stages:
+        value = getattr(stage, "repos", None)
+        for item in value if isinstance(value, list) else []:
+            if isinstance(item, uuid.UUID):
+                overlay_ids.add(item)
+    return [overlay for overlay in Repository.OverlayDirectory.value if overlay.id in overlay_ids]

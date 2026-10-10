@@ -69,26 +69,9 @@ class GitUpdateStepUpdate(MultiStageProcessStage):
         return result.stdout.strip()
     def start(self):
         super().start()
-        with self.directory.operation():
-            self._update()
-    def _update(self):
-        repo_path = self.directory.directory_path()
         try:
-            if not os.path.exists(repo_path):
-                raise RuntimeError(
-                    f"Directory {repo_path} does not exist for update"
-                )
             self.process_started = True
-            self.run_git_command(
-                repo_path,
-                ["fetch", "--all", "--prune"]
-            )
-            self.run_git_command(
-                repo_path,
-                ["rebase", "--autostash", "--rebase-merges", "origin/HEAD"]
-            )
-            self.directory.update_status(wait=True)
-            self.directory.update_logs(wait=True)
+            update_git_directory(self.directory, self.log)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during Git directory update: {e}")
@@ -100,3 +83,27 @@ class GitUpdateStepUpdate(MultiStageProcessStage):
             self.run_git_command(self.directory.directory_path(), ["rebase", "--abort"])
         return True
 
+def update_git_directory(directory: GitDirectory, log):
+    """Fetches latest changes of Git directory and rebases its commits on top of them (like update process), outside
+    of process (eg. overlays updated with project). Raises when update fails, rebase is aborted then."""
+    path = directory.directory_path()
+    def git(*arguments):
+        log(f"$ git {' '.join(arguments)}")
+        result = subprocess.run(["git", *arguments], cwd=path, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                universal_newlines=True, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+        for line in result.stdout.splitlines():
+            log(line)
+        if result.returncode != 0:
+            raise RuntimeError(f"git {arguments[0]} failed in {directory.name}")
+    with directory.operation():
+        if not os.path.isdir(path):
+            raise RuntimeError(f"Directory {path} does not exist for update")
+        try:
+            git("fetch", "--all", "--prune")
+            git("rebase", "--autostash", "--rebase-merges", "origin/HEAD")
+        except Exception:
+            subprocess.run(["git", "rebase", "--abort"], cwd=path, capture_output=True)
+            raise
+        finally:
+            directory.update_status(wait=True)
+            directory.update_logs(wait=True)
