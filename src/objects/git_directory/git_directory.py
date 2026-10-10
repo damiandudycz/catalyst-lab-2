@@ -8,7 +8,7 @@ from enum import Enum, auto
 from datetime import datetime
 from .repository import Serializable
 from .event_bus import EventBus, SharedEvent
-from .status_indicator import StatusIndicatorState, StatusIndicatorValues, status_values
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues, StatusDetail, item_status
 from abc import ABC, abstractmethod
 
 class GitDirectoryEvent(Enum):
@@ -91,19 +91,22 @@ class GitDirectory(Serializable, ABC):
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
         # TODO: Show updates available (has_remote_changes) too.
+        return item_status(self.status_details(), blinking=self.is_busy)
+
+    def status_details(self) -> list[StatusDetail]:
+        """States of directory (Git status, running operation)."""
         match self.status:
             case GitDirectoryStatus.CHANGED:
-                state, description = StatusIndicatorState.CHANGED, "Not saved changes"
+                detail = StatusDetail(StatusIndicatorState.CHANGED, "Not saved changes")
             case GitDirectoryStatus.CONFLICTED:
-                state, description = StatusIndicatorState.ERROR, "Merge conflicts"
+                detail = StatusDetail(StatusIndicatorState.ERROR, "Merge conflicts")
             case GitDirectoryStatus.ERROR:
-                state, description = StatusIndicatorState.ERROR, "Git status can't be read (directory is missing or isn't Git repository)"
+                detail = StatusDetail(StatusIndicatorState.ERROR, "Git status can't be read (directory is missing or isn't Git repository)")
             case GitDirectoryStatus.UNKNOWN:
-                state, description = StatusIndicatorState.IDLE, "Checking status"
+                detail = StatusDetail(StatusIndicatorState.IDLE, "Checking status")
             case _:
-                state, description = StatusIndicatorState.IDLE, "No changes"
-        return status_values(state, blinking=self.is_busy,
-                             description=[description, "Git operation running" if self.is_busy else None])
+                detail = StatusDetail(StatusIndicatorState.IDLE, "No changes")
+        return [detail, StatusDetail(StatusIndicatorState.LOADED, "Git operation running") if self.is_busy else None]
 
     @classmethod
     def parse_metadata(cls, dict: dict) -> Serializable:

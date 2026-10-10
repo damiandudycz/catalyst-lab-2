@@ -95,8 +95,8 @@ Items in lists and sections of the side menu have a colored dot showing their st
 | 🔴 Red | Has errors |
 
 The dot **blinks** while the item is actively used (building, running an operation), in its current color (gray
-becomes blue). An item with several states shows the most important one (red, orange, purple, blue, gray). Hovering
-the dot shows its details.
+becomes blue). An item can have several states at once (eg. running and has changes): the dot shows the most
+important one (red, orange, purple, blue, gray), and hovering it lists all of them, each with its own color.
 
 A section in the side menu shows the most important state of its items, and blinks while any of them is used or any of
 its operations runs. Warnings and errors (eg. failed build) are shown there until the section is opened, and again

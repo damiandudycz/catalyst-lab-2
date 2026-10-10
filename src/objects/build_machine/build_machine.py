@@ -3,7 +3,7 @@ import os, threading, uuid
 from typing import Self
 from .event_bus import EventBus, SharedEvent
 from .repository import Repository
-from .status_indicator import StatusIndicatorState, StatusIndicatorValues, status_values
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues, StatusDetail, item_status, status_values
 from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY
 from .lima import lima_home as default_new_lima_home
 
@@ -99,8 +99,9 @@ class BuildMachine:
         operations."""
         match self.status:
             case self.STATUS_RUNNING:
-                return status_values(StatusIndicatorState.LOADED, blinking=self.is_used,
-                                     description=["Running", "Used by operation" if self.is_used else None])
+                return item_status([StatusDetail(StatusIndicatorState.LOADED, "Running"),
+                                    StatusDetail(StatusIndicatorState.LOADED, "Used by operation") if self.is_used else None],
+                                   blinking=self.is_used)
             case self.STATUS_STARTING:
                 return status_values(StatusIndicatorState.LOADED, blinking=True, description="Starting")
             case self.STATUS_STOPPING:

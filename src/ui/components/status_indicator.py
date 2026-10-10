@@ -6,8 +6,10 @@ import math
 from enum import Enum, auto
 from collections import namedtuple
 
-# Description explains state (shown when indicator is hovered), eg. "Not saved changes".
-StatusIndicatorValues = namedtuple("StatusIndicatorValues", ["state", "blinking", "description"], defaults=(None,))
+# Item can have many states at once (eg. running and has changes). Indicator shows the most important one, details
+# list all of them with their own states (shown when indicator is hovered).
+StatusDetail = namedtuple("StatusDetail", ["state", "text"])
+StatusIndicatorValues = namedtuple("StatusIndicatorValues", ["state", "blinking", "details"], defaults=((),))
 
 class StatusIndicatorState(Enum):
     """States of items shown with color of indicator, from least to most important (item with many states shows the
@@ -27,14 +29,22 @@ class StatusIndicatorState(Enum):
             case StatusIndicatorState.WARNING: return (0xff / 255, 0x78 / 255, 0x00 / 255)
             case StatusIndicatorState.ERROR: return (0xe0 / 255, 0x1b / 255, 0x24 / 255)
 
-def status_values(state: StatusIndicatorState, blinking: bool = False, description: str | list[str] | None = None) -> StatusIndicatorValues:
-    """Indicator values. Actively used item is at least loaded, so blinking is visible. Description can be list of
-    reasons of state, shown in separate lines."""
+def status_values(state: StatusIndicatorState, blinking: bool = False, description: str | None = None) -> StatusIndicatorValues:
+    """Indicator values of item with single state. Actively used item is at least loaded, so blinking is visible."""
+    return item_status([StatusDetail(state, description)] if description else [], blinking=blinking, state=state)
+
+def item_status(details: list[StatusDetail | None], blinking: bool = False,
+                state: StatusIndicatorState | None = None) -> StatusIndicatorValues:
+    """Indicator values of item with states in details (none are skipped). Indicator shows the most important of them
+    (or given state), actively used item is at least loaded, so blinking is visible."""
+    # Most important first, like the state shown by indicator.
+    details = tuple(sorted((detail for detail in details if detail is not None and detail.text),
+                           key=lambda detail: detail.state.value, reverse=True))
+    if state is None:
+        state = most_important_state(*(detail.state for detail in details)) if details else StatusIndicatorState.IDLE
     if blinking and state == StatusIndicatorState.IDLE:
         state = StatusIndicatorState.LOADED
-    if isinstance(description, list):
-        description = "\n".join(line for line in description if line) or None
-    return StatusIndicatorValues(state=state, blinking=blinking, description=description)
+    return StatusIndicatorValues(state=state, blinking=blinking, details=details)
 
 def most_important_state(*states: StatusIndicatorState) -> StatusIndicatorState:
     return max(states, key=lambda state: state.value)
@@ -52,12 +62,32 @@ class StatusIndicator(Gtk.DrawingArea):
         self._dimmed = False
         # Use custom draw function
         self.set_draw_func(self._on_draw)
+        # Tooltip lists states with their own indicators.
+        self._details: tuple = ()
+        self.set_has_tooltip(False)
+        self.connect("query-tooltip", self._on_query_tooltip)
 
     def set_values(self, values: StatusIndicatorValues):
-        values = status_values(values.state, values.blinking, values.description)
+        values = item_status(list(values.details), values.blinking, values.state)
         self.set_state(values.state)
         self.set_blinking(values.blinking)
-        self.set_tooltip_text(values.description)
+        self._details = values.details
+        self.set_has_tooltip(bool(values.details))
+
+    def _on_query_tooltip(self, widget, x, y, keyboard_mode, tooltip):
+        if not self._details:
+            return False
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        for detail in self._details:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            indicator = StatusIndicator()
+            indicator.set_state(detail.state)
+            indicator.set_valign(Gtk.Align.CENTER)
+            row.append(indicator)
+            row.append(Gtk.Label(label=detail.text, xalign=0))
+            box.append(row)
+        tooltip.set_custom(box)
+        return True
 
     def set_state(self, state: StatusIndicatorState):
         self._state = state
@@ -105,7 +135,8 @@ class StatusIndicator(Gtk.DrawingArea):
 StatusEntry = namedtuple("StatusEntry", ["key", "values", "label"], defaults=(None,)) # Label is name of item.
 
 def combined_status(entries: list) -> StatusIndicatorValues | None:
-    """Most important state of entries (StatusEntry or StatusIndicatorValues), None when there is nothing to show."""
+    """Most important state of entries (StatusEntry or StatusIndicatorValues), None when there is nothing to show.
+    Details list states of entries, with names of their items."""
     values = [entry.values if isinstance(entry, StatusEntry) else entry for entry in entries]
     values = [value for value in values if value is not None]
     if not values:
@@ -114,18 +145,17 @@ def combined_status(entries: list) -> StatusIndicatorValues | None:
     blinking = any(value.blinking for value in values)
     if state == StatusIndicatorState.IDLE and not blinking:
         return None
-    descriptions = [entry_description(entry) for entry in entries
-                    if (entry.values if isinstance(entry, StatusEntry) else entry) is not None]
-    return status_values(state, blinking, [description for description in descriptions if description])
+    details = [detail for entry in entries for detail in entry_details(entry)]
+    return item_status(details, blinking, state)
 
-def entry_description(entry) -> str | None:
-    """Description of entry, with name of its item (eg. "Raspberry Pi 5: Not saved changes")."""
+def entry_details(entry) -> list[StatusDetail]:
+    """States of entry that are not idle, with name of its item (eg. "Raspberry Pi 5: Not saved changes")."""
     values = entry.values if isinstance(entry, StatusEntry) else entry
-    if values is None or (values.state == StatusIndicatorState.IDLE and not values.blinking) or not values.description:
-        return None
+    if values is None:
+        return []
     label = entry.label if isinstance(entry, StatusEntry) else None
-    description = values.description.replace("\n", ", ")
-    return f"{label}: {description}" if label else description
+    return [StatusDetail(detail.state, f"{label}: {detail.text}" if label else detail.text)
+            for detail in values.details if detail.state != StatusIndicatorState.IDLE]
 
 def items_status(items, property_name: str = "status_indicator_values") -> list[StatusEntry]:
     result = []

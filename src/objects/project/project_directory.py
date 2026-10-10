@@ -91,34 +91,32 @@ class ProjectDirectory(GitDirectory):
     def build_status_indicator_values(self):
         """Builds list: last build run failed (error) or stopped (warning), blinking while building."""
         from .project_build import BuildRunResult
-        from .status_indicator import StatusIndicatorState, status_values
+        from .status_indicator import StatusIndicatorState, StatusDetail, item_status
         result, building = self._last_build_run_result()
         match result:
             case BuildRunResult.FAILED: state, description = StatusIndicatorState.ERROR, "Last build failed"
             case BuildRunResult.STOPPED: state, description = StatusIndicatorState.WARNING, "Last build was stopped"
             case BuildRunResult.COMPLETED: state, description = StatusIndicatorState.IDLE, "Last build completed"
             case _: state, description = StatusIndicatorState.IDLE, "No builds"
-        return status_values(state, blinking=building, description="Building" if building else description)
+        return item_status([StatusDetail(state, description),
+                            StatusDetail(StatusIndicatorState.LOADED, "Building") if building else None], blinking=building)
 
     @property
     def status_indicator_values(self):
         """Projects list: configuration error (error), failed last build (warning), Git status (changes, errors),
         blinking while building."""
         from .project_build import BuildRunResult
-        from .status_indicator import StatusIndicatorState, status_values, most_important_state
+        from .status_indicator import StatusIndicatorState, StatusDetail, item_status
         result, building = self._last_build_run_result()
-        git_values = super().status_indicator_values
-        states, descriptions = [git_values.state], []
+        details = []
         if configuration_error := self.configuration_error:
-            states.append(StatusIndicatorState.ERROR)
-            descriptions.append(configuration_error)
+            details.append(StatusDetail(StatusIndicatorState.ERROR, configuration_error))
         if result == BuildRunResult.FAILED:
-            states.append(StatusIndicatorState.WARNING)
-            descriptions.append("Last build failed")
-        descriptions.append(git_values.description)
+            details.append(StatusDetail(StatusIndicatorState.WARNING, "Last build failed"))
+        details += self.status_details()
         if building:
-            descriptions.append("Building")
-        return status_values(most_important_state(*states), blinking=building or git_values.blinking, description=descriptions)
+            details.append(StatusDetail(StatusIndicatorState.LOADED, "Building"))
+        return item_status(details, blinking=building or self.is_busy)
 
     @property
     def deploy_summary(self) -> str:
@@ -135,10 +133,10 @@ class ProjectDirectory(GitDirectory):
         """Blinking indicator while build of project is being deployed."""
         from .deploy_installation import DeployInstallation
         from .multistage_process import MultiStageProcess, MultiStageProcessState
-        from .status_indicator import StatusIndicatorState, status_values
+        from .status_indicator import StatusIndicatorState, StatusDetail, item_status
         deploying = any(process.project_id == self.id and process.status == MultiStageProcessState.IN_PROGRESS
                         for process in MultiStageProcess.get_started_processes_by_class(DeployInstallation))
-        return status_values(StatusIndicatorState.IDLE, blinking=deploying, description="Deploying" if deploying else None)
+        return item_status([StatusDetail(StatusIndicatorState.LOADED, "Deploying") if deploying else None], blinking=deploying)
 
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:
