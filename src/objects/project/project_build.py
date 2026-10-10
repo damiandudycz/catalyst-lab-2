@@ -148,6 +148,27 @@ def load_project_builds(project_directory) -> list[StageBuild]:
                     print(f"Warning: Failed to read build {metadata_path}: {e}")
     return sorted(builds, key=lambda build: build.date, reverse=True)
 
+class BuildRunResult(Enum):
+    """Result of build run (stages built together), for status of project."""
+    COMPLETED = "completed"
+    FAILED = "failed"   # Building of some stage failed.
+    STOPPED = "stopped" # Cancelled, or interrupted (app was closed).
+
+def last_build_run_result(project_directory, running_timestamp: str | None = None) -> BuildRunResult | None:
+    """Result of newest build run of project, None when project has no builds. Stages of run that is still running
+    (running_timestamp) are not interrupted."""
+    builds = load_project_builds(project_directory)
+    if not builds:
+        return None
+    timestamp = max(builds, key=lambda build: build.date).timestamp
+    statuses = {build.status for build in builds if build.timestamp == timestamp}
+    if StageBuildStatus.FAILED in statuses:
+        return BuildRunResult.FAILED
+    if timestamp != running_timestamp and statuses & {StageBuildStatus.STOPPED, StageBuildStatus.CANCELLED,
+                                                      StageBuildStatus.IN_PROGRESS, StageBuildStatus.SCHEDULED}:
+        return BuildRunResult.STOPPED
+    return BuildRunResult.COMPLETED
+
 # ------------------------------------------------------------------------------
 # Build plan:
 

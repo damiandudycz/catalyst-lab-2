@@ -71,25 +71,47 @@ class ProjectDirectory(GitDirectory):
         return f"Building now · {summary}" if running_project_build(self) else summary
 
     @property
-    def build_status_indicator_values(self):
-        """Blinking indicator while project is being built."""
+    def configuration_error(self) -> str | None:
+        """Why project can't be built because of its configuration (toolset, releng directory, snapshot)."""
+        if self.get_toolset() is None:
+            return "Toolset is not selected or was removed"
+        if self.get_releng_directory() is None:
+            return "Releng directory is not selected or was removed"
+        if self.get_snapshot() is None:
+            return "Snapshot is not selected or was removed"
+        return None
+
+    def _last_build_run_result(self):
+        from .project_build import last_build_run_result
         from .project_build_process import running_project_build
-        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
-        if running_project_build(self):
-            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
-        return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
+        running = running_project_build(self)
+        return last_build_run_result(self, running_timestamp=running.timestamp if running else None), running is not None
+
+    @property
+    def build_status_indicator_values(self):
+        """Builds list: last build run failed (error) or stopped (warning), blinking while building."""
+        from .project_build import BuildRunResult
+        from .status_indicator import StatusIndicatorState, status_values
+        result, building = self._last_build_run_result()
+        match result:
+            case BuildRunResult.FAILED: state = StatusIndicatorState.ERROR
+            case BuildRunResult.STOPPED: state = StatusIndicatorState.WARNING
+            case _: state = StatusIndicatorState.IDLE
+        return status_values(state, blinking=building)
 
     @property
     def status_indicator_values(self):
-        """Git status of project, blinking while project is being built."""
-        values = super().status_indicator_values
-        from .project_build_process import running_project_build
-        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
-        if running_project_build(self):
-            # Changed files keep their color, otherwise build is shown like in builds list.
-            state = values.state if values.state == StatusIndicatorState.ENABLED_UNSAFE else StatusIndicatorState.ENABLED
-            return StatusIndicatorValues(state=state, blinking=True)
-        return values
+        """Projects list: configuration error (error), failed last build (warning), Git status (changes, errors),
+        blinking while building."""
+        from .project_build import BuildRunResult
+        from .status_indicator import StatusIndicatorState, status_values, most_important_state
+        result, building = self._last_build_run_result()
+        states = [super().status_indicator_values.state]
+        if self.configuration_error:
+            states.append(StatusIndicatorState.ERROR)
+        if result == BuildRunResult.FAILED:
+            states.append(StatusIndicatorState.WARNING)
+        return status_values(most_important_state(*states), blinking=building)
 
     @property
     def deploy_summary(self) -> str:
@@ -106,10 +128,10 @@ class ProjectDirectory(GitDirectory):
         """Blinking indicator while build of project is being deployed."""
         from .deploy_installation import DeployInstallation
         from .multistage_process import MultiStageProcess, MultiStageProcessState
-        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+        from .status_indicator import StatusIndicatorState, status_values
         deploying = any(process.project_id == self.id and process.status == MultiStageProcessState.IN_PROGRESS
                         for process in MultiStageProcess.get_started_processes_by_class(DeployInstallation))
-        return StatusIndicatorValues(state=StatusIndicatorState.ENABLED if deploying else StatusIndicatorState.DISABLED, blinking=deploying)
+        return status_values(StatusIndicatorState.IDLE, blinking=deploying)
 
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:

@@ -7,7 +7,7 @@ from enum import Enum, auto
 from datetime import datetime
 from .repository import Serializable
 from .event_bus import EventBus, SharedEvent
-from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues, status_values
 from abc import ABC, abstractmethod
 
 class GitDirectoryEvent(Enum):
@@ -17,9 +17,14 @@ class GitDirectoryEvent(Enum):
 
 class GitDirectoryStatus(Enum):
     # Git status
-    UNKNOWN = auto()
+    UNKNOWN = auto() # Not checked yet.
     UNCHANGED = auto()
     CHANGED = auto()
+    CONFLICTED = auto() # Unfinished merge with conflicts.
+    ERROR = auto() # Directory is missing, isn't Git repository, or Git failed.
+
+# Status codes of unmerged files in git status --porcelain.
+_CONFLICT_STATUS_CODES = {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
 
 class GitDirectory(Serializable, ABC):
 
@@ -64,23 +69,13 @@ class GitDirectory(Serializable, ABC):
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
+        # TODO: Show updates available (has_remote_changes) too.
         match self.status:
-            # TODO: Add new color when updates are available, here and in other classes.
-            case GitDirectoryStatus.UNKNOWN | GitDirectoryStatus.UNCHANGED:
-                return StatusIndicatorValues(
-                    state=StatusIndicatorState.DISABLED,
-                    blinking=False
-                )
             case GitDirectoryStatus.CHANGED:
-                return StatusIndicatorValues(
-                    state=StatusIndicatorState.ENABLED_UNSAFE,
-                    blinking=False
-                )
-            case _:
-                return StatusIndicatorValues(
-                    state=StatusIndicatorState.DISABLED,
-                    blinking=False
-                )
+                return status_values(StatusIndicatorState.CHANGED)
+            case GitDirectoryStatus.CONFLICTED | GitDirectoryStatus.ERROR:
+                return status_values(StatusIndicatorState.ERROR)
+        return status_values(StatusIndicatorState.IDLE)
 
     @classmethod
     def parse_metadata(cls, dict: dict) -> Serializable:
@@ -141,7 +136,7 @@ class GitDirectory(Serializable, ABC):
             if not os.path.isdir(directory) or not os.path.isdir(
                 os.path.join(directory, ".git")
             ):
-                self.status = GitDirectoryStatus.UNKNOWN
+                self.status = GitDirectoryStatus.ERROR
                 self.last_commit_date = None
                 self.branch_name = None
                 self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
@@ -157,7 +152,9 @@ class GitDirectory(Serializable, ABC):
                 )
                 stdout, _ = process.communicate()
                 if process.returncode != 0:
-                    self.status = GitDirectoryStatus.UNKNOWN
+                    self.status = GitDirectoryStatus.ERROR
+                elif any(line[:2] in _CONFLICT_STATUS_CODES for line in stdout.splitlines()):
+                    self.status = GitDirectoryStatus.CONFLICTED
                 else:
                     self.status = GitDirectoryStatus.CHANGED if stdout.strip() else GitDirectoryStatus.UNCHANGED
                 # Get last commit date (ISO 8601)
@@ -230,7 +227,7 @@ class GitDirectory(Serializable, ABC):
                     self.has_remote_changes = False
             except Exception as e:
                 print(f"STATUS EXCEPTION: {e}")
-                self.status = GitDirectoryStatus.UNKNOWN
+                self.status = GitDirectoryStatus.ERROR
                 self.last_commit_date = None
                 self.branch_name = None
             self.event_bus.emit(SharedEvent.STATE_UPDATED, self)

@@ -3,7 +3,7 @@ import os, threading, uuid
 from typing import Self
 from .event_bus import EventBus, SharedEvent
 from .repository import Repository
-from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues, status_values
 from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY
 from .lima import lima_home as default_new_lima_home
 
@@ -95,16 +95,16 @@ class BuildMachine:
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
-        """Like toolsets: active while running, blinking while used by operations. Starting blinks as active, stopping
-        blinks as warning (machine becomes unavailable)."""
+        """Running is loaded, missing (removed outside of app) is error. Blinks while starting, stopping or used by
+        operations."""
         match self.status:
             case self.STATUS_RUNNING:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=self.is_used)
-            case self.STATUS_STARTING:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
-            case self.STATUS_STOPPING:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=True)
-        return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
+                return status_values(StatusIndicatorState.LOADED, blinking=self.is_used)
+            case self.STATUS_STARTING | self.STATUS_STOPPING:
+                return status_values(StatusIndicatorState.LOADED, blinking=True)
+            case self.STATUS_MISSING:
+                return status_values(StatusIndicatorState.ERROR)
+        return status_values(StatusIndicatorState.IDLE)
 
     # Lifecycle:
 

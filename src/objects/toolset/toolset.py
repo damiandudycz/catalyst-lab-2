@@ -14,7 +14,7 @@ from .hotfix_patching import HotFix, apply_patch_and_store_for_isolated_system
 from .repository import Serializable, Repository
 from .toolset_application import ToolsetApplication, ToolsetApplicationInstall
 from .helper_functions import create_temp_workdir, delete_temp_workdir, mount_squashfs, umount_squashfs, create_squashfs, loop_mount_squashfs, loop_umount_squashfs
-from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues, status_values
 from .rootless import (
     rootless_toolset_unsupported_reason, run_in_namespace, extracted_squashfs, writable_squashfs_copy,
     remove_in_namespace, squashfs_process, sessions_directory, executor_for_machine, LOCAL_EXECUTOR,
@@ -79,15 +79,18 @@ class Toolset(Serializable):
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
-        match (self.is_reserved, self.spawned, self.store_changes):
-            case True, _, _:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=self.in_use)
-            case False, True, True:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=self.in_use)
-            case False, True, False:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=self.in_use)
-            case _:
-                return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=self.in_use)
+        """Mounted (environment open, also with changes kept) is loaded. Missing file or virtual machine is error,
+        missing Catalyst is warning (projects can't be built with toolset). Blinks while used by operation."""
+        machine = self.machine
+        if not os.path.exists(self.file_path()) or (self.machine_id and (machine is None or machine.status == machine.STATUS_MISSING)):
+            state = StatusIndicatorState.ERROR
+        elif self.get_app_install(ToolsetApplication.CATALYST) is None:
+            state = StatusIndicatorState.WARNING
+        elif self.spawned:
+            state = StatusIndicatorState.LOADED
+        else:
+            state = StatusIndicatorState.IDLE
+        return status_values(state, blinking=self.in_use or self.is_reserved)
 
     @classmethod
     def init_from(cls, data: dict) -> Toolset:

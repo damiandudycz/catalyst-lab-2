@@ -16,6 +16,7 @@ knowledge of Catalyst internals is needed.
 ## Contents
 
 - [Features](#features)
+  - [Status indicators](#-status-indicators)
 - [How it works](#how-it-works)
 - [Supported systems](#supported-systems)
 - [Installation](#installation)
@@ -80,6 +81,32 @@ The deploy wizard handles:
 - **System**: hostname, users, root password, network, timezone, locales, keyboard layout and SSH keys.
 - **Boot**: kernel (from the stage or a distribution kernel), linux-firmware and bootloader (GRUB, systemd-boot,
   rEFInd, EFI stub, or kboot for PS3 petitboot), with warnings about anything that needs manual updates later.
+
+### 🟢 Status indicators
+
+Items in lists and sections of the side menu have a colored dot showing their state:
+
+| Color | Meaning |
+|---|---|
+| ⚪ Gray | Not used or mounted, no changes |
+| 🔵 Blue | Mounted, loaded or running |
+| 🟣 Purple | Has changes |
+| 🟠 Orange | Has warnings |
+| 🔴 Red | Has errors |
+
+The dot **blinks** while the item is actively used (building, running an operation), in its current color (gray
+becomes blue). An item with several states shows the most important one (red, orange, purple, blue, gray). A section
+in the side menu shows the most important state of its items, and blinks while any of them is used or any of its
+operations runs.
+
+| Item | Blue | Purple | Orange | Red | Blinking |
+|---|---|---|---|---|---|
+| Toolset | Environment is open | | Catalyst is not installed | File or virtual machine is missing | Used by operation |
+| Virtual machine | Running | | | Missing | Starting, stopping, used by operation |
+| Project | | Not saved changes | Last build failed | Toolset, Releng directory or snapshot is missing, Git error or conflicts | Building |
+| Releng directory, overlay | | Not saved changes | | Git error or conflicts | |
+| Project in Builds | | | Last build stopped | Last build failed | Building |
+| Project in Deploy | | | | | Deploying |
 
 ---
 
