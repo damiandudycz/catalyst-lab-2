@@ -112,6 +112,8 @@ destination = "portage"                 # Relative to the stage directory.
 
 - Lists in arguments are added to lists of the stage and of other groups (without duplicates), other values replace
   them.
+- A group isn't applied to a stage built from a stage that already gets it (its parent, or further ancestor): the
+  stage has its packages, services and files from its seed. Such stages are shown checked and disabled.
 - Arguments that the target of a stage doesn't have are skipped, so a group can set for example both
   `stage4_packages` and `livecd_packages`.
 - Enabled groups are available in expressions as list `groups`, for example `'kernel' in groups`. Groups can use
