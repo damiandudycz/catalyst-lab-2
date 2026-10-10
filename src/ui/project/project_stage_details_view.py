@@ -1205,9 +1205,24 @@ class KernelPackageRow(Adw.ExpanderRow):
                    lambda package=package: self.on_select(package.atom, package.kind), sensitive=package.supported)
         if not self.packages:
             rows.append(Adw.ActionRow(title="No kernel packages found", subtitle="Project has no snapshot yet, and overlays of stage don't have kernels"))
+        # Custom package is option too: checked when stage uses it, selecting it uses typed package.
         custom = Adw.EntryRow(title="Custom package, eg. =sys-kernel/gentoo-kernel-6.12.8", show_apply_button=True,
                               text=self.own if selected == "" else "")
         self.custom_row = custom
+        custom_check = Gtk.CheckButton(valign=Gtk.Align.CENTER, active=selected == "")
+        if group:
+            custom_check.set_group(group)
+        self.checks[""] = custom_check
+        custom.add_prefix(custom_check)
+        def select_custom():
+            text = custom.get_text().strip()
+            if text:
+                self.on_select(text, None)
+            else:
+                self._update_rows() # Nothing to use yet, previous option stays checked.
+                custom.grab_focus()
+            return False
+        custom_check.connect("toggled", lambda check: check.get_active() and not self._building and GLib.idle_add(select_custom))
         custom.connect("apply", lambda row: row.get_text().strip() and GLib.idle_add(lambda: self.on_select(row.get_text().strip(), None) and False))
         rows.append(custom)
         self._replace_rows(rows)
