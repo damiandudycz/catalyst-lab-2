@@ -150,10 +150,11 @@ tar -xzf "$LIMA_DOWNLOADS/$LIMA_ARCHIVE" -C "$LIMA" bin/limactl share/lima
 
 # ------------------------------------------------------------------------------
 step "Bundling application"
+# PyInstaller cache is cleaned, it could keep compiled modules of previous build.
 TOOLS="$(readlink -f "$("$BREW" --prefix squashfs)/bin/unsquashfs"):$(readlink -f "$("$BREW" --prefix squashfs)/bin/mksquashfs")"
 CATALYSTLAB_STAGING="$STAGING" CATALYSTLAB_SCHEMAS="$SCHEMAS" CATALYSTLAB_ICON="$ICON" CATALYSTLAB_VERSION="$VERSION" \
 CATALYSTLAB_TOOLS="$TOOLS" \
-    "$VENV/bin/pyinstaller" --noconfirm --log-level WARN --workpath "$WORK/pyinstaller" --distpath "$WORK/dist" \
+    "$VENV/bin/pyinstaller" --noconfirm --clean --log-level WARN --workpath "$WORK/pyinstaller" --distpath "$WORK/dist" \
     "$HERE/catalystlab.spec"
 APP="$WORK/dist/$APP_NAME.app"
 
