@@ -33,6 +33,8 @@ from .project_stage_kernels import (
     set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
+from .project_kernel_packages import load_kernel_packages, KernelPackageKind
+
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
@@ -1006,6 +1008,8 @@ class StageKernelRow(Adw.ExpanderRow):
         self.entry_rows = []
         for setting in KERNEL_SETTINGS:
             match setting.type:
+                case _ if setting.key == "sources":
+                    row = KernelPackageRow(project_directory, stage, setting, on_select=self._on_package_selected)
                 case KernelSettingType.BOOLEAN:
                     row = Adw.SwitchRow(title=GLib.markup_escape_text(setting.title))
                     row.connect("notify::active", self._on_switch_toggled, setting)
@@ -1043,6 +1047,8 @@ class StageKernelRow(Adw.ExpanderRow):
             value, is_own = kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key)
             inherited = value is not None and not is_own
             match setting.type:
+                case _ if setting.key == "sources":
+                    row.load(own.get(setting.key), value if inherited else None)
                 case KernelSettingType.BOOLEAN:
                     row.set_active(kernel_setting_enabled(value))
                     row.set_subtitle("From releng spec" if inherited else "Set by this stage" if is_own else "")
@@ -1071,11 +1077,112 @@ class StageKernelRow(Adw.ExpanderRow):
         set_kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key, value or None)
         self.load_state()
 
+    def _own_value_for(self, key: str, value):
+        """Value stored by stage: none when it's the same as value of releng template."""
+        releng = releng_kernel_setting(self.project_directory, self.stage, self.kernel_name, key)
+        if key == "distkernel":
+            return None if value == kernel_setting_enabled(releng) else "yes" if value else "no"
+        return None if value == releng else value
+
+    def _on_package_selected(self, atom: str | None, kind: KernelPackageKind | None):
+        """Package of kernel (None uses releng template), Distribution kernel follows kind of selected package."""
+        set_kernel_setting(self.project_directory, self.stage, self.kernel_name, "sources",
+                           None if atom is None else self._own_value_for("sources", atom))
+        if kind in (KernelPackageKind.DISTRIBUTION, KernelPackageKind.SOURCES):
+            set_kernel_setting(self.project_directory, self.stage, self.kernel_name, "distkernel",
+                               self._own_value_for("distkernel", kind == KernelPackageKind.DISTRIBUTION))
+        self.load_state()
+
     @staticmethod
     def _text(value) -> str:
         if value is None:
             return ""
         return " ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+
+class KernelPackageRow(Adw.ExpanderRow):
+    """Package of kernel, selected from kernel packages of snapshot and overlays of stage (read when row is expanded
+    first time), from releng template, or typed (eg. with version). Packages without kernel sources can't be selected."""
+
+    def __init__(self, project_directory, stage, setting, on_select):
+        super().__init__(title=GLib.markup_escape_text(setting.title))
+        self.project_directory = project_directory
+        self.stage = stage
+        self.on_select = on_select
+        self.packages = None # Read when expanded.
+        self.own = None
+        self.inherited = None
+        self.rows = []
+        self._loading = False
+        self._building = False
+        self.connect("notify::expanded", self._on_expanded)
+
+    def load(self, own, inherited):
+        self.own, self.inherited = own, inherited
+        value = own or inherited
+        self.set_subtitle(GLib.markup_escape_text(
+            value if own else f"From releng spec: {inherited}" if inherited
+            else "Not set, catalyst uses sys-kernel/gentoo-kernel (distribution kernel) or sys-kernel/gentoo-sources"))
+        if self.packages is not None:
+            self._build_rows()
+
+    def _on_expanded(self, row, _param):
+        if not self.get_expanded() or self.packages is not None or self._loading:
+            return
+        self._loading = True
+        self._replace_rows([Adw.ActionRow(title="Reading kernel packages of snapshot and overlays...")])
+        def work():
+            try:
+                packages = load_kernel_packages(self.project_directory, self.stage)
+            except Exception as e:
+                print(f"Failed to read kernel packages: {e}")
+                packages = []
+            def done():
+                self._loading = False
+                self.packages = packages
+                self._build_rows()
+                return False
+            GLib.idle_add(done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _replace_rows(self, rows):
+        for row in self.rows:
+            self.remove(row)
+        self.rows = rows
+        for row in rows:
+            self.add_row(row)
+
+    def _build_rows(self):
+        rows, group = [], None
+        known = {package.atom for package in self.packages}
+        selected_custom = bool(self.own) and self.own not in known
+        def option(title, subtitle, active, on_activate, sensitive=True):
+            nonlocal group
+            check = Gtk.CheckButton(valign=Gtk.Align.CENTER, active=active)
+            if group:
+                check.set_group(group)
+            group = group or check
+            row = Adw.ActionRow(title=GLib.markup_escape_text(title), subtitle=GLib.markup_escape_text(subtitle))
+            row.add_prefix(check)
+            row.set_activatable_widget(check)
+            row.set_sensitive(sensitive)
+            # Selection rebuilds rows (with this one), after its signal.
+            check.connect("toggled", lambda check: check.get_active() and not self._building and GLib.idle_add(lambda: on_activate() and False))
+            rows.append(row)
+        self._building = True
+        if self.inherited:
+            option(f"From releng spec: {self.inherited}", "Package set by releng template of stage", not self.own,
+                   lambda: self.on_select(None, None))
+        for package in self.packages:
+            option(package.atom, package.details, self.own == package.atom,
+                   lambda package=package: self.on_select(package.atom, package.kind), sensitive=package.supported)
+        if not self.packages:
+            rows.append(Adw.ActionRow(title="No kernel packages found", subtitle="Project has no snapshot yet, and overlays of stage don't have kernels"))
+        custom = Adw.EntryRow(title="Custom package, eg. =sys-kernel/gentoo-kernel-6.12.8", show_apply_button=True,
+                              text=self.own if selected_custom else "")
+        custom.connect("apply", lambda row: row.get_text().strip() and GLib.idle_add(lambda: self.on_select(row.get_text().strip(), None) and False))
+        rows.append(custom)
+        self._replace_rows(rows)
+        self._building = False
 
 class KernelListRow(Adw.ExpanderRow):
     """List setting of kernel, edited one entry per line like list settings of stage. Empty list uses value of
