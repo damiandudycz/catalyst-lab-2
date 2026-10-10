@@ -56,6 +56,10 @@ knowledge of Catalyst internals is needed.
   tree are still built.
 - The **Builds** section lists every build run of every stage, including the ones that were skipped or cancelled.
 
+### 🗂️ App data
+- Everything the app stores is in `~/CatalystLab`: toolsets, snapshots, projects, builds, machines, and its settings
+  and lists of items (`~/CatalystLab/Config`). Removing this folder resets the app.
+
 ### 📦 Binary packages
 - Binary packages built with stages are kept in **binary packages folders** (`~/CatalystLab/Packages`), separate from
   builds of projects, and reused by next builds.

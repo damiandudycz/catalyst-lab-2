@@ -7,6 +7,48 @@ from .event_bus import EventBus
 from enum import Enum, auto
 from typing import final
 
+APP_DIRECTORY = "~/CatalystLab"
+
+def config_directory() -> str:
+    """Stored repositories and settings, in app directory with all other data, so removing app directory resets app."""
+    directory = os.path.join(os.path.expanduser(APP_DIRECTORY), "Config")
+    _migrate_legacy_config(directory)
+    return directory
+
+def _legacy_config_directory() -> str:
+    """Config directory used by older versions."""
+    if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
+        return os.path.expanduser(f"~/.var/app/{os.environ.get('FLATPAK_ID')}/config/catalystlab")
+    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "catalystlab")
+
+_legacy_config_checked = False
+
+def _migrate_legacy_config(directory: str):
+    """Config of older versions is moved to config directory, when data it describes still exists (any location from
+    its settings). Otherwise it describes removed data and is deleted."""
+    global _legacy_config_checked
+    if _legacy_config_checked:
+        return
+    _legacy_config_checked = True
+    legacy = _legacy_config_directory()
+    if not os.path.isdir(legacy) or os.path.isdir(directory):
+        return
+    import shutil
+    try:
+        with open(os.path.join(legacy, "settings.json"), encoding="utf-8") as file:
+            settings = json.load(file)
+        locations = [value for key, value in settings.items() if key.endswith("_location") and isinstance(value, str)]
+    except (OSError, ValueError, AttributeError):
+        locations = []
+    locations.append(APP_DIRECTORY)
+    if any(os.path.isdir(os.path.expanduser(location)) for location in locations):
+        print(f"Moving configuration from {legacy} to {directory}")
+        os.makedirs(os.path.dirname(directory), exist_ok=True)
+        shutil.move(legacy, directory)
+    else:
+        print(f"Removing configuration of removed data {legacy}")
+        shutil.rmtree(legacy, ignore_errors=True)
+
 class Serializable(Protocol):
     def serialize(self) -> dict: ...
     @classmethod
@@ -85,12 +127,7 @@ class Repository(Generic[T]):
         self._value: T | TrackedList[T] = self._load()
 
     def _config_file(self) -> str:
-        config_paths = {
-            RuntimeEnv.FLATPAK: lambda: os.path.expanduser(f"~/.var/app/{os.environ.get('FLATPAK_ID')}/config"),
-            RuntimeEnv.HOST: lambda: os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
-        }
-        config_base = os.path.join(config_paths.get(RuntimeEnv.current())(), "catalystlab")
-        return os.path.join(config_base, f"{self._alias}.json")
+        return os.path.join(config_directory(), f"{self._alias}.json")
 
     def save(self):
         path = self._config_file()
