@@ -523,6 +523,8 @@ class ProjectTemplate:
             if variable.type == TemplateVariableType.MULTIPLE:
                 # Selection of user, or default, without options that are not available.
                 value = selected.get(variable.id)
+                if isinstance(value, str):
+                    value = [value] # Selected when variable was single choice (projects created by older template).
                 value = variable.default if not isinstance(value, list) else value
                 names[variable.id] = [option for option in options if option in value]
                 continue
