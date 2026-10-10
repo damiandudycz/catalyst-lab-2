@@ -87,16 +87,32 @@ class BuildMachineStepCreate(BuildMachineStep):
         return True
 
 class BuildMachineStepStart(BuildMachineStep):
+    # Machine is used by creation until it finishes, so it's not stopped (when idle) between steps and booted again.
+    USER = "Machine creation"
     def __init__(self, multistage_process: MultiStageProcess):
         super().__init__(name="Start virtual machine", description="Boots machine and installs required packages", multistage_process=multistage_process)
+        self.used = False
     def start(self):
         super().start()
         try:
+            self.multistage_process.machine.begin_use(self.USER)
+            self.used = True
             self.multistage_process.machine.ensure_running(self.log, self.processes)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
             print(f"Error during '{self.name}': {e}")
             self.complete(MultiStageProcessStageState.FAILED)
+    def cleanup(self) -> bool:
+        if not super().cleanup():
+            return False
+        if self.used:
+            self.used = False
+            machine = self.multistage_process.machine
+            machine.end_use(self.USER)
+            # Machine of failed creation is stopped now, before it's removed.
+            if self.multistage_process.status.name != "COMPLETED":
+                machine.stop_if_started_automatically()
+        return True
 
 class BuildMachineStepVerify(BuildMachineStep):
     def __init__(self, multistage_process: MultiStageProcess):
