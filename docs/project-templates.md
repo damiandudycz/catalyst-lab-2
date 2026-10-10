@@ -214,14 +214,18 @@ from template", "Update from template") change this file. The project page shows
 project (not in the template), not saved changes, and **Update template** button. It's blue when the template has
 changes: when the project is opened, only listing of files of the latest template is downloaded to check it.
 
-Changes of the project have to be saved before updating. Update generates the project again from the latest version of
+Changes of the project have to be saved before updating. Update starts with options of the latest version of the
+template, with values selected for the project (options that aren't available anymore get defaults), so they can be
+changed too. Update generates the project again from the latest version of
 the template, with the same options, as a new commit on top of the last generation. Then it compares three versions:
 the last generation, the project, and the new generation. Settings of stages are compared one by one (stages are
 matched by ids, so renamed stages are compared too), other files as whole:
 
 - changed only in the template: applied,
 - changed only in the project: kept,
-- changed in both differently: you choose to keep the project version or use the template version.
+- changed in both differently: you choose to keep the project version or use the template version,
+- stage removed by the template (eg. option was changed), but changed in the project (its settings, or files added
+  to it): you choose to keep the whole stage, or remove it.
 
 Own commits of the project are then replayed on top of the new generation, with these decisions, so the history of the
 project has its own commits on top of the latest template. Commits keep their messages and authors. The template

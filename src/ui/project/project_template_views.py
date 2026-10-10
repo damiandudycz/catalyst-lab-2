@@ -136,11 +136,13 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self._expanded_rows: set[str] = set() # Expander rows kept expanded when rows are rebuilt.
         self._rebuild()
 
-    def set_template(self, template: ProjectTemplate | None):
+    def set_template(self, template: ProjectTemplate | None, selected: dict[str, Any] | None = None):
+        """Template with options selected by default (eg. selected when project was created), other ones get defaults
+        of template."""
         if template is self.template:
             return
         self.template = template
-        self.selected = {}
+        self.selected = dict(selected or {})
         self._expanded_rows = set()
         self._rebuild()
 
