@@ -31,7 +31,7 @@ from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cach
 from .project_stage_kernels import (
     KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_kernel_names, kernel_setting, own_kernel_settings,
     set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
-    new_kernel_name, rename_kernel
+    new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -987,14 +987,15 @@ class _StageWithValue:
         return self._value if name == self._attribute_name else getattr(self._stage, name)
 
 class StageKernelRow(Adw.ExpanderRow):
-    """Kernel of stage with its settings. Settings not set by stage show value of releng template, used when empty."""
+    """Kernel of stage with its settings. Settings not set by stage use values of releng template, which are shown
+    with them. Settings are edited by their type: switches, lists (one entry per line) and texts."""
 
     def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, kernel_name: str, on_rename=None):
         super().__init__(title=GLib.markup_escape_text(kernel_name))
         self.project_directory = project_directory
         self.stage = stage
         self.kernel_name = kernel_name
-        self.entry_rows = []
+        self._loading = False
         # Name is used by catalyst in file names (/boot/<name>) and names of settings (boot/kernel/<name>/...).
         self.name_row = Adw.EntryRow(title="Name", text=kernel_name, show_apply_button=True)
         self.name_row.set_tooltip_text("Name of kernel, used in names of its files in /boot")
@@ -1002,10 +1003,18 @@ class StageKernelRow(Adw.ExpanderRow):
         if on_rename:
             self.name_row.connect("apply", lambda row: self._on_rename(row, on_rename))
         self.add_row(self.name_row)
+        self.entry_rows = []
         for setting in KERNEL_SETTINGS:
-            row = Adw.EntryRow(show_apply_button=True)
+            match setting.type:
+                case KernelSettingType.BOOLEAN:
+                    row = Adw.SwitchRow(title=GLib.markup_escape_text(setting.title))
+                    row.connect("notify::active", self._on_switch_toggled, setting)
+                case KernelSettingType.LIST:
+                    row = KernelListRow(setting, on_apply=lambda values, setting=setting: self._set(setting, values))
+                case _:
+                    row = Adw.EntryRow(show_apply_button=True)
+                    row.connect("apply", lambda row, setting=setting: self._set(setting, row.get_text().strip()))
             row.set_tooltip_text(setting.description)
-            row.connect("apply", self._on_apply, setting)
             self.add_row(row)
             self.entry_rows.append((setting, row))
         self.load_state()
@@ -1027,22 +1036,38 @@ class StageKernelRow(Adw.ExpanderRow):
         return hidden
 
     def load_state(self):
+        self._loading = True
         own = own_kernel_settings(self.stage).get(self.kernel_name, {})
         summary = []
         for setting, row in self.entry_rows:
             value, is_own = kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key)
-            text = self._text(own.get(setting.key))
-            row.set_text(text)
-            # Empty entry shows title as placeholder, with value of releng template used then.
-            inherited = self._text(value) if value is not None and not is_own else ""
-            row.set_title(GLib.markup_escape_text(f"{setting.title} (releng: {inherited})" if inherited else setting.title))
-            if value is not None and setting.key in ("sources", "distkernel", "config"):
-                summary.append(f"{setting.key}: {self._text(value)}")
-        self.set_subtitle(GLib.markup_escape_text(" · ".join(summary) or "Default settings of catalyst"))
+            inherited = value is not None and not is_own
+            match setting.type:
+                case KernelSettingType.BOOLEAN:
+                    row.set_active(kernel_setting_enabled(value))
+                    row.set_subtitle("From releng spec" if inherited else "Set by this stage" if is_own else "")
+                case KernelSettingType.LIST:
+                    row.load(own.get(setting.key) or [], value if inherited else None)
+                case _:
+                    row.set_text(self._text(own.get(setting.key)))
+                    # Empty entry shows title as placeholder, with value of releng template used then.
+                    row.set_title(GLib.markup_escape_text(f"{setting.title} (releng: {self._text(value)})" if inherited else setting.title))
+            if setting.key == "sources" and value:
+                summary.append(self._text(value))
+            elif setting.key == "distkernel":
+                summary.append("distribution kernel" if kernel_setting_enabled(value) else "genkernel")
+        self.set_subtitle(GLib.markup_escape_text(" · ".join(summary)))
+        self._loading = False
 
-    def _on_apply(self, row: Adw.EntryRow, setting):
-        text = row.get_text().strip()
-        value = text.split() if setting.is_list else text
+    def _on_switch_toggled(self, row: Adw.SwitchRow, _param, setting):
+        if self._loading:
+            return
+        # Stage stores value only when it differs from releng template (no turns off releng yes, and isn't written).
+        releng = kernel_setting_enabled(releng_kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key))
+        enabled = row.get_active()
+        self._set(setting, None if enabled == releng else "yes" if enabled else "no")
+
+    def _set(self, setting, value):
         set_kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key, value or None)
         self.load_state()
 
@@ -1051,6 +1076,61 @@ class StageKernelRow(Adw.ExpanderRow):
         if value is None:
             return ""
         return " ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+
+class KernelListRow(Adw.ExpanderRow):
+    """List setting of kernel, edited one entry per line like list settings of stage. Empty list uses value of
+    releng template, shown in subtitle."""
+
+    def __init__(self, setting, on_apply):
+        super().__init__(title=GLib.markup_escape_text(setting.title))
+        self.on_apply = on_apply
+        self.values: list[str] = []
+        self.text_view = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                                      top_margin=8, bottom_margin=8, left_margin=8, right_margin=8)
+        self.text_view.set_size_request(-1, 72)
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        self.text_view.add_controller(key_controller)
+        hint = Gtk.Label(label="One entry per line. Ctrl+Enter to apply.", halign=Gtk.Align.START, hexpand=True)
+        hint.add_css_class("dimmed")
+        hint.add_css_class("caption")
+        revert_button = Gtk.Button(label="Revert")
+        revert_button.connect("clicked", lambda _: self._set_text(self.values))
+        apply_button = Gtk.Button(label="Apply")
+        apply_button.add_css_class("suggested-action")
+        apply_button.connect("clicked", lambda _: self._apply())
+        buttons = Gtk.Box(spacing=6)
+        for widget in (hint, revert_button, apply_button):
+            buttons.append(widget)
+        editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.append(Gtk.Frame(child=self.text_view))
+        editor.append(buttons)
+        self.add_row(Gtk.ListBoxRow(activatable=False, selectable=False, child=editor))
+
+    def load(self, values: list[str], inherited: list[str] | None):
+        self.values = list(values)
+        self._set_text(self.values)
+        if self.values:
+            subtitle = ", ".join(self.values)
+        elif inherited:
+            subtitle = f"From releng spec: {', '.join(inherited)}"
+        else:
+            subtitle = "None"
+        self.set_subtitle(GLib.markup_escape_text(subtitle))
+
+    def _set_text(self, values: list[str]):
+        self.text_view.get_buffer().set_text("\n".join(values))
+
+    def _apply(self):
+        buffer = self.text_view.get_buffer()
+        text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+        self.on_apply([line.strip() for line in text.splitlines() if line.strip()])
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.CONTROL_MASK:
+            self._apply()
+            return True
+        return False
 
 def _has_own_value(stage: ProjectStage, attribute: str) -> bool:
     """Stage sets value itself (not automatic option like inheriting from parent or releng spec)."""

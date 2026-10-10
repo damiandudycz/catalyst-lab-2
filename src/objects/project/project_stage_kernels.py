@@ -1,6 +1,7 @@
 from __future__ import annotations
 import re
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 from .project_stage_arguments import StageArgumentDetails, StageArgumentLevel
 from .project_stage_automatic_option import StageAutomaticOption
@@ -17,27 +18,44 @@ from .project_stage_automatic_option import StageAutomaticOption
 
 BOOT_KERNELS_ATTRIBUTE = "boot_kernels"
 
+class KernelSettingType(Enum):
+    TEXT = "text"
+    PATH = "path"       # File or folder, placeholders (@STAGE_DIR@, @REPO_DIR@...) can be used.
+    LIST = "list"       # Values separated by spaces in spec, edited one per line.
+    BOOLEAN = "boolean" # Catalyst checks only if option exists, so it's written only when enabled (as yes).
+
 @dataclass(frozen=True)
 class KernelSetting:
     key: str # Name in spec, after boot/kernel/<name>/.
     title: str
     description: str
-    is_list: bool = False
+    type: KernelSettingType = KernelSettingType.TEXT
+
+    @property
+    def is_list(self) -> bool:
+        return self.type == KernelSettingType.LIST
+
+# Accepted by catalyst, but its scripts don't use them (catalyst 4).
+_NOT_USED = " Catalyst accepts this setting, but doesn't use it when building kernels."
 
 KERNEL_SETTINGS = [
-    KernelSetting("sources", "Kernel package", "Package with kernel sources, eg. sys-kernel/gentoo-kernel (distribution kernel) or sys-kernel/gentoo-sources. Prebuilt kernels without sources (eg. raspberrypi-image) are installed as packages of stage instead"),
-    KernelSetting("distkernel", "Distribution kernel", "yes: kernel package builds kernel and initramfs itself (gentoo-kernel)"),
-    KernelSetting("config", "Configuration", "Kernel .config file, @STAGE_DIR@ and @REPO_DIR@ can be used"),
-    KernelSetting("dracut_args", "Dracut arguments", "Arguments of dracut creating initramfs of distribution kernel"),
-    KernelSetting("extraversion", "Extra version", "Added to kernel version"),
-    KernelSetting("packages", "Packages", "Packages built with kernel (eg. external modules)", is_list=True),
-    KernelSetting("use", "USE flags", "USE flags of kernel packages", is_list=True),
-    KernelSetting("gk_kernargs", "Genkernel arguments", "Arguments of genkernel (kernels which aren't distribution kernels)"),
-    KernelSetting("gk_action", "Genkernel action", "Genkernel action, eg. all"),
-    KernelSetting("aliases", "Aliases", "Other names of kernel in boot menu", is_list=True),
-    KernelSetting("console", "Console", "Kernel console options, eg. ttyS0,115200", is_list=True),
-    KernelSetting("initramfs_overlay", "Initramfs overlay", "Folder with files added to initramfs"),
-    KernelSetting("softlevel", "Soft level", "OpenRC runlevel used when booting"),
+    KernelSetting("sources", "Kernel package", "Package with kernel sources, eg. sys-kernel/gentoo-kernel (distribution kernel) or "
+                  "sys-kernel/gentoo-sources. Prebuilt kernels without sources (eg. raspberrypi-image) are installed as packages of stage instead."),
+    KernelSetting("distkernel", "Distribution kernel", "Kernel package builds kernel itself (gentoo-kernel), catalyst creates its "
+                  "initramfs with dracut. Otherwise kernel is built from sources with genkernel.", KernelSettingType.BOOLEAN),
+    KernelSetting("config", "Configuration", "Kernel .config file, eg. @STAGE_DIR@/kernel.config. @STAGE_DIR@, @PROJECT_DIR@ and "
+                  "@REPO_DIR@ can be used.", KernelSettingType.PATH),
+    KernelSetting("dracut_args", "Dracut arguments", "Arguments of dracut creating initramfs of distribution kernel."),
+    KernelSetting("extraversion", "Extra version", "Added to kernel version."),
+    KernelSetting("packages", "Packages", "Packages built with kernel, eg. external modules.", KernelSettingType.LIST),
+    KernelSetting("use", "USE flags", "USE flags of kernel packages.", KernelSettingType.LIST),
+    KernelSetting("gk_kernargs", "Genkernel arguments", "Arguments of genkernel, for kernels which aren't distribution kernels."),
+    KernelSetting("gk_action", "Genkernel action", "Genkernel action, eg. all." + _NOT_USED),
+    KernelSetting("aliases", "Aliases", "Other names of kernel in boot menu." + _NOT_USED, KernelSettingType.LIST),
+    KernelSetting("console", "Console", "Console of kernel in boot menu of ISO, eg. ttyS0,115200.", KernelSettingType.LIST),
+    KernelSetting("initramfs_overlay", "Initramfs overlay", "Folder with files added to initramfs (genkernel). @STAGE_DIR@, "
+                  "@PROJECT_DIR@ and @REPO_DIR@ can be used.", KernelSettingType.PATH),
+    KernelSetting("softlevel", "Soft level", "OpenRC runlevel used when booting." + _NOT_USED),
 ]
 _SETTINGS_BY_KEY = {setting.key: setting for setting in KERNEL_SETTINGS}
 
@@ -77,6 +95,10 @@ def releng_kernel_setting(project_directory, stage, name: str, key: str):
     if value is not None and _SETTINGS_BY_KEY[key].is_list and not isinstance(value, list):
         value = [value]
     return value
+
+def kernel_setting_enabled(value) -> bool:
+    """Boolean setting is enabled (yes, like catalyst checks it)."""
+    return isinstance(value, str) and value.strip().lower() == "yes"
 
 def kernel_setting(project_directory, stage, name: str, key: str) -> tuple[Any, bool]:
     """Value of kernel setting used when building, and whether it's set by stage (otherwise from releng template)."""
@@ -160,6 +182,9 @@ def kernel_spec_values(project_directory, stage) -> list[tuple[str, Any]]:
     for name in stage_kernel_names(project_directory, stage):
         for setting in KERNEL_SETTINGS:
             value, _ = kernel_setting(project_directory, stage, name, setting.key)
+            if setting.type == KernelSettingType.BOOLEAN:
+                # Catalyst checks only if option exists, "no" would start preparing distribution kernel.
+                value = "yes" if kernel_setting_enabled(value) else None
             if not _is_empty(value):
                 values.append((f"{StageArgumentDetails.boot_kernel.value}/{name}/{setting.key}", value))
     return values
