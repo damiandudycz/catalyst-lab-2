@@ -1,5 +1,5 @@
 import threading, uuid, os
-from gi.repository import Gtk, Gdk, Adw, GLib, Gio
+from gi.repository import Gtk, Gdk, Adw, GLib, Gio, Pango
 from dataclasses import dataclass
 from .project_directory import ProjectDirectory
 from .project_stage import (
@@ -240,6 +240,8 @@ class ProjectStageDetailsView(Gtk.Box):
                 )
             case StageArgumentType.string_list | StageArgumentType.raw:
                 return StageTextListRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
+            case _ if argument.details in SCRIPT_ARGUMENTS:
+                return StageScriptRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
             case _:
                 # Stored automatic option is shown as unsupported value even if argument doesn't allow any.
                 if (argument.details and argument.details.automatic_options) or isinstance(getattr(self.stage, argument.attribute_name, None), StageAutomaticOption):
@@ -785,6 +787,136 @@ class StageTextEntrySourceRow(StageTextSourceRow):
 
     def custom_value_display(self, value) -> str:
         return value
+
+# Arguments with path of script run by catalyst in stage (fsscript). Scripts in stage folder are edited in the app.
+SCRIPT_ARGUMENTS = (StageArgumentDetails.stage4_fsscript, StageArgumentDetails.livecd_fsscript)
+_STAGE_DIR = "@STAGE_DIR@/"
+
+class StageScriptRow(StageTextEntrySourceRow):
+    """Path of script catalyst copies into stage and runs (fsscript). Script in stage folder (path @STAGE_DIR@/...) is
+    written in the app: its text is saved to the file, which is part of the project, and @STAGE_DIR@ is replaced with the
+    folder when building. Without script, one can be written in stage folder."""
+
+    _NEW_SCRIPT = "#!/bin/bash\n# Runs in stage after its packages are installed.\nset -e\n\n"
+
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, argument: StageArgumentTargetDetails):
+        self.project_directory = project_directory
+        self.stage = stage
+        self._script_rows_created = False
+        super().__init__(project_directory=project_directory, stage=stage, argument=argument)
+        self._create_script_rows()
+        self.update_display()
+
+    def _create_script_rows(self):
+        self.text_view = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=True,
+                                      top_margin=8, bottom_margin=8, left_margin=8, right_margin=8)
+        self.text_view.set_size_request(-1, 240)
+        self.text_view.get_buffer().connect("changed", lambda buffer: self._update_script_state())
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self._on_key_pressed)
+        self.text_view.add_controller(key_controller)
+        self.script_label = Gtk.Label(halign=Gtk.Align.START, hexpand=True, ellipsize=Pango.EllipsizeMode.START)
+        self.script_label.add_css_class("dimmed")
+        self.script_label.add_css_class("caption")
+        self.revert_button = Gtk.Button(label="Revert")
+        self.revert_button.connect("clicked", lambda _: self._load_script())
+        self.save_button = Gtk.Button(label="Save")
+        self.save_button.add_css_class("suggested-action")
+        self.save_button.connect("clicked", lambda _: self._save_script())
+        buttons = Gtk.Box(spacing=6)
+        for widget in (self.script_label, self.revert_button, self.save_button):
+            buttons.append(widget)
+        editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        editor.append(Gtk.Frame(child=Gtk.ScrolledWindow(child=self.text_view, min_content_height=240, max_content_height=480,
+                                                          propagate_natural_height=True, hscrollbar_policy=Gtk.PolicyType.NEVER)))
+        editor.append(buttons)
+        self.script_row = Gtk.ListBoxRow(activatable=False, selectable=False, child=editor)
+        self.add_row(self.script_row)
+        self.write_row = Adw.ButtonRow(title="Write script in stage folder", start_icon_name="document-edit-symbolic")
+        self.write_row.connect("activated", lambda _: self._write_new_script())
+        self.add_row(self.write_row)
+        self.outside_row = Adw.ActionRow(title="Script is outside of project", subtitle="Only scripts in stage folder (@STAGE_DIR@/...) are edited in the app")
+        self.add_row(self.outside_row)
+        self._script_rows_created = True
+        self._loaded_path = None
+
+    def _script_file(self, path) -> str | None:
+        """File of script in stage folder, None for other paths."""
+        if not isinstance(path, str) or not path.startswith(_STAGE_DIR):
+            return None
+        relative = os.path.normpath(path[len(_STAGE_DIR):])
+        if relative.startswith("..") or os.path.isabs(relative):
+            return None
+        return os.path.join(self.project_directory.stage_directory_path(self.stage.name), relative)
+
+    def update_display(self):
+        super().update_display()
+        if not getattr(self, "_script_rows_created", False):
+            return
+        custom = self.is_custom()
+        path = self.value if custom else None
+        file = self._script_file(path)
+        self.script_row.set_visible(custom and file is not None)
+        self.write_row.set_visible(custom and not path)
+        self.outside_row.set_visible(custom and bool(path) and file is None)
+        if file is not None and path != self._loaded_path:
+            self._load_script()
+
+    def _load_script(self):
+        file = self._script_file(self.value if self.is_custom() else None)
+        try:
+            with open(file, encoding="utf-8") as script:
+                text = script.read()
+        except (OSError, TypeError):
+            text = ""
+        self._loaded_path = self.value
+        self._saved_text = text
+        self.text_view.get_buffer().set_text(text)
+        self._update_script_state()
+
+    def _text(self) -> str:
+        buffer = self.text_view.get_buffer()
+        return buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+
+    def _update_script_state(self):
+        changed = self._text() != getattr(self, "_saved_text", None)
+        self.save_button.set_sensitive(changed)
+        self.revert_button.set_sensitive(changed)
+        file = self._script_file(self.value if self.is_custom() else None)
+        name = os.path.relpath(file, self.project_directory.directory_path()) if file else ""
+        self.script_label.set_label(f"{name} · not saved" if changed else name)
+
+    def _save_script(self):
+        file = self._script_file(self.value if self.is_custom() else None)
+        if file is None:
+            return
+        text = self._text()
+        os.makedirs(os.path.dirname(file), exist_ok=True)
+        with open(file, "w", encoding="utf-8") as script:
+            script.write(text)
+        self._saved_text = text
+        self._update_script_state()
+        # Script is file of project, its Git status changes.
+        self.project_directory.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, self.project_directory)
+
+    def _write_new_script(self):
+        """New script in stage folder, its path is set as value."""
+        name = "fsscript.sh"
+        number = 2
+        folder = self.project_directory.stage_directory_path(self.stage.name)
+        while os.path.exists(os.path.join(folder, name)):
+            name, number = f"fsscript-{number}.sh", number + 1
+        self.set_editor_value(_STAGE_DIR + name)
+        self.apply_custom_value()
+        self.text_view.get_buffer().set_text(self._NEW_SCRIPT)
+        self._save_script()
+        GLib.idle_add(lambda: self.text_view.grab_focus() and False)
+
+    def _on_key_pressed(self, controller, keyval, keycode, state):
+        if keyval == Gdk.KEY_s and state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
+            self._save_script()
+            return True
+        return False
 
 class StageTextListRow(StageTextSourceRow):
     """Edits list arguments (packages, use, rcadd...) one entry per line. Custom value is stored as list[str]."""
