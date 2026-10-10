@@ -126,6 +126,7 @@ catalystlab_sources = [
   'ui/components/wizard/wizard_view.py',
   'ui/components/stages_tree_view.py',
   'ui/components/cl_toggle_group.py',
+  'ui/components/combo_row_popup.py',
   'ui/git_directory/git_directory_create_config_view.py',
   'ui/git_directory/git_directory_details_view.py',
   'ui/main_window/main_window_content.py',

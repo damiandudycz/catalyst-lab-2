@@ -13,6 +13,7 @@ from .project_stage_arguments import (
     StageArgumentType, StageArgumentDetails, StageArgumentLevel, stage_argument_level
 )
 from .cl_toggle_group import CLToggle, CLToggleGroup
+from .combo_row_popup import fit_popup_to_items
 from .project_manager import ProjectManager
 from .git_directory import GitDirectoryEvent
 from .project_stage import ProjectStageEvent
@@ -1158,6 +1159,7 @@ class KernelPackageRow(Adw.ComboRow):
 
     def __init__(self, setting, on_select):
         super().__init__(title=GLib.markup_escape_text(setting.title), enable_search=True)
+        fit_popup_to_items(self)
         self.on_select = on_select
         self.packages = None
         self.own = None

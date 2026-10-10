@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, subprocess, sys, threading
 from gi.repository import Gtk, GLib, Adw
+from .combo_row_popup import fit_popup_to_items
 from .repository import Repository, RepositoryEvent
 from .architecture import Architecture
 from .event_bus import SharedEvent
@@ -25,7 +26,7 @@ def present_new_packages_directory_dialog(parent: Gtk.Widget, architecture: Arch
     """Dialog creating binary packages folder: name and architecture."""
     name_row = Adw.EntryRow(title="Name", text=name)
     architectures = sorted(Architecture, key=lambda item: item.name)
-    architecture_row = Adw.ComboRow(title="Architecture", model=Gtk.StringList.new([item.name for item in architectures]))
+    architecture_row = fit_popup_to_items(Adw.ComboRow(title="Architecture", model=Gtk.StringList.new([item.name for item in architectures])))
     if architecture in architectures:
         architecture_row.set_selected(architectures.index(architecture))
     list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
