@@ -67,6 +67,10 @@ class ProjectDetailsView(Gtk.Box):
         self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
         self.packages_selection_view.select(self.project_directory.get_packages_directory())
         self._update_packages_warning()
+        if not getattr(self, "_new_packages_row", None):
+            self._new_packages_row = Adw.ButtonRow(title="New folder for project", start_icon_name="add-square-svgrepo-com-symbolic")
+            self._new_packages_row.connect("activated", self.on_new_packages_activated)
+            self.packages_selection_view.add_footer_row(self._new_packages_row)
 
     def _update_packages_warning(self):
         """Selected binary packages folder made for other architecture or CPU flags than project has."""
@@ -106,7 +110,6 @@ class ProjectDetailsView(Gtk.Box):
         self._update_packages_warning()
         self._refresh_build_state() # Toolset could change.
 
-    @Gtk.Template.Callback()
     def on_new_packages_activated(self, row):
         from .packages_views import present_new_packages_directory_dialog
         from .packages_directory import project_cpu_flags, unique_packages_name

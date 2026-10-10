@@ -206,13 +206,6 @@
                         <signal name="is-item-usable" handler="is_item_usable"/>
                       </object>
                     </child>
-                    <child>
-                      <object class="AdwButtonRow" id="new_packages_row">
-                        <property name="title">New binary packages folder for project</property>
-                        <property name="start-icon-name">add-square-svgrepo-com-symbolic</property>
-                        <signal name="activated" handler="on_new_packages_activated"/>
-                      </object>
-                    </child>
                   </object>
                 </child>
               </object>

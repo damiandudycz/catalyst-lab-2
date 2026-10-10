@@ -1,7 +1,7 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio, GObject, Adw
 from enum import Enum, auto
-from .repository import Repository
+from .repository import Repository, RepositoryEvent
 from .repository_list_view import ItemRow
 from .event_bus import EventBus
 from .item_select_view import ItemSelectionViewEvent
@@ -51,12 +51,19 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             if hasattr(self, 'static_list'):
                 raise ValueError("Canno't use both static_list and item_class_name")
             self._load_items()
+            # Items added or removed while view is displayed (eg. folder created in other view).
+            if not getattr(self, "_repository_observed", False):
+                self._repository_observed = True
+                self.repository.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self._on_repository_changed)
 
     def _add_warning_icon(self):
         self.warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
         self.warning_icon.add_css_class("warning")
         self.warning_icon.set_visible(False) # Shown by determine_incorrect_selection once items are loaded.
         self.add_suffix(self.warning_icon)
+
+    def _on_repository_changed(self, *args):
+        self._load_items()
 
     def items(self) -> list:
         return self.static_list if hasattr(self, 'static_list') else self.repository.value
@@ -167,6 +174,10 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             row.set_sensitive(item in valid_items)
             self.add_row(row)
             self.rows.append(row)
+        # Footer rows (eg. button creating new item) stay below items.
+        for footer_row in getattr(self, "_footer_rows", []):
+            self.remove(footer_row)
+            self.add_row(footer_row)
         self.no_valid_entries_label.set_visible(not valid_items)
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
         self.determine_incorrect_selection()
@@ -202,6 +213,13 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             self.set_subtitle(", ".join(item.display for item in self.selected_items) if self.selected_items else f"({self.none_title})")
         else:
             self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, self.selected_item if isinstance(self.selected_item, str) else "(Selected)") if self.selected_item else f"({self.none_title})")
+
+    def add_footer_row(self, row: Gtk.Widget):
+        """Row shown below items when expanded, kept there when items are loaded again."""
+        if not hasattr(self, "_footer_rows"):
+            self._footer_rows = []
+        self._footer_rows.append(row)
+        self.add_row(row)
 
     def set_extra_warning(self, text: str | None):
         """Warning about selected item that depends on context (eg. folder made for other architecture than project),

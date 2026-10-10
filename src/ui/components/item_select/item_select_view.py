@@ -1,7 +1,7 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio, GObject, Adw
 from enum import Enum, auto
-from .repository import Repository
+from .repository import Repository, RepositoryEvent
 from .repository_list_view import ItemRow
 from .event_bus import EventBus
 
@@ -55,6 +55,13 @@ class ItemSelectionView(Gtk.Box):
             if hasattr(self, 'static_list'):
                 raise ValueError("Canno't use both static_list and item_class_name")
             self._load_items()
+            # Items added or removed while view is displayed (eg. folder created in other view).
+            if not getattr(self, "_repository_observed", False):
+                self._repository_observed = True
+                self.repository.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self._on_repository_changed)
+
+    def _on_repository_changed(self, *args):
+        self._load_items()
 
     def items(self) -> list:
         return self.static_list if hasattr(self, 'static_list') else self.repository.value
