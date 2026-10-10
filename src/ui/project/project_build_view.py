@@ -12,14 +12,7 @@ from .wizard_view import WizardView
 from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
 from .toolset_application import ToolsetApplication
-
-class LatestSnapshotOption:
-    """Snapshot list entry generating new snapshot with project toolset when build starts."""
-    name = "Get latest"
-    short_details = "Generates new snapshot of the Gentoo ebuild repository with the project toolset"
-    icon_name = "folder-download-symbolic"
-
-LATEST_SNAPSHOT = LatestSnapshotOption()
+from .snapshot import LATEST_SNAPSHOT
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_build_view.ui')
 class ProjectBuildView(Gtk.Box):

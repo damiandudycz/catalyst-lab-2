@@ -10,6 +10,14 @@ from collections import defaultdict
 from .architecture import Architecture
 from typing import NamedTuple
 
+class LatestSnapshotOption:
+    """Snapshot list entry generating new snapshot with selected toolset (when project is created or build starts)."""
+    name = "Get latest"
+    short_details = "Generates new snapshot of the Gentoo ebuild repository with the toolset"
+    icon_name = "folder-download-symbolic"
+
+LATEST_SNAPSHOT = LatestSnapshotOption()
+
 @dataclass
 class Snapshot(Serializable):
     filename: str
