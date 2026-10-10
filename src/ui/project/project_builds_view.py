@@ -116,15 +116,17 @@ class ProjectBuildsView(Gtk.Box):
         steps_by_stage = {step.stage.id: step for step in running_build.stages if isinstance(step, ProjectBuildStepBuildStage)}
         entries = []
         for stage in running_build.plan.build_order():
-            build = builds_by_stage.get(stage.id)
             step = steps_by_stage.get(stage.id)
-            started = build is not None and build.status.is_attempt
-            if started and build.status != StageBuildStatus.IN_PROGRESS:
-                state = _record_state(build)
-            elif started:
+            # Step reports its state before its build record is saved, so state of running build is taken from steps,
+            # records give details (and results of finished stages).
+            build = (step.build if step is not None else None) or builds_by_stage.get(stage.id)
+            step_state = step.state if step is not None else None
+            if step_state == MultiStageProcessStageState.IN_PROGRESS:
                 state = BuildRowState.BUILDING
-            elif step is not None and step.state == MultiStageProcessStageState.FAILED:
-                state = BuildRowState.SKIPPED
+            elif build is not None and build.status.is_attempt and build.status != StageBuildStatus.IN_PROGRESS:
+                state = _record_state(build)
+            elif step_state == MultiStageProcessStageState.FAILED:
+                state = BuildRowState.SKIPPED # Failed without starting build: stage it depends on failed.
             else:
                 state = BuildRowState.SCHEDULED
             entries.append((stage.name, build, state))
