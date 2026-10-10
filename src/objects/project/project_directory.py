@@ -77,7 +77,7 @@ class ProjectDirectory(GitDirectory):
             return "Toolset is not selected or was removed"
         if self.get_releng_directory() is None:
             return "Releng directory is not selected or was removed"
-        if self.get_snapshot() is None:
+        if self.get_snapshot() is None and not self.uses_latest_snapshot:
             return "Snapshot is not selected or was removed"
         return None
 
@@ -180,9 +180,18 @@ class ProjectDirectory(GitDirectory):
         return self._get_by_id(Repository.RelengDirectory.value, self.metadata.releng_directory_id, 'id')
 
     def get_snapshot(self) -> Snapshot | None:
+        """Snapshot of project, newest snapshot when project uses latest snapshot."""
         if self.metadata is None:
             return None
+        if self.metadata.latest_snapshot:
+            from .snapshot_manager import sorted_snapshots
+            return next(iter(sorted_snapshots(Repository.Snapshot.value)), None)
         return self._get_by_id(Repository.Snapshot.value, self.metadata.snapshot_id, 'filename')
+
+    @property
+    def uses_latest_snapshot(self) -> bool:
+        """Builds generate latest snapshot by default."""
+        return self.metadata is not None and self.metadata.latest_snapshot
 
     def get_packages_directory(self):
         """Binary packages folder of project, None when not set (or removed)."""
@@ -220,6 +229,7 @@ class ProjectConfiguration(Serializable):
     toolset_id: uuid.UUID | None = None
     releng_directory_id: uuid.UUID | None = None
     snapshot_id: str | None = None
+    latest_snapshot: bool = False # Builds generate latest snapshot, newest snapshot is used as snapshot of project.
     architecture: Architecture | None = None
     seen_build_timestamp: str | None = None # Newest build run whose result was seen (project was opened).
     packages_directory_id: uuid.UUID | None = None # Binary packages folder (shared by projects).
@@ -229,6 +239,7 @@ class ProjectConfiguration(Serializable):
             "toolset_id": str(self.toolset_id) if self.toolset_id else None,
             "releng_directory_id": str(self.releng_directory_id) if self.releng_directory_id else None,
             "snapshot_id": self.snapshot_id,
+            "latest_snapshot": self.latest_snapshot,
             "architecture": self.architecture.value if self.architecture else None,
             "seen_build_timestamp": self.seen_build_timestamp,
             "packages_directory_id": str(self.packages_directory_id) if self.packages_directory_id else None,
@@ -247,6 +258,7 @@ class ProjectConfiguration(Serializable):
             toolset_id=toolset_id,
             releng_directory_id=releng_directory_id,
             snapshot_id=snapshot_id,
+            latest_snapshot=bool(data.get("latest_snapshot", False)),
             architecture=architecture,
             seen_build_timestamp=data.get("seen_build_timestamp"),
             packages_directory_id=uuid.UUID(data["packages_directory_id"]) if data.get("packages_directory_id") else None

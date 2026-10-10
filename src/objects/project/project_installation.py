@@ -114,6 +114,7 @@ class ProjectInstallationStepSaveConfig(MultiStageProcessStage):
                 toolset_id=self.toolset.uuid,
                 releng_directory_id=self.releng_directory.id,
                 snapshot_id=self.multistage_process.snapshot.filename, # Generated before, when latest was selected.
+                latest_snapshot=self.multistage_process.generate_snapshot, # Builds get latest snapshot too.
                 architecture=self.architecture
             )
             self.complete(MultiStageProcessStageState.COMPLETED)

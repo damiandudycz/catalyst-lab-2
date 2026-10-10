@@ -67,8 +67,15 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         with preserved_scroll_position(self):
             self._load_items()
 
+    def set_leading_items(self, items: list):
+        """Items shown before items of repository (or static list), eg. option that isn't stored in repository."""
+        self.leading_items = items
+        if hasattr(self, 'rows'):
+            self._load_items()
+
     def items(self) -> list:
-        return self.static_list if hasattr(self, 'static_list') else self.repository.value
+        items = self.static_list if hasattr(self, 'static_list') else self.repository.value if hasattr(self, 'repository') else []
+        return getattr(self, 'leading_items', []) + list(items)
 
     def select(self, item):
         self.selected_item = item
@@ -87,7 +94,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
         valid_items = [item for item in self.items() if self.emit("is-item-selectable", item)]
         self.no_valid_entries_label.set_visible(not valid_items)
-        for row in self.rows:
+        for row in getattr(self, 'rows', []):
             row.set_sensitive(row.item in valid_items)
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 

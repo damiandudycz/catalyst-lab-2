@@ -12,7 +12,6 @@ from .toolset import ToolsetEvents
 from .wizard_view import WizardView
 from .item_select_view import ItemSelectionViewEvent
 from .architecture import Architecture
-from .repository import Repository
 from .snapshot import LATEST_SNAPSHOT
 from .rootless import authorize_toolset_action
 from gi.repository import GLib
@@ -53,7 +52,7 @@ class ProjectCreateView(Gtk.Box):
         self.apps_requirements = [ToolsetApplication.CATALYST]
         self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
         # Latest snapshot (default) is generated with selected toolset when project is created.
-        self.snapshot_selection_view.set_static_list([LATEST_SNAPSHOT] + Repository.Snapshot.value)
+        self.snapshot_selection_view.set_leading_items([LATEST_SNAPSHOT])
         # Templates: chooser in source page, options of selected template in next page.
         self.template_chooser = ProjectTemplateChooser()
         self.template_options_view = ProjectTemplateOptionsView()

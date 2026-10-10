@@ -230,7 +230,9 @@ class ProjectBuild(MultiStageProcess):
         """Selected snapshot becomes snapshot of project."""
         if self.snapshot is None:
             return False
-        self.project_directory.initialize_metadata().snapshot_id = self.snapshot.filename
+        metadata = self.project_directory.initialize_metadata()
+        metadata.snapshot_id = self.snapshot.filename
+        metadata.latest_snapshot = False
         Repository.ProjectDirectory.save()
         return False
 

@@ -16,6 +16,7 @@ from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, run
 from .project_builds_view import ProjectBuildsView
 from .multistage_process import MultiStageProcess, MultiStageProcessState, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState
 from .architecture import Architecture
+from .snapshot import LATEST_SNAPSHOT
 from .cl_toggle_group import CLToggle, CLToggleGroup
 from .project_template_update import (
     TemplateState, repository_origin, has_unsaved_changes, own_commits_count, template_update_available, project_overlays
@@ -62,7 +63,10 @@ class ProjectDetailsView(Gtk.Box):
     def get_configuration(self):
         self.toolset_selection_view.select(self.project_directory.get_toolset())
         self.releng_selection_view.select(self.project_directory.get_releng_directory())
-        self.snapshot_selection_view.select(self.project_directory.get_snapshot())
+        self.snapshot_selection_view.set_leading_items([LATEST_SNAPSHOT])
+        self.snapshot_selection_view.select(
+            LATEST_SNAPSHOT if self.project_directory.uses_latest_snapshot else self.project_directory.get_snapshot()
+        )
         self.arch_selection_view.select(self.project_directory.get_architecture())
         self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
         self.packages_selection_view.select(self.project_directory.get_packages_directory())
@@ -85,16 +89,19 @@ class ProjectDetailsView(Gtk.Box):
                     self.toolset_selection_view.selected_item.uuid
                     if self.toolset_selection_view.selected_item else None
                 )
+                GLib.idle_add(self.snapshot_selection_view.refresh_items_state, None) # Latest snapshot needs Catalyst.
             case self.releng_selection_view:
                 self.project_directory.initialize_metadata().releng_directory_id = (
                     self.releng_selection_view.selected_item.id
                     if self.releng_selection_view.selected_item else None
                 )
             case self.snapshot_selection_view:
-                self.project_directory.initialize_metadata().snapshot_id = (
-                    self.snapshot_selection_view.selected_item.filename
-                    if self.snapshot_selection_view.selected_item else None
-                )
+                selected = self.snapshot_selection_view.selected_item
+                metadata = self.project_directory.initialize_metadata()
+                # Latest: builds generate latest snapshot, previously selected snapshot is kept.
+                metadata.latest_snapshot = selected is LATEST_SNAPSHOT
+                if selected is not LATEST_SNAPSHOT:
+                    metadata.snapshot_id = selected.filename if selected else None
             case self.arch_selection_view:
                 architecture = self.arch_selection_view.selected_item if self.arch_selection_view.selected_item else None
                 changed = architecture != self.project_directory.get_architecture()
@@ -371,6 +378,9 @@ class ProjectDetailsView(Gtk.Box):
             case self.releng_selection_view:
                 return True
             case self.snapshot_selection_view:
+                if item is LATEST_SNAPSHOT:
+                    toolset = self.project_directory.get_toolset()
+                    return toolset is None or toolset.get_app_install(ToolsetApplication.CATALYST) is not None
                 return True
             case self.arch_selection_view:
                 return True

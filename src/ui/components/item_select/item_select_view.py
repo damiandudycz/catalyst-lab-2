@@ -65,8 +65,15 @@ class ItemSelectionView(Gtk.Box):
         with preserved_scroll_position(self):
             self._load_items()
 
+    def set_leading_items(self, items: list):
+        """Items shown before items of repository (or static list), eg. option that isn't stored in repository."""
+        self.leading_items = items
+        if hasattr(self, 'rows'):
+            self._load_items()
+
     def items(self) -> list:
-        return self.static_list if hasattr(self, 'static_list') else self.repository.value
+        items = self.static_list if hasattr(self, 'static_list') else self.repository.value if hasattr(self, 'repository') else []
+        return getattr(self, 'leading_items', []) + list(items)
 
     def select(self, item):
         self.selected_item = item
