@@ -298,37 +298,12 @@ class ProjectBuildStepFetchSnapshot(ProjectBuildStep):
     def start(self):
         super().start()
         try:
-            from .snapshot import Snapshot
-            from .snapshot_manager import SnapshotManager
-            from .snapshot_installation import delete_file, unlock_file_access
+            from .snapshot import existing_latest_snapshot
             process = self.multistage_process
-            snapshots = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
-            os.makedirs(snapshots, exist_ok=True)
-            started = datetime.now().timestamp() - 1
-            command = "catalyst -s stable"
-            if process.rootless:
-                # Same session as stage builds, catalyst writes snapshot to snapshots folder.
-                self.log(f"$ {command}")
-                script = stage_build_session_script(executor=process.executor, toolset_path=process.rootless_toolset_path,
-                                                    bindings=[(snapshots, CATALYST_SNAPSHOTS_PATH)], command=command)
-                success = process.executor.run_in_namespace(script, self.log, self.namespace_processes)
-            else:
-                success = self.run_command_in_toolset(command) # Toolset is spawned with snapshots folder bound.
-            if not success:
-                raise RuntimeError(f"{command} failed")
-            # Snapshot with the same name is replaced when repository didn't change since it was generated.
-            written = [name for name in os.listdir(snapshots)
-                       if name.endswith(".sqfs") and os.path.getmtime(os.path.join(snapshots, name)) >= started]
-            if not written:
-                raise RuntimeError("Generated snapshot was not found")
-            filename = max(written, key=lambda name: os.path.getmtime(os.path.join(snapshots, name)))
-            path = os.path.join(snapshots, filename)
-            delete_file(file_path=os.path.join(snapshots, os.path.splitext(filename)[0] + ".lock"), root_dir=snapshots)
-            unlock_file_access(path=path)
-            snapshot = Snapshot(filename=filename, date=_snapshot_timestamp(path) or datetime.now())
-            GLib.idle_add(SnapshotManager.shared().add_snapshot, snapshot)
+            # Snapshot of current commit of Gentoo repository is used when it exists, without downloading it again.
+            snapshot = existing_latest_snapshot(self.log) or self._generate_snapshot()
             process.snapshot = snapshot
-            self.log(f"Using snapshot {filename} ({snapshot.name})")
+            self.log(f"Using snapshot {snapshot.filename} ({snapshot.name})")
             if process.rootless:
                 process.rootless_snapshot_path = extracted_squashfs(
                     snapshot.file_path(), "snapshots", self.log, self.namespace_processes, check_path="profiles", executor=process.executor)
@@ -338,6 +313,38 @@ class ProjectBuildStepFetchSnapshot(ProjectBuildStep):
         except Exception as e:
             print(f"Error during snapshot generation: {e}")
             self.complete(MultiStageProcessStageState.FAILED)
+
+    def _generate_snapshot(self):
+        from .snapshot import Snapshot
+        from .snapshot_manager import SnapshotManager
+        from .snapshot_installation import delete_file, unlock_file_access
+        process = self.multistage_process
+        snapshots = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
+        os.makedirs(snapshots, exist_ok=True)
+        started = datetime.now().timestamp() - 1
+        command = "catalyst -s stable"
+        if process.rootless:
+            # Same session as stage builds, catalyst writes snapshot to snapshots folder.
+            self.log(f"$ {command}")
+            script = stage_build_session_script(executor=process.executor, toolset_path=process.rootless_toolset_path,
+                                                bindings=[(snapshots, CATALYST_SNAPSHOTS_PATH)], command=command)
+            success = process.executor.run_in_namespace(script, self.log, self.namespace_processes)
+        else:
+            success = self.run_command_in_toolset(command) # Toolset is spawned with snapshots folder bound.
+        if not success:
+            raise RuntimeError(f"{command} failed")
+        # Snapshot with the same name is replaced when repository didn't change since it was generated.
+        written = [name for name in os.listdir(snapshots)
+                   if name.endswith(".sqfs") and os.path.getmtime(os.path.join(snapshots, name)) >= started]
+        if not written:
+            raise RuntimeError("Generated snapshot was not found")
+        filename = max(written, key=lambda name: os.path.getmtime(os.path.join(snapshots, name)))
+        path = os.path.join(snapshots, filename)
+        delete_file(file_path=os.path.join(snapshots, os.path.splitext(filename)[0] + ".lock"), root_dir=snapshots)
+        unlock_file_access(path=path)
+        snapshot = Snapshot(filename=filename, date=_snapshot_timestamp(path) or datetime.now())
+        GLib.idle_add(SnapshotManager.shared().add_snapshot, snapshot)
+        return snapshot
 
 def _snapshot_timestamp(path: str):
     """Date of Gentoo repository in snapshot, None when it can't be read."""

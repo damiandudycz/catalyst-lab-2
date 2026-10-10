@@ -261,7 +261,9 @@ def load_catalyst_stage_arguments_options(project_directory, stage: ProjectStage
         case StageArgumentDetails.stage4_root_overlay | StageArgumentDetails.livecd_root_overlay:
             return root_overlay_options(project_directory=project_directory, stage=stage)
         case StageArgumentDetails.profile:
-            values = project_directory.get_snapshot().load_profiles(arch=project_directory.get_architecture())
+            # Project getting latest snapshot has no snapshot before its first build, only profiles of overlays are known.
+            snapshot = project_directory.get_snapshot()
+            values = snapshot.load_profiles(arch=project_directory.get_architecture()) if snapshot else []
             values += load_stage_overlay_profiles(project_directory=project_directory, stage=stage)
             return [StageArgumentOption(raw=value.path, display=value.path, subtitle=value.repo, value=value, argument=arg_details.details) for value in values]
         case StageArgumentDetails.releng_template:

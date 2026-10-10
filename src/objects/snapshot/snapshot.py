@@ -18,6 +18,37 @@ class LatestSnapshotOption:
 
 LATEST_SNAPSHOT = LatestSnapshotOption()
 
+# Repository from which Catalyst generates snapshots (catalyst -s stable), they are named gentoo-<commit>.sqfs.
+GENTOO_REPOSITORY_URL = "https://anongit.gentoo.org/git/repo/sync/gentoo.git"
+GENTOO_REPOSITORY_BRANCH = "stable"
+
+def latest_gentoo_commit(timeout: float = 30) -> str | None:
+    """Current commit of branch from which Catalyst generates snapshots, None when it can't be checked."""
+    try:
+        output = subprocess.run(["git", "ls-remote", GENTOO_REPOSITORY_URL, f"refs/heads/{GENTOO_REPOSITORY_BRANCH}"],
+                                capture_output=True, text=True, timeout=timeout).stdout
+    except Exception as e:
+        print(f"Failed to check latest Gentoo repository commit: {e}")
+        return None
+    commit = output.split()[0] if output.split() else ""
+    return commit if re.fullmatch(r"[0-9a-f]{40}", commit) else None
+
+def existing_latest_snapshot(log=print) -> Snapshot | None:
+    """Snapshot generated from current commit of Gentoo repository, when it was already generated. Then it's used
+    instead of generating it again (Catalyst downloads whole repository for it)."""
+    commit = latest_gentoo_commit()
+    if commit is None:
+        log("Couldn't check latest commit of Gentoo repository, snapshot will be generated")
+        return None
+    filename = f"gentoo-{commit}.sqfs"
+    snapshot = next((snapshot for snapshot in Repository.Snapshot.value
+                     if snapshot.filename == filename and not snapshot.from_file), None)
+    if snapshot is None or not os.path.isfile(snapshot.file_path()):
+        log(f"Latest commit of Gentoo repository is {commit}, it has no snapshot yet")
+        return None
+    log(f"Snapshot of latest commit of Gentoo repository already exists: {filename} ({snapshot.name})")
+    return snapshot
+
 @dataclass
 class Snapshot(Serializable):
     filename: str

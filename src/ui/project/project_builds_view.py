@@ -235,8 +235,8 @@ class ProjectBuildsView(Gtk.Box):
             self._open_build_progress(running_build)
             return
         project = self.project_directory
-        if project.get_toolset() is None or project.get_releng_directory() is None or project.get_snapshot() is None:
-            dialog = Adw.AlertDialog(heading="Can't start build", body="Please setup toolset, releng directory and snapshot first.")
+        if error := project.configuration_error:
+            dialog = Adw.AlertDialog(heading="Can't start build", body=error)
             dialog.add_response("ok", "OK")
             dialog.present(self.get_root())
             return

@@ -7,7 +7,7 @@ from .multistage_process import (
 )
 from .toolset import Toolset, BindMount
 from .snapshot_manager import SnapshotManager
-from .snapshot import Snapshot
+from .snapshot import Snapshot, existing_latest_snapshot
 from .root_function import root_function
 from .repository import Repository
 from .root_helper_server import ServerResponse, ServerResponseStatusCode
@@ -26,6 +26,8 @@ class SnapshotInstallation(MultiStageProcess):
         self.toolset = toolset
         self.file = file
         self.custom_filename = custom_filename # Works only with file
+        self.snapshot: Snapshot | None = None
+        self.reused_snapshot = False # Snapshot of latest commit existed already, it was not generated again.
         super().__init__(title="Generating Portage snapshot")
 
     def setup_stages(self):
@@ -98,6 +100,12 @@ class SnapshotInstallationStepPrepareToolset(SnapshotInstallationStep):
     def start(self):
         super().start()
         try:
+            # Snapshot of current commit of Gentoo repository is used when it exists, toolset is not needed then.
+            if snapshot := existing_latest_snapshot(self.log):
+                self.multistage_process.snapshot = snapshot
+                self.multistage_process.reused_snapshot = True
+                self.complete(MultiStageProcessStageState.COMPLETED)
+                return
             if self.toolset.in_use:
                 raise RuntimeError("Toolset is currently in use")
             def toolset_has_required_binding() -> bool:
@@ -192,6 +200,9 @@ class SnapshotInstallationStepGenerateSnapshot(SnapshotInstallationStep):
         super().__init__(name="Generate snapshot", description="Fetches latest portage snapshot tree", multistage_process=multistage_process)
     def start(self):
         super().start()
+        if self.multistage_process.reused_snapshot:
+            self.complete(MultiStageProcessStageState.COMPLETED)
+            return
         try:
             snapshot_path: str | None = None
             def catalyst_snapshot_handler(line: str) -> float | None:
@@ -235,7 +246,8 @@ class SnapshotInstallationStepSetupPermissions(SnapshotInstallationStep):
         if not super().cleanup():
             return False
         # Remove file if installation failed
-        if self.multistage_process.status == MultiStageProcessState.FAILED and self.multistage_process.snapshot:
+        if (self.multistage_process.status == MultiStageProcessState.FAILED and self.multistage_process.snapshot
+                and not self.multistage_process.reused_snapshot):
             snapshots_location = os.path.realpath(os.path.expanduser(Repository.Settings.value.snapshots_location))
             snapshot_real_path = os.path.join(snapshots_location, self.multistage_process.snapshot.filename)
             delete_file(file_path=snapshot_real_path, root_dir=snapshots_location)

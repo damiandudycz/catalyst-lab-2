@@ -425,24 +425,15 @@ class ProjectDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_add_stage_activated(self, sender):
-        if (
-            self.project_directory.get_toolset() is None
-            or self.project_directory.get_releng_directory() is None
-            or self.project_directory.get_snapshot() is None
-        ):
-            print("Missing configuration")
-            self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
+        if error := self.project_directory.configuration_error:
+            self.show_alert(message=error)
             return
         app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectStageCreateView(project_directory=self.project_directory), "New Stage", 640, 480)
 
     @Gtk.Template.Callback()
     def on_build_activated(self, sender):
-        if (
-            self.project_directory.get_toolset() is None
-            or self.project_directory.get_releng_directory() is None
-            or self.project_directory.get_snapshot() is None
-        ):
-            self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
+        if error := self.project_directory.configuration_error:
+            self.show_alert(message=error)
             return
         if _running_builds():
             self._refresh_build_state()
@@ -463,13 +454,8 @@ class ProjectDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_stage_selected(self, sender, stage):
-        if (
-            self.project_directory.get_toolset() is None
-            or self.project_directory.get_releng_directory() is None
-            or self.project_directory.get_snapshot() is None
-        ):
-            print("Missing configuration")
-            self.show_alert(message="Please setup toolset, releng directory and snapshot first.")
+        if error := self.project_directory.configuration_error:
+            self.show_alert(message=error)
             return
         view = ProjectStageDetailsView(project_directory=self.project_directory, stage=stage, content_navigation_view=self.content_navigation_view)
         self.content_navigation_view.push_view(view, title=stage.name)

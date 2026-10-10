@@ -13,8 +13,6 @@ from .wizard_view import WizardView
 from .item_select_view import ItemSelectionViewEvent
 from .architecture import Architecture
 from .snapshot import LATEST_SNAPSHOT
-from .rootless import authorize_toolset_action
-from gi.repository import GLib
 import os
 
 class DefaultProjectDirContentBuilder(DefaultDirContentBuilder):
@@ -51,7 +49,7 @@ class ProjectCreateView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         self.apps_requirements = [ToolsetApplication.CATALYST]
         self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
-        # Latest snapshot (default) is generated with selected toolset when project is created.
+        # Latest snapshot (default) is generated with toolset of project when building.
         self.snapshot_selection_view.set_leading_items([LATEST_SNAPSHOT])
         # Templates: chooser in source page, options of selected template in next page.
         self.template_chooser = ProjectTemplateChooser()
@@ -106,7 +104,7 @@ class ProjectCreateView(Gtk.Box):
         self.wizard_view.set_page_visible(self.arch_page, template is None or (template.architecture_variable is None and template.architecture is None))
 
     def toolset_changed(self, data):
-        self.snapshot_selection_view.refresh_items_state(None) # Latest snapshot is generated with toolset.
+        self.snapshot_selection_view.refresh_items_state(None) # Latest snapshot is generated with toolset (it needs Catalyst).
         self.wizard_view._refresh_buttons_state()
 
     def releng_changed(self, data):
@@ -254,17 +252,6 @@ class ProjectCreateView(Gtk.Box):
             architecture=architecture,
             packages_directory=packages_directory
         )
-        if snapshot is not LATEST_SNAPSHOT:
-            installation_in_progress.start()
-            self.wizard_view.set_installation(installation_in_progress)
-            return
-        # Latest snapshot is generated in toolset, which may need root privileges to run.
-        def start(authorization_keeper):
-            if authorization_keeper:
-                GLib.idle_add(start_installation)
-        def start_installation():
-            installation_in_progress.start()
-            self.wizard_view.set_installation(installation_in_progress)
-            return False
-        authorize_toolset_action(callback=start, machine=toolset.machine if toolset else None)
+        installation_in_progress.start()
+        self.wizard_view.set_installation(installation_in_progress)
 
