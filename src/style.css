@@ -45,3 +45,10 @@
   background-color: var(--window-bg-color);
   border-radius: 12px;
 }
+
+/* Small button, eg. next to caption text (Update template in project page). */
+button.small-button {
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: 6px;
+}

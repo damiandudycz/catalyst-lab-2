@@ -1,4 +1,4 @@
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Pango
 from .git_directory import GitDirectoryEvent
 from .project_manager import ProjectManager
 from .project_directory import ProjectDirectory, ProjectConfiguration
@@ -150,8 +150,18 @@ class ProjectDetailsView(Gtk.Box):
 
     def _setup_source_banner(self):
         """Template or Git repository project was created from, with button updating project from it."""
-        self.source_banner = Adw.Banner()
-        self.source_banner.connect("button-clicked", self._on_update_source_clicked)
+        self.source_banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, margin_start=24,
+                                     margin_end=24, margin_top=6, margin_bottom=6, visible=False)
+        self.source_label = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE)
+        self.source_label.add_css_class("caption")
+        self.source_label.add_css_class("dimmed")
+        self.source_button = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.source_button.add_css_class("suggested-action")
+        self.source_button.add_css_class("caption")
+        self.source_button.add_css_class("small-button")
+        self.source_button.connect("clicked", self._on_update_source_clicked)
+        self.source_banner.append(self.source_label)
+        self.source_banner.append(self.source_button)
         self.prepend(self.source_banner)
         self.project_directory.event_bus.subscribe(SharedEvent.STATE_UPDATED, self._update_source_banner)
         self._update_source_banner()
@@ -170,14 +180,15 @@ class ProjectDetailsView(Gtk.Box):
                 title, button = f"Update from {origin.url}{branch} is applied, save changes to finish it", ""
             else:
                 title, button = f"Cloned from {origin.url}{branch}", "Update from repository"
+        self.source_banner.set_visible(self._source is not None)
         if self._source is None:
-            self.source_banner.set_revealed(False)
             return
-        self.source_banner.set_title(GLib.markup_escape_text(title))
-        self.source_banner.set_button_label(button or None)
-        self.source_banner.set_revealed(True)
+        self.source_label.set_label(title)
+        self.source_label.set_tooltip_text(title)
+        self.source_button.set_label(button)
+        self.source_button.set_visible(bool(button))
 
-    def _on_update_source_clicked(self, banner):
+    def _on_update_source_clicked(self, button):
         if self._source is None:
             return
         title = "Update template" if self._source == "template" else "Update from repository"
