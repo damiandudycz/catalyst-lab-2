@@ -13,6 +13,8 @@ import ast, hashlib, os, re, shutil, subprocess, tempfile, tomllib, uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from .architecture import Architecture
+from .project_stage_arguments import StageArgumentDetails
+from .project_stage_kernels import BOOT_KERNELS_ATTRIBUTE, kernel_settings_from_template, merge_kernel_settings
 
 TEMPLATE_FILE = "template.toml"
 TEMPLATE_FORMAT = 1
@@ -625,7 +627,7 @@ class ProjectTemplate:
                 value = render_value(value, names)
                 if value is None or value == "" or value == []:
                     continue
-                arguments[key] = _stage_argument_value(value, f"{context}, argument {key}")
+                arguments[key] = _template_argument_value(key, value, f"{context}, argument {key}")
             applied_groups = []
             for group in self.groups:
                 if not self.group_applied_to(group.id, stage.id, names):
@@ -635,10 +637,12 @@ class ProjectTemplate:
                     value = render_value(value, names)
                     if value is None or value == "" or value == []:
                         continue
-                    value = _stage_argument_value(value, f"Group {group.id}, argument {key}")
+                    value = _template_argument_value(key, value, f"Group {group.id}, argument {key}")
                     existing = arguments.get(key)
                     if isinstance(existing, list) and isinstance(value, list):
                         arguments[key] = existing + [item for item in value if item not in existing]
+                    elif key == BOOT_KERNELS_ATTRIBUTE and isinstance(existing, dict):
+                        arguments[key] = merge_kernel_settings(existing, value)
                     else:
                         arguments[key] = value
             stages.append(GeneratedStage(template_id=stage.id, name=name, target=target, parent=stage.parent,
@@ -700,6 +704,12 @@ def _replace_overlay_references(value, overlay_ids: dict[str, Any]):
     if isinstance(value, list):
         return [_replace_overlay_references(item, overlay_ids) for item in value]
     return value
+
+def _template_argument_value(key: str, value, context: str):
+    """Value of stage argument, or kernel settings (boot_kernels) given as tables."""
+    if key == BOOT_KERNELS_ATTRIBUTE:
+        return kernel_settings_from_template(value, context)
+    return _stage_argument_value(value, context)
 
 def _stage_argument_value(value, context: str):
     """Value of stage argument from template: texts, numbers, booleans and their lists are used directly, tables
@@ -1033,7 +1043,9 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
         )
         valid_arguments = _stage_argument_names(project_directory, generated_stage.target)
         for key, value in generated_stage.arguments.items():
-            if valid_arguments is not None and key not in valid_arguments:
+            # Kernel settings are not argument of target, they are used by targets with kernels (boot/kernel).
+            argument_name = StageArgumentDetails.boot_kernel.name if key == BOOT_KERNELS_ATTRIBUTE else key
+            if valid_arguments is not None and argument_name not in valid_arguments:
                 # Groups can set arguments of different targets (eg. stage4_packages and livecd_packages).
                 continue
             setattr(stage, key, _replace_overlay_references(value, overlay_ids))

@@ -187,6 +187,29 @@ stage4_rcadd = "{{ stage4_services }}"
   `stage4_fsscript = "@STAGE_DIR@/fsscript.sh"`. Projects are moved and cloned, so they shouldn't contain
   absolute paths.
 
+#### Kernels
+
+Stages with kernels (`livecd_stage2`, `stage4`...) build kernels listed in `boot_kernel`. Settings of each kernel
+(`boot/kernel/<name>/...` in Catalyst specs) are given in `boot_kernels`, a table of kernel names. Settings that are not
+given come from the Releng spec of the stage. For example a kernel from an overlay:
+
+```toml
+[stages.arguments]
+boot_kernel = ["ps3"]
+
+[stages.arguments.boot_kernels.ps3]
+sources = "sys-kernel/gentoo-kernel-ps3"
+distkernel = true
+dracut_args = "--xz --no-hostonly -a dmsquash-live -o btrfs"
+extraversion = "ps3"
+```
+
+Settings: `sources`, `distkernel`, `config`, `dracut_args`, `extraversion`, `packages`, `use`, `gk_kernargs`,
+`gk_action`, `aliases`, `console`, `initramfs_overlay`, `softlevel`. `packages`, `use`, `aliases` and `console` are
+lists, others are texts (booleans are written as `yes` / `no`). Groups can add settings of kernels too
+(`[groups.arguments.boot_kernels.<name>]`), they are combined with settings of the stage.
+Kernel settings need Catalyst Lab 0.3.0 or newer (`min_app_version = "0.3.0"`).
+
 ### Files: `[[files]]`
 
 Files copied to the project, for example Portage configuration or root overlays of stages.

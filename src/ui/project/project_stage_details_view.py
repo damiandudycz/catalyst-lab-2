@@ -27,6 +27,9 @@ from .project_stage_portage_confdir import (
     StagePortageConfdirSource, stage_overlay_path, stage_root_overlay_path, root_overlay_values, ROOT_OVERLAY_ARGUMENTS
 )
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
+from .project_stage_kernels import (
+    KERNEL_SETTINGS, stage_supports_kernels, stage_kernel_names, kernel_setting, own_kernel_settings, set_kernel_setting
+)
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
@@ -39,6 +42,7 @@ class ProjectStageDetailsView(Gtk.Box):
     release_pref_group = Gtk.Template.Child()
     packages_pref_group = Gtk.Template.Child()
     configuration_pref_group = Gtk.Template.Child()
+    kernels_pref_group = Gtk.Template.Child()
 
     def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -84,6 +88,32 @@ class ProjectStageDetailsView(Gtk.Box):
                 )
                 row.pref_group.add(row)
                 self.configuration_rows.append(row)
+                # Kernels depend on boot/kernel and releng template, refreshed after argument is saved.
+                row.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.load_kernel_rows, "kernels")
+        self.load_kernel_rows()
+
+    def load_kernel_rows(self, *args):
+        """Kernels of stage (boot/kernel) with their settings (boot/kernel/<name>/...). Expanded kernels stay expanded."""
+        expanded = {row.kernel_name for row in getattr(self, "kernel_rows", []) if row.get_expanded()}
+        for row in getattr(self, "kernel_rows", []):
+            self.kernels_pref_group.remove(row)
+        self.kernel_rows = []
+        if not stage_supports_kernels(self.project_directory, self.stage):
+            self.kernels_pref_group.set_visible(False)
+            return
+        self.kernels_pref_group.set_visible(True)
+        names = stage_kernel_names(self.project_directory, self.stage)
+        for name in names:
+            row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name)
+            row.set_expanded(name in expanded)
+            self.kernels_pref_group.add(row)
+            self.kernel_rows.append(row)
+        if not names:
+            row = Adw.ActionRow(title="No kernels", subtitle="Add names of kernels in Boot / kernel")
+            row.kernel_name = None
+            row.get_expanded = lambda: False
+            self.kernels_pref_group.add(row)
+            self.kernel_rows.append(row)
 
     def create_row_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesRow:
         if argument.details in CACHE_ARGUMENTS:
@@ -850,3 +880,46 @@ class _StageWithValue:
 
     def __getattr__(self, name):
         return self._value if name == self._attribute_name else getattr(self._stage, name)
+
+class StageKernelRow(Adw.ExpanderRow):
+    """Kernel of stage with its settings. Settings not set by stage show value of releng template, used when empty."""
+
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage, kernel_name: str):
+        super().__init__(title=GLib.markup_escape_text(kernel_name))
+        self.project_directory = project_directory
+        self.stage = stage
+        self.kernel_name = kernel_name
+        self.entry_rows = []
+        for setting in KERNEL_SETTINGS:
+            row = Adw.EntryRow(show_apply_button=True)
+            row.set_tooltip_text(setting.description)
+            row.connect("apply", self._on_apply, setting)
+            self.add_row(row)
+            self.entry_rows.append((setting, row))
+        self.load_state()
+
+    def load_state(self):
+        own = own_kernel_settings(self.stage).get(self.kernel_name, {})
+        summary = []
+        for setting, row in self.entry_rows:
+            value, is_own = kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key)
+            text = self._text(own.get(setting.key))
+            row.set_text(text)
+            # Empty entry shows title as placeholder, with value of releng template used then.
+            inherited = self._text(value) if value is not None and not is_own else ""
+            row.set_title(GLib.markup_escape_text(f"{setting.title} (releng: {inherited})" if inherited else setting.title))
+            if value is not None and setting.key in ("sources", "distkernel", "config"):
+                summary.append(f"{setting.key}: {self._text(value)}")
+        self.set_subtitle(GLib.markup_escape_text(" · ".join(summary) or "Default settings of catalyst"))
+
+    def _on_apply(self, row: Adw.EntryRow, setting):
+        text = row.get_text().strip()
+        value = text.split() if setting.is_list else text
+        set_kernel_setting(self.project_directory, self.stage, self.kernel_name, setting.key, value or None)
+        self.load_state()
+
+    @staticmethod
+    def _text(value) -> str:
+        if value is None:
+            return ""
+        return " ".join(str(item) for item in value) if isinstance(value, list) else str(value)

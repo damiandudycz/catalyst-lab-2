@@ -62,6 +62,15 @@ def generate_stage_spec(project_directory, stage, context: StageSpecContext) -> 
         for placeholder, replacement in placeholders.items():
             text = text.replace(placeholder, replacement)
         lines.append(f"{name}: {text}")
+    # Settings of kernels (boot/kernel/<name>/...), own of stage or from its releng template.
+    if StageArgumentDetails.boot_kernel.value in arguments:
+        from .project_stage_kernels import kernel_spec_values
+        for name, value in kernel_spec_values(project_directory, stage):
+            if (text := _format_value(value)) is None:
+                continue
+            for placeholder, replacement in placeholders.items():
+                text = text.replace(placeholder, replacement)
+            lines.append(f"{name}: {text}")
     if missing:
         raise RuntimeError(f"Missing required values: {', '.join(missing)}")
     return "\n".join(lines) + "\n"

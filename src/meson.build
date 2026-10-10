@@ -76,6 +76,7 @@ catalystlab_sources = [
   'objects/project/project_stage_automatic_option.py',
   'objects/project/project_stage_value_resolver.py',
   'objects/project/project_stage_cache.py',
+  'objects/project/project_stage_kernels.py',
   'objects/project/project_build_rootless.py',
   'objects/project/project_stage_portage_confdir.py',
   'objects/project/project_build.py',
