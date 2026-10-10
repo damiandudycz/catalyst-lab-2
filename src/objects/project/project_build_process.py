@@ -110,14 +110,24 @@ class ProjectBuild(MultiStageProcess):
             if (path := stage_cache_path(self.project_directory, stage, argument))
         }
         if self.machine:
-            # Project id instead of name, paths in spec can't contain spaces.
-            project_caches = os.path.join(self.executor.cache_directory(), "Projects", self.project_directory.id.hex)
-            paths = {
-                argument: os.path.join(project_caches, os.path.relpath(path, self.builds_directory))
-                if path.startswith(self.builds_directory + os.sep) else path
-                for argument, path in paths.items()
-            }
+            paths = {argument: self._machine_cache_path(path) or path for argument, path in paths.items()}
         return paths
+
+    def _saved_cache_roots(self) -> list[tuple[str, str]]:
+        """Folders of automatic caches on host, with their folders in cache directory of machine: builds of project
+        (kernels), and binary packages folder (shared by projects using it). Ids instead of names, paths in spec can't
+        contain spaces."""
+        roots = [(self.builds_directory, os.path.join("Projects", self.project_directory.id.hex))]
+        if packages_directory := self.project_directory.get_packages_directory():
+            roots.append((packages_directory.directory_path(), os.path.join("Packages", packages_directory.id.hex)))
+        return roots
+
+    def _machine_cache_path(self, path: str) -> str | None:
+        """Folder in machine used for automatic cache saved in path, None for caches selected by user."""
+        for root, machine_root in self._saved_cache_roots():
+            if path.startswith(root + os.sep):
+                return os.path.join(self.executor.cache_directory(), machine_root, os.path.relpath(path, root))
+        return None
 
     def synced_caches(self, stage) -> list[tuple[str, str]]:
         """Caches of machine build kept in shared folders between builds, as (saved path, path in working space).
@@ -128,7 +138,7 @@ class ProjectBuild(MultiStageProcess):
         used_paths = self.stage_cache_paths(stage)
         for argument in CACHE_ARGUMENTS:
             saved = stage_cache_path(self.project_directory, stage, argument)
-            if saved and saved.startswith(self.builds_directory + os.sep) and argument in used_paths:
+            if saved and self._machine_cache_path(saved) and argument in used_paths:
                 caches.append((saved, used_paths[argument]))
         return caches
 
@@ -220,7 +230,9 @@ class ProjectBuild(MultiStageProcess):
         """Selected snapshot becomes snapshot of project."""
         if self.snapshot is None:
             return False
-        self.project_directory.initialize_metadata().snapshot_id = self.snapshot.filename
+        metadata = self.project_directory.initialize_metadata()
+        metadata.snapshot_id = self.snapshot.filename
+        metadata.latest_snapshot = False
         Repository.ProjectDirectory.save()
         return False
 

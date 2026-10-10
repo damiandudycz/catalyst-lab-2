@@ -5,6 +5,10 @@ import os, subprocess
 from .snapshot import Snapshot
 from .helper_functions import parse_strict_rfc_datetime
 
+def sorted_snapshots(snapshots: list[Snapshot]) -> list[Snapshot]:
+    """Newest snapshots first, snapshots without date last."""
+    return sorted(snapshots, key=lambda snapshot: snapshot.date.timestamp() if snapshot.date else 0, reverse=True)
+
 @final
 class SnapshotManager:
     _instance = None
@@ -47,11 +51,68 @@ class SnapshotManager:
         deleted_snapshots = [snapshot for snapshot in snapshots if snapshot.filename not in found_filenames]
         for snapshot in deleted_snapshots:
             self.remove_snapshot(snapshot)
+        # --- Step 4: Keep newest snapshots first ---
+        ordered = sorted_snapshots(Repository.Snapshot.value)
+        if ordered != Repository.Snapshot.value:
+            Repository.Snapshot.value = ordered
 
     def add_snapshot(self, snapshot: Snapshot):
         # Remove existing snapshot with the same filename
-        Repository.Snapshot.value = [s for s in Repository.Snapshot.value if s.filename != snapshot.filename]
-        Repository.Snapshot.value.append(snapshot)
+        Repository.Snapshot.value = sorted_snapshots(
+            [s for s in Repository.Snapshot.value if s.filename != snapshot.filename] + [snapshot]
+        )
+
+    # Auto clean:
+
+    def start_auto_clean(self):
+        """Removes unused snapshots when enabled in settings, whenever snapshots, projects or running processes change."""
+        from .settings import SettingsEvents
+        from .repository import RepositoryEvent
+        from .multistage_process import MultiStageProcess, MultiStageProcessEvent
+        self._auto_clean_scheduled = False
+        schedule = lambda *args: self.schedule_auto_clean()
+        Repository.Settings.value.event_bus.subscribe(SettingsEvents.AUTO_CLEAN_SNAPSHOTS_CHANGED, schedule)
+        Repository.Snapshot.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, schedule)
+        Repository.ProjectDirectory.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, schedule)
+        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, schedule)
+        self.schedule_auto_clean()
+
+    def schedule_auto_clean(self):
+        if getattr(self, "_auto_clean_scheduled", False) or not Repository.Settings.value.auto_clean_snapshots:
+            return
+        from gi.repository import GLib
+        self._auto_clean_scheduled = True
+        def clean():
+            self._auto_clean_scheduled = False
+            self.auto_clean()
+            return False
+        GLib.idle_add(clean)
+
+    def unused_snapshots(self) -> list[Snapshot]:
+        """Snapshots removed by auto clean: not used by projects or running processes, not newest, and not added from
+        file (these can contain own changes)."""
+        from .multistage_process import MultiStageProcess, MultiStageProcessState
+        snapshots = sorted_snapshots(Repository.Snapshot.value)
+        used = {snapshot.filename for snapshot in snapshots[:1]}
+        for project in Repository.ProjectDirectory.value:
+            if snapshot := project.get_snapshot():
+                used.add(snapshot.filename)
+        for process in MultiStageProcess.started_processes:
+            snapshot = getattr(process, "snapshot", None)
+            if process.status == MultiStageProcessState.IN_PROGRESS and isinstance(snapshot, Snapshot):
+                used.add(snapshot.filename)
+        return [snapshot for snapshot in snapshots
+                if snapshot.filename not in used and not snapshot.may_contain_own_changes]
+
+    def auto_clean(self):
+        if not Repository.Settings.value.auto_clean_snapshots:
+            return
+        for snapshot in self.unused_snapshots():
+            print(f"Removing unused snapshot {snapshot.filename}")
+            try:
+                self.remove_snapshot(snapshot)
+            except Exception as e:
+                print(f"Failed to remove snapshot {snapshot.filename}: {e}")
 
     def remove_snapshot(self, snapshot: Snapshot):
         from .rootless import remove_extracted_squashfs, MachineExecutor

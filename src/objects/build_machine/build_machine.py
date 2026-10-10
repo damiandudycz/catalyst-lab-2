@@ -191,6 +191,7 @@ class BuildMachine:
             output_handler(f"Starting virtual machine {self.name}...")
             self._set_status(self.STATUS_STARTING)
             try:
+                self._update_provision_script(output_handler, process_holder)
                 self._prepare_swap_disk(output_handler, process_holder)
                 success = run_limactl(["start", self.instance_name], output_handler, process_holder, home=self.lima_home)
             finally:
@@ -275,6 +276,24 @@ class BuildMachine:
                 raise RuntimeError(f"Failed to configure swap disk of virtual machine {self.name}")
         if not self.swap_gib:
             run_limactl(["disk", "delete", "--force", self.swap_disk_name], lambda line: None, home=self.lima_home)
+
+    def _update_provision_script(self, output_handler, process_holder: list | None = None):
+        """Lima runs provisioning script (stored in configuration of machine) on every boot. Machines created by
+        previous versions get current script, which doesn't install packages again when machine is set up."""
+        import json
+        from .lima import machine_setup_script
+        script = machine_setup_script()
+        try:
+            with open(os.path.join(self.machine_directory, "lima.yaml"), encoding="utf-8") as file:
+                configuration = file.read()
+        except OSError:
+            return
+        if all(line.strip() in configuration for line in script.splitlines() if line.strip()):
+            return
+        output_handler(f"Updating provisioning of virtual machine {self.name}")
+        expression = f'.provision = [{{"mode": "system", "script": {json.dumps(script)}}}]'
+        if not run_limactl(["edit", "--set", expression, self.instance_name], output_handler, process_holder, home=self.lima_home):
+            output_handler(f"Warning: provisioning of virtual machine {self.name} was not updated")
 
     def _swap_disk_attached(self) -> bool:
         try:

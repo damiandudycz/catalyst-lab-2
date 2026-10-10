@@ -7,6 +7,7 @@ from .project_template import (
     download_template_repositories, fetch_template_repository, find_overlay_for_url
 )
 from .project_stage import stage_target_icon
+from .scroll_position import preserved_scroll_position
 
 class ProjectTemplateChooser(Gtk.Box):
     """Templates from Git repositories. Latest list of repositories is downloaded every time (so templates removed from
@@ -135,11 +136,13 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self._expanded_rows: set[str] = set() # Expander rows kept expanded when rows are rebuilt.
         self._rebuild()
 
-    def set_template(self, template: ProjectTemplate | None):
+    def set_template(self, template: ProjectTemplate | None, selected: dict[str, Any] | None = None):
+        """Template with options selected by default (eg. selected when project was created), other ones get defaults
+        of template."""
         if template is self.template:
             return
         self.template = template
-        self.selected = {}
+        self.selected = dict(selected or {})
         self._expanded_rows = set()
         self._rebuild()
 
@@ -151,6 +154,13 @@ class ProjectTemplateOptionsView(Gtk.Box):
 
     def _rebuild(self):
         self._rebuild_scheduled = False
+        with preserved_scroll_position(self):
+            self._rebuild_rows()
+        if self.on_changed:
+            self.on_changed()
+        return False
+
+    def _rebuild_rows(self):
         for row in self._option_rows:
             self.options_group.remove(row)
         for row in self._group_rows:
@@ -201,9 +211,6 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self.stages_group.set_visible(self.generated is not None and bool(self.generated.stages))
         self.error_label.set_label(f"Template can't be used: {error}" if error else "")
         self.error_label.set_visible(error is not None)
-        if self.on_changed:
-            self.on_changed()
-        return False
 
     def _expander_row(self, key: str, title: str, subtitle: str | None) -> Adw.ExpanderRow:
         row = Adw.ExpanderRow(title=GLib.markup_escape_text(title))
@@ -233,6 +240,12 @@ class ProjectTemplateOptionsView(Gtk.Box):
             if stage is None:
                 continue # Not created for selected options.
             stage_row = Adw.ActionRow(title=GLib.markup_escape_text(stage.name))
+            if inherited_from := self.template.group_inherited_from(group.id, stage_id, names):
+                # Built from stage that gets group, it has its packages and files already.
+                stage_row.set_subtitle(GLib.markup_escape_text(f"Included from {generated[inherited_from].name}"))
+                stage_row.add_prefix(Gtk.CheckButton(active=True, sensitive=False))
+                row.add_row(stage_row)
+                continue
             check_button = Gtk.CheckButton(active=stage_id in selected_stages)
             check_button.connect("toggled", lambda button, stage_id=stage_id: self._set_group_stage(group.id, stage_id, button.get_active()))
             stage_row.add_prefix(check_button)

@@ -56,6 +56,19 @@ knowledge of Catalyst internals is needed.
   tree are still built.
 - The **Builds** section lists every build run of every stage, including the ones that were skipped or cancelled.
 
+### 🗂️ App data
+- Everything the app stores is in `~/CatalystLab`: toolsets, snapshots, projects, builds, machines, and its settings
+  and lists of items (`~/CatalystLab/Config`). Removing this folder resets the app.
+
+### 📦 Binary packages
+- Binary packages built with stages are kept in **binary packages folders** (`~/CatalystLab/Packages`), separate from
+  builds of projects, and reused by next builds.
+- Projects can **share a folder** to reuse packages built by each other. Folders record architecture and CPU flags of
+  projects they were made for: folders of other architecture can't be selected, other CPU flags show a warning (such
+  packages might not run on machines of the project).
+- New projects get their own folder or use an existing one. Changing architecture of a project offers to switch to
+  another folder, deleting the last project using a folder asks whether to delete it too.
+
 ### 🧰 Environments
 - **Toolsets** are isolated Gentoo environments with the tools needed for building (Catalyst, QEMU...). They are
   created from official stage3 images, kept as `.squashfs` files and can be updated from the app.
@@ -113,6 +126,7 @@ Hovering the dot lists items and their states.
 | Releng directory, overlay | | | Not saved changes | | Git error or conflicts | Updating, saving or discarding changes |
 | Project in Builds (also Builds in side menu) | Last build completed (until project or its builds are opened) | | | Last build stopped (until opened) | Last build failed (until opened) | Building |
 | Project in Deploy | | | | | | Deploying |
+| Binary packages folder | | | | | | Used by build |
 
 ---
 

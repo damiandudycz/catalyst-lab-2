@@ -245,12 +245,37 @@ def machine_setup_script() -> str:
     mount point and emulators of other architectures."""
     return f"""#!/bin/sh
 set -eux
-apk add --no-cache bash coreutils findutils grep sed tar xz zstd bubblewrap util-linux util-linux-misc \\
-    shadow-subids squashfs-tools python3 curl e2fsprogs qemu-openrc
+# Lima runs provisioning on every boot, machine that is already set up starts without installing packages again.
+[ "$(cat {_MACHINE_SETUP_VERSION_FILE} 2>/dev/null || echo 0)" -ge {MACHINE_SETUP_VERSION} ] && exit 0
+# Mirror sometimes stops sending data in the middle of download (for a minute or more): downloads time out quickly
+# and are retried. Downloaded packages are kept in cache, so retries download only missing ones.
+mkdir -p /var/cache/catalystlab-apk
+apk_options="--cache-dir /var/cache/catalystlab-apk"
+apk --timeout 20 --version >/dev/null 2>&1 && apk_options="$apk_options --timeout 20"
+retry() {{
+    for attempt in 1 2 3 4 5; do
+        "$@" && return 0
+        echo "Retrying: $*"
+        sleep 2
+    done
+    return 1
+}}
+retry apk update $apk_options
 host=$(uname -m)
+emulators=""
 for arch in {_QEMU_ARCHITECTURES}; do
-    [ "$arch" = "$host" ] || apk add --no-cache "qemu-$arch" || echo "qemu-$arch is not available"
+    if [ "$arch" = "$host" ]; then
+        continue
+    elif apk search $apk_options "qemu-$arch" | grep -q "^qemu-$arch-[0-9]"; then
+        emulators="$emulators qemu-$arch"
+    else
+        echo "qemu-$arch is not available"
+    fi
 done
+# One transaction: package index is read once and packages are downloaded together.
+retry apk add $apk_options --cache-predownload bash coreutils findutils grep sed tar xz zstd bubblewrap util-linux util-linux-misc \\
+    shadow-subids squashfs-tools python3 curl e2fsprogs qemu-openrc $emulators
+rm -rf /var/cache/catalystlab-apk
 rc-update add qemu-binfmt default
 rc-service qemu-binfmt restart || rc-service qemu-binfmt start
 # User of machine (same uid as on host) gets subordinate ids for files of toolsets.

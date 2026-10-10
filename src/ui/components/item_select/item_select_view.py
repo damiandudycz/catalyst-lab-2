@@ -1,9 +1,10 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio, GObject, Adw
 from enum import Enum, auto
-from .repository import Repository
+from .repository import Repository, RepositoryEvent
 from .repository_list_view import ItemRow
 from .event_bus import EventBus
+from .scroll_position import preserved_scroll_position
 
 class ItemSelectionViewEvent(Enum):
     ITEM_CHANGED = auto() # Means selection was changed or currently selected state changed.
@@ -55,9 +56,24 @@ class ItemSelectionView(Gtk.Box):
             if hasattr(self, 'static_list'):
                 raise ValueError("Canno't use both static_list and item_class_name")
             self._load_items()
+            # Items added or removed while view is displayed (eg. folder created in other view).
+            if not getattr(self, "_repository_observed", False):
+                self._repository_observed = True
+                self.repository.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self._on_repository_changed)
+
+    def _on_repository_changed(self, *args):
+        with preserved_scroll_position(self):
+            self._load_items()
+
+    def set_leading_items(self, items: list):
+        """Items shown before items of repository (or static list), eg. option that isn't stored in repository."""
+        self.leading_items = items
+        if hasattr(self, 'rows'):
+            self._load_items()
 
     def items(self) -> list:
-        return self.static_list if hasattr(self, 'static_list') else self.repository.value
+        items = self.static_list if hasattr(self, 'static_list') else self.repository.value if hasattr(self, 'repository') else []
+        return getattr(self, 'leading_items', []) + list(items)
 
     def select(self, item):
         self.selected_item = item

@@ -5,7 +5,7 @@ from .git_manager import GitManager
 from .project_manager import ProjectManager
 from .toolset import Toolset
 from .releng_directory import RelengDirectory
-from .snapshot import Snapshot
+from .snapshot import Snapshot, LATEST_SNAPSHOT
 from .project_directory import ProjectConfiguration
 from .architecture import Architecture
 from .project_template import apply_project_template, load_cloned_template, ensure_template_overlays
@@ -26,11 +26,16 @@ class ProjectInstallation(GitInstallation):
         toolset: Toolset,
         releng_directory: RelengDirectory,
         snapshot: Snapshot,
-        architecture: Architecture
+        architecture: Architecture,
+        packages_directory=None
     ):
+        self.packages_directory = packages_directory # Existing binary packages folder, None creates new one.
         self.toolset = toolset
         self.releng_directory = releng_directory
-        self.snapshot = snapshot
+        # Latest snapshot is generated with toolset before configuration is saved (steps of snapshot installation use
+        # toolset and snapshot of this process).
+        self.generate_snapshot = snapshot is LATEST_SNAPSHOT
+        self.snapshot = None if self.generate_snapshot else snapshot
         self.architecture = architecture
         super().__init__(configuration=source_config)
 
@@ -39,26 +44,51 @@ class ProjectInstallation(GitInstallation):
     def manager(cls) -> GitManager:
         return ProjectManager.shared()
 
+    def complete_process(self, success: bool):
+        if success and self.generate_snapshot and self.snapshot:
+            from .snapshot_manager import SnapshotManager
+            SnapshotManager.shared().add_snapshot(self.snapshot)
+        if success:
+            # Binary packages folder: selected one, or new one for project (CPU flags of its stages are known now).
+            try:
+                from .packages_directory import create_packages_directory_for_project
+                directory = self.packages_directory or create_packages_directory_for_project(self.directory)
+                self.directory.initialize_metadata().packages_directory_id = directory.id
+            except Exception as e:
+                print(f"Failed to set binary packages folder: {e}")
+        super().complete_process(success)
+
     def setup_stages(self):
         super().setup_stages()
         save_config = ProjectInstallationStepSaveConfig(
             multistage_process=self,
             toolset=self.toolset,
             releng_directory=self.releng_directory,
-            snapshot=self.snapshot,
             architecture=self.architecture
         )
+        snapshot_steps = []
+        if self.generate_snapshot:
+            from .snapshot_installation import (
+                SnapshotInstallationStepPrepareToolset, SnapshotInstallationStepGenerateSnapshot,
+                SnapshotInstallationStepSetupPermissions, SnapshotInstallationStepAnalyze
+            )
+            snapshot_steps = [
+                SnapshotInstallationStepPrepareToolset(toolset=self.toolset, multistage_process=self),
+                SnapshotInstallationStepGenerateSnapshot(multistage_process=self),
+                SnapshotInstallationStepSetupPermissions(multistage_process=self),
+                SnapshotInstallationStepAnalyze(multistage_process=self)
+            ]
         if self.configuration.source == GitDirectorySource.TEMPLATE:
             # Stages of template get default values from configuration, so it's saved before. Content is created before
             # Git repository is configured, so new repository has it in first commit.
             # Overlays used by template are added first, as separate step (they can be cloned).
-            template_steps = [save_config]
+            template_steps = snapshot_steps + [save_config]
             if self.configuration.data.template.overlays:
                 template_steps.append(ProjectInstallationStepAddOverlays(multistage_process=self))
             template_steps.append(ProjectInstallationStepApplyTemplate(multistage_process=self))
             self.stages[1:1] = template_steps
         else:
-            self.stages.append(save_config)
+            self.stages.extend(snapshot_steps + [save_config])
 
 
 class ProjectInstallationStepSaveConfig(MultiStageProcessStage):
@@ -67,7 +97,6 @@ class ProjectInstallationStepSaveConfig(MultiStageProcessStage):
         multistage_process: MultiStageProcess,
         toolset: Toolset,
         releng_directory: RelengDirectory,
-        snapshot: Snapshot,
         architecture: Architecture
     ):
         super().__init__(
@@ -77,7 +106,6 @@ class ProjectInstallationStepSaveConfig(MultiStageProcessStage):
         )
         self.toolset = toolset
         self.releng_directory = releng_directory
-        self.snapshot = snapshot
         self.architecture = architecture
     def start(self):
         super().start()
@@ -85,7 +113,8 @@ class ProjectInstallationStepSaveConfig(MultiStageProcessStage):
             self.multistage_process.directory.metadata = ProjectConfiguration(
                 toolset_id=self.toolset.uuid,
                 releng_directory_id=self.releng_directory.id,
-                snapshot_id=self.snapshot.filename,
+                snapshot_id=self.multistage_process.snapshot.filename, # Generated before, when latest was selected.
+                latest_snapshot=self.multistage_process.generate_snapshot, # Builds get latest snapshot too.
                 architecture=self.architecture
             )
             self.complete(MultiStageProcessStageState.COMPLETED)

@@ -1,9 +1,10 @@
 from __future__ import annotations
 from gi.repository import Gtk, GLib, Gio, GObject, Adw
 from enum import Enum, auto
-from .repository import Repository
+from .repository import Repository, RepositoryEvent
 from .repository_list_view import ItemRow
 from .event_bus import EventBus
+from .scroll_position import preserved_scroll_position
 from .item_select_view import ItemSelectionViewEvent
 
 class ItemSelectionExpanderRow(Adw.ExpanderRow):
@@ -51,6 +52,10 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             if hasattr(self, 'static_list'):
                 raise ValueError("Canno't use both static_list and item_class_name")
             self._load_items()
+            # Items added or removed while view is displayed (eg. folder created in other view).
+            if not getattr(self, "_repository_observed", False):
+                self._repository_observed = True
+                self.repository.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self._on_repository_changed)
 
     def _add_warning_icon(self):
         self.warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
@@ -58,8 +63,19 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         self.warning_icon.set_visible(False) # Shown by determine_incorrect_selection once items are loaded.
         self.add_suffix(self.warning_icon)
 
+    def _on_repository_changed(self, *args):
+        with preserved_scroll_position(self):
+            self._load_items()
+
+    def set_leading_items(self, items: list):
+        """Items shown before items of repository (or static list), eg. option that isn't stored in repository."""
+        self.leading_items = items
+        if hasattr(self, 'rows'):
+            self._load_items()
+
     def items(self) -> list:
-        return self.static_list if hasattr(self, 'static_list') else self.repository.value
+        items = self.static_list if hasattr(self, 'static_list') else self.repository.value if hasattr(self, 'repository') else []
+        return getattr(self, 'leading_items', []) + list(items)
 
     def select(self, item):
         self.selected_item = item
@@ -78,7 +94,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
         valid_items = [item for item in self.items() if self.emit("is-item-selectable", item)]
         self.no_valid_entries_label.set_visible(not valid_items)
-        for row in self.rows:
+        for row in getattr(self, 'rows', []):
             row.set_sensitive(row.item in valid_items)
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
@@ -167,6 +183,10 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
             row.set_sensitive(item in valid_items)
             self.add_row(row)
             self.rows.append(row)
+        # Footer rows (eg. button creating new item) stay below items.
+        for footer_row in getattr(self, "_footer_rows", []):
+            self.remove(footer_row)
+            self.add_row(footer_row)
         self.no_valid_entries_label.set_visible(not valid_items)
         self.is_not_usable_label.set_visible(self.selected_item and not self.emit("is-item-usable", self.selected_item))
         self.determine_incorrect_selection()
@@ -203,6 +223,19 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         else:
             self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, self.selected_item if isinstance(self.selected_item, str) else "(Selected)") if self.selected_item else f"({self.none_title})")
 
+    def add_footer_row(self, row: Gtk.Widget):
+        """Row shown below items when expanded, kept there when items are loaded again."""
+        if not hasattr(self, "_footer_rows"):
+            self._footer_rows = []
+        self._footer_rows.append(row)
+        self.add_row(row)
+
+    def set_extra_warning(self, text: str | None):
+        """Warning about selected item that depends on context (eg. folder made for other architecture than project),
+        shown with warning icon and its tooltip."""
+        self._extra_warning = text
+        self.determine_incorrect_selection()
+
     def determine_incorrect_selection(self):
         """If not available item is set as selected display warning."""
         if hasattr(self, 'repository') or hasattr(self, 'static_list'):
@@ -221,5 +254,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
                 self.warning_icon.set_visible(
                     (item_not_found and not(item_none and self.display_none))
                     or item_unsupported
+                    or bool(getattr(self, "_extra_warning", None))
                 )
+                self.warning_icon.set_tooltip_text(getattr(self, "_extra_warning", None))
 

@@ -39,6 +39,39 @@
             </child>
 
             <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">6</property>
+                <child>
+                  <object class="GtkListBox">
+                    <property name="selection-mode">none</property>
+                    <style>
+                      <class name="boxed-list"/>
+                    </style>
+                    <child>
+                      <object class="AdwSwitchRow" id="auto_clean_row">
+                        <property name="title">Auto clean unused snapshots</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label">Snapshots not used by any project are removed, the newest snapshot is always kept. Snapshots added from file are never removed, as they can contain own changes.</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">True</property>
+                    <property name="margin-start">12</property>
+                    <property name="margin-end">12</property>
+                    <style>
+                      <class name="caption"/>
+                      <class name="dimmed"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <child>
               <object class="GtkSeparator"/>
             </child>
 

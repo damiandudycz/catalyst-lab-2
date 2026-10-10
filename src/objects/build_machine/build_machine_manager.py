@@ -43,7 +43,7 @@ def shared_paths() -> list[str]:
     locations = [
         "~/CatalystLab", settings.toolsets_location, settings.snapshots_location, settings.releng_location,
         settings.overlay_location, settings.project_location, settings.builds_location, settings.cache_location,
-        settings.temporary_location
+        settings.temporary_location, settings.packages_location
     ]
     paths = []
     for location in sorted({os.path.realpath(os.path.expanduser(location)) for location in locations}, key=len):

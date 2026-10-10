@@ -12,14 +12,7 @@ from .wizard_view import WizardView
 from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
 from .toolset_application import ToolsetApplication
-
-class LatestSnapshotOption:
-    """Snapshot list entry generating new snapshot with project toolset when build starts."""
-    name = "Get latest"
-    short_details = "Generates new snapshot of the Gentoo ebuild repository with the project toolset"
-    icon_name = "folder-download-symbolic"
-
-LATEST_SNAPSHOT = LatestSnapshotOption()
+from .snapshot import LATEST_SNAPSHOT
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_build_view.ui')
 class ProjectBuildView(Gtk.Box):
@@ -98,9 +91,8 @@ class ProjectBuildView(Gtk.Box):
 
     def load_snapshots(self):
         """Latest snapshot option and all snapshots (newest first), snapshot of project is selected."""
-        snapshots = sorted(Repository.Snapshot.value, key=lambda snapshot: snapshot.date.timestamp() if snapshot.date else 0, reverse=True)
-        self.snapshot_selection_view.selected_item = self.project_directory.get_snapshot()
-        self.snapshot_selection_view.set_static_list([LATEST_SNAPSHOT] + snapshots)
+        self.snapshot_selection_view.selected_item = self._project_snapshot_option()
+        self.snapshot_selection_view.set_static_list([LATEST_SNAPSHOT] + Repository.Snapshot.value)
         self._update_snapshot_row()
 
     def snapshot_changed(self, view):
@@ -115,9 +107,13 @@ class ProjectBuildView(Gtk.Box):
             subtitle = f"{selected.name} ({selected.short_details})"
         else:
             subtitle = "Not selected"
-        if selected is not None and selected is not LATEST_SNAPSHOT and selected == self.project_directory.get_snapshot():
+        if selected is not None and selected is self._project_snapshot_option():
             subtitle += ", snapshot of the project"
         self.snapshot_row.set_subtitle(GLib.markup_escape_text(subtitle))
+
+    def _project_snapshot_option(self):
+        """Snapshot option set in project: latest or its snapshot."""
+        return LATEST_SNAPSHOT if self.project_directory.uses_latest_snapshot else self.project_directory.get_snapshot()
 
     def _toolset_generates_snapshots(self) -> bool:
         toolset = self.project_directory.get_toolset()
@@ -228,7 +224,8 @@ class ProjectBuildView(Gtk.Box):
             dialog.present(self.get_root())
             return
         selected = self.snapshot_selection_view.selected_item
-        if selected is LATEST_SNAPSHOT or selected != self.project_directory.get_snapshot():
+        # Snapshot option of project doesn't change project settings.
+        if selected is not self._project_snapshot_option():
             self._ask_update_project_snapshot(selected)
         else:
             self._authorize_and_start(update_project_snapshot=False)
@@ -236,8 +233,8 @@ class ProjectBuildView(Gtk.Box):
     def _ask_update_project_snapshot(self, selected):
         """Snapshot different than project snapshot is used in this build, it can be stored in project too."""
         if selected is LATEST_SNAPSHOT:
-            body = ("The latest snapshot will be generated before building. Do you want the project to use it as well? "
-                    "Project settings are updated when the snapshot is ready.")
+            body = ("The latest snapshot will be generated before building. Do you want the project to always get the "
+                    "latest snapshot when building?")
         else:
             body = f"This build uses snapshot {selected.name}. Do you want the project to use it as well?"
         dialog = Adw.AlertDialog(heading="Update project snapshot?", body=body)
@@ -275,9 +272,14 @@ class ProjectBuildView(Gtk.Box):
         try:
             selected = self.snapshot_selection_view.selected_item
             fetch = selected is LATEST_SNAPSHOT
+            if fetch and self.update_project_snapshot:
+                # Project gets latest snapshot in next builds too, newest snapshot is its snapshot.
+                metadata = self.project_directory.initialize_metadata()
+                metadata.latest_snapshot = True
+                Repository.ProjectDirectory.save()
             installation_in_progress = ProjectBuild(project_directory=self.project_directory, plan=plan,
                                                     snapshot=None if fetch else selected, fetch_snapshot=fetch,
-                                                    update_project_snapshot=self.update_project_snapshot)
+                                                    update_project_snapshot=self.update_project_snapshot and not fetch)
             installation_in_progress.start(authorization_keeper=authorization_keeper)
         finally:
             if authorization_keeper:

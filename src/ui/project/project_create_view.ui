@@ -194,6 +194,41 @@
           </object>
         </child>
 
+        <!-- Page 7: Binary packages screen -->
+        <child>
+          <object class="GtkScrolledWindow" id="packages_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="ItemSelectionView" id="packages_selection_view">
+                    <property name="title">Binary packages</property>
+                    <property name="description">Folder keeping binary packages built with stages, reused by next builds. Projects with the same architecture can share a folder to reuse packages built by each other.</property>
+                    <property name="item_class_name">PackagesDirectory</property>
+                    <property name="item_icon">archive-minimalistic-svgrepo-com-symbolic</property>
+                    <property name="item_title_property_name">name</property>
+                    <property name="item_subtitle_property_name">short_details</property>
+                    <property name="display_none">True</property>
+                    <property name="none_title">New folder for this project</property>
+                    <property name="none_subtitle">Named like the project</property>
+                    <signal name="is-item-selectable" handler="is_item_selectable"/>
+                    <signal name="is-item-usable" handler="is_item_usable"/>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
       </object>
     </child>
 

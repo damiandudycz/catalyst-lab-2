@@ -71,7 +71,7 @@ class RepositoryListView(Gtk.Box):
         process_class: type[MultiStageProcess],
         started_processes: list[MultiStageProcess]
     ):
-        if issubclass(process_class, self.item_installation_class):
+        if self.item_installation_class is not None and issubclass(process_class, self.item_installation_class):
             self._load_items(started_processes=started_processes)
 
     def items_updated(self, _):
@@ -79,7 +79,8 @@ class RepositoryListView(Gtk.Box):
 
     def _load_items(self, started_processes: list[MultiStageProcess] | None = None):
         if started_processes is None:
-            started_processes = MultiStageProcess.get_started_processes_by_class(self.item_installation_class)
+            # Lists without installations (no installation class) show only items.
+            started_processes = MultiStageProcess.get_started_processes_by_class(self.item_installation_class) if self.item_installation_class else []
         # Remove previously added rows
         if hasattr(self, "_item_rows"):
             for row in self._item_rows:

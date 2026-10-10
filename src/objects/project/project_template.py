@@ -523,6 +523,8 @@ class ProjectTemplate:
             if variable.type == TemplateVariableType.MULTIPLE:
                 # Selection of user, or default, without options that are not available.
                 value = selected.get(variable.id)
+                if isinstance(value, str):
+                    value = [value] # Selected when variable was single choice (projects created by older template).
                 value = variable.default if not isinstance(value, list) else value
                 names[variable.id] = [option for option in options if option in value]
                 continue
@@ -553,6 +555,31 @@ class ProjectTemplate:
 
     def _files_paths(self, entry: TemplateFiles, names: dict[str, Any], base: str) -> tuple[str, str]:
         return _template_files_paths(self, entry, names, base)
+
+    def generated_stage_ids(self, names: dict[str, Any]) -> set[str]:
+        """Ids of stages created for selected options (with conditions that are true, and their parents)."""
+        generated = set()
+        for stage in self.stages:
+            if (stage.parent is None or stage.parent in generated) and evaluate_condition(stage.when, names):
+                generated.add(stage.id)
+        return generated
+
+    def group_inherited_from(self, group_id: str, stage_id: str, names: dict[str, Any]) -> str | None:
+        """Id of parent (or further ancestor) of stage the group is applied to: stage is built from its build, so it
+        already has packages, services and files of group, and group isn't applied to it again."""
+        selected = names.get(_GROUP_STAGES_NAME, {}).get(group_id, [])
+        parents = {stage.id: stage.parent for stage in self.stages}
+        generated = self.generated_stage_ids(names)
+        ancestor = parents.get(stage_id)
+        while ancestor is not None:
+            if ancestor in selected and ancestor in generated:
+                return ancestor
+            ancestor = parents.get(ancestor)
+        return None
+
+    def group_applied_to(self, group_id: str, stage_id: str, names: dict[str, Any]) -> bool:
+        return (stage_id in names.get(_GROUP_STAGES_NAME, {}).get(group_id, [])
+                and self.group_inherited_from(group_id, stage_id, names) is None)
 
     def available_groups(self, names: dict[str, Any]) -> list[TemplateGroup]:
         """Groups that can be enabled for selected values of variables."""
@@ -601,8 +628,8 @@ class ProjectTemplate:
                 arguments[key] = _stage_argument_value(value, f"{context}, argument {key}")
             applied_groups = []
             for group in self.groups:
-                if stage.id not in names.get(_GROUP_STAGES_NAME, {}).get(group.id, []):
-                    continue
+                if not self.group_applied_to(group.id, stage.id, names):
+                    continue # Not selected, or inherited from parent stage.
                 applied_groups.append(group.title)
                 for key, value in group.arguments.items():
                     value = render_value(value, names)
@@ -625,7 +652,7 @@ class ProjectTemplate:
         stage_names = {stage.template_id: stage.name for stage in stages}
         for group in self.groups:
             for stage_id in names.get(_GROUP_STAGES_NAME, {}).get(group.id, []):
-                if stage_id not in stage_names:
+                if stage_id not in stage_names or not self.group_applied_to(group.id, stage_id, names):
                     continue
                 for entry in group.files:
                     if evaluate_condition(entry.when, names):

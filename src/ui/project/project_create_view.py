@@ -12,6 +12,9 @@ from .toolset import ToolsetEvents
 from .wizard_view import WizardView
 from .item_select_view import ItemSelectionViewEvent
 from .architecture import Architecture
+from .snapshot import LATEST_SNAPSHOT
+from .rootless import authorize_toolset_action
+from gi.repository import GLib
 import os
 
 class DefaultProjectDirContentBuilder(DefaultDirContentBuilder):
@@ -39,6 +42,8 @@ class ProjectCreateView(Gtk.Box):
     snapshot_selection_view = Gtk.Template.Child()
     arch_page = Gtk.Template.Child()
     arch_selection_view = Gtk.Template.Child()
+    packages_page = Gtk.Template.Child()
+    packages_selection_view = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: ProjectInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -46,6 +51,8 @@ class ProjectCreateView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         self.apps_requirements = [ToolsetApplication.CATALYST]
         self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
+        # Latest snapshot (default) is generated with selected toolset when project is created.
+        self.snapshot_selection_view.set_leading_items([LATEST_SNAPSHOT])
         # Templates: chooser in source page, options of selected template in next page.
         self.template_chooser = ProjectTemplateChooser()
         self.template_options_view = ProjectTemplateOptionsView()
@@ -84,6 +91,7 @@ class ProjectCreateView(Gtk.Box):
         self._update_pages()
 
     def template_options_changed(self):
+        self.packages_selection_view.refresh_items_state(None) # Template can set architecture.
         self.wizard_view._refresh_buttons_state()
 
     @property
@@ -98,6 +106,7 @@ class ProjectCreateView(Gtk.Box):
         self.wizard_view.set_page_visible(self.arch_page, template is None or (template.architecture_variable is None and template.architecture is None))
 
     def toolset_changed(self, data):
+        self.snapshot_selection_view.refresh_items_state(None) # Latest snapshot is generated with toolset.
         self.wizard_view._refresh_buttons_state()
 
     def releng_changed(self, data):
@@ -107,7 +116,14 @@ class ProjectCreateView(Gtk.Box):
         self.wizard_view._refresh_buttons_state()
 
     def arch_changed(self, data):
+        self.packages_selection_view.refresh_items_state(None) # Folders depend on architecture.
         self.wizard_view._refresh_buttons_state()
+
+    def _selected_architecture(self):
+        """Architecture of new project: from template (when it sets it) or architecture page."""
+        if self._uses_template and self.template_options_view.generated and self.template_options_view.generated.architecture:
+            return self.template_options_view.generated.architecture
+        return self.arch_selection_view.selected_item
 
     def on_realize(self, widget):
         self.wizard_view.content_navigation_view = self.content_navigation_view
@@ -123,9 +139,16 @@ class ProjectCreateView(Gtk.Box):
             case self.releng_selection_view:
                 return True
             case self.snapshot_selection_view:
+                if item is LATEST_SNAPSHOT:
+                    toolset = self.toolset_selection_view.selected_item
+                    return toolset is None or toolset.get_app_install(ToolsetApplication.CATALYST) is not None
                 return True
             case self.arch_selection_view:
                 return True
+            case self.packages_selection_view:
+                # Packages of other architecture can't be used.
+                architecture = self._selected_architecture()
+                return item.architecture is None or architecture is None or item.architecture == architecture
         return False
 
     @Gtk.Template.Callback()
@@ -138,6 +161,8 @@ class ProjectCreateView(Gtk.Box):
             case self.snapshot_selection_view:
                 return True
             case self.arch_selection_view:
+                return True
+            case self.packages_selection_view:
                 return True
         return False
 
@@ -201,8 +226,16 @@ class ProjectCreateView(Gtk.Box):
             toolset=self.toolset_selection_view.selected_item,
             releng_directory=self.releng_selection_view.selected_item,
             snapshot=self.snapshot_selection_view.selected_item,
-            architecture=architecture
+            architecture=architecture,
+            packages_directory=self._usable_packages_directory(architecture)
         )
+
+    def _usable_packages_directory(self, architecture):
+        """Selected binary packages folder, None (new folder is created) when it doesn't match architecture."""
+        directory = self.packages_selection_view.selected_item
+        if directory is not None and architecture is not None and directory.architecture not in (None, architecture):
+            return None
+        return directory
 
     def _start_installation(
         self,
@@ -210,15 +243,28 @@ class ProjectCreateView(Gtk.Box):
         toolset: Toolset,
         releng_directory: RelengDirectory,
         snapshot: Snapshot,
-        architecture: Architecture
+        architecture: Architecture,
+        packages_directory=None
     ):
         installation_in_progress = ProjectInstallation(
             source_config=source_config,
             toolset=toolset,
             releng_directory=releng_directory,
             snapshot=snapshot,
-            architecture=architecture
+            architecture=architecture,
+            packages_directory=packages_directory
         )
-        installation_in_progress.start()
-        self.wizard_view.set_installation(installation_in_progress)
+        if snapshot is not LATEST_SNAPSHOT:
+            installation_in_progress.start()
+            self.wizard_view.set_installation(installation_in_progress)
+            return
+        # Latest snapshot is generated in toolset, which may need root privileges to run.
+        def start(authorization_keeper):
+            if authorization_keeper:
+                GLib.idle_add(start_installation)
+        def start_installation():
+            installation_in_progress.start()
+            self.wizard_view.set_installation(installation_in_progress)
+            return False
+        authorize_toolset_action(callback=start, machine=toolset.machine if toolset else None)
 

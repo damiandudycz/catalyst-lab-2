@@ -179,7 +179,12 @@ class TemplateChange:
     parts: list[TemplateChange] = field(default_factory=list) # Changes grouped in this one (eg. files of new stage).
 
     def flattened(self) -> list[TemplateChange]:
-        return [part for change in self.parts for part in change.flattened()] if self.parts else [self]
+        """Changes grouped in this one, with its decision (group is decided as whole)."""
+        if not self.parts:
+            return [self]
+        for part in self.parts:
+            part.use_template = self.use_template
+        return [part for change in self.parts for part in change.flattened()]
 
 def describe_value(value) -> str:
     if value is _MISSING or value is None:
@@ -220,7 +225,11 @@ def compare_versions(base: ProjectVersion, project: ProjectVersion, template: Pr
         conflict = project_value != base_value
         changes.append(TemplateChange(key=key, title=title, base=base_value, project=project_value,
                                       template=template_value, conflict=conflict, use_template=not conflict))
-    return _group_stage_changes(changes, project, template)
+    return _group_stage_changes(changes, base, project, template)
+
+def _is_stage_key(key: str) -> bool:
+    """Key of whole stage (change of stage added or removed)."""
+    return key.startswith("stage:") and "/" not in key and "#" not in key
 
 def _stage_id_of(key: str) -> str | None:
     if not key.startswith("stage:"):
@@ -228,23 +237,41 @@ def _stage_id_of(key: str) -> str | None:
     body = key[len("stage:"):]
     return body.partition("#")[0] if "#" in body else body.partition("/")[0]
 
-def _group_stage_changes(changes: list[TemplateChange], project: ProjectVersion, template: ProjectVersion) -> list[TemplateChange]:
-    """Automatic changes of stages added to project (only in template) or removed from it (not in template anymore)
-    are shown as one change."""
+def _group_stage_changes(changes: list[TemplateChange], base: ProjectVersion, project: ProjectVersion,
+                         template: ProjectVersion) -> list[TemplateChange]:
+    """Changes of stages added to project (only in template) or removed from it (not in template anymore) are shown as
+    one change. Removed stage changed in project (settings, or files added to it) is conflict decided as whole: stage
+    is kept as it is, or removed completely."""
     grouped, by_stage = [], {}
     for change in changes:
         stage_id = _stage_id_of(change.key)
         added = stage_id is not None and stage_id not in project.stage_directories and stage_id in template.stage_directories
         removed = stage_id is not None and stage_id in project.stage_directories and stage_id not in template.stage_directories
-        if not change.conflict and (added or removed):
+        if removed or (added and not change.conflict):
             by_stage.setdefault((stage_id, added), []).append(change)
         else:
             grouped.append(change)
     for (stage_id, added), parts in by_stage.items():
-        name = (template if added else project).stage_names.get(stage_id, stage_id)
-        grouped.append(TemplateChange(key=f"stage:{stage_id}", title=f"{'New' if added else 'Removed'} stage {name}",
-                                      base=_MISSING, project=_MISSING if added else "Stage", template="Stage" if added else _MISSING,
-                                      conflict=False, use_template=True, parts=parts))
+        if added:
+            name = template.stage_names.get(stage_id, stage_id)
+            grouped.append(TemplateChange(key=f"stage:{stage_id}", title=f"New stage {name}", base=_MISSING,
+                                          project=_MISSING, template="Stage", conflict=False, use_template=True, parts=parts))
+            continue
+        name = project.stage_names.get(stage_id, stage_id)
+        # Files added to stage in project (not generated): removed with stage when template version is used.
+        known = {part.key for part in parts}
+        for key, value in project.entries.items():
+            if _stage_id_of(key) == stage_id and key not in known and base.entries.get(key, _MISSING) != value:
+                parts.append(TemplateChange(key=key, title=key, base=base.entries.get(key, _MISSING), project=value,
+                                            template=_MISSING, conflict=True, use_template=False))
+        changed = any(part.conflict for part in parts)
+        if changed:
+            grouped.append(TemplateChange(key=f"stage:{stage_id}", title=f"{name} is removed by template, but changed in project",
+                                          base="Stage", project="Stage with changes", template="Removed",
+                                          conflict=True, use_template=False, parts=parts))
+        else:
+            grouped.append(TemplateChange(key=f"stage:{stage_id}", title=f"Removed stage {name}", base="Stage",
+                                          project="Stage", template=_MISSING, conflict=False, use_template=True, parts=parts))
     return grouped
 
 def apply_changes(project_path: str, changes: list[TemplateChange], project: ProjectVersion, template: ProjectVersion):
@@ -364,22 +391,47 @@ def rebase_project(repository_path: str, onto: str, base: str, changes: list[Tem
     commits = _git(repository_path, "rev-list", "--reverse", f"{base}..HEAD").split()
     # Decisions about changes made in project and new version, by keys: True when new version is used.
     decisions = {part.key: part.use_template for change in changes if change.conflict for part in change.flattened()}
+    decisions.update({change.key: change.use_template for change in changes if change.conflict and change.parts})
     current = os.path.join(temporary, "rebase")
     _read_commit(repository_path, onto, current)
+    # Stages removed by new version, but changed in project: kept stages are restored as they were at base (commits
+    # change them then), commits don't recreate removed ones.
+    removed_stages = [change for change in changes if change.conflict and change.parts and _is_stage_key(change.key)]
+    removed_ids = {_stage_id_of(change.key) for change in removed_stages if change.use_template}
+    kept_ids = {_stage_id_of(change.key) for change in removed_stages if not change.use_template}
+    if kept_ids:
+        base_directory = os.path.join(temporary, "rebase-base")
+        base_version = _read_commit(repository_path, base, base_directory)
+        for stage_id in kept_ids:
+            if name := base_version.stage_directories.get(stage_id):
+                target = os.path.join(current, _STAGES_DIRECTORY, name)
+                if not os.path.exists(target):
+                    shutil.copytree(os.path.join(base_directory, _STAGES_DIRECTORY, name), target)
     head = onto
     for index, commit in enumerate(commits):
         parent_version = _read_commit(repository_path, f"{commit}^", os.path.join(temporary, f"parent-{index}"))
         commit_version = _read_commit(repository_path, commit, os.path.join(temporary, f"commit-{index}"))
         current_version = read_project_version(current)
         commit_changes = compare_versions(parent_version, current_version, commit_version)
-        for change in [part for change in commit_changes for part in change.flattened()]:
-            if change.conflict:
+        for change in commit_changes:
+            if _stage_id_of(change.key) in removed_ids:
+                change.use_template = False # Stage was removed by new version, commit doesn't recreate it.
+            elif change.conflict:
                 # Commit changed what new version changed too: version chosen by user (commit is project version).
+                # Grouped changes are decided as whole, their parts get decision of group.
                 change.use_template = not decisions.get(change.key, False)
+                for part in change.parts:
+                    if part.conflict:
+                        part.use_template = not decisions.get(part.key, False)
         apply_changes(current, commit_changes, current_version, commit_version)
         message = _git(repository_path, "log", "-1", "--format=%B", commit)
-        head = _commit_directory(repository_path, current, message, [head], author=_commit_author(repository_path, commit))
-        log(f"Replayed {message.splitlines()[0] if message else commit[:8]}")
+        title = message.splitlines()[0] if message else commit[:8]
+        replayed = _commit_directory(repository_path, current, message, [head], author=_commit_author(repository_path, commit))
+        if _git(repository_path, "rev-parse", f"{replayed}^{{tree}}") == _git(repository_path, "rev-parse", f"{head}^{{tree}}"):
+            log(f"Skipped {title}, its changes are not used") # Eg. changes of stage removed by new version.
+            continue
+        head = replayed
+        log(f"Replayed {title}")
     old_head = _git(repository_path, "rev-parse", "HEAD")
     _git(repository_path, "update-ref", "-m", "Catalyst Lab: update", "HEAD", head, old_head)
     _git(repository_path, "reset", "--hard", "--quiet", head)
@@ -398,6 +450,7 @@ class ProjectUpdate:
     changes: list[TemplateChange]
     temporary_directory: str
     fast_forward: bool # Project has no own commits since base, it's moved to new version.
+    architecture: Any = None # Architecture set by template (it can change with options).
 
     def cleanup(self):
         shutil.rmtree(self.temporary_directory, ignore_errors=True)
@@ -412,6 +465,10 @@ class ProjectUpdate:
             _git(project_path, "reset", "--hard", "--quiet", self.onto)
         else:
             rebase_project(project_path, self.onto, self.base, self.changes, self.temporary_directory, log)
+        if self.architecture is not None and self.architecture != project_directory.get_architecture():
+            from .repository import Repository
+            project_directory.initialize_metadata().architecture = self.architecture
+            Repository.ProjectDirectory.save()
         if hasattr(project_directory, "_stages"):
             del project_directory._stages # Stages are read again.
         from .git_directory import GitDirectoryEvent
@@ -462,9 +519,10 @@ def template_base_commit(project_path: str) -> str | None:
     """Newest commit generating project from template (it changes project-template.json)."""
     return _git(project_path, "log", "-1", "--format=%H", "--", TEMPLATE_STATE_FILE, check=False) or None
 
-def prepare_template_update(project_directory, log: Callable[[str], None]) -> ProjectUpdate | None:
+def prepare_template_update(project_directory, log: Callable[[str], None],
+                            selected: dict[str, Any] | None = None) -> ProjectUpdate | None:
     """Downloads latest version of template, generates project from it (as commit on top of base) and compares it with
-    project. None when template didn't change project."""
+    project. Options are the ones selected before, or new selected values. None when template didn't change project."""
     project_path = project_directory.directory_path()
     state = TemplateState.load(project_path)
     if state is None:
@@ -486,21 +544,27 @@ def prepare_template_update(project_directory, log: Callable[[str], None]) -> Pr
         os.makedirs(generated)
         log(f"Generating project from {template.name}")
         stage_ids = apply_project_template(_RenderTarget(project_directory, generated), template,
-                                           template.resolve(state.selected, project_name=project_directory.name),
+                                           template.resolve(selected if selected is not None else state.selected,
+                                                            project_name=project_directory.name),
                                            log=log, stage_ids=state.uuid_stage_ids)
         base_version = _read_commit(project_path, base, os.path.join(temporary, "base"))
         changes = compare_versions(base_version, read_project_version(project_path), read_project_version(generated))
         commit = repository_commit(repository)
-        if not changes and commit == state.commit:
+        options_changed = selected is not None and selected != state.selected
+        if not changes and commit == state.commit and not options_changed:
             shutil.rmtree(temporary, ignore_errors=True)
             return None
+        names = template.resolve(selected if selected is not None else state.selected, project_name=project_directory.name)
+        architecture = template.generate(names).architecture
         # New version of template, as commit on top of base.
+        if selected is not None:
+            state.selected = selected
         record_template_state(generated, template, state.selected, commit, stage_ids,
                               template_tree(repository, state.repository_path))
         onto = _commit_directory(project_path, generated, f"Update from template {template.name}", [base])
         head = _git(project_path, "rev-parse", "HEAD")
         return ProjectUpdate(source="template", onto=onto, base=base, changes=changes, temporary_directory=temporary,
-                             fast_forward=head == base)
+                             fast_forward=head == base, architecture=architecture)
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise

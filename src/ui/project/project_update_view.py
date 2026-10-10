@@ -3,8 +3,10 @@ import threading
 from gi.repository import Gtk, GLib, Adw
 from .cl_toggle_group import CLToggle, CLToggleGroup
 from .project_template_update import (
-    prepare_template_update, prepare_repository_update, describe_value, TemplateChange
+    prepare_template_update, prepare_repository_update, describe_value, TemplateChange, TemplateState
 )
+from .project_template import fetch_template_repository, ProjectTemplate
+from .project_template_views import ProjectTemplateOptionsView
 
 class ProjectUpdateView(Gtk.Box):
     """Updates project from its template or Git repository: downloads latest version, lists changes and lets user
@@ -25,15 +27,65 @@ class ProjectUpdateView(Gtk.Box):
                                margin_top=12, margin_bottom=24)
         scrolled_window.set_child(self.content)
         self.append(scrolled_window)
+        self.selected = None # Options of template chosen for update.
+        if source == "template":
+            # Options of latest template, with values selected before.
+            self._show_loading("Downloading options of latest template…")
+            threading.Thread(target=self._load_options, daemon=True).start()
+        else:
+            self._start_update()
+
+    def _start_update(self):
         self._show_loading()
         threading.Thread(target=self._prepare, daemon=True).start()
 
+    # Options of template:
+
+    def _load_options(self):
+        state = TemplateState.load(self.project_directory.directory_path())
+        try:
+            if state is None:
+                raise RuntimeError("Project wasn't created from template")
+            templates = fetch_template_repository(state.repository_url)
+            template = next((item for item in templates if isinstance(item, ProjectTemplate)
+                             and item.repository_path == state.repository_path), None)
+            if template is None:
+                error = next((item[1] for item in templates if not isinstance(item, ProjectTemplate) and item[0] == state.repository_path), None)
+                raise RuntimeError(str(error) if error else f"Template {state.template_name} is not in repository anymore")
+            GLib.idle_add(self._show_options, template, state.selected, None)
+        except Exception as e:
+            GLib.idle_add(self._show_options, None, None, e)
+
+    def _show_options(self, template, selected, error):
+        if error is not None:
+            self._show_message("dialog-error-symbolic", "Update failed", str(error))
+            return False
+        options = ProjectTemplateOptionsView()
+        options.set_template(template, selected)
+        description = self._label("Options of the latest version of template, with values selected for project. "
+                                  "Changed options change generated stages and files.")
+        continue_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        continue_list.add_css_class("boxed-list")
+        continue_row = Adw.ButtonRow(title="Continue", end_icon_name="go-next-symbolic")
+        continue_row.add_css_class("suggested-action")
+        def on_continue(row):
+            self.selected = dict(options.selected)
+            self._start_update()
+        continue_row.connect("activated", on_continue)
+        continue_list.append(continue_row)
+        def on_changed():
+            continue_row.set_sensitive(options.generated is not None)
+        options.on_changed = on_changed
+        on_changed()
+        self._set_content([description, options, continue_list])
+        return False
+
     # Preparing:
 
-    def _show_loading(self):
+    def _show_loading(self, text: str | None = None):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, valign=Gtk.Align.CENTER, vexpand=True)
         box.append(Adw.Spinner(width_request=32, height_request=32))
-        self.loading_label = Gtk.Label(label=f"Downloading latest version of {self.source_name}…", wrap=True)
+        self.loading_label = Gtk.Label(label=text or f"Downloading latest version of {self.source_name}…", wrap=True)
         self.loading_label.add_css_class("dimmed")
         box.append(self.loading_label)
         self._set_content([box])
@@ -58,7 +110,7 @@ class ProjectUpdateView(Gtk.Box):
                 self.overlay_errors.append(f"{overlay.name}: {e}")
         try:
             if self.source == "template":
-                update = prepare_template_update(self.project_directory, log)
+                update = prepare_template_update(self.project_directory, log, selected=self.selected)
             else:
                 update = prepare_repository_update(self.project_directory, log)
             GLib.idle_add(self._show_update, update, None)
