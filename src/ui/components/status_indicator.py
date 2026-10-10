@@ -15,6 +15,7 @@ class StatusIndicatorState(Enum):
     """States of items shown with color of indicator, from least to most important (item with many states shows the
     most important one). Item that is actively used (eg. building, running operation) blinks. Described in README."""
     IDLE = auto()     # Gray: not used, not mounted, no changes.
+    SUCCEEDED = auto() # Green: last operation completed (eg. build).
     LOADED = auto()   # Blue: mounted, loaded or running.
     CHANGED = auto()  # Purple: has changes (eg. not saved changes of Git directory).
     WARNING = auto()  # Orange: has warnings.
@@ -24,6 +25,7 @@ class StatusIndicatorState(Enum):
         """Colors of GNOME palette (gray is light 5, others are 3), the same in light and dark style."""
         match self:
             case StatusIndicatorState.IDLE: return (0x9a / 255, 0x99 / 255, 0x96 / 255)
+            case StatusIndicatorState.SUCCEEDED: return (0x33 / 255, 0xd1 / 255, 0x7a / 255)
             case StatusIndicatorState.LOADED: return (0x35 / 255, 0x84 / 255, 0xe4 / 255)
             case StatusIndicatorState.CHANGED: return (0x91 / 255, 0x41 / 255, 0xac / 255)
             case StatusIndicatorState.WARNING: return (0xff / 255, 0x78 / 255, 0x00 / 255)
@@ -178,13 +180,13 @@ def processes_status(*process_classes) -> list[StatusEntry]:
         if process.status == MultiStageProcessState.IN_PROGRESS
     ]
 
-# Warnings and errors (eg. failed build) are reported in side menu until their section is opened.
-_HIDDEN_WHEN_SEEN = {StatusIndicatorState.WARNING, StatusIndicatorState.ERROR}
+# Results (eg. completed or failed build), warnings and errors are reported in side menu until their section is opened.
+_HIDDEN_WHEN_SEEN = {StatusIndicatorState.SUCCEEDED, StatusIndicatorState.WARNING, StatusIndicatorState.ERROR}
 
 def unseen_status_entries(entries: list[StatusEntry], seen: set, section_open: bool) -> tuple[list[StatusEntry], set]:
-    """Entries of section shown in side menu, and updated seen states. Warnings and errors are shown until section is
-    opened (they are seen while it's open). State that disappears and comes back (eg. failure of next build) is shown
-    again. Other states (changes, loaded, running operations) are always shown."""
+    """Entries of section shown in side menu, and updated seen states. Results, warnings and errors are shown until
+    section is opened (they are seen while it's open). State that disappears and comes back (eg. result of next build)
+    is shown again. Other states (changes, loaded, running operations) are always shown."""
     current = {(entry.key, entry.values.state) for entry in entries
                if entry.values is not None and entry.values.state in _HIDDEN_WHEN_SEEN}
     seen = current if section_open else seen & current

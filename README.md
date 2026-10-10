@@ -89,6 +89,7 @@ Items in lists and sections of the side menu have a colored dot showing their st
 | Color | Meaning |
 |---|---|
 | ⚪ Gray | Not used or mounted, no changes |
+| 🟢 Green | Completed successfully |
 | 🔵 Blue | Mounted, loaded or running |
 | 🟣 Purple | Has changes |
 | 🟠 Orange | Has warnings |
@@ -96,21 +97,21 @@ Items in lists and sections of the side menu have a colored dot showing their st
 
 The dot **blinks** while the item is actively used (building, running an operation), in its current color (gray
 becomes blue). An item can have several states at once (eg. running and has changes): the dot shows the most
-important one (red, orange, purple, blue, gray), and hovering it lists all of them, each with its own color.
+important one (red, orange, purple, blue, green, gray), and hovering it lists all of them, each with its own color.
 
 A section in the side menu shows the most important state of its items, and blinks while any of them is used or any of
-its operations runs. Warnings and errors (eg. failed build) are shown there until the section is opened, and again
-when a new one appears. Changes and ongoing states (running machines, open environments, operations) stay visible.
+its operations runs. Results, warnings and errors (eg. completed or failed build) are shown there until the section is
+opened, and again when a new one appears. Changes and ongoing states (running machines, open environments, operations) stay visible.
 Hovering the dot lists items and their states.
 
-| Item | Blue | Purple | Orange | Red | Blinking |
-|---|---|---|---|---|---|
-| Toolset | Environment is open | | Catalyst is not installed | File or virtual machine is missing | Mounting, unmounting, used by operation or command |
-| Virtual machine | Running | | | Missing | Starting, stopping, used by operation |
-| Project | | Not saved changes | Last build failed | Toolset, Releng directory or snapshot is missing, Git error or conflicts | Building, updating, saving or discarding changes |
-| Releng directory, overlay | | Not saved changes | | Git error or conflicts | Updating, saving or discarding changes |
-| Project in Builds (also Builds in side menu) | | | Last build stopped | Last build failed | Building |
-| Project in Deploy | | | | | Deploying |
+| Item | Green | Blue | Purple | Orange | Red | Blinking |
+|---|---|---|---|---|---|---|
+| Toolset | | Environment is open | | Catalyst is not installed | File or virtual machine is missing | Mounting, unmounting, used by operation or command |
+| Virtual machine | | Running | | | Missing | Starting, stopping, used by operation |
+| Project | | | Not saved changes | Last build failed | Toolset, Releng directory or snapshot is missing, Git error or conflicts | Building, updating, saving or discarding changes |
+| Releng directory, overlay | | | Not saved changes | | Git error or conflicts | Updating, saving or discarding changes |
+| Project in Builds (also Builds in side menu) | Last build completed | | | Last build stopped | Last build failed | Building |
+| Project in Deploy | | | | | | Deploying |
 
 ---
 

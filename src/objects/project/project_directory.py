@@ -89,14 +89,15 @@ class ProjectDirectory(GitDirectory):
 
     @property
     def build_status_indicator_values(self):
-        """Builds list: last build run failed (error) or stopped (warning), blinking while building."""
+        """Builds list: last build run completed (succeeded), failed (error) or stopped (warning), blinking while
+        building."""
         from .project_build import BuildRunResult
         from .status_indicator import StatusIndicatorState, StatusDetail, item_status
         result, building = self._last_build_run_result()
         match result:
             case BuildRunResult.FAILED: state, description = StatusIndicatorState.ERROR, "Last build failed"
             case BuildRunResult.STOPPED: state, description = StatusIndicatorState.WARNING, "Last build was stopped"
-            case BuildRunResult.COMPLETED: state, description = StatusIndicatorState.IDLE, "Last build completed"
+            case BuildRunResult.COMPLETED: state, description = StatusIndicatorState.SUCCEEDED, "Last build completed"
             case _: state, description = StatusIndicatorState.IDLE, "No builds"
         return item_status([StatusDetail(state, description),
                             StatusDetail(StatusIndicatorState.LOADED, "Building") if building else None], blinking=building)
