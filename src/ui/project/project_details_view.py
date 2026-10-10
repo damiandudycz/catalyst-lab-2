@@ -171,20 +171,20 @@ class ProjectDetailsView(Gtk.Box):
         self._source = None
         if state := TemplateState.load(path):
             self._source = "template"
-            title = f"Created from template {state.template_name}"
-            button = "Update template"
+            title, button = "Generated from template", "Update template"
+            details = f"{state.template_name}\n{state.repository_url}" + (f" ({state.repository_path})" if state.repository_path else "")
         elif origin := repository_origin(path):
             self._source = "repository"
-            branch = f" ({origin.branch})" if origin.branch else ""
+            details = origin.url + (f" ({origin.branch})" if origin.branch else "")
             if pending_repository_update(path):
-                title, button = f"Update from {origin.url}{branch} is applied, save changes to finish it", ""
+                title, button = "Update applied, save changes to finish it", ""
             else:
-                title, button = f"Cloned from {origin.url}{branch}", "Update from repository"
+                title, button = "Cloned from repository", "Update from repository"
         self.source_banner.set_visible(self._source is not None)
         if self._source is None:
             return
         self.source_label.set_label(title)
-        self.source_label.set_tooltip_text(title)
+        self.source_label.set_tooltip_text(details)
         self.source_button.set_label(button)
         self.source_button.set_visible(bool(button))
 
