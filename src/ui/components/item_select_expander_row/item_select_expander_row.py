@@ -203,6 +203,12 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
         else:
             self.set_subtitle(getattr(self.selected_item, self.item_title_property_name, self.selected_item if isinstance(self.selected_item, str) else "(Selected)") if self.selected_item else f"({self.none_title})")
 
+    def set_extra_warning(self, text: str | None):
+        """Warning about selected item that depends on context (eg. folder made for other architecture than project),
+        shown with warning icon and its tooltip."""
+        self._extra_warning = text
+        self.determine_incorrect_selection()
+
     def determine_incorrect_selection(self):
         """If not available item is set as selected display warning."""
         if hasattr(self, 'repository') or hasattr(self, 'static_list'):
@@ -221,5 +227,7 @@ class ItemSelectionExpanderRow(Adw.ExpanderRow):
                 self.warning_icon.set_visible(
                     (item_not_found and not(item_none and self.display_none))
                     or item_unsupported
+                    or bool(getattr(self, "_extra_warning", None))
                 )
+                self.warning_icon.set_tooltip_text(getattr(self, "_extra_warning", None))
 

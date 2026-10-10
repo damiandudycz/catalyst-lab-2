@@ -258,7 +258,13 @@ class GitDirectoryDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
+        root = self.get_root()
+        # Binary packages folder of deleted project, when no other project uses it.
+        get_packages_directory = getattr(self.git_directory, "get_packages_directory", None)
+        packages_directory = get_packages_directory() if get_packages_directory else None
         self.manager_class.shared().remove_directory(directory=self.git_directory)
+        if packages_directory is not None and not packages_directory.projects:
+            ask_delete_unused_packages_directory(root, packages_directory)
         if hasattr(self, "_window"):
             self._window.close()
         elif hasattr(self, "content_navigation_view"):
@@ -282,3 +288,17 @@ class GitDirectoryDetailsView(Gtk.Box):
         update_view.set_multistage_process(multistage_process=update)
         self.content_navigation_view.push_view(update_view, title="Updating Git repository")
 
+def ask_delete_unused_packages_directory(root, packages_directory):
+    """Binary packages folder isn't used by any project anymore (its last project was deleted): it's kept by default,
+    as packages can be used by other projects later."""
+    from .packages_directory import delete_packages_directory
+    dialog = Adw.AlertDialog(
+        heading=f"Delete binary packages folder {packages_directory.name}?",
+        body="No other project uses it. Packages in it can be reused by projects created later.")
+    dialog.add_response("keep", "Keep")
+    dialog.add_response("delete", "Delete")
+    dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+    dialog.set_default_response("keep")
+    dialog.set_close_response("keep")
+    dialog.connect("response", lambda _, response: delete_packages_directory(packages_directory) if response == "delete" else None)
+    dialog.present(root)

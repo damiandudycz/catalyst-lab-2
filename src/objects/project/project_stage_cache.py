@@ -6,8 +6,9 @@ from .project_stage_automatic_option import StageAutomaticOption
 # ------------------------------------------------------------------------------
 # Package and kernel caches of stages.
 # Each cache argument (pkgcache_path, kerncache_path) is one of:
-# - Automatic (StageAutomaticOption): folder in project builds directory, shared by stages with the same rel_type. Stages
-#   in one rel_type are built with compatible settings, so they can reuse packages built by each other.
+# - Automatic (StageAutomaticOption): folder shared by stages with the same rel_type. Stages in one rel_type are built
+#   with compatible settings, so they can reuse packages built by each other. Packages are in binary packages folder of
+#   project (shared with other projects using it), kernels in project builds directory.
 # - Manual (str): folder selected by user, path on host.
 # - None: cache is disabled.
 
@@ -36,7 +37,11 @@ def stage_cache_path(project_directory, stage, argument: StageArgumentDetails) -
     rel_type = resolve_stage_argument(project_directory, stage, StageArgumentDetails.rel_type.value)
     if not isinstance(rel_type, str) or not rel_type.strip("/ "):
         return None
-    root = os.path.join(project_builds_directory(project_directory), _automatic_cache_folders[argument])
+    packages_directory = project_directory.get_packages_directory() if argument == StageArgumentDetails.pkgcache_path else None
+    if packages_directory is not None:
+        root = packages_directory.directory_path()
+    else:
+        root = os.path.join(project_builds_directory(project_directory), _automatic_cache_folders[argument])
     path = os.path.normpath(os.path.join(root, rel_type.strip("/")))
     return path if path.startswith(root + os.sep) else None
 

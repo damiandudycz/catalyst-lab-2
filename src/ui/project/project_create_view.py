@@ -39,6 +39,8 @@ class ProjectCreateView(Gtk.Box):
     snapshot_selection_view = Gtk.Template.Child()
     arch_page = Gtk.Template.Child()
     arch_selection_view = Gtk.Template.Child()
+    packages_page = Gtk.Template.Child()
+    packages_selection_view = Gtk.Template.Child()
 
     def __init__(self, installation_in_progress: ProjectInstallation | None = None, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -84,6 +86,7 @@ class ProjectCreateView(Gtk.Box):
         self._update_pages()
 
     def template_options_changed(self):
+        self.packages_selection_view.refresh_items_state(None) # Template can set architecture.
         self.wizard_view._refresh_buttons_state()
 
     @property
@@ -107,7 +110,14 @@ class ProjectCreateView(Gtk.Box):
         self.wizard_view._refresh_buttons_state()
 
     def arch_changed(self, data):
+        self.packages_selection_view.refresh_items_state(None) # Folders depend on architecture.
         self.wizard_view._refresh_buttons_state()
+
+    def _selected_architecture(self):
+        """Architecture of new project: from template (when it sets it) or architecture page."""
+        if self._uses_template and self.template_options_view.generated and self.template_options_view.generated.architecture:
+            return self.template_options_view.generated.architecture
+        return self.arch_selection_view.selected_item
 
     def on_realize(self, widget):
         self.wizard_view.content_navigation_view = self.content_navigation_view
@@ -126,6 +136,10 @@ class ProjectCreateView(Gtk.Box):
                 return True
             case self.arch_selection_view:
                 return True
+            case self.packages_selection_view:
+                # Packages of other architecture can't be used.
+                architecture = self._selected_architecture()
+                return item.architecture is None or architecture is None or item.architecture == architecture
         return False
 
     @Gtk.Template.Callback()
@@ -138,6 +152,8 @@ class ProjectCreateView(Gtk.Box):
             case self.snapshot_selection_view:
                 return True
             case self.arch_selection_view:
+                return True
+            case self.packages_selection_view:
                 return True
         return False
 
@@ -201,8 +217,16 @@ class ProjectCreateView(Gtk.Box):
             toolset=self.toolset_selection_view.selected_item,
             releng_directory=self.releng_selection_view.selected_item,
             snapshot=self.snapshot_selection_view.selected_item,
-            architecture=architecture
+            architecture=architecture,
+            packages_directory=self._usable_packages_directory(architecture)
         )
+
+    def _usable_packages_directory(self, architecture):
+        """Selected binary packages folder, None (new folder is created) when it doesn't match architecture."""
+        directory = self.packages_selection_view.selected_item
+        if directory is not None and architecture is not None and directory.architecture not in (None, architecture):
+            return None
+        return directory
 
     def _start_installation(
         self,
@@ -210,14 +234,16 @@ class ProjectCreateView(Gtk.Box):
         toolset: Toolset,
         releng_directory: RelengDirectory,
         snapshot: Snapshot,
-        architecture: Architecture
+        architecture: Architecture,
+        packages_directory=None
     ):
         installation_in_progress = ProjectInstallation(
             source_config=source_config,
             toolset=toolset,
             releng_directory=releng_directory,
             snapshot=snapshot,
-            architecture=architecture
+            architecture=architecture,
+            packages_directory=packages_directory
         )
         installation_in_progress.start()
         self.wizard_view.set_installation(installation_in_progress)

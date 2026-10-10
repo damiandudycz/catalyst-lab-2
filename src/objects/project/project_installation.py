@@ -26,8 +26,10 @@ class ProjectInstallation(GitInstallation):
         toolset: Toolset,
         releng_directory: RelengDirectory,
         snapshot: Snapshot,
-        architecture: Architecture
+        architecture: Architecture,
+        packages_directory=None
     ):
+        self.packages_directory = packages_directory # Existing binary packages folder, None creates new one.
         self.toolset = toolset
         self.releng_directory = releng_directory
         self.snapshot = snapshot
@@ -38,6 +40,17 @@ class ProjectInstallation(GitInstallation):
     @classmethod
     def manager(cls) -> GitManager:
         return ProjectManager.shared()
+
+    def complete_process(self, success: bool):
+        if success:
+            # Binary packages folder: selected one, or new one for project (CPU flags of its stages are known now).
+            try:
+                from .packages_directory import create_packages_directory_for_project
+                directory = self.packages_directory or create_packages_directory_for_project(self.directory)
+                self.directory.initialize_metadata().packages_directory_id = directory.id
+            except Exception as e:
+                print(f"Failed to set binary packages folder: {e}")
+        super().complete_process(success)
 
     def setup_stages(self):
         super().setup_stages()

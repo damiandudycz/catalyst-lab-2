@@ -33,6 +33,9 @@ class CatalystlabApplication(Adw.Application):
         RelengManager.shared().refresh()
         OverlayManager.shared().refresh()
         ProjectManager.shared().refresh()
+        # Projects get binary packages folders, packages built before are moved to them.
+        from .packages_directory import migrate_project_packages
+        migrate_project_packages()
 
     def do_activate(self):
         """Called when the application is activated.

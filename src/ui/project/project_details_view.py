@@ -36,6 +36,7 @@ class ProjectDetailsView(Gtk.Box):
     releng_selection_view = Gtk.Template.Child()
     snapshot_selection_view = Gtk.Template.Child()
     arch_selection_view = Gtk.Template.Child()
+    packages_selection_view = Gtk.Template.Child()
 
     def __init__(self, project_directory: ProjectDirectory, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
@@ -64,6 +65,14 @@ class ProjectDetailsView(Gtk.Box):
         self.snapshot_selection_view.select(self.project_directory.get_snapshot())
         self.arch_selection_view.select(self.project_directory.get_architecture())
         self.arch_selection_view.set_static_list(sorted(Architecture, key=lambda arch: arch.name))
+        self.packages_selection_view.select(self.project_directory.get_packages_directory())
+        self._update_packages_warning()
+
+    def _update_packages_warning(self):
+        """Selected binary packages folder made for other architecture or CPU flags than project has."""
+        directory = self.project_directory.get_packages_directory()
+        problems = directory.compatibility(self.project_directory) if directory else []
+        self.packages_selection_view.set_extra_warning("\n".join(problem.text for problem in problems) or None)
 
     def configuration_item_changed(self, container):
         match container:
@@ -83,12 +92,55 @@ class ProjectDetailsView(Gtk.Box):
                     if self.snapshot_selection_view.selected_item else None
                 )
             case self.arch_selection_view:
-                self.project_directory.initialize_metadata().architecture = (
-                    self.arch_selection_view.selected_item
-                    if self.arch_selection_view.selected_item else None
+                architecture = self.arch_selection_view.selected_item if self.arch_selection_view.selected_item else None
+                changed = architecture != self.project_directory.get_architecture()
+                self.project_directory.initialize_metadata().architecture = architecture
+                if changed:
+                    GLib.idle_add(self._ask_packages_for_architecture)
+            case self.packages_selection_view:
+                self.project_directory.initialize_metadata().packages_directory_id = (
+                    self.packages_selection_view.selected_item.id
+                    if self.packages_selection_view.selected_item else None
                 )
         Repository.ProjectDirectory.save()
+        self._update_packages_warning()
         self._refresh_build_state() # Toolset could change.
+
+    @Gtk.Template.Callback()
+    def on_new_packages_activated(self, row):
+        from .packages_views import present_new_packages_directory_dialog
+        from .packages_directory import project_cpu_flags, unique_packages_name
+        def on_created(directory):
+            self.packages_selection_view.select(directory)
+        present_new_packages_directory_dialog(self, architecture=self.project_directory.get_architecture(),
+                                              cpu_flags=project_cpu_flags(self.project_directory),
+                                              name=unique_packages_name(self.project_directory.name), on_created=on_created)
+
+    def _ask_packages_for_architecture(self):
+        """Architecture changed: binary packages folder made for other architecture can't be used anymore."""
+        directory = self.project_directory.get_packages_directory()
+        if directory is None or directory.is_usable_by(self.project_directory):
+            return False
+        architecture = self.project_directory.get_architecture()
+        dialog = Adw.AlertDialog(
+            heading="Change binary packages folder?",
+            body=f"{directory.name} has packages for {directory.architecture.name if directory.architecture else 'other architecture'}, "
+                 f"they can't be used by {architecture.name if architecture else 'this architecture'}.")
+        dialog.add_response("keep", "Keep")
+        dialog.add_response("choose", "Choose other")
+        dialog.add_response("new", "Create new")
+        dialog.set_response_appearance("new", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("new")
+        dialog.set_close_response("keep")
+        def on_response(dialog, response):
+            if response == "new":
+                from .packages_directory import create_packages_directory_for_project
+                self.packages_selection_view.select(create_packages_directory_for_project(self.project_directory))
+            elif response == "choose":
+                self.packages_selection_view.set_expanded(True)
+        dialog.connect("response", on_response)
+        dialog.present(self.get_root())
+        return False
 
     def _update_name(self, name: str):
         self._page.set_title(name)
@@ -300,7 +352,8 @@ class ProjectDetailsView(Gtk.Box):
             self.toolset_selection_view,
             self.releng_selection_view,
             self.snapshot_selection_view,
-            self.arch_selection_view
+            self.arch_selection_view,
+            self.packages_selection_view
         ]:
             view.event_bus.subscribe(
                 ItemSelectionViewEvent.ITEM_CHANGED,
@@ -318,6 +371,9 @@ class ProjectDetailsView(Gtk.Box):
                 return True
             case self.arch_selection_view:
                 return True
+            case self.packages_selection_view:
+                # Packages of other architecture can't be used.
+                return item.is_usable_by(self.project_directory)
         return False
 
     @Gtk.Template.Callback()
@@ -330,6 +386,8 @@ class ProjectDetailsView(Gtk.Box):
             case self.snapshot_selection_view:
                 return True
             case self.arch_selection_view:
+                return True
+            case self.packages_selection_view:
                 return True
         return False
 

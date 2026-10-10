@@ -15,6 +15,7 @@ class SettingsEvents(Enum):
     BUILDS_LOCATION_CHANGED = auto()
     CACHE_LOCATION_CHANGED = auto()
     TEMPORARY_LOCATION_CHANGED = auto()
+    PACKAGES_LOCATION_CHANGED = auto()
     INITIAL_SETUP_DONE_CHANGED = auto()
 
 @final
@@ -32,7 +33,8 @@ class Settings(Serializable):
         project_location: str = "~/CatalystLab/Projects",
         builds_location: str = "~/CatalystLab/Builds",
         cache_location: str = "~/CatalystLab/Cache",
-        temporary_location: str = "~/CatalystLab/Temporary"
+        temporary_location: str = "~/CatalystLab/Temporary",
+        packages_location: str = "~/CatalystLab/Packages"
     ):
         self._initial_setup_done = initial_setup_done
         self._keep_root_unlocked = keep_root_unlocked
@@ -44,6 +46,7 @@ class Settings(Serializable):
         self._builds_location = builds_location
         self._cache_location = cache_location # Reusable data, safe to delete (distfiles, extracted squashfs files).
         self._temporary_location = temporary_location # Data of running operations, emptied when app starts.
+        self._packages_location = packages_location # Binary packages folders, shared by projects.
         self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
@@ -60,7 +63,8 @@ class Settings(Serializable):
                 # Added later, settings stored by older versions don't contain it.
                 builds_location=data.get("builds_location", "~/CatalystLab/Builds"),
                 cache_location=data.get("cache_location", "~/CatalystLab/Cache"),
-                temporary_location=data.get("temporary_location", "~/CatalystLab/Temporary")
+                temporary_location=data.get("temporary_location", "~/CatalystLab/Temporary"),
+                packages_location=data.get("packages_location", "~/CatalystLab/Packages")
             )
         except:
             return cls()
@@ -76,7 +80,8 @@ class Settings(Serializable):
             "project_location": self.project_location,
             "builds_location": self.builds_location,
             "cache_location": self.cache_location,
-            "temporary_location": self.temporary_location
+            "temporary_location": self.temporary_location,
+            "packages_location": self.packages_location
         }
 
     # --------------------------------------------------------------------------
@@ -236,6 +241,22 @@ class Settings(Serializable):
             self._temporary_location = value
             self.event_bus.emit(
                 SettingsEvents.TEMPORARY_LOCATION_CHANGED,
+                value
+            )
+            Repository.Settings.save()
+
+    # --------------------------------------------------------------------------
+    # Accessors for packages location:
+
+    @property
+    def packages_location(self) -> str:
+        return self._packages_location
+    @packages_location.setter
+    def packages_location(self, value: str):
+        if self._packages_location != value:
+            self._packages_location = value
+            self.event_bus.emit(
+                SettingsEvents.PACKAGES_LOCATION_CHANGED,
                 value
             )
             Repository.Settings.save()

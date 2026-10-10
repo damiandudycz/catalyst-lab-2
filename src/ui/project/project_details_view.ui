@@ -191,6 +191,28 @@
                         <signal name="is-item-usable" handler="is_item_usable"/>
                       </object>
                     </child>
+                    <child>
+                      <object class="ItemSelectionExpanderRow" id="packages_selection_view">
+                        <property name="title">Binary packages</property>
+                        <property name="item_class_name">PackagesDirectory</property>
+                        <property name="item_icon">archive-minimalistic-svgrepo-com-symbolic</property>
+                        <property name="item_title_property_name">name</property>
+                        <property name="item_subtitle_property_name">short_details</property>
+                        <property name="item_status_property_name">status_indicator_values</property>
+                        <property name="display_none">True</property>
+                        <property name="none_title">None</property>
+                        <property name="none_subtitle">Packages are kept in builds of project, not shared</property>
+                        <signal name="is-item-selectable" handler="is_item_selectable"/>
+                        <signal name="is-item-usable" handler="is_item_usable"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="AdwButtonRow" id="new_packages_row">
+                        <property name="title">New binary packages folder for project</property>
+                        <property name="start-icon-name">add-square-svgrepo-com-symbolic</property>
+                        <signal name="activated" handler="on_new_packages_activated"/>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>
