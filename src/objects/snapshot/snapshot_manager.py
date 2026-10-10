@@ -5,6 +5,10 @@ import os, subprocess
 from .snapshot import Snapshot
 from .helper_functions import parse_strict_rfc_datetime
 
+def sorted_snapshots(snapshots: list[Snapshot]) -> list[Snapshot]:
+    """Newest snapshots first, snapshots without date last."""
+    return sorted(snapshots, key=lambda snapshot: snapshot.date.timestamp() if snapshot.date else 0, reverse=True)
+
 @final
 class SnapshotManager:
     _instance = None
@@ -47,11 +51,16 @@ class SnapshotManager:
         deleted_snapshots = [snapshot for snapshot in snapshots if snapshot.filename not in found_filenames]
         for snapshot in deleted_snapshots:
             self.remove_snapshot(snapshot)
+        # --- Step 4: Keep newest snapshots first ---
+        ordered = sorted_snapshots(Repository.Snapshot.value)
+        if ordered != Repository.Snapshot.value:
+            Repository.Snapshot.value = ordered
 
     def add_snapshot(self, snapshot: Snapshot):
         # Remove existing snapshot with the same filename
-        Repository.Snapshot.value = [s for s in Repository.Snapshot.value if s.filename != snapshot.filename]
-        Repository.Snapshot.value.append(snapshot)
+        Repository.Snapshot.value = sorted_snapshots(
+            [s for s in Repository.Snapshot.value if s.filename != snapshot.filename] + [snapshot]
+        )
 
     def remove_snapshot(self, snapshot: Snapshot):
         from .rootless import remove_extracted_squashfs, MachineExecutor

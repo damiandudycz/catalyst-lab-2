@@ -98,9 +98,8 @@ class ProjectBuildView(Gtk.Box):
 
     def load_snapshots(self):
         """Latest snapshot option and all snapshots (newest first), snapshot of project is selected."""
-        snapshots = sorted(Repository.Snapshot.value, key=lambda snapshot: snapshot.date.timestamp() if snapshot.date else 0, reverse=True)
         self.snapshot_selection_view.selected_item = self.project_directory.get_snapshot()
-        self.snapshot_selection_view.set_static_list([LATEST_SNAPSHOT] + snapshots)
+        self.snapshot_selection_view.set_static_list([LATEST_SNAPSHOT] + Repository.Snapshot.value)
         self._update_snapshot_row()
 
     def snapshot_changed(self, view):
