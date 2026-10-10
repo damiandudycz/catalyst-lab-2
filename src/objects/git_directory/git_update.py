@@ -69,6 +69,9 @@ class GitUpdateStepUpdate(MultiStageProcessStage):
         return result.stdout.strip()
     def start(self):
         super().start()
+        with self.directory.operation():
+            self._update()
+    def _update(self):
         repo_path = self.directory.directory_path()
         try:
             if not os.path.exists(repo_path):

@@ -106,12 +106,13 @@ class ProjectDirectory(GitDirectory):
         from .project_build import BuildRunResult
         from .status_indicator import StatusIndicatorState, status_values, most_important_state
         result, building = self._last_build_run_result()
-        states = [super().status_indicator_values.state]
+        git_values = super().status_indicator_values
+        states = [git_values.state]
         if self.configuration_error:
             states.append(StatusIndicatorState.ERROR)
         if result == BuildRunResult.FAILED:
             states.append(StatusIndicatorState.WARNING)
-        return status_values(most_important_state(*states), blinking=building)
+        return status_values(most_important_state(*states), blinking=building or git_values.blinking)
 
     @property
     def deploy_summary(self) -> str:
