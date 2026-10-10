@@ -179,9 +179,18 @@ def rename_kernel(project_directory, stage, old_name: str, new_name: str):
 def kernel_spec_values(project_directory, stage) -> list[tuple[str, Any]]:
     """Spec options of kernels of stage, (option, value) in order of kernels and settings."""
     values = []
+    packages = None # Kernel packages of snapshot and overlays, read when needed.
     for name in stage_kernel_names(project_directory, stage):
         for setting in KERNEL_SETTINGS:
             value, _ = kernel_setting(project_directory, stage, name, setting.key)
+            if setting.key == "distkernel":
+                # Set by kind of package when it's known (catalyst builds each kind only one way), otherwise stored.
+                from .project_kernel_packages import load_kernel_packages, derived_distkernel
+                package, _ = kernel_setting(project_directory, stage, name, "sources")
+                if package:
+                    packages = packages if packages is not None else load_kernel_packages(project_directory, stage)
+                    if (derived := derived_distkernel(package, packages)) is not None:
+                        value = "yes" if derived else None
             if setting.type == KernelSettingType.BOOLEAN:
                 # Catalyst checks only if option exists, "no" would start preparing distribution kernel.
                 value = "yes" if kernel_setting_enabled(value) else None

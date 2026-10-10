@@ -83,6 +83,27 @@ def load_kernel_packages(project_directory, stage) -> list[KernelPackage]:
             package.repositories.append(repository)
     return sorted(packages.values(), key=lambda package: (not package.supported, package.atom))
 
+def package_kind(atom: str | None, packages: list[KernelPackage]) -> KernelPackageKind | None:
+    """Kind of package given as Portage atom (eg. =sys-kernel/gentoo-kernel-6.12.8:6.12::gentoo), None when it's not
+    one of packages (not in snapshot or overlays of stage)."""
+    if not atom:
+        return None
+    name = re.sub(r"^[<>=~!]+", "", atom.strip()).split("::")[0].split(":")[0]
+    known = {package.atom: package.kind for package in packages}
+    if name in known:
+        return known[name]
+    # Versioned atom: package name followed by -version.
+    matches = [package for package in known if name.startswith(package + "-") and name[len(package) + 1:][:1].isdigit()]
+    return known[max(matches, key=len)] if matches else None
+
+def derived_distkernel(atom: str | None, packages: list[KernelPackage]) -> bool | None:
+    """Distribution kernel setting matching package: catalyst can build distribution kernels only as distribution
+    kernels and sources only with genkernel. None when kind of package isn't known."""
+    match package_kind(atom, packages):
+        case KernelPackageKind.DISTRIBUTION: return True
+        case KernelPackageKind.SOURCES: return False
+    return None
+
 # Distribution kernel catalyst uses when kernel doesn't set package (and releng templates use).
 DEFAULT_KERNEL_PACKAGE = "sys-kernel/gentoo-kernel"
 

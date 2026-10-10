@@ -33,7 +33,7 @@ from .project_stage_kernels import (
     set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
-from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package
+from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package, derived_distkernel
 
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
@@ -1025,7 +1025,35 @@ class StageKernelRow(Adw.ExpanderRow):
             row.set_tooltip_text(setting.description)
             self.add_row(row)
             self.entry_rows.append((setting, row))
+        # Distribution kernel is set by kind of package, switch is shown only when it isn't known. Kinds of packages
+        # are read in background (cached), switch is hidden until then.
+        self.packages = None
+        self._advanced = True
+        self._switch_needed = False
         self.load_state()
+        def load_packages():
+            try:
+                packages = load_kernel_packages(project_directory, stage)
+            except Exception as e:
+                print(f"Failed to read kernel packages: {e}")
+                packages = []
+            GLib.idle_add(lambda: self._packages_loaded(packages) and False)
+        threading.Thread(target=load_packages, daemon=True).start()
+
+    def _packages_loaded(self, packages):
+        self.packages = packages
+        self.load_state()
+        self._update_switch_visibility()
+
+    def _derived_distkernel(self) -> bool | None:
+        package, _ = kernel_setting(self.project_directory, self.stage, self.kernel_name, "sources")
+        return derived_distkernel(package, self.packages) if self.packages is not None else None
+
+    def _update_switch_visibility(self):
+        for setting, row in self.entry_rows:
+            if setting.key == "distkernel":
+                level_visible = self._advanced or KERNEL_SETTING_LEVELS[setting.key] == StageArgumentLevel.BASIC
+                row.set_visible(level_visible and self._switch_needed)
 
     def _on_rename(self, row: Adw.EntryRow, on_rename):
         if error := on_rename(self.kernel_name, row.get_text().strip()):
@@ -1036,11 +1064,13 @@ class StageKernelRow(Adw.ExpanderRow):
         """Shows settings of mode, returns titles of hidden settings set by stage."""
         own = own_kernel_settings(self.stage).get(self.kernel_name, {})
         hidden = []
+        self._advanced = advanced
         for setting, row in self.entry_rows:
             visible = advanced or KERNEL_SETTING_LEVELS[setting.key] == StageArgumentLevel.BASIC
             row.set_visible(visible)
-            if not visible and own.get(setting.key) not in (None, "", []):
+            if not visible and own.get(setting.key) not in (None, "", []) and setting.key != "distkernel":
                 hidden.append(setting.title)
+        self._update_switch_visibility()
         return hidden
 
     def load_state(self):
@@ -1054,8 +1084,14 @@ class StageKernelRow(Adw.ExpanderRow):
                 case _ if setting.key == "sources":
                     row.load(own.get(setting.key), value if inherited else None)
                 case KernelSettingType.BOOLEAN:
+                    derived = self._derived_distkernel() if setting.key == "distkernel" else None
+                    if setting.key == "distkernel":
+                        self._switch_needed = derived is None and self.packages is not None
+                    if derived is not None:
+                        value = "yes" if derived else None
                     row.set_active(kernel_setting_enabled(value))
-                    row.set_subtitle("From releng spec" if inherited else "Set by this stage" if is_own else "")
+                    row.set_subtitle("Kind of package is not known, set how catalyst builds it" if setting.key == "distkernel"
+                                     else "From releng spec" if inherited else "Set by this stage" if is_own else "")
                 case KernelSettingType.LIST:
                     row.load(own.get(setting.key) or [], value if inherited else None)
                 case _:
@@ -1066,6 +1102,8 @@ class StageKernelRow(Adw.ExpanderRow):
                 summary.append(self._text(value))
             elif setting.key == "distkernel":
                 summary.append("distribution kernel" if kernel_setting_enabled(value) else "genkernel")
+        if hasattr(self, "_advanced"):
+            self._update_switch_visibility()
         self.set_subtitle(GLib.markup_escape_text(" · ".join(summary)))
         self._loading = False
 
@@ -1089,12 +1127,14 @@ class StageKernelRow(Adw.ExpanderRow):
         return None if value == releng else value
 
     def _on_package_selected(self, atom: str | None, kind: KernelPackageKind | None):
-        """Package of kernel (None uses releng template), Distribution kernel follows kind of selected package."""
+        """Package of kernel (None uses releng template), Distribution kernel follows kind of package (also typed one,
+        recognized by its name)."""
         set_kernel_setting(self.project_directory, self.stage, self.kernel_name, "sources",
                            None if atom is None else self._own_value_for("sources", atom))
-        if kind in (KernelPackageKind.DISTRIBUTION, KernelPackageKind.SOURCES):
+        derived = self._derived_distkernel()
+        if derived is not None:
             set_kernel_setting(self.project_directory, self.stage, self.kernel_name, "distkernel",
-                               self._own_value_for("distkernel", kind == KernelPackageKind.DISTRIBUTION))
+                               self._own_value_for("distkernel", derived))
         self.load_state()
 
     @staticmethod
