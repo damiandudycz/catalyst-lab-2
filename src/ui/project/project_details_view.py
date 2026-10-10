@@ -210,7 +210,7 @@ class ProjectDetailsView(Gtk.Box):
         badges = []
         if commits := own_commits_count(path):
             badges.append((f"{commits} own commit{'s' if commits != 1 else ''}",
-                           f"Commits of project that are not in {self._source}, they are kept when updating", "orange"))
+                           f"Commits of project that are not in {self._source}, they are kept when updating", "notice"))
         if unsaved:
             badges.append(("Not saved changes", "Save or discard changes before updating", None))
         for text, tooltip, css_class in badges:
