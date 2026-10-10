@@ -70,14 +70,14 @@ class SnapshotManager:
         from .repository import RepositoryEvent
         from .multistage_process import MultiStageProcess, MultiStageProcessEvent
         self._auto_clean_scheduled = False
-        schedule = lambda *args: self.schedule_auto_clean()
-        Repository.Settings.value.event_bus.subscribe(SettingsEvents.AUTO_CLEAN_SNAPSHOTS_CHANGED, schedule)
-        Repository.Snapshot.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, schedule)
-        Repository.ProjectDirectory.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, schedule)
-        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, schedule)
+        # Event buses keep weak references, bound method of shared manager stays alive (lambda wouldn't).
+        Repository.Settings.value.event_bus.subscribe(SettingsEvents.AUTO_CLEAN_SNAPSHOTS_CHANGED, self.schedule_auto_clean)
+        Repository.Snapshot.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.schedule_auto_clean)
+        Repository.ProjectDirectory.event_bus.subscribe(RepositoryEvent.VALUE_CHANGED, self.schedule_auto_clean)
+        MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self.schedule_auto_clean)
         self.schedule_auto_clean()
 
-    def schedule_auto_clean(self):
+    def schedule_auto_clean(self, *args):
         if getattr(self, "_auto_clean_scheduled", False) or not Repository.Settings.value.auto_clean_snapshots:
             return
         from gi.repository import GLib
