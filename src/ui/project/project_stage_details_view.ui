@@ -61,7 +61,7 @@
             <child>
               <object class="AdwPreferencesGroup" id="kernels_pref_group">
                 <property name="title">Kernels</property>
-                <property name="description">Settings of kernels listed in Boot / kernel. Empty settings use values of releng template.</property>
+                <property name="description">Kernels built by catalyst, listed in Boot / kernel, with settings of each. Empty settings use values of releng template.</property>
                 <property name="visible">False</property>
               </object>
             </child>

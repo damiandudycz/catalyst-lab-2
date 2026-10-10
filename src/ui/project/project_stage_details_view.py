@@ -29,7 +29,7 @@ from .project_stage_portage_confdir import (
 )
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 from .project_stage_kernels import (
-    KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_supports_kernels, stage_kernel_names, kernel_setting, own_kernel_settings,
+    KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_kernel_names, kernel_setting, own_kernel_settings,
     set_kernel_setting
 )
 
@@ -93,9 +93,9 @@ class ProjectStageDetailsView(Gtk.Box):
             if not visible and _has_own_value(self.stage, row.argument.attribute_name):
                 hidden_custom.append(row.argument.display_name)
         for row in getattr(self, "kernel_rows", []):
-            if isinstance(row, StageKernelRow):
-                hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
-        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group, self.configuration_pref_group):
+            hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
+        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group, self.kernels_pref_group,
+                      self.configuration_pref_group):
             group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
         self.hidden_settings_label.set_label(
             f"Advanced settings set by this stage: {', '.join(hidden_custom)}. Switch to Advanced to see them." if hidden_custom else "")
@@ -150,20 +150,10 @@ class ProjectStageDetailsView(Gtk.Box):
         for row in getattr(self, "kernel_rows", []):
             self.kernels_pref_group.remove(row)
         self.kernel_rows = []
-        if not stage_supports_kernels(self.project_directory, self.stage):
-            self.kernels_pref_group.set_visible(False)
-            return
-        self.kernels_pref_group.set_visible(True)
-        names = stage_kernel_names(self.project_directory, self.stage)
-        for name in names:
+        # Kernels follow Boot / kernel row in the group, which lists their names.
+        for name in stage_kernel_names(self.project_directory, self.stage):
             row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name)
             row.set_expanded(name in expanded)
-            self.kernels_pref_group.add(row)
-            self.kernel_rows.append(row)
-        if not names:
-            row = Adw.ActionRow(title="No kernels", subtitle="Add names of kernels in Boot / kernel")
-            row.kernel_name = None
-            row.get_expanded = lambda: False
             self.kernels_pref_group.add(row)
             self.kernel_rows.append(row)
         if args:
@@ -236,6 +226,8 @@ class ProjectStageDetailsView(Gtk.Box):
                 StageArgumentDetails.compression_mode
             ):
                 return self.release_pref_group
+            case StageArgumentDetails.boot_kernel:
+                return self.kernels_pref_group # Names of kernels, their settings are listed after it.
             case (
                 StageArgumentDetails.repos |
                 StageArgumentDetails.keep_repos |

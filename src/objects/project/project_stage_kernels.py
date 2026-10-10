@@ -56,15 +56,6 @@ KERNEL_SETTING_LEVELS: dict[str, StageArgumentLevel] = {
     "softlevel": StageArgumentLevel.ADVANCED,
 }
 
-def stage_supports_kernels(project_directory, stage) -> bool:
-    """Target of stage has boot/kernel option."""
-    from .project_stage import load_catalyst_stage_arguments_details
-    try:
-        arguments = load_catalyst_stage_arguments_details(toolset=project_directory.get_toolset(), target_name=stage.target)
-    except Exception:
-        return False
-    return StageArgumentDetails.boot_kernel.value in arguments
-
 def stage_kernel_names(project_directory, stage) -> list[str]:
     """Kernels built by stage (boot/kernel value, own or from releng template)."""
     from .project_stage_value_resolver import resolve_stage_argument
