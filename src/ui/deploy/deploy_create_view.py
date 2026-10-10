@@ -14,20 +14,25 @@ from .deploy_target import (
 )
 from .ssh_connection import SSHConnection
 from .local_disk_connection import LocalDiskConnection
+from .deploy_image import image_supported_reason, image_connection, image_path, initial_image_size
+from .deploy_target import default_image_layout
 from .item_select_view import ItemSelectionViewEvent
 
 class DeployMethod(Enum):
     """Where build is deployed."""
     SSH = "ssh"
     LOCAL_DISK = "local-disk"
+    IMAGE_FILE = "image-file"
 
     @property
     def title(self) -> str:
-        return {DeployMethod.SSH: "Machine through SSH", DeployMethod.LOCAL_DISK: "Disk of this computer"}[self]
+        return {DeployMethod.SSH: "Machine through SSH", DeployMethod.LOCAL_DISK: "Disk of this computer",
+                DeployMethod.IMAGE_FILE: "Disk image file"}[self]
 
     @property
     def icon_name(self) -> str:
-        return {DeployMethod.SSH: "network-wired-symbolic", DeployMethod.LOCAL_DISK: "drive-removable-media-symbolic"}[self]
+        return {DeployMethod.SSH: "network-wired-symbolic", DeployMethod.LOCAL_DISK: "drive-removable-media-symbolic",
+                DeployMethod.IMAGE_FILE: "document-save-symbolic"}[self]
 
     @property
     def unavailable_reason(self) -> str | None:
@@ -38,6 +43,8 @@ class DeployMethod(Enum):
                 # Installed system is configured in chroot, which needs Linux. Virtual machines used on macOS can't
                 # access disks of this computer.
                 return None if sys.platform.startswith("linux") else "Not available: needs Linux, virtual machines on this system can't access disks of this computer"
+            case DeployMethod.IMAGE_FILE:
+                return image_supported_reason(None)
 
     @property
     def unavailable(self) -> bool:
@@ -48,6 +55,8 @@ class DeployMethod(Enum):
         description = {
             DeployMethod.SSH: "Other machine booted from Gentoo LiveCD, installed through SSH connection",
             DeployMethod.LOCAL_DISK: "SD card or external disk connected to this computer, booted later on other machine",
+            DeployMethod.IMAGE_FILE: "Image (.img.xz) saved next to build, written later to SD card or disk with Raspberry Pi Imager or dd. "
+                                     "It's sized to the system and grows to fill the disk at first start",
         }[self]
         return self.unavailable_reason or description
 
@@ -129,6 +138,9 @@ class DeployCreateView(Gtk.Box):
         self.bootloader_options: list[Bootloader] = []
         self.kernel_options: list[Kernel] = []
         self.network_options: list[NetworkService] = []
+        # Shown for image method, created before method is selected.
+        self.compress_row = Adw.SwitchRow(title="Compress image", subtitle="Saved as .img.xz, Raspberry Pi Imager writes it directly", active=True)
+        self.local_group.add(self.compress_row)
         self.method_selection_view.set_static_list(list(DeployMethod))
         self.method_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.on_method_changed)
         self.on_method_changed(None) # First available method is selected when list is loaded.
@@ -167,7 +179,8 @@ class DeployCreateView(Gtk.Box):
                 f"Installs {self.build.stage_name} ({self.build.artifact}, {format_size(size)}) on disk of another machine. "
                 "Boot that machine from Gentoo LiveCD and allow SSH connections to it" +
                 (", or connect its disk (eg. SD card) to this computer" if not DeployMethod.LOCAL_DISK.unavailable else "") +
-                ". Catalyst Lab partitions the disk, installs the stage and configures the system.")
+                ". Catalyst Lab partitions the disk, installs the stage and configures the system." +
+                (" It can also create disk image file to write to SD cards or disks later." if not DeployMethod.IMAGE_FILE.unavailable else ""))
         self.connect("realize", self.on_realize)
         self.connect("unrealize", self.on_unrealize)
 
@@ -215,16 +228,23 @@ class DeployCreateView(Gtk.Box):
         return True
 
     def _local(self) -> bool:
-        return self.method_selection_view.selected_item == DeployMethod.LOCAL_DISK
+        """Disk of this computer, or image file (both installed here and booted on other machine)."""
+        return self.method_selection_view.selected_item in (DeployMethod.LOCAL_DISK, DeployMethod.IMAGE_FILE)
+
+    def _image(self) -> bool:
+        return self.method_selection_view.selected_item == DeployMethod.IMAGE_FILE
 
     def on_method_changed(self, view):
-        local = self._local()
-        if getattr(self, "_shown_method_local", None) == local:
+        method = self.method_selection_view.selected_item
+        if getattr(self, "_shown_method", None) == method and hasattr(self, "_shown_method"):
             return
-        self._shown_method_local = local
+        self._shown_method = method
+        local = self._local()
         self.local_group.set_visible(local)
+        self.compress_row.set_visible(self._image())
         self.ssh_group.set_visible(not local)
         self.reboot_row.set_visible(not local)
+        self.disks_group.set_visible(not self._image())
         # Machine or disks found with other method are not used.
         self.on_connection_changed(None)
         self.wizard_view._refresh_buttons_state()
@@ -258,6 +278,10 @@ class DeployCreateView(Gtk.Box):
         return self.firmware_options[index] if 0 <= index < len(self.firmware_options) else TargetFirmware.OTHER
 
     def _update_connect_button(self):
+        if self._image():
+            self.connect_button.set_sensitive(not self.connecting and self.local_architecture is not None and self.build is not None)
+            self.connect_button.set_label("Preparing..." if self.connecting else "Prepare image" if self.machine is None else "Prepare again")
+            return
         if self._local():
             self.connect_button.set_sensitive(not self.connecting and self.local_architecture is not None)
             self.connect_button.set_label("Finding disks..." if self.connecting else "Find disks" if self.machine is None else "Find disks again")
@@ -269,6 +293,9 @@ class DeployCreateView(Gtk.Box):
     @Gtk.Template.Callback()
     def on_connect_clicked(self, sender):
         if self.connecting or not self.connect_button.get_sensitive():
+            return
+        if self._image():
+            self._prepare_image()
             return
         if self._local():
             self._find_local_disks()
@@ -347,6 +374,38 @@ class DeployCreateView(Gtk.Box):
             GLib.idle_add(done)
         threading.Thread(target=work, daemon=True).start()
 
+    def _prepare_image(self):
+        """Root access (Linux) or virtual machine where image is created."""
+        architecture, firmware = self.local_architecture, self._firmware()
+        method = self.method_selection_view.selected_item
+        self.connecting = True
+        self._set_status(None)
+        self._update_connect_button()
+        previous = self.connection
+        project_directory, build = self.project_directory, self.build
+        def work():
+            if previous:
+                previous.close()
+            connection = image_connection(project_directory)
+            error = connection.connect()
+            machine = None
+            if error is None:
+                archive_size = os.path.getsize(build.artifact_path) if os.path.isfile(build.artifact_path or "") else 0
+                machine = TargetMachine.for_image(connection, architecture, firmware, image_path(build), initial_image_size(archive_size))
+            def done():
+                self.connecting = False
+                if self.method_selection_view.selected_item != method:
+                    if machine:
+                        threading.Thread(target=connection.close, daemon=True).start()
+                    self._update_connect_button()
+                    return
+                self.connection = connection if machine else None
+                self._set_machine(machine)
+                self._set_status(error)
+                self._update_connect_button()
+            GLib.idle_add(done)
+        threading.Thread(target=work, daemon=True).start()
+
     def _set_status(self, error: str | None):
         self.connection_status_label.set_visible(error is not None)
         self.connection_status_label.set_label(error or "")
@@ -356,7 +415,14 @@ class DeployCreateView(Gtk.Box):
     def _set_machine(self, machine: TargetMachine | None):
         self.machine = machine
         self.machine_group.set_visible(machine is not None)
-        if machine and machine.local:
+        if machine and machine.image:
+            self.machine_row.set_title(GLib.markup_escape_text(f"Image {os.path.basename(machine.disks[0].path)}"))
+            creator = f" by {self.connection.host}" if self.connection.host.startswith("virtual machine") else ""
+            self.machine_row.set_subtitle(GLib.markup_escape_text(f"{machine.description}\nCreated in {os.path.dirname(machine.disks[0].path)}{creator}"))
+            if not self.hostname_row.get_text():
+                self.hostname_row.set_text("gentoo")
+            self._update_boot_options()
+        elif machine and machine.local:
             available = sum(1 for disk in machine.disks if not disk.in_use)
             self.machine_row.set_title(GLib.markup_escape_text(f"{available} disk{'' if available == 1 else 's'} of this computer can be used"))
             self.machine_row.set_subtitle(GLib.markup_escape_text(machine.description))
@@ -408,6 +474,9 @@ class DeployCreateView(Gtk.Box):
             self.disks_group.add(row)
             self.disk_rows.append(row)
         self.layout = []
+        if self.machine and self.machine.image:
+            self.selected_disk = self.machine.disks[0]
+            self.layout = self._default_layout()
         self._load_partition_rows()
 
     def _on_disk_toggled(self, check: Gtk.CheckButton, disk):
@@ -420,12 +489,16 @@ class DeployCreateView(Gtk.Box):
         if self.selected_disk is None or self.machine is None:
             return None
         return PartitionPlan(disk=self.selected_disk, uefi=self.machine.uefi, layout=self.layout, table=self._table(),
-                             local=self.machine.local, raspberry_pi=self.machine.raspberry_pi)
+                             local=self.machine.local, raspberry_pi=self.machine.raspberry_pi,
+                             image_path=self.selected_disk.path if self.machine.image else None,
+                             compress_image=self.compress_row.get_active())
 
     def _table(self) -> PartitionTable:
         return list(PartitionTable)[self.table_row.get_selected()]
 
     def _default_layout(self) -> list[PartitionSpec]:
+        if self.machine.image:
+            return default_image_layout(self.machine.uefi, self.machine.architecture, self._table(), raspberry_pi=self.machine.raspberry_pi)
         return default_layout(self.selected_disk, self.machine.uefi, self.machine.memory, self.machine.architecture, self._table(),
                               raspberry_pi=self.machine.raspberry_pi)
 
@@ -491,9 +564,15 @@ class DeployCreateView(Gtk.Box):
         for index, row in enumerate(self.partition_rows, start=1):
             # Space partition gets when it uses remaining space: space not used by other partitions.
             available = max(0, plan.remaining_size + (row.spec.size or 0))
-            row.update(plan.partition_device(index), plan.size_of(row.spec), available, first=index == 1, last=index == len(self.partition_rows))
+            device = f"Partition {index}" if plan.image else plan.partition_device(index)
+            row.update(device, plan.size_of(row.spec), available, first=index == 1, last=index == len(self.partition_rows), image=plan.image)
         free = plan.remaining_size if all(spec.size for spec in self.layout) else 0
-        description = f"New {plan.table.display_name} partition table on {plan.disk.path}, {format_size(plan.usable_size)}"
+        if plan.image:
+            description = (f"{plan.table.display_name} partition table of image. Root partition is shrunk to the installed system "
+                           "with some free space, and grows to fill the disk when the system starts first time")
+            free = 0
+        else:
+            description = f"New {plan.table.display_name} partition table on {plan.disk.path}, {format_size(plan.usable_size)}"
         if free > 0:
             description += f", {format_size(free)} not used"
         self.partitions_group.set_description(description)
@@ -509,7 +588,8 @@ class DeployCreateView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_system_changed(self, row, *args):
-        if not hasattr(self, "network_options"):
+        # Rows of template report changes while view is created, before its editors exist.
+        if not hasattr(self, "network_options") or not hasattr(self, "locales_view"):
             return
         network = self._network()
         static = network.service != NetworkService.NONE and network.static
@@ -747,13 +827,23 @@ class DeployCreateView(Gtk.Box):
         if plan is None or self.connection is None:
             return
         owner = "this computer" if self.machine.local else self.connection.host
-        dialog = Adw.AlertDialog(
-            heading="Erase disk?",
-            body=f"All data on {plan.disk.path} ({plan.disk.subtitle}, {format_size(plan.disk.size)}) of {owner} will be erased and {self.build.stage_name} will be installed on it."
-        )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("deploy", "Erase and deploy")
-        dialog.set_response_appearance("deploy", Adw.ResponseAppearance.DESTRUCTIVE)
+        if plan.image:
+            dialog = Adw.AlertDialog(
+                heading="Create image?",
+                body=f"{self.build.stage_name} will be installed in image {os.path.basename(plan.image_path)}"
+                     f"{'.xz' if plan.compress_image else ''} in {os.path.dirname(plan.image_path)}."
+            )
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("deploy", "Create image")
+            dialog.set_response_appearance("deploy", Adw.ResponseAppearance.SUGGESTED)
+        else:
+            dialog = Adw.AlertDialog(
+                heading="Erase disk?",
+                body=f"All data on {plan.disk.path} ({plan.disk.subtitle}, {format_size(plan.disk.size)}) of {owner} will be erased and {self.build.stage_name} will be installed on it."
+            )
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("deploy", "Erase and deploy")
+            dialog.set_response_appearance("deploy", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response("cancel")
         dialog.set_close_response("cancel")
         dialog.connect("response", self._on_confirm_response, plan)
@@ -921,12 +1011,14 @@ class PartitionRow(Adw.ExpanderRow):
         self.rest_row.set_visible(partition_type in (PartitionType.LINUX, PartitionType.SWAP))
         self.size_row.set_visible(partition_type != PartitionType.BIOS_BOOT and not (self.rest_row.get_visible() and self.rest_row.get_active()))
 
-    def update(self, device: str, size: int, available: int, first: bool, last: bool):
+    def update(self, device: str, size: int, available: int, first: bool, last: bool, image: bool = False):
         spec = self.spec
-        self.rest_row.set_subtitle(f"Uses {format_size(size)}" if spec.size is None else f"Would use {format_size(available)}")
+        self.rest_row.set_subtitle(("Sized to contents, grows to fill disk" if image else f"Uses {format_size(size)}") if spec.size is None
+                                   else f"Would use {format_size(available)}")
         purpose = spec.mount_point if spec.type in MOUNTED_TYPES and spec.mount_point else spec.type.display_name
         self.set_title(GLib.markup_escape_text(f"{device} · {purpose}"))
-        details = [format_size(size) + (" (remaining space)" if spec.size is None else "")]
+        details = ["sized to contents, grows to fill disk" if image and spec.size is None
+                   else format_size(size) + (" (remaining space)" if spec.size is None else "")]
         if spec.type == PartitionType.LINUX:
             details.append((spec.filesystem or TargetFilesystem.EXT4).value)
         elif spec.type == PartitionType.EFI:

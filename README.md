@@ -89,6 +89,9 @@ knowledge of Catalyst internals is needed.
 Install a built stage3 or stage4 on real hardware:
 - **On another machine** booted from Gentoo LiveCD, through SSH.
 - **On a disk connected to this computer** (SD card, external disk), on Linux.
+- **To a disk image file** (`.img.xz`), written later to SD cards or disks with Raspberry Pi Imager or `dd`. The image
+  is sized to the installed system and grows to fill the disk when the system starts first time. On macOS it's
+  created in the virtual machine.
 
 The deploy wizard handles:
 - **Disk**: editable partition layout with sensible defaults, GPT or MBR.
