@@ -435,6 +435,7 @@ class _RenderTarget:
     def __init__(self, project_directory, path: str):
         self._project = project_directory
         self._path = path
+        self._stages = [] # Created stages (cleared by apply_project_template, then created again).
         class _NoEvents:
             def emit(self, *arguments):
                 pass
@@ -452,6 +453,9 @@ class _RenderTarget:
             self.__dict__["_stages"] = []
         return self.__dict__["_stages"]
     def __getattr__(self, name):
+        # Configuration of real project (toolset, releng...), its private state isn't shared.
+        if name.startswith("_"):
+            raise AttributeError(name)
         return getattr(self._project, name)
 
 def template_base_commit(project_path: str) -> str | None:
