@@ -82,15 +82,18 @@ class Toolset(Serializable):
         """Mounted (environment open, also with changes kept) is loaded. Missing file or virtual machine is error,
         missing Catalyst is warning (projects can't be built with toolset). Blinks while used by operation."""
         machine = self.machine
-        if not os.path.exists(self.file_path()) or (self.machine_id and (machine is None or machine.status == machine.STATUS_MISSING)):
-            state = StatusIndicatorState.ERROR
+        if not os.path.exists(self.file_path()):
+            state, description = StatusIndicatorState.ERROR, "File of toolset is missing"
+        elif self.machine_id and (machine is None or machine.status == machine.STATUS_MISSING):
+            state, description = StatusIndicatorState.ERROR, "Virtual machine of toolset is missing"
         elif self.get_app_install(ToolsetApplication.CATALYST) is None:
-            state = StatusIndicatorState.WARNING
+            state, description = StatusIndicatorState.WARNING, "Catalyst is not installed, projects can't be built"
         elif self.spawned:
-            state = StatusIndicatorState.LOADED
+            state, description = StatusIndicatorState.LOADED, "Environment is open" + (", changes are kept" if self.store_changes else "")
         else:
-            state = StatusIndicatorState.IDLE
-        return status_values(state, blinking=self.in_use or self.is_reserved)
+            state, description = StatusIndicatorState.IDLE, "Not mounted"
+        busy = "Running command" if self.in_use else "Used by operation" if self.is_reserved else None
+        return status_values(state, blinking=self.in_use or self.is_reserved, description=[description, busy])
 
     @classmethod
     def init_from(cls, data: dict) -> Toolset:

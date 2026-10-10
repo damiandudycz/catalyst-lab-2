@@ -99,12 +99,15 @@ class BuildMachine:
         operations."""
         match self.status:
             case self.STATUS_RUNNING:
-                return status_values(StatusIndicatorState.LOADED, blinking=self.is_used)
-            case self.STATUS_STARTING | self.STATUS_STOPPING:
-                return status_values(StatusIndicatorState.LOADED, blinking=True)
+                return status_values(StatusIndicatorState.LOADED, blinking=self.is_used,
+                                     description=["Running", "Used by operation" if self.is_used else None])
+            case self.STATUS_STARTING:
+                return status_values(StatusIndicatorState.LOADED, blinking=True, description="Starting")
+            case self.STATUS_STOPPING:
+                return status_values(StatusIndicatorState.LOADED, blinking=True, description="Stopping")
             case self.STATUS_MISSING:
-                return status_values(StatusIndicatorState.ERROR)
-        return status_values(StatusIndicatorState.IDLE)
+                return status_values(StatusIndicatorState.ERROR, description="Virtual machine is missing (removed outside of Catalyst Lab)")
+        return status_values(StatusIndicatorState.IDLE, description="Stopped")
 
     # Lifecycle:
 

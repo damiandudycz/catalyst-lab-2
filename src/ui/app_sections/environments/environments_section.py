@@ -4,7 +4,7 @@ from .build_machine_installation import BuildMachineInstallation
 from .toolset_update import ToolsetUpdate
 from .toolset_installation import ToolsetInstallation
 from .repository import Repository
-from .status_indicator import combined_status, items_status, processes_status
+from .status_indicator import items_status, processes_status
 from .toolset_details_view import ToolsetDetailsView
 from .toolset_create_view import ToolsetCreateView
 from .app_events import app_event_bus, AppEvents
@@ -21,7 +21,7 @@ class EnvironmentsSection(Gtk.Box):
     def section_status():
         """Running virtual machines, mounted or used toolsets, environments being created or updated (side menu)."""
         machines = Repository.BuildMachine.value if virtual_machines_supported() else []
-        return combined_status(items_status(machines) + items_status(Repository.Toolset.value)
+        return (items_status(machines) + items_status(Repository.Toolset.value)
                                + processes_status(ToolsetInstallation, ToolsetUpdate, BuildMachineInstallation))
 
     machines_list = Gtk.Template.Child()

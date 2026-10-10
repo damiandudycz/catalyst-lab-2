@@ -6,7 +6,8 @@ import math
 from enum import Enum, auto
 from collections import namedtuple
 
-StatusIndicatorValues = namedtuple("StatusIndicatorValues", ["state", "blinking"])
+# Description explains state (shown when indicator is hovered), eg. "Not saved changes".
+StatusIndicatorValues = namedtuple("StatusIndicatorValues", ["state", "blinking", "description"], defaults=(None,))
 
 class StatusIndicatorState(Enum):
     """States of items shown with color of indicator, from least to most important (item with many states shows the
@@ -26,11 +27,14 @@ class StatusIndicatorState(Enum):
             case StatusIndicatorState.WARNING: return (0xff / 255, 0x78 / 255, 0x00 / 255)
             case StatusIndicatorState.ERROR: return (0xe0 / 255, 0x1b / 255, 0x24 / 255)
 
-def status_values(state: StatusIndicatorState, blinking: bool = False) -> StatusIndicatorValues:
-    """Indicator values. Actively used item is at least loaded, so blinking is visible."""
+def status_values(state: StatusIndicatorState, blinking: bool = False, description: str | list[str] | None = None) -> StatusIndicatorValues:
+    """Indicator values. Actively used item is at least loaded, so blinking is visible. Description can be list of
+    reasons of state, shown in separate lines."""
     if blinking and state == StatusIndicatorState.IDLE:
         state = StatusIndicatorState.LOADED
-    return StatusIndicatorValues(state=state, blinking=blinking)
+    if isinstance(description, list):
+        description = "\n".join(line for line in description if line) or None
+    return StatusIndicatorValues(state=state, blinking=blinking, description=description)
 
 def most_important_state(*states: StatusIndicatorState) -> StatusIndicatorState:
     return max(states, key=lambda state: state.value)
@@ -50,9 +54,10 @@ class StatusIndicator(Gtk.DrawingArea):
         self.set_draw_func(self._on_draw)
 
     def set_values(self, values: StatusIndicatorValues):
-        values = status_values(values.state, values.blinking)
+        values = status_values(values.state, values.blinking, values.description)
         self.set_state(values.state)
         self.set_blinking(values.blinking)
+        self.set_tooltip_text(values.description)
 
     def set_state(self, state: StatusIndicatorState):
         self._state = state
@@ -93,10 +98,15 @@ class StatusIndicator(Gtk.DrawingArea):
 
 
 # ------------------------------------------------------------------------------
-# Status of whole section (eg. in side menu): most important state of its items, blinking when any item blinks or any
-# of its operations runs. None when there is nothing to show.
+# Status of whole section (eg. in side menu): statuses of its items and running operations, with keys identifying them
+# (so side menu can hide states that were already seen). Combined status is the most important state of items, blinking
+# when any item blinks or any of its operations runs.
 
-def combined_status(values: list[StatusIndicatorValues]) -> StatusIndicatorValues | None:
+StatusEntry = namedtuple("StatusEntry", ["key", "values", "label"], defaults=(None,)) # Label is name of item.
+
+def combined_status(entries: list) -> StatusIndicatorValues | None:
+    """Most important state of entries (StatusEntry or StatusIndicatorValues), None when there is nothing to show."""
+    values = [entry.values if isinstance(entry, StatusEntry) else entry for entry in entries]
     values = [value for value in values if value is not None]
     if not values:
         return None
@@ -104,23 +114,50 @@ def combined_status(values: list[StatusIndicatorValues]) -> StatusIndicatorValue
     blinking = any(value.blinking for value in values)
     if state == StatusIndicatorState.IDLE and not blinking:
         return None
-    return status_values(state, blinking)
+    descriptions = [entry_description(entry) for entry in entries
+                    if (entry.values if isinstance(entry, StatusEntry) else entry) is not None]
+    return status_values(state, blinking, [description for description in descriptions if description])
 
-def items_status(items, property_name: str = "status_indicator_values") -> list[StatusIndicatorValues]:
+def entry_description(entry) -> str | None:
+    """Description of entry, with name of its item (eg. "Raspberry Pi 5: Not saved changes")."""
+    values = entry.values if isinstance(entry, StatusEntry) else entry
+    if values is None or (values.state == StatusIndicatorState.IDLE and not values.blinking) or not values.description:
+        return None
+    label = entry.label if isinstance(entry, StatusEntry) else None
+    description = values.description.replace("\n", ", ")
+    return f"{label}: {description}" if label else description
+
+def items_status(items, property_name: str = "status_indicator_values") -> list[StatusEntry]:
     result = []
     for item in items:
         try:
-            result.append(getattr(item, property_name))
+            key = (property_name, getattr(item, "id", None) or getattr(item, "uuid", None) or id(item))
+            result.append(StatusEntry(key=key, values=getattr(item, property_name), label=getattr(item, "name", None)))
         except Exception as e:
             print(f"Failed to read status of {item}: {e}")
     return result
 
-def processes_status(*process_classes) -> list[StatusIndicatorValues]:
+def processes_status(*process_classes) -> list[StatusEntry]:
     """Running processes (installations, updates, builds) of given classes, as blinking indicators."""
     from .multistage_process import MultiStageProcess, MultiStageProcessState
     return [
-        status_values(StatusIndicatorState.LOADED, blinking=True)
+        StatusEntry(key=("process", id(process)), label=process.name(),
+                    values=status_values(StatusIndicatorState.LOADED, blinking=True, description=process.title))
         for process_class in process_classes
         for process in MultiStageProcess.get_started_processes_by_class(process_class)
         if process.status == MultiStageProcessState.IN_PROGRESS
     ]
+
+# Warnings and errors (eg. failed build) are reported in side menu until their section is opened.
+_HIDDEN_WHEN_SEEN = {StatusIndicatorState.WARNING, StatusIndicatorState.ERROR}
+
+def unseen_status_entries(entries: list[StatusEntry], seen: set, section_open: bool) -> tuple[list[StatusEntry], set]:
+    """Entries of section shown in side menu, and updated seen states. Warnings and errors are shown until section is
+    opened (they are seen while it's open). State that disappears and comes back (eg. failure of next build) is shown
+    again. Other states (changes, loaded, running operations) are always shown."""
+    current = {(entry.key, entry.values.state) for entry in entries
+               if entry.values is not None and entry.values.state in _HIDDEN_WHEN_SEEN}
+    seen = current if section_open else seen & current
+    unseen = [entry for entry in entries if entry.values is not None
+              and (entry.values.blinking or (entry.key, entry.values.state) not in seen)]
+    return unseen, seen

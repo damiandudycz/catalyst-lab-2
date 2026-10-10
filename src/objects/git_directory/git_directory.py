@@ -93,12 +93,17 @@ class GitDirectory(Serializable, ABC):
         # TODO: Show updates available (has_remote_changes) too.
         match self.status:
             case GitDirectoryStatus.CHANGED:
-                state = StatusIndicatorState.CHANGED
-            case GitDirectoryStatus.CONFLICTED | GitDirectoryStatus.ERROR:
-                state = StatusIndicatorState.ERROR
+                state, description = StatusIndicatorState.CHANGED, "Not saved changes"
+            case GitDirectoryStatus.CONFLICTED:
+                state, description = StatusIndicatorState.ERROR, "Merge conflicts"
+            case GitDirectoryStatus.ERROR:
+                state, description = StatusIndicatorState.ERROR, "Git status can't be read (directory is missing or isn't Git repository)"
+            case GitDirectoryStatus.UNKNOWN:
+                state, description = StatusIndicatorState.IDLE, "Checking status"
             case _:
-                state = StatusIndicatorState.IDLE
-        return status_values(state, blinking=self.is_busy)
+                state, description = StatusIndicatorState.IDLE, "No changes"
+        return status_values(state, blinking=self.is_busy,
+                             description=[description, "Git operation running" if self.is_busy else None])
 
     @classmethod
     def parse_metadata(cls, dict: dict) -> Serializable:

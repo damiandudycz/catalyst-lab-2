@@ -95,9 +95,13 @@ Items in lists and sections of the side menu have a colored dot showing their st
 | 🔴 Red | Has errors |
 
 The dot **blinks** while the item is actively used (building, running an operation), in its current color (gray
-becomes blue). An item with several states shows the most important one (red, orange, purple, blue, gray). A section
-in the side menu shows the most important state of its items, and blinks while any of them is used or any of its
-operations runs.
+becomes blue). An item with several states shows the most important one (red, orange, purple, blue, gray). Hovering
+the dot shows its details.
+
+A section in the side menu shows the most important state of its items, and blinks while any of them is used or any of
+its operations runs. Warnings and errors (eg. failed build) are shown there until the section is opened, and again
+when a new one appears. Changes and ongoing states (running machines, open environments, operations) stay visible.
+Hovering the dot lists items and their states.
 
 | Item | Blue | Purple | Orange | Red | Blinking |
 |---|---|---|---|---|---|
@@ -105,7 +109,7 @@ operations runs.
 | Virtual machine | Running | | | Missing | Starting, stopping, used by operation |
 | Project | | Not saved changes | Last build failed | Toolset, Releng directory or snapshot is missing, Git error or conflicts | Building, updating, saving or discarding changes |
 | Releng directory, overlay | | Not saved changes | | Git error or conflicts | Updating, saving or discarding changes |
-| Project in Builds | | | Last build stopped | Last build failed | Building |
+| Project in Builds (also Builds in side menu) | | | Last build stopped | Last build failed | Building |
 | Project in Deploy | | | | | Deploying |
 
 ---

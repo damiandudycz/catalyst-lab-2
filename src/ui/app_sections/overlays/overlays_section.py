@@ -2,7 +2,7 @@ from gi.repository import Gtk, Adw
 from .app_section import app_section
 from .overlay_installation import OverlayInstallation
 from .repository import Repository
-from .status_indicator import combined_status, items_status, processes_status
+from .status_indicator import items_status, processes_status
 from .overlay_create_view import OverlayCreateView
 from .overlay_manager import OverlayManager
 from .overlay_update import OverlayUpdate
@@ -17,7 +17,7 @@ class OverlaysSection(Gtk.Box):
     @staticmethod
     def section_status():
         """Unsaved changes of overlays, clones or updates running (side menu)."""
-        return combined_status(items_status(Repository.OverlayDirectory.value) + processes_status(OverlayInstallation, OverlayUpdate))
+        return (items_status(Repository.OverlayDirectory.value) + processes_status(OverlayInstallation, OverlayUpdate))
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
