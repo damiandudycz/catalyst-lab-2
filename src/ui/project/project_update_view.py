@@ -62,18 +62,18 @@ class ProjectUpdateView(Gtk.Box):
         if error is not None:
             self._show_message("dialog-error-symbolic", "Update failed", str(error))
             return False
-        if update is None or (not update.changes and not getattr(update, "fast_forward", False)):
-            if update is not None:
-                update.apply(self.project_directory) # Template version is recorded, even when files are the same.
-                update.cleanup()
+        if update is None:
             self._show_message("check-square-svgrepo-com-symbolic", "Project is up to date",
                                f"There are no changes in {self.source_name} to apply.")
             return False
         automatic = [change for change in update.changes if not change.conflict]
         conflicts = [change for change in update.changes if change.conflict]
         widgets = []
-        if getattr(update, "fast_forward", False):
-            widgets.append(self._label(f"Project has no own changes, it's moved to the latest commit of {self.source_name}."))
+        if update.fast_forward:
+            widgets.append(self._label(f"Project has no own commits, it's moved to the latest version of {self.source_name}."))
+        else:
+            widgets.append(self._label(f"Own commits of project are replayed on top of the latest version of "
+                                       f"{self.source_name}, with versions chosen below."))
         if conflicts:
             group = Adw.PreferencesGroup(
                 title=f"Changed in project and in {self.source_name}",
@@ -92,8 +92,8 @@ class ProjectUpdateView(Gtk.Box):
                 row.set_subtitle_lines(3)
                 group.add(row)
             widgets.append(group)
-        widgets.append(self._label("Changes are applied as not saved changes of project, review and save them."
-                                   if not getattr(update, "fast_forward", False) else ""))
+        if not update.changes:
+            widgets.append(self._label(f"Files of project don't change, only version of {self.source_name} is recorded."))
         apply_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         apply_list.add_css_class("boxed-list")
         apply_row = Adw.ButtonRow(title="Apply update", start_icon_name="check-square-svgrepo-com-symbolic")
@@ -136,7 +136,7 @@ class ProjectUpdateView(Gtk.Box):
     def _on_apply(self, row):
         row.set_sensitive(False)
         try:
-            self.update.apply(self.project_directory)
+            self.update.apply(self.project_directory, log=print)
         except Exception as e:
             self._show_message("dialog-error-symbolic", "Update failed", str(e))
             return

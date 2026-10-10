@@ -1,18 +1,19 @@
-"""Updating projects created from templates.
+"""Updating projects from templates they were generated from, and from Git repositories they were cloned from.
 
-When project is created from template, project-template.json is saved in project (template repository, its commit,
-selected options and ids of stages created from template stages), and files generated from template are stored as
-commit in Git repository of project (ref refs/catalystlab/template-base, not on its branch). This is base of update.
+Project created from template has project-template.json (template repository, its commit, selected options and ids of
+stages created from template stages). Commits that generate project from template ("Create project from template",
+"Update from template") change this file, the newest of them is base of update.
 
-Update generates project again from latest version of template, with the same options and stage ids, and compares
-three versions: base (generated before), project (current files, with not saved changes and local commits) and template
-(generated now). Arguments of stages (stage.json) are compared one by one, other files as whole. Stages are matched by
-ids, so renamed stages are compared too. Changes made only in template are applied, changes made only in project are
-kept, and changes made in both differently are decided by user (keep project version or use template version).
+Update compares three versions: base, project (its current commit, changes have to be saved first) and new version
+(project generated again from latest template, or latest commit of remote branch). Arguments of stages (stage.json)
+are compared one by one, other files as whole. Stages are matched by ids, so renamed stages are compared too. Changes
+made only in new version are applied, changes made only in project are kept, and changes made in both differently are
+decided by user (keep project version or use new one).
 
-Projects cloned from Git repository are updated the same way: base is the last commit shared with remote branch,
-incoming version is the latest commit of remote branch. After changes are applied, the update is pending merge of
-remote commit, so saving changes creates merge commit (history of project stays connected with remote).
+History of project follows new version: commits of user made since base are replayed on top of it (new commit with
+generated template, or remote commit), using the same comparison and decisions of user. So history of cloned project
+stays history of its repository with user commits on top, and template project has user commits on top of the latest
+generated template. Without user commits, project is just moved to new version.
 """
 from __future__ import annotations
 import json, os, shutil, subprocess, tempfile, uuid
@@ -24,7 +25,6 @@ from .project_template import (
 
 TEMPLATE_STATE_FILE = "project-template.json"
 TEMPLATE_STATE_FORMAT = 1
-BASE_REF = "refs/catalystlab/template-base"
 
 # ------------------------------------------------------------------------------
 # State of project created from template.
@@ -38,7 +38,7 @@ class TemplateState:
     commit: str | None # Commit of template repository used to generate project.
     selected: dict[str, Any] # Values of options.
     stage_ids: dict[str, str] # Ids of project stages by ids of template stages.
-    base: str | None # Commit with files generated from template (BASE_REF).
+    template_tree: str | None = None # Git tree of template directory, to check if template changed.
 
     @classmethod
     def load(cls, project_path: str) -> TemplateState | None:
@@ -47,7 +47,8 @@ class TemplateState:
                 data = json.load(file)
             return cls(repository_url=data["repository_url"], repository_path=data.get("repository_path", ""),
                        template_name=data.get("template_name", ""), commit=data.get("commit"),
-                       selected=data.get("selected", {}), stage_ids=data.get("stage_ids", {}), base=data.get("base"))
+                       selected=data.get("selected", {}), stage_ids=data.get("stage_ids", {}),
+                       template_tree=data.get("template_tree"))
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
@@ -60,7 +61,7 @@ class TemplateState:
             "commit": self.commit,
             "selected": self.selected,
             "stage_ids": self.stage_ids,
-            "base": self.base,
+            "template_tree": self.template_tree,
         }
         with open(os.path.join(project_path, TEMPLATE_STATE_FILE), "w", encoding="utf-8") as file:
             json.dump(data, file, indent=4)
@@ -70,42 +71,41 @@ class TemplateState:
     def uuid_stage_ids(self) -> dict[str, uuid.UUID]:
         return {key: uuid.UUID(value) for key, value in self.stage_ids.items()}
 
-def snapshot_directory(repository_path: str, directory: str, message: str) -> str | None:
-    """Stores files of directory (without .git) as commit in Git repository of project, pointed by BASE_REF (not on
-    branch of project). Returns its hash, None when project isn't Git repository yet."""
-    if not os.path.isdir(os.path.join(repository_path, ".git")):
-        return None
-    git_directory = os.path.join(repository_path, ".git")
-    with tempfile.TemporaryDirectory() as temporary:
-        environment = {**os.environ, "GIT_INDEX_FILE": os.path.join(temporary, "index"),
-                       "GIT_AUTHOR_NAME": "Catalyst Lab", "GIT_AUTHOR_EMAIL": "catalystlab@localhost",
-                       "GIT_COMMITTER_NAME": "Catalyst Lab", "GIT_COMMITTER_EMAIL": "catalystlab@localhost"}
-        def git(*arguments) -> str:
-            result = subprocess.run(["git", f"--git-dir={git_directory}", f"--work-tree={directory}", *arguments],
-                                    capture_output=True, text=True, env=environment)
-            if result.returncode != 0:
-                raise TemplateError(f"git {arguments[0]} failed: {result.stderr.strip()}")
-            return result.stdout.strip()
-        git("add", "--all", "--force", ".")
-        tree = git("write-tree")
-        commit = git("commit-tree", tree, "-m", message)
-        git("update-ref", BASE_REF, commit)
-        return commit
-
 def record_template_state(project_path: str, template: ProjectTemplate, selected: dict[str, Any], commit: str | None,
-                          stage_ids: dict[str, uuid.UUID]) -> TemplateState:
-    """Saves state of project created (or updated) from template, and files generated from it as base of updates.
-    Called when project directory contains only generated files."""
+                          stage_ids: dict[str, uuid.UUID], template_tree: str | None = None) -> TemplateState:
+    """Saves state of project generated from template (committed with generated files)."""
     state = TemplateState(repository_url=template.repository_url or "", repository_path=template.repository_path,
                           template_name=template.name, commit=commit, selected=selected,
-                          stage_ids={key: str(value) for key, value in stage_ids.items()}, base=None)
-    state.base = snapshot_directory(project_path, project_path, f"Generated from template {template.name}")
+                          stage_ids={key: str(value) for key, value in stage_ids.items()}, template_tree=template_tree)
     state.save(project_path)
     return state
 
 def repository_commit(path: str) -> str | None:
     result = subprocess.run(["git", "-C", path, "rev-parse", "HEAD"], capture_output=True, text=True)
     return result.stdout.strip() if result.returncode == 0 else None
+
+def template_tree(repository: str, repository_path: str) -> str | None:
+    """Git tree of template directory in latest commit of repository (changes when template changes)."""
+    result = subprocess.run(["git", "-C", repository, "rev-parse", f"HEAD:{repository_path}" if repository_path else "HEAD^{tree}"],
+                            capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+def template_update_available(project_path: str) -> bool | None:
+    """Template of project changed since it was generated: tree of template directory in latest commit differs. Only
+    listing of files is downloaded. None when it can't be checked (eg. offline)."""
+    state = TemplateState.load(project_path)
+    if state is None or not state.repository_url:
+        return None
+    with tempfile.TemporaryDirectory() as temporary:
+        try:
+            _run_git(["git", "clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--quiet",
+                      state.repository_url, temporary], timeout=60)
+        except Exception as e:
+            print(f"Failed to check updates of template: {e}")
+            return None
+        if state.template_tree:
+            return template_tree(temporary, state.repository_path) != state.template_tree
+        return repository_commit(temporary) != state.commit
 
 # ------------------------------------------------------------------------------
 # Comparing versions.
@@ -308,12 +308,133 @@ def apply_changes(project_path: str, changes: list[TemplateChange], project: Pro
 # Update.
 # ------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------
+# Git helpers.
+# ------------------------------------------------------------------------------
+
+def _git(path: str, *arguments, check: bool = True, environment: dict | None = None) -> str:
+    result = subprocess.run(["git", "-C", path, *arguments], capture_output=True, text=True,
+                            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", **(environment or {})})
+    if check and result.returncode != 0:
+        raise TemplateError(f"git {arguments[0]} failed: {(result.stderr or result.stdout).strip()}")
+    return result.stdout.strip()
+
+def has_unsaved_changes(project_path: str) -> bool:
+    return bool(_git(project_path, "status", "--porcelain", check=False))
+
+def _extract_commit(repository_path: str, commit: str, destination: str) -> bool:
+    """Files of commit written to destination directory."""
+    archive = subprocess.run(["git", "-C", repository_path, "archive", commit], capture_output=True)
+    if archive.returncode != 0:
+        return False
+    extract = subprocess.run(["tar", "-x", "-C", destination], input=archive.stdout, capture_output=True)
+    return extract.returncode == 0
+
+def _commit_directory(repository_path: str, directory: str, message: str, parents: list[str],
+                      author: dict[str, str] | None = None) -> str:
+    """Creates commit with files of directory and given parents in repository of project, without changing its
+    branch or files. Returns its hash."""
+    with tempfile.TemporaryDirectory() as temporary:
+        environment = {"GIT_INDEX_FILE": os.path.join(temporary, "index"), **(author or {})}
+        git_directory = os.path.join(repository_path, ".git")
+        def git(*arguments) -> str:
+            return _git(repository_path, f"--git-dir={git_directory}", f"--work-tree={directory}", *arguments,
+                        environment=environment)
+        git("add", "--all", "--force", ".")
+        tree = git("write-tree")
+        return git("commit-tree", tree, *[argument for parent in parents for argument in ("-p", parent)], "-m", message)
+
+def _commit_author(repository_path: str, commit: str) -> dict[str, str]:
+    name, email, date = _git(repository_path, "log", "-1", "--format=%an%x00%ae%x00%aI", commit).split("\0")
+    return {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": date}
+
+def _read_commit(repository_path: str, commit: str, directory: str) -> ProjectVersion:
+    os.makedirs(directory)
+    if not _extract_commit(repository_path, commit, directory):
+        raise TemplateError(f"Failed to read commit {commit[:8]}")
+    return read_project_version(directory)
+
+def rebase_project(repository_path: str, onto: str, base: str, changes: list[TemplateChange], temporary: str,
+                   log: Callable[[str], None]) -> str:
+    """Replays commits made since base on top of commit onto, and moves branch to them. Changes of every commit are
+    applied with the same comparison as update: settings and files changed by commit are taken, unless new version
+    changed them too, then decision of user is used (keep project version, or use new version). Returns new HEAD."""
+    if _git(repository_path, "rev-list", "--merges", f"{base}..HEAD"):
+        raise TemplateError("Project history has merge commits since last update, they can't be replayed")
+    commits = _git(repository_path, "rev-list", "--reverse", f"{base}..HEAD").split()
+    # Decisions about changes made in project and new version, by keys: True when new version is used.
+    decisions = {part.key: part.use_template for change in changes if change.conflict for part in change.flattened()}
+    current = os.path.join(temporary, "rebase")
+    _read_commit(repository_path, onto, current)
+    head = onto
+    for index, commit in enumerate(commits):
+        parent_version = _read_commit(repository_path, f"{commit}^", os.path.join(temporary, f"parent-{index}"))
+        commit_version = _read_commit(repository_path, commit, os.path.join(temporary, f"commit-{index}"))
+        current_version = read_project_version(current)
+        commit_changes = compare_versions(parent_version, current_version, commit_version)
+        for change in [part for change in commit_changes for part in change.flattened()]:
+            if change.conflict:
+                # Commit changed what new version changed too: version chosen by user (commit is project version).
+                change.use_template = not decisions.get(change.key, False)
+        apply_changes(current, commit_changes, current_version, commit_version)
+        message = _git(repository_path, "log", "-1", "--format=%B", commit)
+        head = _commit_directory(repository_path, current, message, [head], author=_commit_author(repository_path, commit))
+        log(f"Replayed {message.splitlines()[0] if message else commit[:8]}")
+    old_head = _git(repository_path, "rev-parse", "HEAD")
+    _git(repository_path, "update-ref", "-m", "Catalyst Lab: update", "HEAD", head, old_head)
+    _git(repository_path, "reset", "--hard", "--quiet", head)
+    return head
+
+# ------------------------------------------------------------------------------
+# Update.
+# ------------------------------------------------------------------------------
+
+@dataclass
+class ProjectUpdate:
+    """Update prepared for project: changes of new version, commit of new version and base of project."""
+    source: str # "template" or "repository".
+    onto: str # Commit of new version.
+    base: str # Last commit of project from previous version.
+    changes: list[TemplateChange]
+    temporary_directory: str
+    fast_forward: bool # Project has no own commits since base, it's moved to new version.
+
+    def cleanup(self):
+        shutil.rmtree(self.temporary_directory, ignore_errors=True)
+
+    def apply(self, project_directory, log: Callable[[str], None] = print):
+        project_path = project_directory.directory_path()
+        if has_unsaved_changes(project_path):
+            raise TemplateError("Project has not saved changes, save or discard them first")
+        if self.fast_forward:
+            old_head = _git(project_path, "rev-parse", "HEAD")
+            _git(project_path, "update-ref", "-m", "Catalyst Lab: update", "HEAD", self.onto, old_head)
+            _git(project_path, "reset", "--hard", "--quiet", self.onto)
+        else:
+            rebase_project(project_path, self.onto, self.base, self.changes, self.temporary_directory, log)
+        if hasattr(project_directory, "_stages"):
+            del project_directory._stages # Stages are read again.
+        from .git_directory import GitDirectoryEvent
+        project_directory.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, project_directory)
+        project_directory.update_logs()
+
+def _new_temporary_directory(prefix: str) -> str:
+    from .repository import Repository
+    root = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
+    os.makedirs(root, exist_ok=True)
+    return tempfile.mkdtemp(prefix=prefix, dir=root)
+
+def _require_saved(project_path: str):
+    if not os.path.isdir(os.path.join(project_path, ".git")):
+        raise TemplateError("Project isn't Git repository")
+    if has_unsaved_changes(project_path):
+        raise TemplateError("Project has not saved changes, save or discard them first")
+
 class _RenderTarget:
     """Project generated into other directory (template version), with configuration of real project."""
     def __init__(self, project_directory, path: str):
         self._project = project_directory
         self._path = path
-        self._stages = [] # Created stages, cleared by apply_project_template.
         class _NoEvents:
             def emit(self, *arguments):
                 pass
@@ -326,46 +447,30 @@ class _RenderTarget:
         return os.path.join(self._path, _STAGES_DIRECTORY, self._project.sanitized_name_for_name(name))
     @property
     def stages(self):
+        # Created stages, cleared by apply_project_template.
         if "_stages" not in self.__dict__:
             self.__dict__["_stages"] = []
         return self.__dict__["_stages"]
     def __getattr__(self, name):
         return getattr(self._project, name)
 
-@dataclass
-class TemplateUpdate:
-    """Update prepared for project: changes, and template version to apply."""
-    state: TemplateState
-    template: ProjectTemplate
-    commit: str | None
-    stage_ids: dict[str, uuid.UUID]
-    changes: list[TemplateChange]
-    project_version: ProjectVersion
-    template_version: ProjectVersion
-    temporary_directory: str
+def template_base_commit(project_path: str) -> str | None:
+    """Newest commit generating project from template (it changes project-template.json)."""
+    return _git(project_path, "log", "-1", "--format=%H", "--", TEMPLATE_STATE_FILE, check=False) or None
 
-    def cleanup(self):
-        shutil.rmtree(self.temporary_directory, ignore_errors=True)
-
-    @property
-    def source_title(self) -> str:
-        return "template"
-
-    def apply(self, project_directory):
-        apply_template_update(project_directory, self)
-
-def prepare_template_update(project_directory, log: Callable[[str], None]) -> TemplateUpdate:
-    """Downloads latest version of template, generates project from it and compares it with project and its base."""
-    from .repository import Repository
+def prepare_template_update(project_directory, log: Callable[[str], None]) -> ProjectUpdate | None:
+    """Downloads latest version of template, generates project from it (as commit on top of base) and compares it with
+    project. None when template didn't change project."""
     project_path = project_directory.directory_path()
     state = TemplateState.load(project_path)
     if state is None:
         raise TemplateError("Project wasn't created from template")
-    temporary_root = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
-    os.makedirs(temporary_root, exist_ok=True)
-    temporary = tempfile.mkdtemp(prefix="template-update-", dir=temporary_root)
+    _require_saved(project_path)
+    base = template_base_commit(project_path)
+    if base is None:
+        raise TemplateError(f"{TEMPLATE_STATE_FILE} isn't saved in project history")
+    temporary = _new_temporary_directory("template-update-")
     try:
-        # Latest template:
         repository = os.path.join(temporary, "repository")
         log(f"Downloading {state.repository_url}")
         _run_git(["git", "clone", "--depth", "1", "--quiet", state.repository_url, repository])
@@ -373,66 +478,28 @@ def prepare_template_update(project_directory, log: Callable[[str], None]) -> Te
             raise TemplateError(f"Template {state.repository_path or state.template_name} is not in repository anymore")
         template = ProjectTemplate.load(os.path.join(repository, state.repository_path),
                                         repository_url=state.repository_url, repository_path=state.repository_path)
-        commit = repository_commit(repository)
-        # Template version of project, with the same options and stage ids:
         generated = os.path.join(temporary, "template")
         os.makedirs(generated)
-        names = template.resolve(state.selected, project_name=project_directory.name)
         log(f"Generating project from {template.name}")
-        stage_ids = apply_project_template(_RenderTarget(project_directory, generated), template, names, log=log,
-                                           stage_ids=state.uuid_stage_ids)
-        # Base (generated before), stored in project repository:
-        base = os.path.join(temporary, "base")
-        os.makedirs(base)
-        if state.base and _extract_commit(project_path, state.base, base):
-            base_version = read_project_version(base)
-        else:
-            log("Files generated before are not available, all differences have to be decided")
-            base_version = ProjectVersion()
-        project_version = read_project_version(project_path)
-        template_version = read_project_version(generated)
-        changes = compare_versions(base_version, project_version, template_version)
-        return TemplateUpdate(state=state, template=template, commit=commit, stage_ids=stage_ids, changes=changes,
-                              project_version=project_version, template_version=template_version,
-                              temporary_directory=temporary)
+        stage_ids = apply_project_template(_RenderTarget(project_directory, generated), template,
+                                           template.resolve(state.selected, project_name=project_directory.name),
+                                           log=log, stage_ids=state.uuid_stage_ids)
+        base_version = _read_commit(project_path, base, os.path.join(temporary, "base"))
+        changes = compare_versions(base_version, read_project_version(project_path), read_project_version(generated))
+        commit = repository_commit(repository)
+        if not changes and commit == state.commit:
+            shutil.rmtree(temporary, ignore_errors=True)
+            return None
+        # New version of template, as commit on top of base.
+        record_template_state(generated, template, state.selected, commit, stage_ids,
+                              template_tree(repository, state.repository_path))
+        onto = _commit_directory(project_path, generated, f"Update from template {template.name}", [base])
+        head = _git(project_path, "rev-parse", "HEAD")
+        return ProjectUpdate(source="template", onto=onto, base=base, changes=changes, temporary_directory=temporary,
+                             fast_forward=head == base)
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
-
-def _extract_commit(repository_path: str, commit: str, destination: str) -> bool:
-    archive = subprocess.run(["git", "-C", repository_path, "archive", commit], capture_output=True)
-    if archive.returncode != 0:
-        return False
-    extract = subprocess.run(["tar", "-x", "-C", destination], input=archive.stdout, capture_output=True)
-    return extract.returncode == 0
-
-def apply_template_update(project_directory, update: TemplateUpdate):
-    """Applies changes (with decisions of user) to project, as not saved changes. Template version becomes base of
-    next update."""
-    project_path = project_directory.directory_path()
-    apply_changes(project_path, update.changes, update.project_version, update.template_version)
-    generated = os.path.join(update.temporary_directory, "template")
-    state = update.state
-    state.commit = update.commit
-    state.template_name = update.template.name
-    state.stage_ids = {key: str(value) for key, value in update.stage_ids.items()}
-    state.base = snapshot_directory(project_path, generated, f"Generated from template {update.template.name}") or state.base
-    state.save(project_path)
-    if hasattr(project_directory, "_stages"):
-        del project_directory._stages # Stages are read again.
-    from .git_directory import GitDirectoryEvent
-    project_directory.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, project_directory)
-
-# ------------------------------------------------------------------------------
-# Projects cloned from Git repository.
-# ------------------------------------------------------------------------------
-
-def _git(path: str, *arguments, check: bool = True) -> str:
-    result = subprocess.run(["git", "-C", path, *arguments], capture_output=True, text=True,
-                            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
-    if check and result.returncode != 0:
-        raise TemplateError(f"git {arguments[0]} failed: {(result.stderr or result.stdout).strip()}")
-    return result.stdout.strip()
 
 @dataclass
 class RepositoryOrigin:
@@ -449,80 +516,38 @@ def repository_origin(project_path: str) -> RepositoryOrigin | None:
     branch = _git(project_path, "symbolic-ref", "--short", "HEAD", check=False) or None
     return RepositoryOrigin(url=url, branch=branch)
 
-def pending_repository_update(project_path: str) -> bool:
-    """Update was applied, but not saved yet (merge is in progress)."""
-    return os.path.exists(os.path.join(project_path, ".git", "MERGE_HEAD"))
-
-@dataclass
-class RepositoryUpdate:
-    origin: RepositoryOrigin
-    upstream: str # Latest commit of remote branch.
-    changes: list[TemplateChange]
-    project_version: ProjectVersion
-    template_version: ProjectVersion # Version from remote.
-    temporary_directory: str
-    fast_forward: bool # No local changes or commits, branch is moved to remote commit.
-
-    def cleanup(self):
-        shutil.rmtree(self.temporary_directory, ignore_errors=True)
-
-    @property
-    def source_title(self) -> str:
-        return "repository"
-
-    def apply(self, project_directory):
-        apply_repository_update(project_directory, self)
-
-def prepare_repository_update(project_directory, log: Callable[[str], None]) -> RepositoryUpdate | None:
+def prepare_repository_update(project_directory, log: Callable[[str], None]) -> ProjectUpdate | None:
     """Downloads changes of remote branch and compares them with project. None when there is nothing new."""
-    from .repository import Repository
     project_path = project_directory.directory_path()
     origin = repository_origin(project_path)
     if origin is None:
         raise TemplateError("Project wasn't cloned from Git repository")
-    if pending_repository_update(project_path):
-        raise TemplateError("Previous update is not saved yet, save or discard changes first")
+    _require_saved(project_path)
     log(f"Fetching {origin.url}")
     _git(project_path, "fetch", "--quiet", "origin")
     upstream = _git(project_path, "rev-parse", "@{upstream}", check=False) or _git(project_path, "rev-parse", "origin/HEAD")
     head = _git(project_path, "rev-parse", "HEAD")
-    merge_base = _git(project_path, "merge-base", "HEAD", upstream)
-    if merge_base == upstream:
+    base = _git(project_path, "merge-base", "HEAD", upstream)
+    if base == upstream:
         return None # Remote has nothing new.
-    temporary_root = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
-    os.makedirs(temporary_root, exist_ok=True)
-    temporary = tempfile.mkdtemp(prefix="repository-update-", dir=temporary_root)
+    temporary = _new_temporary_directory("repository-update-")
     try:
-        base, remote = os.path.join(temporary, "base"), os.path.join(temporary, "remote")
-        os.makedirs(base)
-        os.makedirs(remote)
-        if not _extract_commit(project_path, merge_base, base) or not _extract_commit(project_path, upstream, remote):
-            raise TemplateError("Failed to read versions of repository")
-        project_version = read_project_version(project_path)
-        remote_version = read_project_version(remote)
-        changes = compare_versions(read_project_version(base), project_version, remote_version)
-        clean = not _git(project_path, "status", "--porcelain")
-        return RepositoryUpdate(origin=origin, upstream=upstream, changes=changes, project_version=project_version,
-                                template_version=remote_version, temporary_directory=temporary,
-                                fast_forward=clean and merge_base == head)
+        changes = compare_versions(_read_commit(project_path, base, os.path.join(temporary, "base")),
+                                   read_project_version(project_path),
+                                   _read_commit(project_path, upstream, os.path.join(temporary, "remote")))
+        return ProjectUpdate(source="repository", onto=upstream, base=base, changes=changes,
+                             temporary_directory=temporary, fast_forward=head == base)
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
 
-def apply_repository_update(project_directory, update: RepositoryUpdate):
-    """Moves branch to remote commit when there are no local changes, otherwise applies changes (with decisions of
-    user) and starts merge of remote commit, finished by saving changes."""
-    project_path = project_directory.directory_path()
-    if update.fast_forward:
-        _git(project_path, "merge", "--ff-only", "--quiet", update.upstream)
+def own_commits_count(project_path: str) -> int:
+    """Commits of project that are not in its template (made since last generation) or remote branch."""
+    if TemplateState.load(project_path) is not None:
+        base = template_base_commit(project_path)
     else:
-        apply_changes(project_path, update.changes, update.project_version, update.template_version)
-        with open(os.path.join(project_path, ".git", "MERGE_HEAD"), "w", encoding="utf-8") as file:
-            file.write(update.upstream + "\n")
-        with open(os.path.join(project_path, ".git", "MERGE_MSG"), "w", encoding="utf-8") as file:
-            file.write(f"Merge updates from {update.origin.url}\n")
-    if hasattr(project_directory, "_stages"):
-        del project_directory._stages
-    from .git_directory import GitDirectoryEvent
-    project_directory.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, project_directory)
-    project_directory.update_logs()
+        base = _git(project_path, "rev-parse", "@{upstream}", check=False)
+    if not base:
+        return 0
+    count = _git(project_path, "rev-list", "--count", f"{base}..HEAD", check=False)
+    return int(count) if count.isdigit() else 0
