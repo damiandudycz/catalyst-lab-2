@@ -45,6 +45,8 @@ class ProjectDetailsView(Gtk.Box):
         self.monitor_configuration_changes()
         self.stages_tree_view.set_root_nodes(project_directory.stages_tree())
         self._setup_stages_view_mode()
+        # Result of last build is seen, project is not marked anymore in projects list.
+        project_directory.mark_build_result_seen()
         self._observed_builds: set[int] = set() # Ids of builds whose changes are observed.
         self._observed_toolset = None # Toolset (and its machine) whose state allows building.
         self._build_refresh_scheduled = False
@@ -94,6 +96,9 @@ class ProjectDetailsView(Gtk.Box):
 
     def _refresh_build_state(self):
         """Shows states of stages in running build of this project and button to its progress."""
+        if self.get_mapped():
+            # Result of build finished while project is displayed is seen.
+            self.project_directory.mark_build_result_seen()
         running_builds = _running_builds()
         for build in running_builds:
             if id(build) not in self._observed_builds:

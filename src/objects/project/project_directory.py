@@ -71,25 +71,73 @@ class ProjectDirectory(GitDirectory):
         return f"Building now · {summary}" if running_project_build(self) else summary
 
     @property
-    def build_status_indicator_values(self):
-        """Blinking indicator while project is being built."""
+    def configuration_error(self) -> str | None:
+        """Why project can't be built because of its configuration (toolset, releng directory, snapshot)."""
+        if self.get_toolset() is None:
+            return "Toolset is not selected or was removed"
+        if self.get_releng_directory() is None:
+            return "Releng directory is not selected or was removed"
+        if self.get_snapshot() is None:
+            return "Snapshot is not selected or was removed"
+        return None
+
+    def _last_build_run_result(self):
+        result, building, _ = self._last_build_run()
+        return result, building
+
+    def _last_build_run(self):
+        """Result of newest build run, whether project is being built, and timestamp of newest run."""
+        from .project_build import last_build_run
         from .project_build_process import running_project_build
-        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
-        if running_project_build(self):
-            return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
-        return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
+        running = running_project_build(self)
+        timestamp, result = last_build_run(self, running_timestamp=running.timestamp if running else None)
+        return result, running is not None, timestamp
+
+    def mark_build_result_seen(self):
+        """Result of newest build run was seen (project or its builds were opened), it's not marked in projects and
+        builds lists anymore."""
+        _, _, timestamp = self._last_build_run()
+        if timestamp is None or self.metadata is None or self.metadata.seen_build_timestamp == timestamp:
+            return
+        self.metadata.seen_build_timestamp = timestamp
+        from .repository import Repository
+        Repository.ProjectDirectory.save()
+        from .event_bus import SharedEvent
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    @property
+    def build_status_indicator_values(self):
+        """Builds list: last build run completed (succeeded), failed (error) or stopped (warning), until builds or
+        project were opened. Blinking while building."""
+        from .project_build import BuildRunResult
+        from .status_indicator import StatusIndicatorState, StatusDetail, item_status
+        result, building, timestamp = self._last_build_run()
+        match result:
+            case BuildRunResult.FAILED: state, description = StatusIndicatorState.ERROR, "Last build failed"
+            case BuildRunResult.STOPPED: state, description = StatusIndicatorState.WARNING, "Last build was stopped"
+            case BuildRunResult.COMPLETED: state, description = StatusIndicatorState.SUCCEEDED, "Last build completed"
+            case _: state, description = StatusIndicatorState.IDLE, "No builds"
+        if self.metadata is not None and self.metadata.seen_build_timestamp == timestamp:
+            state = StatusIndicatorState.IDLE # Result was seen, it's still described.
+        return item_status([StatusDetail(state, description),
+                            StatusDetail(StatusIndicatorState.LOADED, "Building") if building else None], blinking=building)
 
     @property
     def status_indicator_values(self):
-        """Git status of project, blinking while project is being built."""
-        values = super().status_indicator_values
-        from .project_build_process import running_project_build
-        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
-        if running_project_build(self):
-            # Changed files keep their color, otherwise build is shown like in builds list.
-            state = values.state if values.state == StatusIndicatorState.ENABLED_UNSAFE else StatusIndicatorState.ENABLED
-            return StatusIndicatorValues(state=state, blinking=True)
-        return values
+        """Projects list: configuration error, failed last build (until project is opened), Git status (changes,
+        errors), blinking while building."""
+        from .project_build import BuildRunResult
+        from .status_indicator import StatusIndicatorState, StatusDetail, item_status
+        result, building, timestamp = self._last_build_run()
+        details = []
+        if configuration_error := self.configuration_error:
+            details.append(StatusDetail(StatusIndicatorState.ERROR, configuration_error))
+        if result == BuildRunResult.FAILED and (self.metadata is None or self.metadata.seen_build_timestamp != timestamp):
+            details.append(StatusDetail(StatusIndicatorState.ERROR, "Last build failed"))
+        details += self.status_details()
+        if building:
+            details.append(StatusDetail(StatusIndicatorState.LOADED, "Building"))
+        return item_status(details, blinking=building or self.is_busy)
 
     @property
     def deploy_summary(self) -> str:
@@ -106,10 +154,10 @@ class ProjectDirectory(GitDirectory):
         """Blinking indicator while build of project is being deployed."""
         from .deploy_installation import DeployInstallation
         from .multistage_process import MultiStageProcess, MultiStageProcessState
-        from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+        from .status_indicator import StatusIndicatorState, StatusDetail, item_status
         deploying = any(process.project_id == self.id and process.status == MultiStageProcessState.IN_PROGRESS
                         for process in MultiStageProcess.get_started_processes_by_class(DeployInstallation))
-        return StatusIndicatorValues(state=StatusIndicatorState.ENABLED if deploying else StatusIndicatorState.DISABLED, blinking=deploying)
+        return item_status([StatusDetail(StatusIndicatorState.LOADED, "Deploying") if deploying else None], blinking=deploying)
 
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:
@@ -166,6 +214,7 @@ class ProjectConfiguration(Serializable):
     releng_directory_id: uuid.UUID | None = None
     snapshot_id: str | None = None
     architecture: Architecture | None = None
+    seen_build_timestamp: str | None = None # Newest build run whose result was seen (project was opened).
 
     def serialize(self) -> dict:
         return {
@@ -173,6 +222,7 @@ class ProjectConfiguration(Serializable):
             "releng_directory_id": str(self.releng_directory_id) if self.releng_directory_id else None,
             "snapshot_id": self.snapshot_id,
             "architecture": self.architecture.value if self.architecture else None,
+            "seen_build_timestamp": self.seen_build_timestamp,
         }
 
     @classmethod
@@ -188,6 +238,7 @@ class ProjectConfiguration(Serializable):
             toolset_id=toolset_id,
             releng_directory_id=releng_directory_id,
             snapshot_id=snapshot_id,
-            architecture=architecture
+            architecture=architecture,
+            seen_build_timestamp=data.get("seen_build_timestamp")
         )
 

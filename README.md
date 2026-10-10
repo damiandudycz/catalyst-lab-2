@@ -16,6 +16,7 @@ knowledge of Catalyst internals is needed.
 ## Contents
 
 - [Features](#features)
+  - [Status indicators](#-status-indicators)
 - [How it works](#how-it-works)
 - [Supported systems](#supported-systems)
 - [Installation](#installation)
@@ -36,8 +37,9 @@ knowledge of Catalyst internals is needed.
   itself.
 - Profiles are listed from the snapshot and from the overlays used by the stage.
 - Projects are **Git directories**, so their changes can be tracked and shared.
-- New projects can be created from **templates**, included in the app or from Git repositories, with options like
-  architecture, init system and additional software. See [Project templates](docs/project-templates.md) to create
+- New projects can be created from **templates** from Git repositories (like
+  [catalystlab-templates](https://github.com/damiandudycz/catalystlab-templates)), with options like architecture,
+  init system and additional software. See [Project templates](docs/project-templates.md) to create
   and publish one.
 
 ### 🔨 Builds
@@ -79,6 +81,37 @@ The deploy wizard handles:
 - **System**: hostname, users, root password, network, timezone, locales, keyboard layout and SSH keys.
 - **Boot**: kernel (from the stage or a distribution kernel), linux-firmware and bootloader (GRUB, systemd-boot,
   rEFInd, EFI stub, or kboot for PS3 petitboot), with warnings about anything that needs manual updates later.
+
+### 🟢 Status indicators
+
+Items in lists and sections of the side menu have a colored dot showing their state:
+
+| Color | Meaning |
+|---|---|
+| ⚪ Gray | Not used or mounted, no changes |
+| 🟢 Green | Completed successfully |
+| 🔵 Blue | Mounted, loaded or running |
+| 🟣 Purple | Has changes |
+| 🟠 Orange | Has warnings |
+| 🔴 Red | Has errors |
+
+The dot **blinks** while the item is actively used (building, running an operation), in its current color (gray
+becomes blue). An item can have several states at once (eg. running and has changes): the dot shows the most
+important one (red, orange, purple, blue, green, gray), and hovering it lists all of them, each with its own color.
+
+A section in the side menu shows the most important state of its items, and blinks while any of them is used or any of
+its operations runs. Results, warnings and errors (eg. completed or failed build) are shown there until the section is
+opened, and again when a new one appears. Changes and ongoing states (running machines, open environments, operations) stay visible.
+Hovering the dot lists items and their states.
+
+| Item | Green | Blue | Purple | Orange | Red | Blinking |
+|---|---|---|---|---|---|---|
+| Toolset | | Environment is open | | Catalyst is not installed | File or virtual machine is missing | Mounting, unmounting, used by operation or command |
+| Virtual machine | | Running | | | Missing | Starting, stopping, used by operation |
+| Project | | | Not saved changes | | Last build failed (until project is opened), toolset, Releng directory or snapshot is missing, Git error or conflicts | Building, updating, saving or discarding changes |
+| Releng directory, overlay | | | Not saved changes | | Git error or conflicts | Updating, saving or discarding changes |
+| Project in Builds (also Builds in side menu) | Last build completed (until project or its builds are opened) | | | Last build stopped (until opened) | Last build failed (until opened) | Building |
+| Project in Deploy | | | | | | Deploying |
 
 ---
 
@@ -183,7 +216,7 @@ tools and Lima, so it runs on Macs without Homebrew.
 |---|---|
 | `src/objects/` | Model and logic: projects, builds, toolsets, virtual machines, snapshots, deploy, root helper |
 | `src/ui/` | Views (`.py` + `.ui` templates) and app sections |
-| `data/` | Icons, desktop file, metainfo, GSettings schema and project templates |
+| `data/` | Icons, desktop file, metainfo, GSettings schema and list of project template repositories |
 | `docs/` | Documentation, eg. [project templates](docs/project-templates.md) |
 | `packaging/flatpak/` | Flatpak manifest, its modules (bubblewrap, squashfs-tools, Python packages) and build scripts |
 | `packaging/macos/` | macOS application bundle |

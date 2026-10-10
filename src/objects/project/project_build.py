@@ -19,11 +19,12 @@ class StageBuildStatus(Enum):
     FAILED = "failed"
     SKIPPED = "skipped" # Not built, because stage it depends on failed.
     CANCELLED = "cancelled" # Not built, because build run was cancelled.
+    STOPPED = "stopped" # Building started, but build run was cancelled.
 
     @property
     def is_attempt(self) -> bool:
         """Stage was built (or building started)."""
-        return self in (StageBuildStatus.IN_PROGRESS, StageBuildStatus.COMPLETED, StageBuildStatus.FAILED)
+        return self in (StageBuildStatus.IN_PROGRESS, StageBuildStatus.COMPLETED, StageBuildStatus.FAILED, StageBuildStatus.STOPPED)
 
 @dataclass
 class StageBuild:
@@ -146,6 +147,34 @@ def load_project_builds(project_directory) -> list[StageBuild]:
                 if os.path.exists(metadata_path):
                     print(f"Warning: Failed to read build {metadata_path}: {e}")
     return sorted(builds, key=lambda build: build.date, reverse=True)
+
+class BuildRunResult(Enum):
+    """Result of build run (stages built together), for status of project."""
+    COMPLETED = "completed"
+    FAILED = "failed"   # Building of some stage failed.
+    STOPPED = "stopped" # Cancelled, or interrupted (app was closed).
+
+def last_build_run_result(project_directory, running_timestamp: str | None = None) -> BuildRunResult | None:
+    """Result of newest build run of project, None when project has no builds. Stages of run that is still running
+    (running_timestamp) are not interrupted."""
+    return last_build_run(project_directory, running_timestamp)[1]
+
+def last_build_run(project_directory, running_timestamp: str | None = None) -> tuple[str | None, BuildRunResult | None]:
+    """Timestamp and result of newest build run of project, (None, None) when project has no builds."""
+    builds = load_project_builds(project_directory)
+    if not builds:
+        return None, None
+    timestamp = max(builds, key=lambda build: build.date).timestamp
+    return timestamp, _build_run_result(builds, timestamp, running_timestamp)
+
+def _build_run_result(builds: list, timestamp: str, running_timestamp: str | None) -> BuildRunResult:
+    statuses = {build.status for build in builds if build.timestamp == timestamp}
+    if StageBuildStatus.FAILED in statuses:
+        return BuildRunResult.FAILED
+    if timestamp != running_timestamp and statuses & {StageBuildStatus.STOPPED, StageBuildStatus.CANCELLED,
+                                                      StageBuildStatus.IN_PROGRESS, StageBuildStatus.SCHEDULED}:
+        return BuildRunResult.STOPPED
+    return BuildRunResult.COMPLETED
 
 # ------------------------------------------------------------------------------
 # Build plan:

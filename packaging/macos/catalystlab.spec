@@ -22,7 +22,6 @@ a = Analysis(
     datas=[
         (os.path.join(PKGDATADIR, "catalystlab.gresource"), "share/catalystlab"),
         (os.path.join(PKGDATADIR, "VERSION"), "share/catalystlab"),
-        (os.path.join(PKGDATADIR, "project_templates"), "share/catalystlab/project_templates"),
         (os.path.join(STAGING, "share", "icons", "hicolor"), "share/icons/hicolor"),
         (SCHEMAS, "share/catalystlab-schemas"),
     ],

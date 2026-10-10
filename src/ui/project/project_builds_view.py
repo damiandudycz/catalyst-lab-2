@@ -22,6 +22,7 @@ class BuildRowState(Enum):
     SCHEDULED = "Scheduled"
     SKIPPED = "Skipped" # Stage it depends on failed.
     CANCELLED = "Cancelled" # Build was cancelled before stage started.
+    STOPPED = "Stopped" # Build was cancelled while stage was building.
     INTERRUPTED = "Interrupted" # Not finished, but its build is not running anymore (eg. app was closed).
     NOT_STARTED = "Not started" # Scheduled, but its build is not running anymore (eg. app was closed).
 
@@ -35,7 +36,7 @@ class ProjectBuildsView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         # Same layout as other views: groups use whole width of window.
         scrolled_window = Gtk.ScrolledWindow(hexpand=True, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_bottom=24)
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24, margin_top=6, margin_bottom=24)
         scrolled_window.set_child(self.content)
         self.append(scrolled_window)
         # Starts new build of project, or shows progress of running one (like Create build in project page).
@@ -55,6 +56,10 @@ class ProjectBuildsView(Gtk.Box):
     # --------------------------------------------------------------------------
 
     def load_builds(self):
+        # Result of newest build is seen when builds are displayed (opened, or build finished while open).
+        if self.get_mapped() or not getattr(self, "_result_seen", False):
+            self._result_seen = True
+            self.project_directory.mark_build_result_seen()
         for group in self.groups:
             self.content.remove(group)
         self.groups = []
@@ -277,6 +282,7 @@ def _record_state(build) -> BuildRowState:
         case StageBuildStatus.FAILED: return BuildRowState.FAILED
         case StageBuildStatus.SKIPPED: return BuildRowState.SKIPPED
         case StageBuildStatus.CANCELLED: return BuildRowState.CANCELLED
+        case StageBuildStatus.STOPPED: return BuildRowState.STOPPED
         case StageBuildStatus.SCHEDULED: return BuildRowState.NOT_STARTED
     # Running builds are handled separately, so not finished build here is not running anymore.
     return BuildRowState.INTERRUPTED
@@ -301,7 +307,7 @@ def _state_icon(state: BuildRowState) -> str:
         case BuildRowState.COMPLETED: return "check-square-svgrepo-com-symbolic"
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error-box-svgrepo-com-symbolic"
         case BuildRowState.BUILDING: return "menu-dots-square-svgrepo-com-symbolic"
-        case BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
+        case BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.STOPPED | BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
         case _: return "clock-square-svgrepo-com-symbolic"
 
 def _state_css_class(state: BuildRowState) -> str | None:
@@ -309,7 +315,7 @@ def _state_css_class(state: BuildRowState) -> str | None:
         case BuildRowState.COMPLETED: return "success"
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error"
         case BuildRowState.BUILDING: return "accent"
-        case BuildRowState.SCHEDULED | BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.NOT_STARTED: return "dimmed"
+        case BuildRowState.SCHEDULED | BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.STOPPED | BuildRowState.NOT_STARTED: return "dimmed"
     return None
 
 def _failure_summary(build) -> str | None:

@@ -3,8 +3,8 @@ import os, threading, uuid
 from typing import Self
 from .event_bus import EventBus, SharedEvent
 from .repository import Repository
-from .status_indicator import StatusIndicatorState, StatusIndicatorValues
-from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues, StatusDetail, item_status, status_values
+from .lima import list_instances, run_limactl, run_as_root_in_instance, swap_activation_script, default_lima_home, MACHINE_DATA_DIRECTORY, kill_instance_processes, instance_process_ids
 from .lima import lima_home as default_new_lima_home
 
 class BuildMachine:
@@ -95,16 +95,20 @@ class BuildMachine:
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
-        """Like toolsets: active while running, blinking while used by operations. Starting blinks as active, stopping
-        blinks as warning (machine becomes unavailable)."""
+        """Running is loaded, missing (removed outside of app) is error. Blinks while starting, stopping or used by
+        operations."""
         match self.status:
             case self.STATUS_RUNNING:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=self.is_used)
+                return item_status([StatusDetail(StatusIndicatorState.LOADED, "Running"),
+                                    StatusDetail(StatusIndicatorState.LOADED, "Used by operation") if self.is_used else None],
+                                   blinking=self.is_used)
             case self.STATUS_STARTING:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED, blinking=True)
+                return status_values(StatusIndicatorState.LOADED, blinking=True, description="Starting")
             case self.STATUS_STOPPING:
-                return StatusIndicatorValues(state=StatusIndicatorState.ENABLED_UNSAFE, blinking=True)
-        return StatusIndicatorValues(state=StatusIndicatorState.DISABLED, blinking=False)
+                return status_values(StatusIndicatorState.LOADED, blinking=True, description="Stopping")
+            case self.STATUS_MISSING:
+                return status_values(StatusIndicatorState.ERROR, description="Virtual machine is missing (removed outside of Catalyst Lab)")
+        return status_values(StatusIndicatorState.IDLE, description="Stopped")
 
     # Lifecycle:
 
@@ -207,13 +211,31 @@ class BuildMachine:
         with self._lock:
             self._set_status(self.STATUS_STOPPING)
             try:
-                success = run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home)
+                success = self._stop_instance(output_handler)
             finally:
                 self.refresh_status(during_transition=True)
             if success and self.status == self.STATUS_STOPPED:
                 # Swapped data is not needed after machine stops, its disk takes no space until next start.
                 self.delete_swap_disk(lambda line: None)
             return success
+
+    # Time for limactl to stop machine normally, and to force stop it.
+    STOP_TIMEOUT = 60
+    FORCE_STOP_TIMEOUT = 30
+
+    def _stop_instance(self, output_handler) -> bool:
+        """Stops Lima instance, with force when it doesn't stop normally (eg. machine crashed and its host agent doesn't
+        exit), killing its processes as last resort."""
+        if run_limactl(["stop", self.instance_name], output_handler, home=self.lima_home, timeout=self.STOP_TIMEOUT):
+            return True
+        output_handler(f"Virtual machine {self.name} didn't stop, stopping it with force")
+        # Forced stop can leave processes started by host agent running (eg. driver of crashed machine), they are
+        # found before it removes pid files and killed after it.
+        pids = instance_process_ids(self.instance_name, self.lima_home)
+        run_limactl(["stop", "--force", self.instance_name], output_handler, home=self.lima_home, timeout=self.FORCE_STOP_TIMEOUT)
+        kill_instance_processes(self.instance_name, output_handler, home=self.lima_home, pids=pids)
+        instance = list_instances(self.lima_home).get(self.instance_name)
+        return instance is not None and instance.get("status") == self.STATUS_STOPPED
 
     def ensure_running(self, output_handler=print, process_holder: list | None = None):
         """Starts machine if needed, raises when it can't be started. Setup of machine is updated once while app runs,

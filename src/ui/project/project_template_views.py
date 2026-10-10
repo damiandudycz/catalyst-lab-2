@@ -4,120 +4,108 @@ from typing import Any, Callable
 from gi.repository import Gtk, GLib, Adw
 from .project_template import (
     ProjectTemplate, TemplateError, TemplateVariableType, GeneratedProject, _GROUP_STAGES_NAME,
-    local_templates, download_template_repositories, fetch_template_repository
+    download_template_repositories, fetch_template_repository, find_overlay_for_url
 )
 from .project_stage import stage_target_icon
 
 class ProjectTemplateChooser(Gtk.Box):
-    """List of templates included in app and templates from Git repositories. Repository templates are downloaded
-    when selected, to read their options."""
+    """Templates from Git repositories. Latest list of repositories is downloaded every time (so templates removed from
+    it are not offered anymore), then definitions of templates in these repositories, to show them and their options."""
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.selected_template: ProjectTemplate | None = None
         self.on_changed: Callable[[], None] | None = None
-        self._fetch_generation = 0 # Results of earlier downloads are ignored when other template was selected.
-        group = Adw.PreferencesGroup(title="Template")
-        group.set_margin_bottom(12)
-        self.append(group)
-        check_group = Gtk.CheckButton() # Not displayed, rows start without selection.
-        for template in local_templates():
-            if isinstance(template, ProjectTemplate):
-                row = Adw.ActionRow(title=GLib.markup_escape_text(template.name), subtitle=GLib.markup_escape_text(template.description))
-                self._add_check(row, check_group, lambda row, template=template: self._select(template))
-            else:
-                path, error = template
-                row = Adw.ActionRow(title=GLib.markup_escape_text(path.rstrip("/").split("/")[-1]), subtitle=GLib.markup_escape_text(str(error)))
-                row.add_css_class("error")
-                row.set_sensitive(False)
-            group.add(row)
-        # Repositories: latest list is always downloaded, so templates removed from it are not offered anymore.
-        self._group = group
-        self._check_group = check_group
-        self._repository_rows: list[Gtk.Widget] = []
-        self._load_repositories()
+        self._group = Adw.PreferencesGroup(title="Template")
+        self._group.set_margin_bottom(12)
+        self.append(self._group)
+        self._check_group = Gtk.CheckButton() # Not displayed, rows start without selection.
+        self._rows: list[Gtk.Widget] = []
+        self._load()
 
-    def _load_repositories(self):
-        for row in self._repository_rows:
+    def _set_rows(self, rows: list[Gtk.Widget]):
+        for row in self._rows:
             self._group.remove(row)
-        loading_row = Adw.ActionRow(title="Loading templates from repositories…")
+        self._rows = rows
+        for row in rows:
+            self._group.add(row)
+
+    def _load(self):
+        self._set_selected(None)
+        loading_row = Adw.ActionRow(title="Loading templates…")
         loading_row.add_css_class("dimmed")
         loading_row.add_prefix(Adw.Spinner())
-        self._group.add(loading_row)
-        self._repository_rows = [loading_row]
+        self._set_rows([loading_row])
         def download():
+            # Repositories are downloaded at the same time, their templates are shown in order of the list.
             try:
-                repositories, error = download_template_repositories(), None
+                repositories = download_template_repositories()
             except Exception as e:
-                repositories, error = None, e
-            GLib.idle_add(self._show_repositories, repositories, error)
+                GLib.idle_add(self._show, None, e)
+                return
+            results: list = [None] * len(repositories)
+            def fetch(index: int, repository):
+                try:
+                    results[index] = (repository, fetch_template_repository(repository.url))
+                except Exception as e: # Also errors of git and files.
+                    results[index] = (repository, e)
+            threads = [threading.Thread(target=fetch, args=(index, repository), daemon=True) for index, repository in enumerate(repositories)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            GLib.idle_add(self._show, results, None)
         threading.Thread(target=download, daemon=True).start()
 
-    def _show_repositories(self, repositories, error):
-        for row in self._repository_rows:
-            self._group.remove(row)
-        self._repository_rows = []
-        if repositories is None:
-            print(f"Failed to download list of template repositories: {error}")
-            row = Adw.ActionRow(title="Templates from repositories couldn't be loaded",
-                                subtitle="Check internet connection and try again.")
-            row.add_prefix(Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic"))
+    def _error_row(self, title: str, subtitle: str, retry: bool) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=GLib.markup_escape_text(title), subtitle=GLib.markup_escape_text(subtitle))
+        row.add_prefix(Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic"))
+        if retry:
             retry_button = Gtk.Button(label="Try again", valign=Gtk.Align.CENTER)
             retry_button.add_css_class("flat")
-            retry_button.connect("clicked", lambda button: self._load_repositories())
+            retry_button.connect("clicked", lambda button: self._load())
             row.add_suffix(retry_button)
-            self._group.add(row)
-            self._repository_rows.append(row)
+        return row
+
+    def _show(self, results, error):
+        if results is None:
+            print(f"Failed to download list of template repositories: {error}")
+            self._set_rows([self._error_row("Templates couldn't be loaded", "Check internet connection and try again.", retry=True)])
             return False
-        for repository in repositories:
-            row = Adw.ActionRow(title=GLib.markup_escape_text(repository.title), subtitle=GLib.markup_escape_text(repository.url))
-            self._add_check(row, self._check_group, lambda row, repository=repository: self._fetch(row, repository))
-            self._group.add(row)
-            self._repository_rows.append(row)
+        rows = []
+        for repository, templates in results:
+            if isinstance(templates, Exception):
+                print(f"Failed to load templates from {repository.url}: {templates}")
+                rows.append(self._error_row(repository.title, f"{repository.url}\n{templates}", retry=True))
+                continue
+            for template in templates:
+                if isinstance(template, ProjectTemplate):
+                    subtitle = f"{template.description}\n{repository.title}" if template.description else repository.title
+                    row = Adw.ActionRow(title=GLib.markup_escape_text(template.name), subtitle=GLib.markup_escape_text(subtitle))
+                    self._add_check(row, lambda template=template: self._set_selected(template))
+                else:
+                    directory, template_error = template
+                    row = Adw.ActionRow(title=GLib.markup_escape_text(directory or repository.title),
+                                        subtitle=GLib.markup_escape_text(f"{repository.title}\n{template_error}"))
+                    row.add_css_class("dimmed")
+                    row.set_sensitive(False)
+                rows.append(row)
+        if not rows:
+            rows.append(Adw.ActionRow(title="No templates available"))
+        self._set_rows(rows)
         return False
 
-    def _add_check(self, row: Adw.ActionRow, check_group: Gtk.CheckButton, on_selected: Callable):
+    def _add_check(self, row: Adw.ActionRow, on_selected: Callable):
         check_button = Gtk.CheckButton()
-        check_button.set_group(check_group)
-        check_button.connect("toggled", lambda button: on_selected(row) if button.get_active() else None)
+        check_button.set_group(self._check_group)
+        check_button.connect("toggled", lambda button: on_selected() if button.get_active() else None)
         row.add_prefix(check_button)
         row.set_activatable_widget(check_button)
-
-    def _select(self, template: ProjectTemplate | None):
-        self._fetch_generation += 1
-        self._set_selected(template)
 
     def _set_selected(self, template: ProjectTemplate | None):
         self.selected_template = template
         if self.on_changed:
             self.on_changed()
-
-    def _fetch(self, row: Adw.ActionRow, repository):
-        self._fetch_generation += 1
-        generation = self._fetch_generation
-        self._set_selected(None)
-        spinner = Adw.Spinner()
-        row.add_suffix(spinner)
-        row.set_subtitle("Downloading template…")
-        row.remove_css_class("error")
-        def finish(template: ProjectTemplate | None, error: str | None):
-            row.remove(spinner)
-            if error:
-                row.set_subtitle(GLib.markup_escape_text(f"{repository.url}\n{error}"))
-                row.add_css_class("error")
-            else:
-                row.set_title(GLib.markup_escape_text(template.name))
-                row.set_subtitle(GLib.markup_escape_text(f"{template.description}\n{repository.url}" if template.description else repository.url))
-            if generation == self._fetch_generation:
-                self._set_selected(template)
-            return False
-        def fetch():
-            try:
-                template, error = fetch_template_repository(repository.url), None
-            except Exception as e: # Also errors of git and files.
-                template, error = None, str(e)
-            GLib.idle_add(finish, template, error)
-        threading.Thread(target=fetch, daemon=True).start()
 
 class ProjectTemplateOptionsView(Gtk.Box):
     """Options (variables) of template and preview of stages created for them."""
@@ -131,15 +119,18 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self._rebuild_scheduled = False
         self.options_group = Adw.PreferencesGroup(title="Options")
         self.groups_group = Adw.PreferencesGroup(description="Enabled configuration is added to selected stages.")
+        self.overlays_group = Adw.PreferencesGroup(title="Overlays", description="Ebuild repositories used by stages. Overlays that are not added yet are downloaded to Overlays.")
         self.stages_group = Adw.PreferencesGroup(title="Stages", description="Stages created in project for selected options. Their settings can be changed later.")
         self.error_label = Gtk.Label(wrap=True, xalign=0)
         self.error_label.add_css_class("error")
         self.append(self.options_group)
         self.append(self.groups_group)
+        self.append(self.overlays_group)
         self.append(self.error_label)
         self.append(self.stages_group)
         self._option_rows: list[Gtk.Widget] = []
         self._group_rows: list[Gtk.Widget] = []
+        self._overlay_rows: list[Gtk.Widget] = []
         self._stage_rows: list[Gtk.Widget] = []
         self._expanded_rows: set[str] = set() # Expander rows kept expanded when rows are rebuilt.
         self._rebuild()
@@ -164,6 +155,9 @@ class ProjectTemplateOptionsView(Gtk.Box):
             self.options_group.remove(row)
         for row in self._group_rows:
             self.groups_group.remove(row)
+        for row in self._overlay_rows:
+            self.overlays_group.remove(row)
+        self._overlay_rows = []
         for row in self._stage_rows:
             self.stages_group.remove(row)
         self._option_rows, self._group_rows, self._stage_rows = [], [], []
@@ -181,6 +175,13 @@ class ProjectTemplateOptionsView(Gtk.Box):
                 self.generated = self.template.generate(names)
                 for group in self.template.available_groups(names):
                     self._add_group_row(group, names)
+                for overlay in self.generated.overlays:
+                    existing = find_overlay_for_url(overlay.url)
+                    row = Adw.ActionRow(title=GLib.markup_escape_text(overlay.name),
+                                        subtitle=GLib.markup_escape_text(f"Already added as {existing.name}" if existing else f"Will be downloaded from {overlay.url}"))
+                    row.add_prefix(Gtk.Image.new_from_icon_name("layers-minimalistic-svgrepo-com-symbolic"))
+                    self.overlays_group.add(row)
+                    self._overlay_rows.append(row)
                 for stage in self.generated.stages:
                     details = [stage.target.replace("_", "-")]
                     if stage.releng_template:
@@ -196,6 +197,7 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self.options_group.set_visible(bool(self._option_rows))
         self.groups_group.set_title(GLib.markup_escape_text(self.template.groups_title) if self.template else "")
         self.groups_group.set_visible(bool(self._group_rows))
+        self.overlays_group.set_visible(bool(self._overlay_rows))
         self.stages_group.set_visible(self.generated is not None and bool(self.generated.stages))
         self.error_label.set_label(f"Template can't be used: {error}" if error else "")
         self.error_label.set_visible(error is not None)

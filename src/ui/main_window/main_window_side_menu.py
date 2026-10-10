@@ -72,6 +72,12 @@ class CatalystlabWindowSideMenu(Gtk.Box):
         return False
 
     def opened_app_section(self, section: AppSection):
+        # States shown in side menu are seen when their section is opened.
+        row = self.section_list.get_first_child()
+        while row:
+            if isinstance(row, MainWindowSideMenuButton):
+                row.set_section_open(row.section == section)
+            row = row.get_next_sibling()
         if self.selected_section == section:
             return
         self.selected_section = section

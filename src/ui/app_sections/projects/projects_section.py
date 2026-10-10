@@ -2,7 +2,7 @@ from gi.repository import Gtk, Adw
 from .app_section import app_section
 from .project_installation import ProjectInstallation
 from .repository import Repository
-from .status_indicator import combined_status, items_status, processes_status
+from .status_indicator import items_status, processes_status
 from .project_create_view import ProjectCreateView
 from .project_manager import ProjectManager
 from .project_update import ProjectUpdate
@@ -18,7 +18,7 @@ class ProjectsSection(Gtk.Box):
     @staticmethod
     def section_status():
         """Unsaved changes of projects, projects being created or updated (side menu)."""
-        return combined_status(items_status(Repository.ProjectDirectory.value) + processes_status(ProjectInstallation, ProjectUpdate))
+        return (items_status(Repository.ProjectDirectory.value) + processes_status(ProjectInstallation, ProjectUpdate))
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)

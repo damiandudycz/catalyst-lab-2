@@ -2,12 +2,13 @@
 # OverlayDirectory.
 from __future__ import annotations
 import os, threading, subprocess, uuid
+from contextlib import contextmanager
 from gi.repository import GLib
 from enum import Enum, auto
 from datetime import datetime
 from .repository import Serializable
 from .event_bus import EventBus, SharedEvent
-from .status_indicator import StatusIndicatorState, StatusIndicatorValues
+from .status_indicator import StatusIndicatorState, StatusIndicatorValues, StatusDetail, item_status
 from abc import ABC, abstractmethod
 
 class GitDirectoryEvent(Enum):
@@ -17,9 +18,14 @@ class GitDirectoryEvent(Enum):
 
 class GitDirectoryStatus(Enum):
     # Git status
-    UNKNOWN = auto()
+    UNKNOWN = auto() # Not checked yet.
     UNCHANGED = auto()
     CHANGED = auto()
+    CONFLICTED = auto() # Unfinished merge with conflicts.
+    ERROR = auto() # Directory is missing, isn't Git repository, or Git failed.
+
+# Status codes of unmerged files in git status --porcelain.
+_CONFLICT_STATUS_CODES = {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
 
 class GitDirectory(Serializable, ABC):
 
@@ -52,6 +58,26 @@ class GitDirectory(Serializable, ABC):
         # together (eg. stage added and its file written), status is read once after them.
         self._status_update_id = None
         self.event_bus.subscribe(GitDirectoryEvent.CONTENT_CHANGED, self._on_content_changed)
+        # Running Git operations (update, save, discard), shown as blinking status indicator.
+        self._operations = 0
+        self._operations_lock = threading.Lock()
+
+    @contextmanager
+    def operation(self):
+        """Marks Git operation running on directory while inside of with block."""
+        with self._operations_lock:
+            self._operations += 1
+        self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+        try:
+            yield
+        finally:
+            with self._operations_lock:
+                self._operations -= 1
+            self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
+
+    @property
+    def is_busy(self) -> bool:
+        return self._operations > 0
 
     @property
     def short_details(self) -> str:
@@ -64,23 +90,23 @@ class GitDirectory(Serializable, ABC):
 
     @property
     def status_indicator_values(self) -> StatusIndicatorValues:
+        # TODO: Show updates available (has_remote_changes) too.
+        return item_status(self.status_details(), blinking=self.is_busy)
+
+    def status_details(self) -> list[StatusDetail]:
+        """States of directory (Git status, running operation)."""
         match self.status:
-            # TODO: Add new color when updates are available, here and in other classes.
-            case GitDirectoryStatus.UNKNOWN | GitDirectoryStatus.UNCHANGED:
-                return StatusIndicatorValues(
-                    state=StatusIndicatorState.DISABLED,
-                    blinking=False
-                )
             case GitDirectoryStatus.CHANGED:
-                return StatusIndicatorValues(
-                    state=StatusIndicatorState.ENABLED_UNSAFE,
-                    blinking=False
-                )
+                detail = StatusDetail(StatusIndicatorState.CHANGED, "Not saved changes")
+            case GitDirectoryStatus.CONFLICTED:
+                detail = StatusDetail(StatusIndicatorState.ERROR, "Merge conflicts")
+            case GitDirectoryStatus.ERROR:
+                detail = StatusDetail(StatusIndicatorState.ERROR, "Git status can't be read (directory is missing or isn't Git repository)")
+            case GitDirectoryStatus.UNKNOWN:
+                detail = StatusDetail(StatusIndicatorState.IDLE, "Checking status")
             case _:
-                return StatusIndicatorValues(
-                    state=StatusIndicatorState.DISABLED,
-                    blinking=False
-                )
+                detail = StatusDetail(StatusIndicatorState.IDLE, "No changes")
+        return [detail, StatusDetail(StatusIndicatorState.LOADED, "Git operation running") if self.is_busy else None]
 
     @classmethod
     def parse_metadata(cls, dict: dict) -> Serializable:
@@ -141,7 +167,7 @@ class GitDirectory(Serializable, ABC):
             if not os.path.isdir(directory) or not os.path.isdir(
                 os.path.join(directory, ".git")
             ):
-                self.status = GitDirectoryStatus.UNKNOWN
+                self.status = GitDirectoryStatus.ERROR
                 self.last_commit_date = None
                 self.branch_name = None
                 self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
@@ -157,7 +183,9 @@ class GitDirectory(Serializable, ABC):
                 )
                 stdout, _ = process.communicate()
                 if process.returncode != 0:
-                    self.status = GitDirectoryStatus.UNKNOWN
+                    self.status = GitDirectoryStatus.ERROR
+                elif any(line[:2] in _CONFLICT_STATUS_CODES for line in stdout.splitlines()):
+                    self.status = GitDirectoryStatus.CONFLICTED
                 else:
                     self.status = GitDirectoryStatus.CHANGED if stdout.strip() else GitDirectoryStatus.UNCHANGED
                 # Get last commit date (ISO 8601)
@@ -230,7 +258,7 @@ class GitDirectory(Serializable, ABC):
                     self.has_remote_changes = False
             except Exception as e:
                 print(f"STATUS EXCEPTION: {e}")
-                self.status = GitDirectoryStatus.UNKNOWN
+                self.status = GitDirectoryStatus.ERROR
                 self.last_commit_date = None
                 self.branch_name = None
             self.event_bus.emit(SharedEvent.STATE_UPDATED, self)
@@ -290,23 +318,24 @@ class GitDirectory(Serializable, ABC):
 
     def discard_changes(self, wait: bool = False):
         def worker():
-            try:
-                subprocess.run(
-                    ["git", "reset", "--hard"],
-                    cwd=self.directory_path(),
-                    check=True
-                )
-                subprocess.run(
-                    ["git", "clean", "-fdx"],
-                    cwd=self.directory_path(),
-                    check=True
-                )
-            except Exception as e:
-                print(f"DISCARD EXCEPTION: {e}")
-            finally:
-                # Status is read again also after failure, it could be outdated.
-                self.update_status(wait=wait)
-                self.update_logs(wait=wait)
+            with self.operation():
+                try:
+                    subprocess.run(
+                        ["git", "reset", "--hard"],
+                        cwd=self.directory_path(),
+                        check=True
+                    )
+                    subprocess.run(
+                        ["git", "clean", "-fdx"],
+                        cwd=self.directory_path(),
+                        check=True
+                    )
+                except Exception as e:
+                    print(f"DISCARD EXCEPTION: {e}")
+                finally:
+                    # Status is read again also after failure, it could be outdated. Operation ends with new status.
+                    self.update_status(wait=True)
+                    self.update_logs(wait=True)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:
@@ -318,26 +347,27 @@ class GitDirectory(Serializable, ABC):
         """Commits all changes of directory, with given message (default one when empty)."""
         message = (message or "").strip() or self.DEFAULT_COMMIT_MESSAGE
         def worker():
-            try:
-                subprocess.run(
-                    ["git", "add", "-A"],
-                    cwd=self.directory_path(),
-                    check=True
-                )
-                # Nothing to commit when changes were reverted outside of app (status shown was outdated).
-                staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=self.directory_path())
-                if staged.returncode != 0:
+            with self.operation():
+                try:
                     subprocess.run(
-                        ["git", "commit", "-m", message],
+                        ["git", "add", "-A"],
                         cwd=self.directory_path(),
                         check=True
                     )
-            except Exception as e:
-                print(f"COMMIT EXCEPTION: {e}")
-            finally:
-                # Status is read again also after failure, it could be outdated.
-                self.update_status(wait=wait)
-                self.update_logs(wait=wait)
+                    # Nothing to commit when changes were reverted outside of app (status shown was outdated).
+                    staged = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=self.directory_path())
+                    if staged.returncode != 0:
+                        subprocess.run(
+                            ["git", "commit", "-m", message],
+                            cwd=self.directory_path(),
+                            check=True
+                        )
+                except Exception as e:
+                    print(f"COMMIT EXCEPTION: {e}")
+                finally:
+                    # Status is read again also after failure, it could be outdated. Operation ends with new status.
+                    self.update_status(wait=True)
+                    self.update_logs(wait=True)
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
         if wait:

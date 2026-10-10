@@ -1,8 +1,7 @@
 """Project templates: directories with template.toml describing stages, options and files of new project.
 
-Local templates are directories in data/project_templates of the app, templates from Git repositories have the same
-layout in root of repository. Repositories offered in the app are listed in data/project_templates/repositories.txt,
-downloaded from main branch of Catalyst Lab repository.
+Templates come from Git repositories listed in data/project_templates/repositories.txt, downloaded from main branch of
+Catalyst Lab repository. Repository has one template in its root, or many templates in its directories.
 Format of templates is described in docs/project-templates.md.
 
 Templates can't run code. Values in template.toml can contain {{ expressions }} and "when" conditions, evaluated by
@@ -17,7 +16,6 @@ from .architecture import Architecture
 
 TEMPLATE_FILE = "template.toml"
 TEMPLATE_FORMAT = 1
-REPOSITORIES_FILE = "repositories.txt"
 RENDERED_FILE_SUFFIX = ".template"
 
 class TemplateError(Exception):
@@ -230,6 +228,20 @@ class TemplateFiles:
     when: str | None
 
 @dataclass
+class TemplateOverlay:
+    """Overlay (Gentoo ebuild repository) used by template. Overlay with the same URL that was already added is used,
+    otherwise it's cloned to overlays when project is created."""
+    id: str # Used in stage arguments: { type = "Overlay", value = "<id>" }.
+    url: str
+    name: str # Name of overlay directory when it's cloned.
+    when: str | None
+
+@dataclass(frozen=True)
+class TemplateOverlayReference:
+    """Overlay of template in stage arguments (eg. repos), replaced with id of overlay when project is created."""
+    id: str
+
+@dataclass
 class TemplateGroup:
     """Configuration that can be enabled when creating project and applied to selected stages: arguments added to
     stages (lists are extended) and files copied to their directories."""
@@ -269,6 +281,7 @@ class GeneratedProject:
     stages: list[GeneratedStage]
     files: list[tuple[str, str]] # Absolute source path in template, destination path relative to project.
     architecture: Architecture | None
+    overlays: list[TemplateOverlay] = field(default_factory=list) # Overlays used by project.
 
 def _table(data: dict, key: str, context: str) -> dict:
     value = data.get(key, {})
@@ -315,14 +328,18 @@ class ProjectTemplate:
     files: list[TemplateFiles]
     groups: list[TemplateGroup] = field(default_factory=list)
     groups_title: str = "Additional configuration"
+    overlays: list[TemplateOverlay] = field(default_factory=list)
     architecture: Architecture | None = None # Fixed architecture of projects, for templates without architecture variable.
-    repository_url: str | None = None # Git repository of template, None for templates included in app.
+    repository_url: str | None = None # Git repository of template.
+    repository_path: str = "" # Directory of template in repository, empty for template in root of repository.
+    min_app_version: str | None = None # Oldest version of Catalyst Lab that supports template.
     # False for definition downloaded without other files of repository (to show options), files are checked when
     # template is applied from cloned repository.
     files_available: bool = True
 
     @classmethod
-    def load(cls, path: str, repository_url: str | None = None, files_available: bool = True) -> ProjectTemplate:
+    def load(cls, path: str, repository_url: str | None = None, repository_path: str = "",
+             files_available: bool = True) -> ProjectTemplate:
         file_path = os.path.join(path, TEMPLATE_FILE)
         if not os.path.isfile(file_path):
             raise TemplateError(f"{TEMPLATE_FILE} not found")
@@ -333,6 +350,14 @@ class ProjectTemplate:
                 data = tomllib.load(file)
         except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
             raise TemplateError(f"Invalid {TEMPLATE_FILE}: {e}") from None
+        # Checked first, templates for newer versions can use things this version doesn't know.
+        min_app_version = data.get("min_app_version")
+        if min_app_version is not None:
+            from . import app_info
+            if not isinstance(min_app_version, str) or not re.match(r"^\d+(\.\d+)*$", min_app_version):
+                raise TemplateError("Template: min_app_version must be version like 0.2.0")
+            if app_info.version_tuple(app_info.APP_VERSION) < app_info.version_tuple(min_app_version):
+                raise TemplateError(f"Requires Catalyst Lab {min_app_version} or newer (this is {app_info.APP_VERSION})")
         if data.get("format", TEMPLATE_FORMAT) != TEMPLATE_FORMAT:
             raise TemplateError(f"Template format {data.get('format')} is not supported, update Catalyst Lab")
         name = _text(data, "name", "Template")
@@ -457,9 +482,27 @@ class ProjectTemplate:
                 arguments=arguments, files=_parse_files(group_data.get("files", []), f"{context} files")
             ))
         groups_title = _text(data, "groups_title", "Template", required=False) or "Additional configuration"
+        # Overlays:
+        overlays = []
+        for index, overlay_data in enumerate(data.get("overlays", [])):
+            context = f"Overlay {index + 1}"
+            if not isinstance(overlay_data, dict):
+                raise TemplateError(f"{context} must be a table")
+            overlay_id = _text(overlay_data, "id", context)
+            context = f"Overlay {overlay_id}"
+            if not _IDENTIFIER_PATTERN.match(overlay_id) or any(overlay.id == overlay_id for overlay in overlays):
+                raise TemplateError(f"{context}: invalid or duplicated id")
+            url = _text(overlay_data, "url", context)
+            if not re.match(r"^(https://|file://)\S+$", url):
+                raise TemplateError(f"{context}: url must be https:// URL of Git repository")
+            overlay_name = _text(overlay_data, "name", context, required=False) or url.rstrip("/").split("/")[-1].removesuffix(".git")
+            if "/" in overlay_name or overlay_name.startswith(".") or not overlay_name.strip():
+                raise TemplateError(f"{context}: invalid name {overlay_name!r}")
+            overlays.append(TemplateOverlay(id=overlay_id, url=url, name=overlay_name, when=_condition(overlay_data, context)))
         return cls(path=path, name=name, description=description, variables=variables, values=values, stages=stages,
-                   files=files, groups=groups, groups_title=groups_title,
+                   files=files, groups=groups, groups_title=groups_title, overlays=overlays,
                    architecture=Architecture[architecture_name] if architecture_name else None, repository_url=repository_url,
+                   repository_path=repository_path, min_app_version=min_app_version,
                    files_available=files_available)
 
     @property
@@ -589,7 +632,14 @@ class ProjectTemplate:
                         files.append(self._files_paths(entry, names, base=os.path.join("stages", stage_names[stage_id])))
         architecture_variable = self.architecture_variable
         architecture_name = names.get(architecture_variable.id) if architecture_variable else None
-        return GeneratedProject(stages=stages, files=files,
+        # Overlays: used ones have to be available for selected options.
+        overlays = [overlay for overlay in self.overlays if evaluate_condition(overlay.when, names)]
+        available_ids = {overlay.id for overlay in overlays}
+        for stage in stages:
+            for reference in _overlay_references(stage.arguments):
+                if reference.id not in available_ids:
+                    raise TemplateError(f"Stage {stage.template_id}: overlay {reference.id} is not available for selected options")
+        return GeneratedProject(stages=stages, files=files, overlays=overlays,
                                 architecture=Architecture[architecture_name] if architecture_name else self.architecture)
 
 def _template_files_paths(template: ProjectTemplate, entry: TemplateFiles, names: dict[str, Any], base: str) -> tuple[str, str]:
@@ -608,6 +658,22 @@ def _template_files_paths(template: ProjectTemplate, entry: TemplateFiles, names
         raise TemplateError(f"Files source {entry.source} doesn't exist")
     return source, destination
 
+def _overlay_references(value) -> list[TemplateOverlayReference]:
+    if isinstance(value, TemplateOverlayReference):
+        return [value]
+    if isinstance(value, dict):
+        return [reference for item in value.values() for reference in _overlay_references(item)]
+    if isinstance(value, list):
+        return [reference for item in value for reference in _overlay_references(item)]
+    return []
+
+def _replace_overlay_references(value, overlay_ids: dict[str, Any]):
+    if isinstance(value, TemplateOverlayReference):
+        return overlay_ids[value.id]
+    if isinstance(value, list):
+        return [_replace_overlay_references(item, overlay_ids) for item in value]
+    return value
+
 def _stage_argument_value(value, context: str):
     """Value of stage argument from template: texts, numbers, booleans and their lists are used directly, tables
     with type and value use format of stage.json."""
@@ -617,6 +683,10 @@ def _stage_argument_value(value, context: str):
         # Items that are none (also tables with none value) are skipped, so expressions can leave them out.
         return [_stage_argument_value(item, context) for item in value
                 if item is not None and not (isinstance(item, dict) and item.get("value") is None)]
+    if isinstance(value, dict) and value.get("type") == "Overlay" and set(value) == {"type", "value"}:
+        if not isinstance(value["value"], str):
+            raise TemplateError(f"{context}: overlay must be id of overlay")
+        return TemplateOverlayReference(value["value"])
     if isinstance(value, dict) and set(value) == {"type", "value"}:
         from .project_stage_argument_serialization import ProjectStageArgumentSerialization
         try:
@@ -626,34 +696,8 @@ def _stage_argument_value(value, context: str):
     raise TemplateError(f"{context}: unsupported value {value!r}")
 
 # ------------------------------------------------------------------------------
-# Available templates.
+# Template repositories.
 # ------------------------------------------------------------------------------
-
-def templates_directory() -> str | None:
-    """data/project_templates installed with app (share/catalystlab/project_templates)."""
-    import sys
-    from gi.repository import GLib
-    candidates = [os.path.join(directory, "catalystlab", "project_templates") for directory in GLib.get_system_data_dirs()]
-    # Installed modules are in share/catalystlab/catalystlab, macOS bundle has data in share/catalystlab.
-    candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "project_templates"))
-    if hasattr(sys, "_MEIPASS"):
-        candidates.append(os.path.join(sys._MEIPASS, "share", "catalystlab", "project_templates"))
-    return next((path for path in candidates if os.path.isdir(path)), None)
-
-def local_templates() -> list[ProjectTemplate | tuple[str, TemplateError]]:
-    """Templates included in app, sorted by name. Templates that fail to load are returned as (path, error)."""
-    directory = templates_directory()
-    if directory is None:
-        return []
-    templates = []
-    for entry in sorted(os.listdir(directory)):
-        path = os.path.join(directory, entry)
-        if os.path.isfile(os.path.join(path, TEMPLATE_FILE)):
-            try:
-                templates.append(ProjectTemplate.load(path))
-            except TemplateError as e:
-                templates.append((path, e))
-    return sorted(templates, key=lambda item: item.name.lower() if isinstance(item, ProjectTemplate) else item[0])
 
 @dataclass
 class TemplateRepository:
@@ -702,18 +746,23 @@ def _run_git(command: list[str], timeout: int = 300):
         output = result.stdout.strip()
         raise TemplateError(output.splitlines()[-1] if output else f"{' '.join(command[:2])} failed")
 
-# Template repositories can contain only template: template.toml, files used by it and few common repository files.
-_REPOSITORY_ALLOWED_FILES = re.compile(r"^(template\.toml|\.gitignore|\.gitattributes|(README|LICENSE|LICENCE|COPYING)(\.[A-Za-z0-9]+)?)$")
+# Template repositories can contain only templates: one in root of repository, or many in its directories. Template
+# has template.toml, files used by it in files directory and README. Root of repository can also have common
+# repository files.
+_REPOSITORY_ROOT_FILES = re.compile(r"^(\.gitignore|\.gitattributes|(README|LICENSE|LICENCE|COPYING)(\.[A-Za-z0-9]+)?)$")
+_TEMPLATE_FILES = re.compile(r"^(template\.toml|README(\.[A-Za-z0-9]+)?)$")
+_TEMPLATE_DIRECTORY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REPOSITORY_FILES_DIRECTORY = "files"
 _REPOSITORY_MAX_FILES = 2_000
 _REPOSITORY_MAX_FILE_SIZE = 10 * 1024 * 1024
 _REPOSITORY_MAX_TOTAL_SIZE = 50 * 1024 * 1024
 
-def validate_template_repository(path: str, check_sizes: bool):
-    """Checks that latest commit of template repository contains only template: template.toml in root, optionally
-    README, LICENSE, COPYING, .gitignore and .gitattributes files, and other files in files directory. Symbolic links,
-    submodules and executable files are not allowed. Sizes of files are checked when they were downloaded
-    (check_sizes), listing of files doesn't need their contents."""
+def validate_template_repository(path: str, check_sizes: bool) -> list[str]:
+    """Checks that latest commit of template repository contains only templates, and returns their directories in
+    repository ("" for template in root). Template is template.toml, optional README and files directory. Root of
+    repository can also have LICENSE, COPYING, README, .gitignore and .gitattributes. Symbolic links, submodules and
+    executable files are not allowed. Sizes of files are checked when they were downloaded (check_sizes), listing of
+    files doesn't need their contents."""
     command = ["git", "-C", path, "ls-tree", "-r", "-z"] + (["-l"] if check_sizes else []) + ["HEAD"]
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
     if result.returncode != 0:
@@ -721,7 +770,7 @@ def validate_template_repository(path: str, check_sizes: bool):
     entries = [entry for entry in result.stdout.decode("utf-8", errors="replace").split("\0") if entry]
     if len(entries) > _REPOSITORY_MAX_FILES:
         raise TemplateError(f"Repository has more than {_REPOSITORY_MAX_FILES} files")
-    has_template = False
+    files = []
     total_size = 0
     for entry in entries:
         details, _, file_path = entry.partition("\t")
@@ -732,26 +781,46 @@ def validate_template_repository(path: str, check_sizes: bool):
             raise TemplateError(f"Repository can't contain symbolic links ({file_path})")
         if mode != "100644":
             raise TemplateError(f"Repository can't contain executable or special files ({file_path})")
-        if "/" in file_path:
-            if file_path.split("/")[0] != _REPOSITORY_FILES_DIRECTORY:
-                raise TemplateError(f"Files of template must be in {_REPOSITORY_FILES_DIRECTORY} directory ({file_path})")
-        elif not _REPOSITORY_ALLOWED_FILES.match(file_path):
-            raise TemplateError(f"Repository can contain only template ({file_path} is not allowed)")
-        has_template = has_template or file_path == TEMPLATE_FILE
+        files.append(file_path)
         if check_sizes:
             size = int(rest[1]) if len(rest) > 1 and rest[1].isdigit() else 0
             if size > _REPOSITORY_MAX_FILE_SIZE:
                 raise TemplateError(f"{file_path} is larger than {_REPOSITORY_MAX_FILE_SIZE // 1024 // 1024} MB")
             total_size += size
-    if not has_template:
-        raise TemplateError(f"Repository has no {TEMPLATE_FILE}")
     if total_size > _REPOSITORY_MAX_TOTAL_SIZE:
         raise TemplateError(f"Files of repository are larger than {_REPOSITORY_MAX_TOTAL_SIZE // 1024 // 1024} MB")
+    single_template = TEMPLATE_FILE in files
+    templates = set()
+    for file_path in files:
+        parts = file_path.split("/")
+        if not single_template and len(parts) > 1:
+            # Directory of template.
+            if not _TEMPLATE_DIRECTORY.match(parts[0]):
+                raise TemplateError(f"Invalid name of template directory ({parts[0]})")
+            if parts[1:] == [TEMPLATE_FILE]:
+                templates.add(parts[0])
+            parts = parts[1:]
+        elif len(parts) == 1 and _REPOSITORY_ROOT_FILES.match(parts[0]):
+            continue
+        if len(parts) == 1:
+            if not _TEMPLATE_FILES.match(parts[0]):
+                raise TemplateError(f"Repository can contain only templates ({file_path} is not allowed)")
+        elif parts[0] != _REPOSITORY_FILES_DIRECTORY:
+            raise TemplateError(f"Files of template must be in {_REPOSITORY_FILES_DIRECTORY} directory ({file_path})")
+    if single_template:
+        return [""]
+    directories = {file_path.split("/")[0] for file_path in files if "/" in file_path}
+    if missing := sorted(directories - templates):
+        raise TemplateError(f"Directory {missing[0]} has no {TEMPLATE_FILE}")
+    if not templates:
+        raise TemplateError(f"Repository has no {TEMPLATE_FILE}")
+    return sorted(templates)
 
-def fetch_template_repository(url: str) -> ProjectTemplate:
-    """Downloads only template.toml from latest commit of template repository, to show its options. Other files are
-    used from repository cloned when project is created. Uses partial clone without contents of files, servers that
-    don't support it send whole latest commit."""
+def fetch_template_repository(url: str) -> list[ProjectTemplate | tuple[str, TemplateError]]:
+    """Downloads only template.toml files from latest commit of template repository, to show templates and their
+    options. Other files are used from repository cloned when project is created. Uses partial clone without contents
+    of files, servers that don't support it send whole latest commit. Templates that can't be used are returned as
+    (directory, error)."""
     from .repository import Repository
     temporary = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
     path = os.path.join(temporary, "Project templates", hashlib.sha1(url.encode()).hexdigest()[:16])
@@ -759,21 +828,38 @@ def fetch_template_repository(url: str) -> ProjectTemplate:
         shutil.rmtree(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     _run_git(["git", "clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--quiet", url, path])
-    validate_template_repository(path, check_sizes=False)
-    _run_git(["git", "-C", path, "sparse-checkout", "set", "--no-cone", "/" + TEMPLATE_FILE])
+    directories = validate_template_repository(path, check_sizes=False)
+    _run_git(["git", "-C", path, "sparse-checkout", "set", "--no-cone"]
+             + [f"/{directory}/{TEMPLATE_FILE}" if directory else f"/{TEMPLATE_FILE}" for directory in directories])
     _run_git(["git", "-C", path, "checkout", "--quiet"])
-    return ProjectTemplate.load(path, repository_url=url, files_available=False)
+    templates = []
+    for directory in directories:
+        try:
+            templates.append(ProjectTemplate.load(os.path.join(path, directory), repository_url=url,
+                                                  repository_path=directory, files_available=False))
+        except TemplateError as e:
+            templates.append((directory, e))
+    return templates
 
-def load_cloned_template(path: str, repository_url: str) -> ProjectTemplate:
-    """Template of repository cloned as project directory. Its files are copied to temporary directory first, as
-    project directory is replaced with generated content. Remove returned template path when done."""
+def load_cloned_template(path: str, repository_url: str, repository_path: str) -> tuple[ProjectTemplate, str]:
+    """Template from repository cloned as project directory. Files of repository are copied to temporary directory
+    first, as project directory is replaced with generated content. Returns template and temporary directory, remove
+    it when done."""
     from .repository import Repository
-    validate_template_repository(path, check_sizes=True)
+    if repository_path not in validate_template_repository(path, check_sizes=True):
+        raise TemplateError(f"Template {repository_path or TEMPLATE_FILE} is not in repository anymore")
     temporary = os.path.realpath(os.path.expanduser(Repository.Settings.value.temporary_location))
     os.makedirs(temporary, exist_ok=True)
-    copy_path = os.path.join(tempfile.mkdtemp(prefix="project-template-", dir=temporary), "template")
+    temporary_directory = tempfile.mkdtemp(prefix="project-template-", dir=temporary)
+    copy_path = os.path.join(temporary_directory, "repository")
     shutil.copytree(path, copy_path, symlinks=True, ignore=shutil.ignore_patterns(".git"))
-    return ProjectTemplate.load(copy_path, repository_url=repository_url)
+    try:
+        template = ProjectTemplate.load(os.path.join(copy_path, repository_path), repository_url=repository_url,
+                                        repository_path=repository_path)
+    except Exception:
+        shutil.rmtree(temporary_directory, ignore_errors=True)
+        raise
+    return template, temporary_directory
 
 # ------------------------------------------------------------------------------
 # Creating project.
@@ -831,6 +917,42 @@ def _enable_stage_overlays(project_directory, stage, log: Callable[[str], None])
             setattr(stage, attribute, [source for source in PORTAGE_CONFDIR_SOURCES_ORDER if source in sources])
             log(f"Using {os.path.basename(path)} of {stage.name} from template")
 
+def _normalized_git_url(url: str) -> str:
+    return url.strip().rstrip("/").removesuffix(".git").lower()
+
+def find_overlay_for_url(url: str):
+    """Overlay already added to app, cloned from given repository."""
+    from .repository import Repository
+    return next((overlay for overlay in Repository.OverlayDirectory.value
+                 if overlay.remote_url and _normalized_git_url(overlay.remote_url) == _normalized_git_url(url)), None)
+
+def ensure_template_overlays(overlays: list[TemplateOverlay], log: Callable[[str], None]) -> dict[str, uuid.UUID]:
+    """Ids of overlays used by template, by template ids of overlays. Overlays that were not added yet are cloned and
+    added to overlays of app."""
+    from .overlay_directory import OverlayDirectory
+    from .overlay_manager import OverlayManager
+    overlay_ids = {}
+    for overlay in overlays:
+        if existing := find_overlay_for_url(overlay.url):
+            log(f"Using overlay {existing.name} ({overlay.url})")
+            overlay_ids[overlay.id] = existing.id
+            continue
+        name, suffix = overlay.name, 2
+        while not OverlayManager.shared().is_name_available(name):
+            name, suffix = f"{overlay.name}-{suffix}", suffix + 1
+        directory = OverlayDirectory(name=name)
+        log(f"Cloning overlay {overlay.url} to {name}")
+        try:
+            _run_git(["git", "clone", "--quiet", overlay.url, directory.directory_path()], timeout=1800)
+        except Exception:
+            shutil.rmtree(directory.directory_path(), ignore_errors=True)
+            raise
+        directory.update_status(wait=True)
+        directory.update_logs(wait=True)
+        OverlayManager.shared().add_directory(directory)
+        overlay_ids[overlay.id] = directory.id
+    return overlay_ids
+
 def apply_project_template(project_directory, template: ProjectTemplate, names: dict[str, Any],
                            log: Callable[[str], None], replace_content: bool = False):
     """Creates files and stages of template in project directory. Project needs configuration (toolset, releng) set
@@ -839,6 +961,7 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
     from .project_stage import ProjectStage, apply_default_stage_arguments
     from .project_manager import ProjectManager
     generated = template.generate(names)
+    overlay_ids = ensure_template_overlays(generated.overlays, log)
     path = project_directory.directory_path()
     if replace_content:
         for entry in os.listdir(path):
@@ -874,7 +997,7 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
             if valid_arguments is not None and key not in valid_arguments:
                 # Groups can set arguments of different targets (eg. stage4_packages and livecd_packages).
                 continue
-            setattr(stage, key, value)
+            setattr(stage, key, _replace_overlay_references(value, overlay_ids))
         if generated_stage.releng_template and releng_directory and architecture:
             spec_path = os.path.join(releng_directory.directory_path(), "releases", "specs",
                                      architecture.releng_base_arch().value, generated_stage.releng_template)

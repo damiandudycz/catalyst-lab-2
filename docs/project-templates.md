@@ -3,34 +3,40 @@
 New projects can be created from a template. A template describes the stages of a project (and optionally files like
 Portage configuration), and can have options, like architecture or init system, that change what is created.
 
-Templates come from two places:
+Templates come from Git repositories listed in
+[`data/project_templates/repositories.txt`](../data/project_templates/repositories.txt). The app always downloads this
+list from the `main` branch, so templates removed from it are not offered anymore. Then it downloads only the
+`template.toml` files of these repositories, to show their templates and options. When a project is created, the
+repository is cloned under the project name and its content is replaced with the generated project, so the project
+keeps the history of the template repository.
 
-- **Included in Catalyst Lab** — directories in [`data/project_templates`](../data/project_templates), for example
-  [Gentoo release](../data/project_templates/gentoo-release/template.toml).
-- **Git repositories** — listed in [`data/project_templates/repositories.txt`](../data/project_templates/repositories.txt).
-  The app always downloads this list from the `main` branch, so templates removed from it are not offered anymore.
-  When the list can't be downloaded, only templates included in the app are shown. When a repository template is
-  selected, only its `template.toml` is downloaded to show its options. When the project
-  is created, the repository is cloned under the project name and its content is replaced with the generated project,
-  so the project keeps the history of the template.
-
-Both kinds have the same format: a directory (or repository root) with `template.toml`, and optionally a `files`
-directory.
+Templates included in the official list are in
+[catalystlab-templates](https://github.com/damiandudycz/catalystlab-templates), for example
+[Gentoo release](https://github.com/damiandudycz/catalystlab-templates/tree/main/gentoo-release).
 
 Templates can't run code. Values are generated with small expressions (see [Expressions](#expressions)) that only
 allow a fixed set of operations, so templates from other repositories are safe to use.
 
 ## Repository layout
 
+A repository has one template in its root, or many templates, each in its own directory:
+
 ```
-template.toml        Required, definition of template.
-files/               Optional, files copied to projects (see [[files]]).
-README.md            Optional, also README, LICENSE, COPYING (with any extension), .gitignore, .gitattributes.
+gentoo-release/                 Directory of template, its name is used only in repository.
+    template.toml               Required, definition of template.
+    files/                      Optional, files copied to projects (see [[files]]).
+    README.md                   Optional.
+raspberry-pi-5/
+    template.toml
+    ...
+README.md                       Optional, also LICENSE, COPYING (with any extension), .gitignore, .gitattributes.
 ```
+
+With one template, `template.toml`, `files/` and other files are in the root of the repository.
 
 Repositories are checked when they are downloaded, and are rejected if their latest commit contains anything else:
 
-- other files or directories in the root,
+- other files or directories (also directories of templates without `template.toml`),
 - symbolic links, submodules or executable files,
 - more than 2000 files, files larger than 10 MB, or more than 50 MB of files in total.
 
@@ -38,6 +44,7 @@ Repositories are checked when they are downloaded, and are rejected if their lat
 
 ```toml
 format = 1                      # Optional, version of template format.
+min_app_version = "0.2.0"       # Optional, oldest version of Catalyst Lab that supports the template.
 name = "Gentoo release"         # Shown in list of templates and used as default project name.
 description = "Stages built like official Gentoo releases."
 architecture = "arm64"          # Optional, architecture of projects for templates made for one architecture.
@@ -109,6 +116,27 @@ destination = "portage"                 # Relative to the stage directory.
   `stage4_packages` and `livecd_packages`.
 - Enabled groups are available in expressions as list `groups`, for example `'kernel' in groups`. Groups can use
   variables in `when` and expressions, `[values]` can use `groups`.
+
+### Overlays: `[[overlays]]`
+
+Overlays (Gentoo ebuild repositories) used by stages, for example with packages or kernels for specific hardware.
+
+```toml
+[[overlays]]
+id = "ps3"                              # Used in stage arguments.
+url = "https://github.com/damiandudycz/ps3-gentoo-overlay.git"
+name = "ps3-gentoo-overlay"             # Optional, name of overlay in Catalyst Lab when it's added.
+when = "..."                            # Optional, overlay is used only when this is true.
+
+[[stages]]
+...
+[stages.arguments]
+repos = [{ type = "Overlay", value = "ps3" }]
+```
+
+When the project is created, an overlay already added to Catalyst Lab from the same URL is used. Otherwise it's
+cloned to Overlays. The options page lists overlays and whether they will be downloaded. Children of the stage inherit
+`repos` like other arguments.
 
 ### Computed values: `[values]`
 
@@ -196,13 +224,10 @@ rejected. Expressions are limited in length, complexity and size of their result
 
 ## Testing a template
 
-Run Catalyst Lab from the checkout ([Development](../README.md#development)) and either:
-
-- put the template directory in `data/project_templates`, or
-- write a list of repositories in the format of `repositories.txt` and start the app with
-  `CATALYSTLAB_TEMPLATE_REPOSITORIES` set to its `file://` (or `https://`) URL, which replaces the list from `main`.
-  Local repositories can be added to it with `file://` URLs, for example `file:///home/me/my-template`. Only committed
-  files are used.
+Write a list of repositories in the format of `repositories.txt` and start Catalyst Lab with
+`CATALYSTLAB_TEMPLATE_REPOSITORIES` set to its `file://` (or `https://`) URL, which replaces the list from `main`.
+Local repositories can be added to it with `file://` URLs, for example `file:///home/me/my-templates`. Only committed
+files are used.
 
 Then create a new project, select **From template** and your template. Errors in `template.toml` are shown in the list
 of templates or on the options page. Check that every combination of options creates the stages you expect: the
@@ -218,7 +243,9 @@ Templates in Git repositories are added to the list in the app with a pull reque
    ```
    https://github.com/you/your-template.git Title of your template
    ```
-   The URL is followed by an optional title, shown before the template is downloaded.
+   The URL is followed by an optional title, shown with templates of the repository and in errors.
+   A template can also be added to an existing repository with templates, like
+   [catalystlab-templates](https://github.com/damiandudycz/catalystlab-templates), with a pull request there.
 3. Open a pull request that changes only this file. Describe what the template creates and which architectures and
    Releng specs it was tested with.
 
@@ -226,4 +253,5 @@ Catalyst Lab downloads the latest list from the `main` branch of catalyst-lab-2 
 template is available without updating the app, and a template removed from the list (for example when it's broken
 or unsafe) is not offered anymore.
 Repository URLs have to use `https://`. Templates are downloaded from the default branch of their repository, so later
-changes are available without changing the list.
+changes are available without changing the list. Use `min_app_version` when a template needs features of newer
+Catalyst Lab: older versions show it as unavailable, with the version it needs.
