@@ -7,7 +7,7 @@ from .releng_create_view import RelengCreateView
 from .releng_manager import RelengManager
 from .releng_update import RelengUpdate
 from .app_events import app_event_bus, AppEvents
-from .git_directory_details_view import GitDirectoryDetailsView
+from .releng_details_view import RelengDetailsView
 
 @app_section(title="Releng", icon="book-minimalistic-svgrepo-com-symbolic", order=4_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/releng/releng_section.ui')
@@ -25,25 +25,8 @@ class RelengSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_item_row_pressed(self, sender, item):
-        view = GitDirectoryDetailsView(
-            git_directory=item,
-            manager_class=RelengManager,
-            update_class=RelengUpdate
-        )
-        view.content_navigation_view = self.content_navigation_view
-        view.set_margin_start(24)
-        view.set_margin_end(24)
-        #view.set_margin_top(24)
-        view.set_margin_bottom(24)
-        scrolled_window = Gtk.ScrolledWindow()
-        scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scrolled_window.set_hexpand(True)
-        scrolled_window.set_vexpand(True)
-        scrolled_window.set_child(view)
-        self.content_navigation_view.push_view(
-            scrolled_window,
-            title="Releng directory details"
-        )
+        view = RelengDetailsView(releng_directory=item, content_navigation_view=self.content_navigation_view)
+        self.content_navigation_view.push_view(view, title="Releng directory details")
 
     @Gtk.Template.Callback()
     def on_installation_row_pressed(self, sender, installation):
