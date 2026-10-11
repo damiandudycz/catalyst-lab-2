@@ -91,6 +91,13 @@ class ProjectDirectory(GitDirectory):
         from .project_build_process import running_project_build
         running = running_project_build(self)
         timestamp, result = last_build_run(self, running_timestamp=running.timestamp if running else None)
+        if running is not None and timestamp == running.timestamp:
+            # Steps of running build that failed (also steps not building stages, eg. seed download) fail the run
+            # already, records of stages depending on them are updated when build finishes.
+            from .multistage_process import MultiStageProcessStageState
+            from .project_build import BuildRunResult
+            if any(step.state == MultiStageProcessStageState.FAILED for step in running.stages):
+                result = BuildRunResult.FAILED
         return result, running is not None, timestamp
 
     def mark_build_result_seen(self):
