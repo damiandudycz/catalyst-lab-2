@@ -32,6 +32,7 @@ def _push_view(self, view: Gtk.Widget, title: str):
     # Create a navigation page with title and child
     page = Adw.NavigationPage.new(toolbar_view, title)
     view._page = page # TODO: Check if this needs weakref
+    view._header = header
     # Add sidebar toggle button to new presented view:
     if hasattr(self, 'sidebar_toggle_button_visible'):
         self.sidebar_toggle_button = Gtk.Button.new()

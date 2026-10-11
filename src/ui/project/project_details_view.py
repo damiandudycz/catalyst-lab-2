@@ -32,6 +32,8 @@ class ProjectDetailsView(Gtk.Box):
     stages_tree_view = Gtk.Template.Child()
     build_row = Gtk.Template.Child()
     build_progress_row = Gtk.Template.Child()
+    build_list = Gtk.Template.Child()
+    build_progress_list = Gtk.Template.Child()
     directory_details_view = Gtk.Template.Child()
     toolset_selection_view = Gtk.Template.Child()
     releng_selection_view = Gtk.Template.Child()
@@ -180,11 +182,12 @@ class ProjectDetailsView(Gtk.Box):
         toolset = self.project_directory.get_toolset()
         self._observe_toolset(toolset)
         busy_reason = toolset.busy_reason if toolset else "Select toolset in project configuration"
-        self.build_row.set_visible(not running_builds)
+        # Buttons are in separate lists sharing one row, lists are hidden with them.
+        self.build_list.set_visible(not running_builds)
         self.build_row.set_sensitive(not running_builds and busy_reason is None)
         self.build_row.set_title(GLib.markup_escape_text(busy_reason) if busy_reason else "Create build")
         self.build_row.set_tooltip_text(busy_reason)
-        self.build_progress_row.set_visible(running_build is not None)
+        self.build_progress_list.set_visible(running_build is not None)
         statuses = {}
         if running_build is not None:
             for step in running_build.stages:

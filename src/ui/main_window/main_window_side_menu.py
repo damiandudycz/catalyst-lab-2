@@ -3,6 +3,7 @@ from gi.repository import Gtk, GLib
 from .app_events import AppEvents, app_event_bus
 from .app_section import AppSection
 from .main_window_side_menu_button import MainWindowSideMenuButton
+from .main_window_processes_list import ProcessesList
 from .repository import Repository, RepositoryEvent
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent
 from .event_bus import SharedEvent
@@ -22,6 +23,8 @@ class CatalystlabWindowSideMenu(Gtk.Box):
                 button = MainWindowSideMenuButton(section)
                 self.section_list.append(button)
         app_event_bus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
+        # Running and failed installers, at the bottom.
+        self.append(ProcessesList())
         # Statuses of sections come from items with status indicators (toolsets, machines, git directories) and
         # running processes. Their state events refresh side menu, like they refresh rows in sections.
         # Observed items and processes, weak so removed ones are forgotten (their ids can be reused by new objects).

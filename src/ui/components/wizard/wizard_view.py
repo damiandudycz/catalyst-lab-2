@@ -16,6 +16,8 @@ class WizardView(Adw.Bin, Gtk.Buildable):
     welcome_screen_title = GObject.Property(type=str, default=None)
     welcome_screen_description = GObject.Property(type=str, default=None)
     install_button_label = GObject.Property(type=str, default="Start installation") # Next button title on last page.
+    # Setup is shown and it's not on first page: back of navigation (in main window) goes to previous page instead.
+    can_go_back = GObject.Property(type=bool, default=False)
 
     def __init__(
         self, installation_in_progress: MultiStageProcess | None = None,
@@ -57,8 +59,10 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         self._refresh_buttons_state()
 
     def _setup_welcome_page(self):
-        if not self.show_welcome_screen:
+        # Realize can happen again (eg. when view pushed in main window is shown again), welcome page is added once.
+        if not self.show_welcome_screen or getattr(self, "_welcome_page_set_up", False):
             return
+        self._welcome_page_set_up = True
         # Root: GtkScrolledWindow
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -144,6 +148,10 @@ class WizardView(Adw.Bin, Gtk.Buildable):
 
     def do_add_child(self, builder, child, type_):
         # Called ONLY for external <child> in other .ui files
+        # Welcome page is added before other pages (properties of view are set then). Added when view is shown, it
+        # would be placed before page carousel already shows (view pushed in main window), carousel keeps showing that
+        # page then.
+        self._setup_welcome_page()
         if type_ == "welcome":
             self.welcome_page = child
             self.carousel.prepend(child)
@@ -196,6 +204,16 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         else:
             self.emit("begin-installation")
 
+    def go_back(self):
+        """Previous page of setup (back of navigation)."""
+        if self.can_go_back:
+            self.on_back_pressed(None)
+
+    def _update_can_go_back(self):
+        can_go_back = self.get_child() is self.setup_view and self.current_page > 0
+        if self.can_go_back != can_go_back:
+            self.can_go_back = can_go_back
+
     def on_start_row_activated(self, _):
         self.carousel.scroll_to(self.pages[1], True)
 
@@ -212,6 +230,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         self.next_button.set_sensitive(displayed_pages_ready and not is_welcome_page)
         self.next_button.set_opacity(0.0 if is_welcome_page else 1.0)
         self.next_button.set_label(self.install_button_label if is_last_page else "Next")
+        self._update_can_go_back()
 
     # --------------------------------------------------------------------------
     # Installation management:
@@ -222,6 +241,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
             self.set_child(self.setup_view)
         else:
             self.set_child(self.install_view)
+        self._update_can_go_back()
 
     def set_installation(self, installation: MultistageProcess | None):
         # Call this after installation was correctly started from this view using begin_installation overwrite.
