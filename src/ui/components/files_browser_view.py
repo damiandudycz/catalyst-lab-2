@@ -1,5 +1,6 @@
 import os
 from gi.repository import Gtk, Adw, GLib
+from .multistage_process_execution_view import AnsiStyle, append_ansi_line
 
 # ------------------------------------------------------------------------------
 # Read-only browser of folder (eg. releng directory): folders and files of folder, opened folders and text files are
@@ -115,6 +116,9 @@ class FileContentView(Gtk.Box):
         self.append(info)
         text_view = Gtk.TextView(monospace=True, editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.NONE,
                                  top_margin=8, bottom_margin=8, left_margin=8, right_margin=8)
-        text_view.get_buffer().set_text(data.decode("utf-8", errors="replace"))
+        # Logs are shown with colors of their terminal output, like output of build steps.
+        buffer, style = text_view.get_buffer(), AnsiStyle()
+        for line in data.decode("utf-8", errors="replace").splitlines():
+            style = append_ansi_line(buffer, line, style)
         scrolled = Gtk.ScrolledWindow(child=text_view, hexpand=True, vexpand=True)
         self.append(Gtk.Frame(child=scrolled))

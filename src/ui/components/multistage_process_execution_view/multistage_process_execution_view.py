@@ -301,41 +301,7 @@ class MultiStageProcessStageOutputView(Gtk.Box):
 
     def _append_output_line(self, line: str):
         """Appends line, with colors and styles from its ANSI escape sequences."""
-        if self.output_buffer.get_char_count() > 0:
-            self.output_buffer.insert(self.output_buffer.get_end_iter(), "\n")
-        segments, self._ansi_style = parse_ansi_line(line, self._ansi_style)
-        for text, style in segments:
-            tag = self._tag_for_style(style)
-            if tag:
-                self.output_buffer.insert_with_tags(self.output_buffer.get_end_iter(), text, tag)
-            else:
-                self.output_buffer.insert(self.output_buffer.get_end_iter(), text)
-
-    def _tag_for_style(self, style: AnsiStyle) -> Gtk.TextTag | None:
-        if style == AnsiStyle():
-            return None
-        name = f"ansi-{style}"
-        tag_table = self.output_buffer.get_tag_table()
-        if tag := tag_table.lookup(name):
-            return tag
-        foreground, background = style.foreground, style.background
-        if style.inverse: # Default colors are unknown here, inverse of them uses grey background.
-            foreground, background = background or "#ffffff", foreground or _ANSI_COLORS[0]
-        tag = Gtk.TextTag(name=name)
-        if foreground:
-            tag.set_property("foreground", foreground)
-        if background:
-            tag.set_property("background", background)
-        if style.bold:
-            tag.set_property("weight", Pango.Weight.BOLD)
-        if style.dim:
-            tag.set_property("foreground-rgba", _dimmed(foreground))
-        if style.italic:
-            tag.set_property("style", Pango.Style.ITALIC)
-        if style.underline:
-            tag.set_property("underline", Pango.Underline.SINGLE)
-        tag_table.add(tag)
-        return tag
+        self._ansi_style = append_ansi_line(self.output_buffer, line, self._ansi_style)
 
     def _is_output_at_bottom(self) -> bool:
         adjustment = self.output_scrolled_window.get_vadjustment()
@@ -458,3 +424,43 @@ def _dimmed(color: str | None):
     rgba.parse(color or "#808080")
     rgba.alpha = 0.6
     return rgba
+
+def append_ansi_line(buffer: Gtk.TextBuffer, line: str, style: AnsiStyle) -> AnsiStyle:
+    """Appends line to buffer with colors and styles of its ANSI escape sequences. Returns style at end of line
+    (continues in next line)."""
+    if buffer.get_char_count() > 0:
+        buffer.insert(buffer.get_end_iter(), "\n")
+    segments, style = parse_ansi_line(line, style)
+    for text, segment_style in segments:
+        tag = _tag_for_style(buffer, segment_style)
+        if tag:
+            buffer.insert_with_tags(buffer.get_end_iter(), text, tag)
+        else:
+            buffer.insert(buffer.get_end_iter(), text)
+    return style
+
+def _tag_for_style(buffer: Gtk.TextBuffer, style: AnsiStyle) -> Gtk.TextTag | None:
+    if style == AnsiStyle():
+        return None
+    name = f"ansi-{style}"
+    tag_table = buffer.get_tag_table()
+    if tag := tag_table.lookup(name):
+        return tag
+    foreground, background = style.foreground, style.background
+    if style.inverse: # Default colors are unknown here, inverse of them uses grey background.
+        foreground, background = background or "#ffffff", foreground or _ANSI_COLORS[0]
+    tag = Gtk.TextTag(name=name)
+    if foreground:
+        tag.set_property("foreground", foreground)
+    if background:
+        tag.set_property("background", background)
+    if style.bold:
+        tag.set_property("weight", Pango.Weight.BOLD)
+    if style.dim:
+        tag.set_property("foreground-rgba", _dimmed(foreground))
+    if style.italic:
+        tag.set_property("style", Pango.Style.ITALIC)
+    if style.underline:
+        tag.set_property("underline", Pango.Underline.SINGLE)
+    tag_table.add(tag)
+    return tag

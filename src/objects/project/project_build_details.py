@@ -9,7 +9,7 @@ from datetime import datetime
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # " * ERROR: net-libs/webkit-gtk-2.54.0-r411::gentoo failed (compile phase):"
-_FAILED_PACKAGE = re.compile(r"\* ERROR: (\S+?)(?:::\S+)? failed \((\w+) phase\)")
+_FAILED_PACKAGE = re.compile(r"\* ERROR: (\S+?)(?:::(\S+))? failed \((\w+) phase\)")
 
 # Known reasons of failures, by text in build output (first match is used).
 _FAILURE_REASONS = [
@@ -65,7 +65,7 @@ def failure_details(lines: list[str], failure_directory: str | None) -> dict:
     for line in lines:
         line = _ANSI.sub("", line)
         if (match := _FAILED_PACKAGE.search(line)) and not any(item["package"] == match.group(1) for item in packages):
-            packages.append({"package": match.group(1), "phase": match.group(2)})
+            packages.append({"package": match.group(1), "repository": match.group(2), "phase": match.group(3)})
         if reason is None:
             reason = next((text for pattern, text in _FAILURE_REASONS if pattern.search(line)), None)
     failure = {"packages": packages, "reason": reason}
