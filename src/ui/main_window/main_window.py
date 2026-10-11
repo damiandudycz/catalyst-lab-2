@@ -78,6 +78,15 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         self._present_view(view, title, 640, 480)
 
     def _present_view(self, view: Gtk.Widget, title: str, width: int = -1, height: int = -1):
+        """Shows view (wizard, installation...) in window over main window, or pushed in main window, depending on
+        navigation style from settings. View closes itself with view._window.close() in both cases."""
+        from .repository import Repository
+        from .settings import NavigationStyle
+        if Repository.Settings.value.navigation_style == NavigationStyle.PUSH:
+            # Set before pushing, views pass it to their subviews when realized.
+            view._window = PushedViewHandle(self.navigation_view, view)
+            self.navigation_view.push_view(view, title)
+            return
         header = Adw.HeaderBar()
         toolbar_view = Adw.ToolbarView()
         # Container centers the content.
@@ -102,3 +111,21 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         window.set_default_size(width, height)
         view._window = window
         window.present()
+
+class PushedViewHandle:
+    """Used by view pushed in main window instead of window it would be presented in: closing goes back to page
+    shown before view (also when view pushed more pages)."""
+
+    def __init__(self, navigation_view: Adw.NavigationView, view: Gtk.Widget):
+        self.navigation_view = navigation_view
+        self.view = view
+
+    def close(self):
+        page = getattr(self.view, "_page", None)
+        if page is None:
+            return
+        stack = self.navigation_view.get_navigation_stack()
+        if page not in [stack.get_item(index) for index in range(stack.get_n_items())]:
+            return # Already removed (eg. went back).
+        if (previous := self.navigation_view.get_previous_page(page)) is not None:
+            self.navigation_view.pop_to_page(previous)

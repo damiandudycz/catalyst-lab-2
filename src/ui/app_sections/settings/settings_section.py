@@ -1,22 +1,32 @@
 import os, threading, time
 from gi.repository import Gtk, Adw, Gio, GLib, Pango
 from .app_section import app_section, AppSection
-from .repository import library_directory, collapse_home
+from .repository import Repository, library_directory, collapse_home
+from .settings import NavigationStyle
 from .library import LibraryChange, library_target, change_problem, change_library
 from .status_indicator import StatusIndicatorState
 
 @app_section(title="Settings", icon="settings-svgrepo-com-symbolic", order=9_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/settings/settings_section.ui')
 class SettingsSection(Gtk.Box):
-    """Settings of app: location of library."""
+    """Settings of app: location of library, navigation style."""
     __gtype_name__ = "SettingsSection"
 
     location_row = Gtk.Template.Child()
+    navigation_style_row = Gtk.Template.Child()
+
+    # Options of navigation style row, in order.
+    NAVIGATION_STYLES = [NavigationStyle.MODAL, NavigationStyle.PUSH]
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
         self.content_navigation_view = content_navigation_view
         self.location_row.set_subtitle(collapse_home(library_directory()))
+        self.navigation_style_row.set_selected(self.NAVIGATION_STYLES.index(Repository.Settings.value.navigation_style))
+        self.navigation_style_row.connect("notify::selected", self._on_navigation_style_selected)
+
+    def _on_navigation_style_selected(self, row, _param):
+        Repository.Settings.value.navigation_style = self.NAVIGATION_STYLES[row.get_selected()]
 
     # Library location:
 

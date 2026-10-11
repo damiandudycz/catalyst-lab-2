@@ -18,6 +18,13 @@ class SettingsEvents(Enum):
     PACKAGES_LOCATION_CHANGED = auto()
     INITIAL_SETUP_DONE_CHANGED = auto()
     AUTO_CLEAN_SNAPSHOTS_CHANGED = auto()
+    NAVIGATION_STYLE_CHANGED = auto()
+
+@final
+class NavigationStyle(Enum):
+    """How views like wizards and installations are shown."""
+    MODAL = "modal" # In separate windows over main window.
+    PUSH = "push"   # Pushed in main window, closing them goes back.
 
 @final
 class Settings(Serializable):
@@ -36,7 +43,8 @@ class Settings(Serializable):
         cache_location: str = library_path("Cache"),
         temporary_location: str = library_path("Temporary"),
         packages_location: str = library_path("Packages"),
-        auto_clean_snapshots: bool = False
+        auto_clean_snapshots: bool = False,
+        navigation_style: NavigationStyle = NavigationStyle.MODAL
     ):
         self._initial_setup_done = initial_setup_done
         self._keep_root_unlocked = keep_root_unlocked
@@ -50,6 +58,7 @@ class Settings(Serializable):
         self._temporary_location = temporary_location # Data of running operations, emptied when app starts.
         self._packages_location = packages_location # Binary packages folders, shared by projects.
         self._auto_clean_snapshots = auto_clean_snapshots # Snapshots not used by projects are removed (except newest).
+        self._navigation_style = navigation_style
         self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
@@ -68,7 +77,8 @@ class Settings(Serializable):
                 cache_location=data.get("cache_location", library_path("Cache")),
                 temporary_location=data.get("temporary_location", library_path("Temporary")),
                 packages_location=data.get("packages_location", library_path("Packages")),
-                auto_clean_snapshots=data.get("auto_clean_snapshots", False)
+                auto_clean_snapshots=data.get("auto_clean_snapshots", False),
+                navigation_style=_navigation_style(data.get("navigation_style"))
             )
         except:
             return cls()
@@ -86,7 +96,8 @@ class Settings(Serializable):
             "cache_location": self.cache_location,
             "temporary_location": self.temporary_location,
             "packages_location": self.packages_location,
-            "auto_clean_snapshots": self.auto_clean_snapshots
+            "auto_clean_snapshots": self.auto_clean_snapshots,
+            "navigation_style": self.navigation_style.value
         }
 
     # --------------------------------------------------------------------------
@@ -281,3 +292,25 @@ class Settings(Serializable):
                 value
             )
             Repository.Settings.save()
+
+    # --------------------------------------------------------------------------
+    # Accessors for navigation style:
+
+    @property
+    def navigation_style(self) -> NavigationStyle:
+        return self._navigation_style
+    @navigation_style.setter
+    def navigation_style(self, value: NavigationStyle):
+        if self._navigation_style != value:
+            self._navigation_style = value
+            self.event_bus.emit(
+                SettingsEvents.NAVIGATION_STYLE_CHANGED,
+                value
+            )
+            Repository.Settings.save()
+
+def _navigation_style(value) -> NavigationStyle:
+    try:
+        return NavigationStyle(value)
+    except ValueError:
+        return NavigationStyle.MODAL

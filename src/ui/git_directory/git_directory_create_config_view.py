@@ -189,7 +189,7 @@ class GitDirectoryCreateConfigView(Gtk.Box):
         file_dialog = Gtk.FileDialog.new()
         file_dialog.set_title("Select a directory")
         file_dialog.select_folder(
-            getattr(self, '_window', None) or self.get_root(),
+            self.get_root(),
             None,
             on_folder_selected
         )

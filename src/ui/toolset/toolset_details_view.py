@@ -443,7 +443,7 @@ class ToolsetDetailsView(Gtk.Box):
         file_dialog.set_title("Select a .patch file")
         filters = create_filter_list()
         file_dialog.set_filters(filters)
-        file_dialog.open(getattr(self, '_window', None) or self.get_root(), None, on_file_open_response)
+        file_dialog.open(self.get_root(), None, on_file_open_response)
 
     @Gtk.Template.Callback()
     def on_allow_binpkgs_toggled(self, checkbox):
