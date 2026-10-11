@@ -104,34 +104,86 @@ def installed_packages(contents_path: str) -> list[str]:
     return sorted(packages)
 
 def failure_logs_script(chroot: str, destination: str) -> str:
-    """Bash collecting logs usually requested in Gentoo bug reports from chroot of failed build (ran after build
-    failed, with repository and /proc mounted in chroot): emerge --info, and for every package left in
-    /var/tmp/portage (failed ones, portage cleans finished): build.log, environment, emerge -pqv, and configure logs
-    (config.log, CMake and meson logs)."""
+    """Bash collecting data that helps to find cause of failed build (and is usually requested in Gentoo bug reports)
+    from chroot of failed build. Runs after build failed, with repository and /proc mounted in chroot; /dev is mounted
+    here too (catalyst unmounts it, emerge refuses to run without /dev/null), and unmounted when done.
+    Collected: summary (failed packages with their errors), emerge --info, portage configuration of stage, installed
+    packages, end of emerge.log, elog messages, toolchain, disk space and memory, and for every package left in
+    /var/tmp/portage (failed ones, portage cleans finished): its temp folder (build.log, environment, phase logs),
+    emerge --info and emerge -pqv --tree of package, and configure, build and test logs of its work folder."""
     q = shlex.quote
     return f"""
 FAILURE={q(destination)}
+C={q(chroot)}
 mkdir -p "$FAILURE"
 echo "--- collecting logs for bug reports in $FAILURE"
-chroot "{chroot}" /usr/bin/env -i HOME=/root TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin emerge --info > "$FAILURE/emerge-info.txt" 2>&1
-cp "{chroot}/etc/portage/make.conf" "$FAILURE/make.conf" 2>/dev/null
-for PACKAGE_DIR in "{chroot}"/var/tmp/portage/*/*/; do
-    [ -f "$PACKAGE_DIR/temp/build.log" ] || continue
-    PACKAGE=${{PACKAGE_DIR#{chroot}/var/tmp/portage/}}; PACKAGE=${{PACKAGE%/}}
+in_chroot() {{
+    chroot "$C" /usr/bin/env -i HOME=/root TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin "$@" < /dev/null
+}}
+DEV_MOUNTED=""
+if [ ! -c "$C/dev/null" ]; then
+    # Unmounted also when script ends early, chroot is removed later and must not contain /dev of system.
+    mkdir -p "$C/dev" && mount --rbind /dev "$C/dev" && DEV_MOUNTED=1 && trap 'umount -R -l "$C/dev" 2>/dev/null' EXIT
+fi
+in_chroot emerge --info > "$FAILURE/emerge-info.txt" 2>&1
+# Configuration of stage (make.conf, package.use, package.env...), make.profile link is kept as link.
+cp "$C/etc/portage/make.conf" "$FAILURE/make.conf" 2>/dev/null
+cp -RP "$C/etc/portage" "$FAILURE/portage-config" 2>/dev/null
+ls -l "$C/etc/portage/make.profile" > "$FAILURE/profile.txt" 2>&1
+# Installed packages with versions.
+( cd "$C/var/db/pkg" 2>/dev/null && ls -d */* ) > "$FAILURE/installed-packages.txt" 2>/dev/null
+tail -n 300 "$C/var/log/emerge.log" > "$FAILURE/emerge.log" 2>/dev/null
+[ -d "$C/var/log/portage/elog" ] && cp -R "$C/var/log/portage/elog" "$FAILURE/elog" 2>/dev/null
+{{
+    echo "--- gcc"; in_chroot gcc -v 2>&1 | tail -n 3
+    echo "--- gcc-config"; in_chroot gcc-config -l 2>&1
+    echo "--- binutils"; in_chroot ld --version 2>&1 | head -n 1
+    echo "--- binutils-config"; in_chroot binutils-config -l 2>&1
+    echo "--- python"; in_chroot python3 --version 2>&1
+}} > "$FAILURE/toolchain.txt"
+{{
+    echo "--- disk space"; df -h "$C" /var/tmp 2>&1
+    echo "--- memory"; free -m 2>/dev/null || head -n 5 /proc/meminfo
+    echo "--- kernel messages (out of memory kills, crashes)"; dmesg 2>/dev/null | tail -n 100 || echo "not available"
+}} > "$FAILURE/system.txt" 2>&1
+{{
+    echo "Failed build of $(basename "$C")"
+    echo
+    grep -h ">>> Failed to emerge\\|!!! " "$FAILURE/emerge.log" 2>/dev/null | tail -n 20
+}} > "$FAILURE/summary.txt"
+for PACKAGE_DIR in "$C"/var/tmp/portage/*/*/; do
+    [ -d "$PACKAGE_DIR/temp" ] || continue
+    PACKAGE=${{PACKAGE_DIR#$C/var/tmp/portage/}}; PACKAGE=${{PACKAGE%/}}
     DEST="$FAILURE/$(echo "$PACKAGE" | tr / _)"
     mkdir -p "$DEST"
-    cp "$PACKAGE_DIR/temp/build.log" "$DEST/build.log"
-    cp "$PACKAGE_DIR/temp/environment" "$DEST/environment" 2>/dev/null
-    chroot "{chroot}" /usr/bin/env -i HOME=/root TERM=dumb PATH=/usr/sbin:/usr/bin:/sbin:/bin emerge -pqv "=$PACKAGE" > "$DEST/emerge-pqv.txt" 2>&1
+    # build.log, environment, die.env, phase logs (temp/logging)...
+    find "$PACKAGE_DIR/temp" -maxdepth 2 -type f -size -50M 2>/dev/null | while read -r FILE; do
+        RELATIVE=${{FILE#$PACKAGE_DIR/temp/}}
+        mkdir -p "$DEST/$(dirname "$RELATIVE")" && cp "$FILE" "$DEST/$RELATIVE"
+    done
+    in_chroot emerge --info "=$PACKAGE" > "$DEST/emerge-info.txt" 2>&1
+    in_chroot emerge -pqv --tree "=$PACKAGE" > "$DEST/emerge-pqv.txt" 2>&1
     if [ -d "$PACKAGE_DIR/work" ]; then
-        find "$PACKAGE_DIR/work" -maxdepth 6 -type f -size -20M \\( -name config.log -o -name CMakeError.log -o -name CMakeOutput.log \\
-            -o -name CMakeConfigureLog.yaml -o -name meson-log.txt \\) 2>/dev/null | while read -r LOG; do
+        find "$PACKAGE_DIR/work" -maxdepth 6 -type f -size -20M \\( -name config.log -o -name CMakeError.log \\
+            -o -name CMakeOutput.log -o -name CMakeConfigureLog.yaml -o -name CMakeCache.txt -o -name meson-log.txt \\
+            -o -name testlog.txt -o -name test-suite.log -o -name LastTest.log \\) 2>/dev/null | while read -r LOG; do
             RELATIVE=${{LOG#$PACKAGE_DIR/work/}}
             mkdir -p "$DEST/work-logs" && cp "$LOG" "$DEST/work-logs/$(echo "$RELATIVE" | tr / _)"
         done
     fi
+    {{
+        echo
+        echo "===== $PACKAGE (logs in $(basename "$DEST"))"
+        if [ -f "$DEST/build.log" ]; then
+            echo "--- errors:"
+            sed 's/\\x1b\\[[0-9;]*[A-Za-z]//g' "$DEST/build.log" | grep -n -i "error\\|failed\\|undefined reference\\|cannot\\|not found" | grep -v -i "werror\\|-Wno-error" | head -n 30
+            echo "--- end of build.log:"
+            sed 's/\\x1b\\[[0-9;]*[A-Za-z]//g' "$DEST/build.log" | tail -n 40
+        fi
+    }} >> "$FAILURE/summary.txt"
     echo "Collected logs of $PACKAGE"
 done
+[ -n "$DEV_MOUNTED" ] && umount -R -l "$C/dev" && trap - EXIT
 chmod -R a+rwX "$FAILURE" 2>/dev/null
 """
 
