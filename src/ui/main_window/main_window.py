@@ -86,6 +86,8 @@ class CatalystlabWindow(Adw.ApplicationWindow):
             # Set before pushing, views pass it to their subviews when realized.
             view._window = PushedViewHandle(self.navigation_view, view)
             self.navigation_view.push_view(view, title)
+            if (wizard := getattr(view, "wizard_view", None)) is not None:
+                _connect_wizard_back(view._page, view._header, wizard)
             return
         header = Adw.HeaderBar()
         toolbar_view = Adw.ToolbarView()
@@ -111,6 +113,23 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         window.set_default_size(width, height)
         view._window = window
         window.present()
+
+def _connect_wizard_back(page: Adw.NavigationPage, header: Adw.HeaderBar, wizard):
+    """Back of pushed wizard goes to its previous page, until first page (or installation) is shown. Navigation can't
+    go back then (back button, Escape, swipe), back button of wizard is shown instead."""
+    back_button = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="Back", visible=False)
+    back_button.connect("clicked", lambda button: wizard.go_back())
+    header.pack_start(back_button)
+    shortcuts = Gtk.ShortcutController(scope=Gtk.ShortcutScope.LOCAL)
+    action = Gtk.CallbackAction.new(lambda *args: wizard.go_back() or True)
+    shortcuts.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string("Escape|<alt>Left"), action))
+    page.add_controller(shortcuts)
+    def update(*args):
+        page.set_can_pop(not wizard.can_go_back)
+        back_button.set_visible(wizard.can_go_back)
+        shortcuts.set_propagation_phase(Gtk.PropagationPhase.BUBBLE if wizard.can_go_back else Gtk.PropagationPhase.NONE)
+    wizard.connect("notify::can-go-back", update)
+    update()
 
 class PushedViewHandle:
     """Used by view pushed in main window instead of window it would be presented in: closing goes back to page

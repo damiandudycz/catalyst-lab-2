@@ -16,6 +16,8 @@ class WizardView(Adw.Bin, Gtk.Buildable):
     welcome_screen_title = GObject.Property(type=str, default=None)
     welcome_screen_description = GObject.Property(type=str, default=None)
     install_button_label = GObject.Property(type=str, default="Start installation") # Next button title on last page.
+    # Setup is shown and it's not on first page: back of navigation (in main window) goes to previous page instead.
+    can_go_back = GObject.Property(type=bool, default=False)
 
     def __init__(
         self, installation_in_progress: MultiStageProcess | None = None,
@@ -202,6 +204,16 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         else:
             self.emit("begin-installation")
 
+    def go_back(self):
+        """Previous page of setup (back of navigation)."""
+        if self.can_go_back:
+            self.on_back_pressed(None)
+
+    def _update_can_go_back(self):
+        can_go_back = self.get_child() is self.setup_view and self.current_page > 0
+        if self.can_go_back != can_go_back:
+            self.can_go_back = can_go_back
+
     def on_start_row_activated(self, _):
         self.carousel.scroll_to(self.pages[1], True)
 
@@ -218,6 +230,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         self.next_button.set_sensitive(displayed_pages_ready and not is_welcome_page)
         self.next_button.set_opacity(0.0 if is_welcome_page else 1.0)
         self.next_button.set_label(self.install_button_label if is_last_page else "Next")
+        self._update_can_go_back()
 
     # --------------------------------------------------------------------------
     # Installation management:
@@ -228,6 +241,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
             self.set_child(self.setup_view)
         else:
             self.set_child(self.install_view)
+        self._update_can_go_back()
 
     def set_installation(self, installation: MultistageProcess | None):
         # Call this after installation was correctly started from this view using begin_installation overwrite.
