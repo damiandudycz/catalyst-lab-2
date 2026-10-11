@@ -21,10 +21,13 @@ class MultistageProcessExecutionView(Gtk.Box):
     cancel_button = Gtk.Template.Child()
     finish_button = Gtk.Template.Child()
     progress_bar = Gtk.Template.Child()
+    progress_overlay = Gtk.Template.Child()
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.multistage_process: MultiStageProcess | None = None
+        # Bottom bar is as high as progress bar, which is drawn over line.
+        self.progress_overlay.set_measure_overlay(self.progress_bar, True)
 
     def set_multistage_process(self, multistage_process: MultiStageProcess | None = None):
         """Call when multistage_process is started"""
