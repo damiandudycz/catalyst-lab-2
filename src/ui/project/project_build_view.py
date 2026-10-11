@@ -7,7 +7,7 @@ from .project_stage import stage_target_icon
 from .rootless import rootless_unsupported_reason
 from .lima import virtual_machines_supported
 from .root_helper_client import RootHelperClient
-from .multistage_process import MultiStageProcessState
+from .multistage_process import MultiStageProcessState, MultiStageProcessEvent
 from .wizard_view import WizardView
 from .repository import Repository
 from .item_select_view import ItemSelectionViewEvent
@@ -47,6 +47,10 @@ class ProjectBuildView(Gtk.Box):
         self.snapshot_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.snapshot_changed)
         self.load_snapshots()
         self.connect("realize", self.on_realize)
+        # Result of build is seen when it finishes while this view is shown, or when view of finished build is shown.
+        self._observed_build = None
+        self.connect("map", lambda widget: self._mark_result_seen())
+        self._observe_build(installation_in_progress)
 
     def on_realize(self, widget):
         self.wizard_view.content_navigation_view = self.content_navigation_view
@@ -290,7 +294,22 @@ class ProjectBuildView(Gtk.Box):
         if self.update_project_snapshot and not installation_in_progress.fetch_snapshot:
             installation_in_progress.store_project_snapshot()
         self.wizard_view.set_installation(installation_in_progress)
+        self._observe_build(installation_in_progress)
         return False
+
+    def _observe_build(self, build: ProjectBuild | None):
+        if build is None or build is self._observed_build:
+            return
+        self._observed_build = build
+        build.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._on_build_state_changed)
+
+    def _on_build_state_changed(self, *args):
+        self._mark_result_seen()
+
+    def _mark_result_seen(self):
+        build = self._observed_build
+        if build is not None and self.get_mapped() and build.status in (MultiStageProcessState.COMPLETED, MultiStageProcessState.FAILED):
+            self.project_directory.mark_build_result_seen()
 
 def _format_date(date) -> str:
     return date.strftime("%Y-%m-%d %H:%M")
