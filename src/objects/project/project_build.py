@@ -169,7 +169,8 @@ def last_build_run(project_directory, running_timestamp: str | None = None) -> t
 
 def _build_run_result(builds: list, timestamp: str, running_timestamp: str | None) -> BuildRunResult:
     statuses = {build.status for build in builds if build.timestamp == timestamp}
-    if StageBuildStatus.FAILED in statuses:
+    # Stages are skipped when stage or step they depend on failed (eg. seed download), run failed then too.
+    if statuses & {StageBuildStatus.FAILED, StageBuildStatus.SKIPPED}:
         return BuildRunResult.FAILED
     if timestamp != running_timestamp and statuses & {StageBuildStatus.STOPPED, StageBuildStatus.CANCELLED,
                                                       StageBuildStatus.IN_PROGRESS, StageBuildStatus.SCHEDULED}:
