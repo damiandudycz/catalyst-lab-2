@@ -2,7 +2,6 @@ import weakref
 from gi.repository import Gtk, GLib, Pango
 from .app_events import AppEvents, app_event_bus
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
-from .status_indicator import StatusIndicator, StatusIndicatorState, status_values
 
 # ------------------------------------------------------------------------------
 # Installers and setups (installations, builds, deploys...) running or failed, listed at the bottom of side menu.
@@ -115,13 +114,14 @@ class ProcessesList(Gtk.Box):
         return False
 
 class ProcessRow(Gtk.ListBoxRow):
+    """Looks like rows of installations in sections: icon of item, name, state, and progress or failure icon."""
 
     def __init__(self, process: MultiStageProcess):
         super().__init__(tooltip_text=process.title)
         self.process = process
-        box = Gtk.Box(spacing=10, margin_start=6, margin_end=6)
+        box = Gtk.Box(spacing=10, margin_start=6, margin_end=6, margin_top=2, margin_bottom=2)
         box.append(Gtk.Image(icon_name=_process_icon(process)))
-        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
         try:
             name = process.name()
         except Exception:
@@ -129,19 +129,24 @@ class ProcessRow(Gtk.ListBoxRow):
         labels.append(Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.END))
         self.subtitle = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.subtitle.add_css_class("caption")
-        self.subtitle.add_css_class("dimmed")
+        self.subtitle.add_css_class("dim-label")
         labels.append(self.subtitle)
         box.append(labels)
-        self.indicator = StatusIndicator()
-        self.indicator.set_valign(Gtk.Align.CENTER)
-        box.append(self.indicator)
+        self.progress_label = Gtk.Label(valign=Gtk.Align.CENTER)
+        self.progress_label.add_css_class("caption")
+        self.progress_label.add_css_class("dim-label")
+        box.append(self.progress_label)
+        self.status_icon = Gtk.Image(icon_name="error-box-svgrepo-com-symbolic", valign=Gtk.Align.CENTER)
+        self.status_icon.add_css_class("error")
+        box.append(self.status_icon)
         self.set_child(box)
 
     def update(self):
-        if self.process.status == MultiStageProcessState.FAILED:
-            result = "Stopped" if getattr(self.process, "cancelled", False) else "Failed"
-            self.subtitle.set_label(result)
-            self.indicator.set_values(status_values(StatusIndicatorState.ERROR))
+        failed = self.process.status == MultiStageProcessState.FAILED
+        if failed:
+            self.subtitle.set_label("Stopped" if getattr(self.process, "cancelled", False) else "Failed")
         else:
-            self.subtitle.set_label(f"{int(self.process.progress * 100)}%")
-            self.indicator.set_values(status_values(StatusIndicatorState.LOADED, blinking=True))
+            self.subtitle.set_label("In progress")
+            self.progress_label.set_label(f"{int(self.process.progress * 100)}%")
+        self.progress_label.set_visible(not failed)
+        self.status_icon.set_visible(failed)
