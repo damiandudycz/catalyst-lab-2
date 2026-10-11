@@ -55,7 +55,31 @@ class MultistageProcessExecutionView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_cancel_pressed(self, _):
-        self.multistage_process.cancel()
+        from .build_queue import BuildQueue
+        from .project_build_process import ProjectBuild
+        queue = BuildQueue.shared()
+        if not isinstance(self.multistage_process, ProjectBuild) or not queue.entries:
+            self.multistage_process.cancel()
+            return
+        # Builds are queued: next one starts when this one is cancelled, unless queue is cancelled too.
+        count = len(queue.entries)
+        dialog = Adw.AlertDialog(heading="Cancel build?", body=(
+            f"{count} queued build{'s' if count != 1 else ''} start{'s' if count == 1 else ''} after this one. "
+            "Cancel only this build, or the queue too?"))
+        dialog.add_response("keep", "Keep building")
+        dialog.add_response("build", "Cancel build")
+        dialog.add_response("queue", "Cancel build and queue")
+        dialog.set_response_appearance("build", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_response_appearance("queue", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("keep")
+        dialog.set_close_response("keep")
+        def on_response(dialog, response):
+            if response == "queue":
+                queue.clear()
+            if response in ("build", "queue"):
+                self.multistage_process.cancel()
+        dialog.connect("response", on_response)
+        dialog.present(self.get_root())
 
     @Gtk.Template.Callback()
     def on_finish_pressed(self, _):

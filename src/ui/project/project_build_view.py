@@ -2,11 +2,10 @@ from __future__ import annotations
 from gi.repository import Gtk, Adw, GLib
 from .project_directory import ProjectDirectory
 from .project_build import StageBuildPlan, StageBuildMode, load_project_builds, project_builds_directory
-from .project_build_process import ProjectBuild
+from .project_build_process import ProjectBuild, start_project_build
+from .build_queue import BuildQueue, running_build, LATEST
 from .project_stage import stage_target_icon
-from .rootless import rootless_unsupported_reason
 from .lima import virtual_machines_supported
-from .root_helper_client import RootHelperClient
 from .multistage_process import MultiStageProcessState, MultiStageProcessEvent
 from .wizard_view import WizardView
 from .repository import Repository
@@ -47,6 +46,9 @@ class ProjectBuildView(Gtk.Box):
         self.snapshot_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.snapshot_changed)
         self.load_snapshots()
         self.connect("realize", self.on_realize)
+        # While other project is being built, build is added to queue (it starts when previous builds finish).
+        if installation_in_progress is None and self._queue_mode():
+            self.wizard_view.install_button_label = "Add to queue"
         # Result of build is seen when it finishes while this view is shown, or when view of finished build is shown.
         self._observed_build = None
         self.connect("map", lambda widget: self._mark_result_seen())
@@ -218,8 +220,21 @@ class ProjectBuildView(Gtk.Box):
                 return selected is not None and self.is_item_selectable(self.snapshot_selection_view, selected)
         return True
 
+    @staticmethod
+    def _queue_mode() -> bool:
+        return running_build() is not None
+
     @Gtk.Template.Callback()
     def begin_installation(self, view):
+        if self._queue_mode():
+            # Toolset can be used by running build, it's checked when queued build starts.
+            if reason := BuildQueue.shared().queue_unavailable_reason(self.project_directory):
+                dialog = Adw.AlertDialog(heading="Can't add build to queue", body=reason)
+                dialog.add_response("ok", "OK")
+                dialog.present(self.get_root())
+                return
+            self._choose_project_snapshot()
+            return
         toolset = self.project_directory.get_toolset()
         # Toolset or its virtual machine could become busy while wizard was open.
         if busy_reason := (toolset.busy_reason if toolset else "Project has no toolset"):
@@ -227,6 +242,9 @@ class ProjectBuildView(Gtk.Box):
             dialog.add_response("ok", "OK")
             dialog.present(self.get_root())
             return
+        self._choose_project_snapshot()
+
+    def _choose_project_snapshot(self):
         selected = self.snapshot_selection_view.selected_item
         # Snapshot option of project doesn't change project settings.
         if selected is not self._project_snapshot_option():
@@ -255,47 +273,50 @@ class ProjectBuildView(Gtk.Box):
         dialog.present(self.get_root())
 
     def _authorize_and_start(self, update_project_snapshot: bool):
-        plan = self.plan
         self.update_project_snapshot = update_project_snapshot
-        toolset = self.project_directory.get_toolset()
-        if (toolset and toolset.machine) or rootless_unsupported_reason() is None:
-            # Builds run in user namespace, root privileges are not needed.
-            self._start_installation(plan, None, rootless=True)
+        selected = self.snapshot_selection_view.selected_item
+        fetch = selected is LATEST_SNAPSHOT
+        if fetch and update_project_snapshot:
+            # Project gets latest snapshot in next builds too, newest snapshot is its snapshot.
+            metadata = self.project_directory.initialize_metadata()
+            metadata.latest_snapshot = True
+            Repository.ProjectDirectory.save()
+        if self._queue_mode():
+            self._add_to_queue(selected, fetch, update_project_snapshot)
             return
-        def start(authorization_keeper):
-            # Called from background thread. Keeper is released when this callback returns, retain it until build
-            # is started on main thread and retains it by itself.
-            if authorization_keeper:
-                authorization_keeper.retain()
-            GLib.idle_add(self._start_installation, plan, authorization_keeper)
-        RootHelperClient.shared().authorize_and_run(name="Build stages", callback=start)
+        start_project_build(self.project_directory, self.plan, snapshot=None if fetch else selected, fetch_snapshot=fetch,
+                            update_project_snapshot=update_project_snapshot and not fetch, done=self._on_build_started)
 
-    def _start_installation(self, plan: StageBuildPlan, authorization_keeper, rootless: bool = False):
-        if authorization_keeper is None and not rootless:
-            return False # Authorization cancelled.
+    def _add_to_queue(self, selected, fetch: bool, update_project_snapshot: bool):
+        if update_project_snapshot and not fetch:
+            # Snapshot is project snapshot from now, like when build starts.
+            metadata = self.project_directory.initialize_metadata()
+            metadata.snapshot_id = selected.filename
+            metadata.latest_snapshot = False
+            Repository.ProjectDirectory.save()
         try:
-            selected = self.snapshot_selection_view.selected_item
-            fetch = selected is LATEST_SNAPSHOT
-            if fetch and self.update_project_snapshot:
-                # Project gets latest snapshot in next builds too, newest snapshot is its snapshot.
-                metadata = self.project_directory.initialize_metadata()
-                metadata.latest_snapshot = True
-                Repository.ProjectDirectory.save()
-            installation_in_progress = ProjectBuild(project_directory=self.project_directory, plan=plan,
-                                                    snapshot=None if fetch else selected, fetch_snapshot=fetch,
-                                                    update_project_snapshot=self.update_project_snapshot and not fetch)
-            installation_in_progress.start(authorization_keeper=authorization_keeper)
-        finally:
-            if authorization_keeper:
-                authorization_keeper.release()
-        if installation_in_progress.status == MultiStageProcessState.SETUP:
+            BuildQueue.shared().add(self.project_directory, list(self.selected_stage_ids), LATEST if fetch else selected.filename)
+        except RuntimeError as e:
+            dialog = Adw.AlertDialog(heading="Can't add build to queue", body=str(e))
+            dialog.add_response("ok", "OK")
+            dialog.present(self.get_root())
+            return
+        # Wizard shows queued build (steps and waiting in queue), and its progress when it starts.
+        from .build_queue_view import QueuedBuildView
+        queued_view = QueuedBuildView(BuildQueue.shared().entry_for(self.project_directory))
+        queued_view._window = self._window
+        queued_view.set_vexpand(True)
+        self.remove(self.wizard_view)
+        self.append(queued_view)
+
+    def _on_build_started(self, build: ProjectBuild | None):
+        if build is None:
             print("Failed to start build")
-            return False
-        if self.update_project_snapshot and not installation_in_progress.fetch_snapshot:
-            installation_in_progress.store_project_snapshot()
-        self.wizard_view.set_installation(installation_in_progress)
-        self._observe_build(installation_in_progress)
-        return False
+            return
+        if self.update_project_snapshot and not build.fetch_snapshot:
+            build.store_project_snapshot()
+        self.wizard_view.set_installation(build)
+        self._observe_build(build)
 
     def _observe_build(self, build: ProjectBuild | None):
         if build is None or build is self._observed_build:

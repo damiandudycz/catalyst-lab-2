@@ -39,6 +39,9 @@ class CatalystlabApplication(Adw.Application):
         migrate_project_packages()
         # Unused snapshots are removed when enabled in Snapshots section.
         SnapshotManager.shared().start_auto_clean()
+        # Queue of builds is restored (it waits until started again).
+        from .build_queue import BuildQueue
+        BuildQueue.shared()
 
     def do_activate(self):
         """Called when the application is activated.

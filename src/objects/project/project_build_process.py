@@ -286,6 +286,43 @@ class ProjectBuild(MultiStageProcess):
         from .project_build_record import save_build_record
         save_build_record(self)
 
+def start_project_build(project_directory, plan: StageBuildPlan, snapshot=None, fetch_snapshot: bool = False,
+                        update_project_snapshot: bool = False, done=None):
+    """Starts build of project (used by build view and build queue). Builds that can't run in user namespace get root
+    privileges first (user is asked). Done is called on main thread with started build, or None when it didn't start."""
+    from .rootless import rootless_unsupported_reason
+    from .root_helper_client import RootHelperClient
+    def start(authorization_keeper):
+        build = None
+        try:
+            build = ProjectBuild(project_directory=project_directory, plan=plan, snapshot=snapshot,
+                                 fetch_snapshot=fetch_snapshot, update_project_snapshot=update_project_snapshot)
+            build.start(authorization_keeper=authorization_keeper)
+        except Exception as e:
+            print(f"Failed to start build of {project_directory.name}: {e}")
+        finally:
+            if authorization_keeper:
+                authorization_keeper.release()
+        if build is not None and build.status == MultiStageProcessState.SETUP:
+            build = None
+        if done:
+            done(build)
+        return False
+    toolset = project_directory.get_toolset()
+    if (toolset and toolset.machine) or rootless_unsupported_reason() is None:
+        # Builds run in user namespace, root privileges are not needed.
+        GLib.idle_add(start, None)
+        return
+    def authorized(authorization_keeper):
+        # Called from background thread. Keeper is released when this callback returns, retain it until build
+        # is started on main thread and retains it by itself.
+        if authorization_keeper:
+            authorization_keeper.retain()
+            GLib.idle_add(start, authorization_keeper)
+        elif done:
+            GLib.idle_add(lambda: (done(None), False)[1]) # Authorization cancelled.
+    RootHelperClient.shared().authorize_and_run(name="Build stages", callback=authorized)
+
 def running_project_build(project_directory, timestamp: str | None = None) -> ProjectBuild | None:
     """Build of project that is currently in progress, optionally only build started with given timestamp."""
     return next((

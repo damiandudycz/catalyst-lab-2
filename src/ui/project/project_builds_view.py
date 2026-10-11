@@ -9,6 +9,8 @@ from .project_build_record import load_build_record, delete_build_record, failed
 from .multistage_process_execution_view import MultistageProcessExecutionView
 from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, running_project_build
 from .project_build_view import ProjectBuildView
+from .build_queue_view import build_button_state, present_queued_build
+from .build_queue import BuildQueue, BuildQueueEvent
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState, MultiStageProcessState
 from .app_events import app_event_bus, AppEvents
 from .helper_functions import get_file_size_string
@@ -53,6 +55,7 @@ class ProjectBuildsView(Gtk.Box):
         # Builds can change while view is open (build finished), refresh when shown again.
         self.connect("map", lambda widget: self.load_builds())
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._on_started_processes_changed)
+        BuildQueue.shared().event_bus.subscribe(BuildQueueEvent.CHANGED, self._on_started_processes_changed)
 
     # Loading builds
     # --------------------------------------------------------------------------
@@ -259,14 +262,11 @@ class ProjectBuildsView(Gtk.Box):
             self.build_row.set_tooltip_text(None)
             return
         self.build_row.add_css_class("suggested-action")
-        toolset = self.project_directory.get_toolset()
-        other_build = any(build.status == MultiStageProcessState.IN_PROGRESS
-                          for build in MultiStageProcess.get_started_processes_by_class(ProjectBuild))
-        reason = ("Another project is being built" if other_build
-                  else toolset.busy_reason if toolset else "Select toolset in project configuration")
-        self.build_row.set_title(GLib.markup_escape_text(reason) if reason else "Start new build")
-        self.build_row.set_sensitive(reason is None)
-        self.build_row.set_tooltip_text(reason)
+        # Builds of other projects are added to queue while one is built.
+        state = build_button_state(self.project_directory)
+        self.build_row.set_title("Start new build" if state.title == "Create build" else state.title)
+        self.build_row.set_sensitive(state.sensitive)
+        self.build_row.set_tooltip_text(state.tooltip)
 
     def _on_build_activated(self, row):
         if running_build := running_project_build(self.project_directory):
@@ -277,6 +277,9 @@ class ProjectBuildsView(Gtk.Box):
             dialog = Adw.AlertDialog(heading="Can't start build", body=error)
             dialog.add_response("ok", "OK")
             dialog.present(self.get_root())
+            return
+        if (queued := build_button_state(project).queued) is not None:
+            present_queued_build(queued)
             return
         app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=project), "Build stages", 640, 480)
 

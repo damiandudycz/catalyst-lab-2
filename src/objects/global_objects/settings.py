@@ -19,6 +19,7 @@ class SettingsEvents(Enum):
     INITIAL_SETUP_DONE_CHANGED = auto()
     AUTO_CLEAN_SNAPSHOTS_CHANGED = auto()
     NAVIGATION_STYLE_CHANGED = auto()
+    PAUSE_QUEUE_ON_FAILURE_CHANGED = auto()
 
 @final
 class NavigationStyle(Enum):
@@ -44,7 +45,8 @@ class Settings(Serializable):
         temporary_location: str = library_path("Temporary"),
         packages_location: str = library_path("Packages"),
         auto_clean_snapshots: bool = False,
-        navigation_style: NavigationStyle = NavigationStyle.PUSH
+        navigation_style: NavigationStyle = NavigationStyle.PUSH,
+        pause_queue_on_failure: bool = False
     ):
         self._initial_setup_done = initial_setup_done
         self._keep_root_unlocked = keep_root_unlocked
@@ -59,6 +61,7 @@ class Settings(Serializable):
         self._packages_location = packages_location # Binary packages folders, shared by projects.
         self._auto_clean_snapshots = auto_clean_snapshots # Snapshots not used by projects are removed (except newest).
         self._navigation_style = navigation_style
+        self._pause_queue_on_failure = pause_queue_on_failure # Queued builds wait when build fails.
         self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
@@ -78,7 +81,8 @@ class Settings(Serializable):
                 temporary_location=data.get("temporary_location", library_path("Temporary")),
                 packages_location=data.get("packages_location", library_path("Packages")),
                 auto_clean_snapshots=data.get("auto_clean_snapshots", False),
-                navigation_style=_navigation_style(data.get("navigation_style"))
+                navigation_style=_navigation_style(data.get("navigation_style")),
+                pause_queue_on_failure=data.get("pause_queue_on_failure", False)
             )
         except:
             return cls()
@@ -97,7 +101,8 @@ class Settings(Serializable):
             "temporary_location": self.temporary_location,
             "packages_location": self.packages_location,
             "auto_clean_snapshots": self.auto_clean_snapshots,
-            "navigation_style": self.navigation_style.value
+            "navigation_style": self.navigation_style.value,
+            "pause_queue_on_failure": self.pause_queue_on_failure
         }
 
     # --------------------------------------------------------------------------
@@ -305,6 +310,22 @@ class Settings(Serializable):
             self._navigation_style = value
             self.event_bus.emit(
                 SettingsEvents.NAVIGATION_STYLE_CHANGED,
+                value
+            )
+            Repository.Settings.save()
+
+    # --------------------------------------------------------------------------
+    # Accessors for pausing build queue on failure:
+
+    @property
+    def pause_queue_on_failure(self) -> bool:
+        return self._pause_queue_on_failure
+    @pause_queue_on_failure.setter
+    def pause_queue_on_failure(self, value: bool):
+        if self._pause_queue_on_failure != value:
+            self._pause_queue_on_failure = value
+            self.event_bus.emit(
+                SettingsEvents.PAUSE_QUEUE_ON_FAILURE_CHANGED,
                 value
             )
             Repository.Settings.save()
