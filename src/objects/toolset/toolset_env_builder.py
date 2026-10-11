@@ -10,7 +10,7 @@ class ToolsetEnvBuilder:
 
     @staticmethod
     def get_stage3_urls(completion_handler: Callable[[list[ParseResult] | Exception], None], architecture: Architecture = Architecture.HOST):
-        base_url = f"https://distfiles.gentoo.org/releases/{architecture.value}/autobuilds/"
+        base_url = f"https://distfiles.gentoo.org/releases/{architecture.releases_directory()}/autobuilds/"
         file_url = urljoin(base_url, "latest-stage3.txt")
         with ThreadPoolExecutor() as executor:
             future = executor.submit(ToolsetEnvBuilder._fetch_stage3_urls, file_url, base_url, completion_handler)
