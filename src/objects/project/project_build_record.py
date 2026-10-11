@@ -50,6 +50,17 @@ def save_build_record(process):
     except OSError as e:
         print(f"Failed to save record of build {process.timestamp}: {e}")
 
+def failed_steps(project_directory, timestamp: str) -> list[str]:
+    """Names of failed steps of run that don't build stages (eg. seed download), stages depending on them were
+    skipped. Empty for runs without record."""
+    try:
+        with open(_record_path(project_directory, timestamp), encoding="utf-8") as file:
+            record = json.load(file)
+    except (OSError, ValueError):
+        return []
+    return [step["name"] for step in record.get("steps", [])
+            if "stage_name" not in step and step.get("state") == MultiStageProcessStageState.FAILED.name]
+
 def delete_build_record(project_directory, timestamp: str):
     try:
         os.remove(_record_path(project_directory, timestamp))

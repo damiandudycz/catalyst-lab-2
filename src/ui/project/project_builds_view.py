@@ -5,7 +5,7 @@ from enum import Enum
 from gi.repository import Gtk, Adw, GLib, Gio
 from .project_directory import ProjectDirectory
 from .project_build import StageBuildStatus, load_project_builds
-from .project_build_record import load_build_record, delete_build_record
+from .project_build_record import load_build_record, delete_build_record, failed_steps
 from .multistage_process_execution_view import MultistageProcessExecutionView
 from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, running_project_build
 from .project_build_view import ProjectBuildView
@@ -95,7 +95,16 @@ class ProjectBuildsView(Gtk.Box):
                 entries = [(build.stage_name, build, _record_state(build)) for build in ordered]
             is_running = running_build is not None and timestamp == running_build.timestamp
             title = f"Started {_format_timestamp(timestamp, fallback=entries[0][1].date if entries and entries[0][1] else datetime.now())}"
-            group = Adw.PreferencesGroup(title=title, description=_run_summary([state for _, _, state in entries]))
+            description = _run_summary([state for _, _, state in entries])
+            # Failed steps that don't build stages (eg. seed download) are why stages were skipped.
+            if is_running:
+                failed = [step.name for step in running_build.stages
+                          if not isinstance(step, ProjectBuildStepBuildStage) and step.state == MultiStageProcessStageState.FAILED]
+            else:
+                failed = failed_steps(self.project_directory, timestamp)
+            if failed:
+                description += "\n" + ", ".join(failed) + " failed"
+            group = Adw.PreferencesGroup(title=title, description=GLib.markup_escape_text(description))
             if not is_running:
                 group.set_header_suffix(self._delete_button(
                     tooltip="Remove builds",
