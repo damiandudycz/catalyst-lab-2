@@ -165,6 +165,18 @@ def kill_instance_processes(instance_name: str, output_handler, home: str | None
         except OSError:
             pass
 
+def instance_output(instance_name: str, command: list[str], home: str | None = None, timeout: float = 15) -> str | None:
+    """Output of short command run in running instance (as user), None when it fails."""
+    path = limactl_path()
+    if path is None:
+        return None
+    try:
+        result = subprocess.run([path, "shell", "--workdir", "/", instance_name, *command], capture_output=True, text=True,
+                                errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, env=lima_environment(home))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
 def run_as_root_in_instance(instance_name: str, script: str, output_handler, home: str | None = None) -> bool:
     """Runs shell script as root in running instance, output goes to handler line by line."""
     path = limactl_path()

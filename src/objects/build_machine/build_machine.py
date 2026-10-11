@@ -110,6 +110,36 @@ class BuildMachine:
                 return status_values(StatusIndicatorState.ERROR, description="Virtual machine is missing (removed outside of Catalyst Lab)")
         return status_values(StatusIndicatorState.IDLE, description="Stopped")
 
+    # Usage:
+
+    def read_usage(self) -> dict | None:
+        """Counters of processors (from /proc/stat, usage is computed from two readings), memory, swap, load and disk
+        usage of system disk and working space. None when machine doesn't run or can't be read."""
+        from .lima import instance_output
+        script = (f"head -n 1 /proc/stat; grep -c '^cpu[0-9]' /proc/stat; cat /proc/loadavg; "
+                  f"grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo; "
+                  f"df -kP / {MACHINE_DATA_DIRECTORY} 2>/dev/null")
+        output = instance_output(self.instance_name, ["sh", "-c", script], home=self.lima_home)
+        if output is None:
+            return None
+        try:
+            lines = output.splitlines()
+            cpu = [int(value) for value in lines[0].split()[1:9]]
+            usage = {
+                "cpu_total": sum(cpu), "cpu_idle": cpu[3] + cpu[4], "cpus": int(lines[1]),
+                "load": float(lines[2].split()[0]), "disks": {},
+            }
+            for line in lines[3:]:
+                if ":" in line and line.split(":")[0] in ("MemTotal", "MemAvailable", "SwapTotal", "SwapFree"):
+                    key, value = line.split(":", 1)
+                    usage[key] = int(value.split()[0]) * 1024
+                elif len(parts := line.split()) >= 6 and parts[1].isdigit() and parts[5].startswith("/"):
+                    # df: filesystem, size, used, available, capacity, mount point (KiB).
+                    usage["disks"][parts[5]] = (int(parts[2]) * 1024, int(parts[1]) * 1024) # Used, size.
+            return usage
+        except (ValueError, IndexError):
+            return None
+
     # Lifecycle:
 
     # Usage:
