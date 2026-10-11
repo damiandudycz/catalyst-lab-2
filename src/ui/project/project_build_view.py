@@ -301,8 +301,13 @@ class ProjectBuildView(Gtk.Box):
             dialog.add_response("ok", "OK")
             dialog.present(self.get_root())
             return
-        if self._window:
-            self._window.close()
+        # Wizard shows queued build (steps and waiting in queue), and its progress when it starts.
+        from .build_queue_view import QueuedBuildView
+        queued_view = QueuedBuildView(BuildQueue.shared().entry_for(self.project_directory))
+        queued_view._window = self._window
+        queued_view.set_vexpand(True)
+        self.remove(self.wizard_view)
+        self.append(queued_view)
 
     def _on_build_started(self, build: ProjectBuild | None):
         if build is None:
