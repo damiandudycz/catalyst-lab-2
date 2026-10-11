@@ -14,6 +14,7 @@ from .deploy_target import (
 )
 from .ssh_connection import SSHConnection
 from .local_disk_connection import LocalDiskConnection
+from .combo_row_popup import fit_popup_to_items
 from .item_select_view import ItemSelectionViewEvent
 
 class DeployMethod(Enum):
@@ -112,6 +113,8 @@ class DeployCreateView(Gtk.Box):
     def __init__(self, project_directory=None, build=None, installation_in_progress: DeployInstallation | None = None,
                  content_navigation_view: Adw.NavigationView | None = None):
         super().__init__()
+        for row in (self.target_firmware_row, self.table_row, self.network_service_row, self.network_mode_row, self.kernel_row, self.bootloader_row):
+            fit_popup_to_items(row)
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
         self.project_directory = project_directory
@@ -854,9 +857,9 @@ class PartitionRow(Adw.ExpanderRow):
         self.spec = spec
         self.on_changed = on_changed
         self._loading = True
-        self.type_row = Adw.ComboRow(title="Type", model=Gtk.StringList.new([item.display_name for item in self._TYPES]))
+        self.type_row = fit_popup_to_items(Adw.ComboRow(title="Type", model=Gtk.StringList.new([item.display_name for item in self._TYPES])))
         self.type_row.set_selected(self._TYPES.index(spec.type))
-        self.filesystem_row = Adw.ComboRow(title="Filesystem", model=Gtk.StringList.new([item.value for item in self._FILESYSTEMS]))
+        self.filesystem_row = fit_popup_to_items(Adw.ComboRow(title="Filesystem", model=Gtk.StringList.new([item.value for item in self._FILESYSTEMS])))
         self.filesystem_row.set_selected(self._FILESYSTEMS.index(spec.filesystem or TargetFilesystem.EXT4))
         self.mount_row = Adw.EntryRow(title="Mount point", text=spec.mount_point or "")
         self.rest_row = Adw.SwitchRow(title="Use remaining space", active=spec.size is None)

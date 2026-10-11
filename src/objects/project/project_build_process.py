@@ -25,6 +25,9 @@ from .project_build_spec import (
 # Paths used by catalyst inside toolset.
 CATALYST_BUILDS_PATH = "/var/tmp/catalyst/builds"
 CATALYST_SNAPSHOTS_PATH = "/var/tmp/catalyst/snapshots"
+# Folders mounted in toolset whose paths contain whitespace are mounted here: catalyst splits spec values on whitespace,
+# so their paths can't be used in specs (eg. project "Raspberry Pi 5").
+CATALYST_MIRRORS_PATH = "/var/tmp/catalystlab-mirrors"
 # Archive extensions catalyst can produce, used to find built stage file.
 STAGE_ARCHIVE_EXTENSIONS = (".tar.xz", ".tar.bz2", ".tar.gz", ".tar.zst", ".tar", ".squashfs")
 
@@ -80,11 +83,26 @@ class ProjectBuild(MultiStageProcess):
                 self.stages.append(ProjectBuildStepDownloadSeed(stage=stage, multistage_process=self))
             self.stages.append(ProjectBuildStepBuildStage(stage=stage, multistage_process=self))
 
+    def _in_builds_directory(self, host_path: str) -> bool:
+        return host_path == self.builds_directory or host_path.startswith(self.builds_directory + os.sep)
+
     def container_path(self, host_path: str) -> str:
-        """Path inside toolset of file in project builds directory. Other paths are mounted at the same location."""
-        if host_path != self.builds_directory and not host_path.startswith(self.builds_directory + os.sep):
+        """Path inside toolset of file in project builds directory, or in mirrored folder (mounted at the same location,
+        or under CATALYST_MIRRORS_PATH when its path contains whitespace). Other paths are the same."""
+        if self._in_builds_directory(host_path):
+            return os.path.join(CATALYST_BUILDS_PATH, os.path.relpath(host_path, self.builds_directory))
+        for root in sorted(self.mirrored_paths(), key=len, reverse=True):
+            if host_path == root or host_path.startswith(root + os.sep):
+                return self.mirror_path(root) + host_path[len(root):]
+        return host_path
+
+    @staticmethod
+    def mirror_path(host_path: str) -> str:
+        """Location of mirrored folder in toolset: the same path, or path without whitespace."""
+        if not any(character.isspace() for character in host_path):
             return host_path
-        return os.path.join(CATALYST_BUILDS_PATH, os.path.relpath(host_path, self.builds_directory))
+        import hashlib
+        return f"{CATALYST_MIRRORS_PATH}/{hashlib.sha1(host_path.encode()).hexdigest()[:16]}"
 
     def mirrored_paths(self) -> list[str]:
         """Host directories referenced by spec values (@REPO_DIR@, root_overlay, repos, selected cache folders),
@@ -98,7 +116,7 @@ class ProjectBuild(MultiStageProcess):
         # Caches in folders selected by user (automatic ones are in builds directory).
         paths += sorted({
             path for stage in self.plan.build_order() for path in self.stage_cache_paths(stage).values()
-            if self.container_path(path) == path
+            if not self._in_builds_directory(path)
         })
         return paths
 
@@ -424,7 +442,7 @@ class ProjectBuildStepPrepareToolset(ProjectBuildStep):
         ]
         # Directories referenced by spec values with host paths (@REPO_DIR@, root_overlay, repos, cache folders) are
         # available at the same paths.
-        bindings += [BindMount(mount_path=path, host_path=path, store_changes=True, create_if_missing=True) for path in process.mirrored_paths()]
+        bindings += [BindMount(mount_path=process.mirror_path(path), host_path=path, store_changes=True, create_if_missing=True) for path in process.mirrored_paths()]
         # Loop devices for mounting snapshot (store_changes gives read-write device access).
         bindings += [BindMount(mount_path=path, host_path=path, store_changes=True) for path in getattr(self, "loop_devices", [])]
         return bindings
@@ -578,6 +596,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                 root_overlay=process.container_path(root_overlay_path) if has_root_overlay else None,
                 cache_paths={argument: process.container_path(path) for argument, path in cache_paths.items()},
                 snapshot=process.snapshot,
+                path_mapper=process.container_path,
             ))
             spec_path = os.path.join(work_directory, "stage.spec")
             with open(spec_path, "w", encoding="utf-8") as file:
@@ -660,7 +679,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             (process.builds_directory, CATALYST_BUILDS_PATH),
             (process.rootless_snapshot_path, f"{CATALYST_SNAPSHOTS_PATH}/gentoo-{snapshot_treeish(process.project_directory, process.snapshot)}.sqfs"),
             (distfiles_directory(process.executor), "/var/cache/distfiles"),
-        ] + [(path, path) for path in process.mirrored_paths()]
+        ] + [(path, process.mirror_path(path)) for path in process.mirrored_paths()]
         script = stage_build_session_script(
             executor=process.executor,
             toolset_path=process.rootless_toolset_path,

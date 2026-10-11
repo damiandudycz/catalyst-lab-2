@@ -1,7 +1,10 @@
 from __future__ import annotations
+import re
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
-from .project_stage_arguments import StageArgumentDetails
+from .project_stage_arguments import StageArgumentDetails, StageArgumentLevel
+from .project_stage_automatic_option import StageAutomaticOption
 
 # ------------------------------------------------------------------------------
 # Kernels of stages (livecd-stage2, stage4...): catalyst builds kernels listed in boot/kernel, each configured with
@@ -15,38 +18,63 @@ from .project_stage_arguments import StageArgumentDetails
 
 BOOT_KERNELS_ATTRIBUTE = "boot_kernels"
 
+class KernelSettingType(Enum):
+    TEXT = "text"
+    PATH = "path"       # File or folder, placeholders (@STAGE_DIR@, @REPO_DIR@...) can be used.
+    LIST = "list"       # Values separated by spaces in spec, edited one per line.
+    BOOLEAN = "boolean" # Catalyst checks only if option exists, so it's written only when enabled (as yes).
+
 @dataclass(frozen=True)
 class KernelSetting:
     key: str # Name in spec, after boot/kernel/<name>/.
     title: str
     description: str
-    is_list: bool = False
+    type: KernelSettingType = KernelSettingType.TEXT
+
+    @property
+    def is_list(self) -> bool:
+        return self.type == KernelSettingType.LIST
+
+# Accepted by catalyst, but its scripts don't use them (catalyst 4).
+_NOT_USED = " Catalyst accepts this setting, but doesn't use it when building kernels."
 
 KERNEL_SETTINGS = [
-    KernelSetting("sources", "Sources", "Kernel package, eg. sys-kernel/gentoo-kernel-bin or kernel from overlay"),
-    KernelSetting("distkernel", "Distribution kernel", "yes: kernel package builds kernel and initramfs itself (gentoo-kernel)"),
-    KernelSetting("config", "Configuration", "Kernel .config file, @STAGE_DIR@ and @REPO_DIR@ can be used"),
-    KernelSetting("dracut_args", "Dracut arguments", "Arguments of dracut creating initramfs of distribution kernel"),
-    KernelSetting("extraversion", "Extra version", "Added to kernel version"),
-    KernelSetting("packages", "Packages", "Packages built with kernel (eg. external modules)", is_list=True),
-    KernelSetting("use", "USE flags", "USE flags of kernel packages", is_list=True),
-    KernelSetting("gk_kernargs", "Genkernel arguments", "Arguments of genkernel (kernels which aren't distribution kernels)"),
-    KernelSetting("gk_action", "Genkernel action", "Genkernel action, eg. all"),
-    KernelSetting("aliases", "Aliases", "Other names of kernel in boot menu", is_list=True),
-    KernelSetting("console", "Console", "Kernel console options, eg. ttyS0,115200", is_list=True),
-    KernelSetting("initramfs_overlay", "Initramfs overlay", "Folder with files added to initramfs"),
-    KernelSetting("softlevel", "Soft level", "OpenRC runlevel used when booting"),
+    KernelSetting("sources", "Kernel package", "Package with kernel sources, eg. sys-kernel/gentoo-kernel (distribution kernel) or "
+                  "sys-kernel/gentoo-sources. Prebuilt kernels without sources (eg. raspberrypi-image) are installed as packages of stage instead."),
+    KernelSetting("distkernel", "Distribution kernel", "Kernel package builds kernel itself (gentoo-kernel), catalyst creates its "
+                  "initramfs with dracut. Otherwise kernel is built from sources with genkernel.", KernelSettingType.BOOLEAN),
+    KernelSetting("config", "Configuration", "Kernel .config file, eg. @STAGE_DIR@/kernel.config. @STAGE_DIR@, @PROJECT_DIR@ and "
+                  "@REPO_DIR@ can be used.", KernelSettingType.PATH),
+    KernelSetting("dracut_args", "Dracut arguments", "Arguments of dracut creating initramfs of distribution kernel."),
+    KernelSetting("extraversion", "Extra version", "Added to kernel version."),
+    KernelSetting("packages", "Packages", "Packages built with kernel, eg. external modules.", KernelSettingType.LIST),
+    KernelSetting("use", "USE flags", "USE flags of kernel packages.", KernelSettingType.LIST),
+    KernelSetting("gk_kernargs", "Genkernel arguments", "Arguments of genkernel, for kernels which aren't distribution kernels."),
+    KernelSetting("gk_action", "Genkernel action", "Genkernel action, eg. all." + _NOT_USED),
+    KernelSetting("aliases", "Aliases", "Other names of kernel in boot menu." + _NOT_USED, KernelSettingType.LIST),
+    KernelSetting("console", "Console", "Console of kernel in boot menu of ISO, eg. ttyS0,115200.", KernelSettingType.LIST),
+    KernelSetting("initramfs_overlay", "Initramfs overlay", "Folder with files added to initramfs (genkernel). @STAGE_DIR@, "
+                  "@PROJECT_DIR@ and @REPO_DIR@ can be used.", KernelSettingType.PATH),
+    KernelSetting("softlevel", "Soft level", "OpenRC runlevel used when booting." + _NOT_USED),
 ]
 _SETTINGS_BY_KEY = {setting.key: setting for setting in KERNEL_SETTINGS}
 
-def stage_supports_kernels(project_directory, stage) -> bool:
-    """Target of stage has boot/kernel option."""
-    from .project_stage import load_catalyst_stage_arguments_details
-    try:
-        arguments = load_catalyst_stage_arguments_details(toolset=project_directory.get_toolset(), target_name=stage.target)
-    except Exception:
-        return False
-    return StageArgumentDetails.boot_kernel.value in arguments
+# Kernel settings shown in basic mode of stage details (others only in advanced mode), like STAGE_ARGUMENT_LEVELS.
+KERNEL_SETTING_LEVELS: dict[str, StageArgumentLevel] = {
+    "sources": StageArgumentLevel.BASIC,
+    "distkernel": StageArgumentLevel.BASIC,
+    "config": StageArgumentLevel.BASIC,
+    "dracut_args": StageArgumentLevel.ADVANCED,
+    "extraversion": StageArgumentLevel.ADVANCED,
+    "packages": StageArgumentLevel.ADVANCED,
+    "use": StageArgumentLevel.ADVANCED,
+    "gk_kernargs": StageArgumentLevel.ADVANCED,
+    "gk_action": StageArgumentLevel.ADVANCED,
+    "aliases": StageArgumentLevel.ADVANCED,
+    "console": StageArgumentLevel.ADVANCED,
+    "initramfs_overlay": StageArgumentLevel.ADVANCED,
+    "softlevel": StageArgumentLevel.ADVANCED,
+}
 
 def stage_kernel_names(project_directory, stage) -> list[str]:
     """Kernels built by stage (boot/kernel value, own or from releng template)."""
@@ -68,6 +96,10 @@ def releng_kernel_setting(project_directory, stage, name: str, key: str):
         value = [value]
     return value
 
+def kernel_setting_enabled(value) -> bool:
+    """Boolean setting is enabled (yes, like catalyst checks it)."""
+    return isinstance(value, str) and value.strip().lower() == "yes"
+
 def kernel_setting(project_directory, stage, name: str, key: str) -> tuple[Any, bool]:
     """Value of kernel setting used when building, and whether it's set by stage (otherwise from releng template)."""
     own = own_kernel_settings(stage).get(name, {}).get(key)
@@ -88,12 +120,80 @@ def set_kernel_setting(project_directory, stage, name: str, key: str, value):
     ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
                                                   value=settings or None)
 
+# Names of kernels are used by catalyst in file names (/boot/<name>, boot/kernel/<name>/... options).
+_KERNEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+def kernel_name_error(name: str, names: list[str]) -> str | None:
+    if not _KERNEL_NAME.match(name):
+        return "Kernel name can contain letters, digits, dots, underscores and hyphens"
+    if name in names:
+        return f"Kernel {name} is already added"
+    return None
+
+def stage_inherits_kernels(stage) -> bool:
+    """Stage uses kernels of its releng template (boot/kernel isn't set by stage)."""
+    value = getattr(stage, StageArgumentDetails.boot_kernel.name, None)
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return isinstance(value, StageAutomaticOption)
+
+def releng_kernel_names(project_directory, stage) -> list[str]:
+    """Kernels defined by releng template of stage."""
+    from .project_stage_value_resolver import resolve_stage_argument
+    value = resolve_stage_argument(project_directory, stage, StageArgumentDetails.boot_kernel.value,
+                                   option=StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE)
+    names = value if isinstance(value, list) else [value]
+    return [name.strip() for name in names if isinstance(name, str) and name.strip()]
+
+def set_kernel_names(project_directory, stage, names: list[str] | None):
+    """Kernels of stage (boot/kernel), None uses kernels of releng template again."""
+    from .project_manager import ProjectManager
+    value = StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE if names is None else (names or None)
+    ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage,
+                                                  argument=StageArgumentDetails.boot_kernel, value=value)
+
+def remove_kernel(project_directory, stage, name: str):
+    """Removes kernel from stage, with settings stage set for it."""
+    from .project_manager import ProjectManager
+    set_kernel_names(project_directory, stage, [kernel for kernel in stage_kernel_names(project_directory, stage) if kernel != name])
+    settings = {kernel: values for kernel, values in own_kernel_settings(stage).items() if kernel != name}
+    ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
+                                                  value=settings or None)
+
+def new_kernel_name(names: list[str]) -> str:
+    """Name of added kernel, not used by other kernels of stage (kernel, kernel-2...). It can be renamed."""
+    name, number = "kernel", 2
+    while name in names:
+        name, number = f"kernel-{number}", number + 1
+    return name
+
+def rename_kernel(project_directory, stage, old_name: str, new_name: str):
+    """Renames kernel, keeping its position and settings."""
+    from .project_manager import ProjectManager
+    set_kernel_names(project_directory, stage, [new_name if name == old_name else name
+                                                for name in stage_kernel_names(project_directory, stage)])
+    settings = {new_name if kernel == old_name else kernel: values for kernel, values in own_kernel_settings(stage).items()}
+    ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
+                                                  value=settings or None)
+
 def kernel_spec_values(project_directory, stage) -> list[tuple[str, Any]]:
     """Spec options of kernels of stage, (option, value) in order of kernels and settings."""
     values = []
+    packages = None # Kernel packages of snapshot and overlays, read when needed.
     for name in stage_kernel_names(project_directory, stage):
         for setting in KERNEL_SETTINGS:
             value, _ = kernel_setting(project_directory, stage, name, setting.key)
+            if setting.key == "distkernel":
+                # Set by kind of package when it's known (catalyst builds each kind only one way), otherwise stored.
+                from .project_kernel_packages import load_kernel_packages, derived_distkernel
+                package, _ = kernel_setting(project_directory, stage, name, "sources")
+                if package:
+                    packages = packages if packages is not None else load_kernel_packages(project_directory, stage)
+                    if (derived := derived_distkernel(package, packages)) is not None:
+                        value = "yes" if derived else None
+            if setting.type == KernelSettingType.BOOLEAN:
+                # Catalyst checks only if option exists, "no" would start preparing distribution kernel.
+                value = "yes" if kernel_setting_enabled(value) else None
             if not _is_empty(value):
                 values.append((f"{StageArgumentDetails.boot_kernel.value}/{name}/{setting.key}", value))
     return values

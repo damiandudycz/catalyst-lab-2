@@ -15,6 +15,7 @@ from .multistage_process import MultiStageProcess, MultiStageProcessEvent, Multi
 from .multistage_process_execution_view import MultistageProcessExecutionView
 from .toolset_manager import ToolsetManager
 from .cl_toggle_group import CLToggle, CLToggleGroup
+from .combo_row_popup import fit_popup_to_items
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/toolset/toolset_details_view.ui')
 class ToolsetDetailsView(Gtk.Box):
@@ -125,6 +126,7 @@ class ToolsetDetailsView(Gtk.Box):
         # This computer is listed only on Linux (or when toolset still uses it, so it's displayed).
         local = sys.platform.startswith("linux") or current is None
         self.runs_on_machines = ([None] if local else []) + list(Repository.BuildMachine.value)
+        fit_popup_to_items(self.runs_on_row)
         self.runs_on_row.set_model(Gtk.StringList.new([machine.name if machine else "This computer" for machine in self.runs_on_machines]))
         self.runs_on_row.set_selected(self.runs_on_machines.index(current) if current in self.runs_on_machines else 0)
         self.runs_on_row.connect("notify::selected", self.on_runs_on_changed)

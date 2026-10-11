@@ -206,7 +206,8 @@ extraversion = "ps3"
 
 Settings: `sources`, `distkernel`, `config`, `dracut_args`, `extraversion`, `packages`, `use`, `gk_kernargs`,
 `gk_action`, `aliases`, `console`, `initramfs_overlay`, `softlevel`. `packages`, `use`, `aliases` and `console` are
-lists, others are texts (booleans are written as `yes` / `no`). Groups can add settings of kernels too
+lists, `distkernel` is a boolean (`true` writes `yes`, `false` leaves it out, as Catalyst only checks if it's set), others are
+texts. Groups can add settings of kernels too
 (`[groups.arguments.boot_kernels.<name>]`), they are combined with settings of the stage.
 Kernel settings need Catalyst Lab 0.3.0 or newer (`min_app_version = "0.3.0"`).
 

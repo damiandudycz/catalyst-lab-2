@@ -1,5 +1,6 @@
 from __future__ import annotations
 import threading
+from .combo_row_popup import fit_popup_to_items
 from typing import Any, Callable
 from gi.repository import Gtk, GLib, Adw
 from .project_template import (
@@ -296,7 +297,7 @@ class ProjectTemplateOptionsView(Gtk.Box):
             row.connect("notify::active", lambda row, _: self._set_value(variable.id, row.get_active()))
         else:
             options = variable.available_options(names)
-            row = Adw.ComboRow(title=GLib.markup_escape_text(variable.title))
+            row = fit_popup_to_items(Adw.ComboRow(title=GLib.markup_escape_text(variable.title)))
             row.set_model(Gtk.StringList.new([option.title for option in options]))
             values = [option.value for option in options]
             row.set_selected(values.index(names[variable.id]))
