@@ -6,43 +6,26 @@ from .library import LibraryChange, library_target, change_problem, change_libra
 from .status_indicator import StatusIndicatorState
 
 @app_section(title="Settings", icon="settings-svgrepo-com-symbolic", order=9_000)
+@Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/settings/settings_section.ui')
 class SettingsSection(Gtk.Box):
     """Settings of app: location of library."""
     __gtype_name__ = "SettingsSection"
 
-    def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, **kwargs)
-        self.content_navigation_view = content_navigation_view
-        scrolled_window = Gtk.ScrolledWindow(hexpand=True, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        clamp = Adw.Clamp(maximum_size=800)
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, margin_start=24, margin_end=24,
-                          margin_top=12, margin_bottom=24)
-        clamp.set_child(content)
-        scrolled_window.set_child(clamp)
-        self.append(scrolled_window)
+    location_row = Gtk.Template.Child()
 
-        group = Adw.PreferencesGroup(title="Library", description=(
-            "Folder with all data of Catalyst Lab: toolsets, snapshots, releng and overlays, projects with their "
-            "builds, binary packages, virtual machines and configuration."))
-        location_row = Adw.ActionRow(title="Location", subtitle=collapse_home(library_directory()))
-        location_row.add_css_class("property")
-        location_row.set_subtitle_selectable(True)
-        open_button = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER, tooltip_text="Open folder")
-        open_button.add_css_class("flat")
-        open_button.connect("clicked", self._on_open_clicked)
-        change_button = Gtk.Button(label="Change…", valign=Gtk.Align.CENTER)
-        change_button.connect("clicked", self._on_change_clicked)
-        location_row.add_suffix(open_button)
-        location_row.add_suffix(change_button)
-        group.add(location_row)
-        content.append(group)
+    def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
+        super().__init__(**kwargs)
+        self.content_navigation_view = content_navigation_view
+        self.location_row.set_subtitle(collapse_home(library_directory()))
 
     # Library location:
 
-    def _on_open_clicked(self, button):
+    @Gtk.Template.Callback()
+    def on_open_clicked(self, button):
         Gio.AppInfo.launch_default_for_uri(Gio.File.new_for_path(library_directory()).get_uri(), None)
 
-    def _on_change_clicked(self, button):
+    @Gtk.Template.Callback()
+    def on_change_clicked(self, button):
         if self._show_if_busy():
             return
         dialog = Gtk.FileDialog(title="Choose Library Folder", modal=True)
