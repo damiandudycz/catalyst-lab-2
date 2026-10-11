@@ -4,10 +4,9 @@ from .overlay_installation import OverlayInstallation
 from .repository import Repository
 from .status_indicator import items_status, processes_status
 from .overlay_create_view import OverlayCreateView
-from .overlay_manager import OverlayManager
 from .overlay_update import OverlayUpdate
 from .app_events import app_event_bus, AppEvents
-from .git_directory_details_view import GitDirectoryDetailsView
+from .overlay_details_view import OverlayDetailsView
 
 @app_section(title="Overlays", icon="layers-minimalistic-svgrepo-com-symbolic", order=6_000)
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/app_sections/overlays/overlays_section.ui')
@@ -25,25 +24,8 @@ class OverlaysSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_item_row_pressed(self, sender, item):
-        view = GitDirectoryDetailsView(
-            git_directory=item,
-            manager_class=OverlayManager,
-            update_class=OverlayUpdate
-        )
-        view.set_margin_start(24)
-        view.set_margin_end(24)
-        #view.set_margin_top(24)
-        view.set_margin_bottom(24)
-        view.content_navigation_view = self.content_navigation_view
-        scrolled_window = Gtk.ScrolledWindow()
-        scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scrolled_window.set_hexpand(True)
-        scrolled_window.set_vexpand(True)
-        scrolled_window.set_child(view)
-        self.content_navigation_view.push_view(
-            scrolled_window,
-            title="Portage overlay details"
-        )
+        view = OverlayDetailsView(overlay=item, content_navigation_view=self.content_navigation_view)
+        self.content_navigation_view.push_view(view, title="Portage overlay details")
 
     @Gtk.Template.Callback()
     def on_installation_row_pressed(self, sender, installation):
