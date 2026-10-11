@@ -384,12 +384,26 @@ class UsageGraph(Gtk.DrawingArea):
         except AttributeError: # Older libadwaita.
             return (0x35 / 255, 0x84 / 255, 0xe4 / 255)
 
+    @staticmethod
+    def _rounded_rectangle(context, x: float, y: float, width: float, height: float, radius: float):
+        import math
+        context.new_sub_path()
+        context.arc(x + width - radius, y + radius, radius, -math.pi / 2, 0)
+        context.arc(x + width - radius, y + height - radius, radius, 0, math.pi / 2)
+        context.arc(x + radius, y + height - radius, radius, math.pi / 2, math.pi)
+        context.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
+        context.close_path()
+
     def _draw(self, area, context, width, height):
-        # Frame of graph.
+        # Rounded frame, graph is clipped to it.
         foreground = self.get_color()
+        self._rounded_rectangle(context, 0.5, 0.5, width - 1, height - 1, 6)
         context.set_source_rgba(foreground.red, foreground.green, foreground.blue, 0.08)
-        context.rectangle(0, 0, width, height)
-        context.fill()
+        context.fill_preserve()
+        context.set_source_rgba(foreground.red, foreground.green, foreground.blue, 0.15)
+        context.set_line_width(1)
+        context.stroke_preserve()
+        context.clip()
         if not self.values:
             return
         samples = USAGE_HISTORY_SECONDS // USAGE_INTERVAL_SECONDS
