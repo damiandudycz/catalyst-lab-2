@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from gi.repository import GLib
 from .multistage_process import (
     MultiStageProcess, MultiStageProcessStage, MultiStageProcessState, MultiStageProcessStageState,
-    MultiStageProcessEvent
+    MultiStageProcessEvent, MultiStageProcessStageEvent
 )
 from .root_function import root_function
 from .repository import Repository
@@ -66,9 +66,18 @@ class ProjectBuild(MultiStageProcess):
         super().__init__(title=f"Building {project_directory.name}")
         # Project rows show running builds in their status indicators, so project state changes with build state.
         self.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._on_state_changed)
+        # Record of run (steps shown later from builds list) is saved when steps change, also runs interrupted by
+        # closing app can be shown then.
+        for step in self.stages:
+            step.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, self._on_step_state_changed)
 
     def name(self) -> str:
         return self.project_directory.name
+
+    def _on_step_state_changed(self, *args):
+        if self.status != MultiStageProcessState.SETUP:
+            from .project_build_record import save_build_record
+            save_build_record(self)
 
     def _on_state_changed(self, *args):
         self.project_directory.event_bus.emit(SharedEvent.STATE_UPDATED, self.project_directory)
