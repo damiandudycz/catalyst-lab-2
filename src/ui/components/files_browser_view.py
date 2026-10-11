@@ -1,5 +1,6 @@
 import os
 from gi.repository import Gtk, Adw, GLib
+from .multistage_process_execution_view import AnsiStyle, append_ansi_line
 
 # ------------------------------------------------------------------------------
 # Read-only browser of folder (eg. releng directory): folders and files of folder, opened folders and text files are
@@ -20,9 +21,12 @@ def _format_size(size: int) -> str:
 class FilesBrowserView(Gtk.Box):
     """Folders and files of folder inside root (folders first), read when view is loaded."""
 
-    def __init__(self, root: str, path: str | None = None, content_navigation_view: Adw.NavigationView | None = None):
+    def __init__(self, root: str, path: str | None = None, content_navigation_view: Adw.NavigationView | None = None,
+                 title: str | None = None):
+        """Title replaces path in title of root folder."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         self.root = root
+        self.title = title
         self.path = path or root
         self.content_navigation_view = content_navigation_view
         self.group = None
@@ -36,7 +40,8 @@ class FilesBrowserView(Gtk.Box):
         if self.group is not None:
             self.remove(self.group)
         relative = os.path.relpath(self.path, self.root)
-        self.group = Adw.PreferencesGroup(title=GLib.markup_escape_text("/" if relative == "." else f"/{relative}"))
+        title = (self.title or "/") if relative == "." else f"/{relative}"
+        self.group = Adw.PreferencesGroup(title=GLib.markup_escape_text(title))
         self.append(self.group)
         try:
             entries = [entry for entry in os.scandir(self.path) if entry.name not in _HIDDEN_NAMES]
@@ -115,6 +120,9 @@ class FileContentView(Gtk.Box):
         self.append(info)
         text_view = Gtk.TextView(monospace=True, editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.NONE,
                                  top_margin=8, bottom_margin=8, left_margin=8, right_margin=8)
-        text_view.get_buffer().set_text(data.decode("utf-8", errors="replace"))
+        # Logs are shown with colors of their terminal output, like output of build steps.
+        buffer, style = text_view.get_buffer(), AnsiStyle()
+        for line in data.decode("utf-8", errors="replace").splitlines():
+            style = append_ansi_line(buffer, line, style)
         scrolled = Gtk.ScrolledWindow(child=text_view, hexpand=True, vexpand=True)
         self.append(Gtk.Frame(child=scrolled))

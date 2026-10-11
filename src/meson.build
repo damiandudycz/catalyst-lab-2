@@ -88,6 +88,7 @@ catalystlab_sources = [
   'objects/project/project_build_spec.py',
   'objects/project/project_build_process.py',
   'objects/project/project_build_record.py',
+  'objects/project/build_failures.py',
   'objects/releng/releng_directory.py',
   'objects/releng/releng_installation.py',
   'objects/releng/releng_manager.py',
