@@ -9,7 +9,7 @@ from .project_build_record import load_build_record, delete_build_record, failed
 from .multistage_process_execution_view import MultistageProcessExecutionView
 from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, running_project_build
 from .project_build_view import ProjectBuildView
-from .build_queue_view import build_button_state, present_build_queue
+from .build_queue_view import build_button_state, present_queued_build
 from .build_queue import BuildQueue, BuildQueueEvent
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState, MultiStageProcessState
 from .app_events import app_event_bus, AppEvents
@@ -278,8 +278,8 @@ class ProjectBuildsView(Gtk.Box):
             dialog.add_response("ok", "OK")
             dialog.present(self.get_root())
             return
-        if build_button_state(project).opens_queue:
-            present_build_queue()
+        if (queued := build_button_state(project).queued) is not None:
+            present_queued_build(queued)
             return
         app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=project), "Build stages", 640, 480)
 

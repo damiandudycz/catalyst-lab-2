@@ -135,10 +135,11 @@ class ProcessesList(Gtk.Box):
         return False
 
 class QueuedBuildRow(Gtk.ListBoxRow):
-    """Build waiting in queue, opens queue."""
+    """Build waiting in queue, opens its steps."""
 
     def __init__(self, queued_build):
         super().__init__(tooltip_text="Queued build")
+        self.queued_build = queued_build
         project = queued_build.project_directory
         box = Gtk.Box(spacing=10, margin_start=6, margin_end=6, margin_top=2, margin_bottom=2)
         icon = Gtk.Image(icon_name="clock-square-svgrepo-com-symbolic", valign=Gtk.Align.CENTER)
@@ -157,8 +158,8 @@ class QueuedBuildRow(Gtk.ListBoxRow):
         self.subtitle.set_label(f"Queued{f' ({position})' if position > 1 else ''}{' · paused' if paused else ''}")
 
     def open(self):
-        from .build_queue_view import present_build_queue
-        present_build_queue()
+        from .build_queue_view import present_queued_build
+        present_queued_build(self.queued_build)
 
 class ProcessRow(Gtk.ListBoxRow):
     """Looks like rows of installation steps: status icon, name with state, and progress. Row of running step shows

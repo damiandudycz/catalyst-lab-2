@@ -12,7 +12,7 @@ from .app_events import app_event_bus, AppEvents
 from .stages_tree_view import StagesTreeView, TreeNode, StageNodeStatus
 from .project_stage_details_view import ProjectStageDetailsView
 from .project_build_view import ProjectBuildView
-from .build_queue_view import build_button_state, present_build_queue
+from .build_queue_view import build_button_state, present_queued_build
 from .build_queue import BuildQueue, BuildQueueEvent
 from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, running_project_build
 from .project_builds_view import ProjectBuildsView
@@ -445,8 +445,8 @@ class ProjectDetailsView(Gtk.Box):
             self.show_alert(message=error)
             return
         state = build_button_state(self.project_directory)
-        if state.opens_queue:
-            present_build_queue()
+        if state.queued is not None:
+            present_queued_build(state.queued)
             return
         if not state.visible:
             self._refresh_build_state()
