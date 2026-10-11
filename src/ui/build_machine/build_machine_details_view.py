@@ -58,6 +58,22 @@ class BuildMachineDetailsView(Gtk.Box):
         status_group.add(self.users_row)
         content.append(status_group)
 
+        # Usage of running machine, read every few seconds while view is shown.
+        self.usage_group = Adw.PreferencesGroup(title="Usage", visible=False)
+        self.cpu_usage_row = self._usage_row("Processors")
+        self.memory_usage_row = self._usage_row("Memory")
+        self.swap_usage_row = self._usage_row("Swap")
+        self.disk_usage_row = self._usage_row("System disk")
+        self.workspace_usage_row = self._usage_row("Working space")
+        for row in (self.cpu_usage_row, self.memory_usage_row, self.swap_usage_row, self.disk_usage_row, self.workspace_usage_row):
+            self.usage_group.add(row)
+        content.append(self.usage_group)
+        self._previous_cpu: tuple[int, int] | None = None
+        self._usage_timer: int | None = None
+        self._reading_usage = False
+        self.connect("map", lambda widget: self._start_usage_updates())
+        self.connect("unmap", lambda widget: self._stop_usage_updates())
+
         # Actions
         actions_group = Adw.PreferencesGroup(title="Actions")
         actions = Gtk.Box(spacing=6, hexpand=True, homogeneous=True)
@@ -102,6 +118,81 @@ class BuildMachineDetailsView(Gtk.Box):
         self.connect("map", lambda widget: self._refresh_in_background())
         self._load_resources()
         self._update_display()
+
+    # Usage
+
+    @staticmethod
+    def _usage_row(title: str) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=title, subtitle="…")
+        row.graph = UsageGraph()
+        row.add_suffix(row.graph)
+        return row
+
+    def _start_usage_updates(self):
+        if self._usage_timer is None:
+            self._usage_timer = GLib.timeout_add_seconds(USAGE_INTERVAL_SECONDS, self._read_usage)
+            self._read_usage()
+
+    def _stop_usage_updates(self):
+        if self._usage_timer is not None:
+            GLib.source_remove(self._usage_timer)
+            self._usage_timer = None
+        self._previous_cpu = None
+
+    def _clear_usage(self):
+        for row in (self.cpu_usage_row, self.memory_usage_row, self.swap_usage_row, self.disk_usage_row, self.workspace_usage_row):
+            row.graph.clear()
+            row.set_subtitle("…")
+        self._previous_cpu = None
+
+    def _read_usage(self) -> bool:
+        if self._reading_usage or self.machine._status != BuildMachine.STATUS_RUNNING:
+            return True
+        self._reading_usage = True
+        def work():
+            usage = self.machine.read_usage()
+            GLib.idle_add(self._show_usage, usage)
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
+    def _show_usage(self, usage: dict | None):
+        self._reading_usage = False
+        running = self.machine._status == BuildMachine.STATUS_RUNNING
+        self.usage_group.set_visible(running and usage is not None)
+        if not running or usage is None:
+            if not running:
+                self._clear_usage() # Graphs start again when machine starts.
+            return False
+        # Processors: usage between this and previous reading.
+        cpu = (usage["cpu_total"], usage["cpu_idle"])
+        if self._previous_cpu and cpu[0] > self._previous_cpu[0]:
+            busy = 1 - (cpu[1] - self._previous_cpu[1]) / (cpu[0] - self._previous_cpu[0])
+            self._set_usage(self.cpu_usage_row, busy, f"{busy:.0%} of {usage['cpus']} cores · load {usage['load']:.1f}")
+        self._previous_cpu = cpu
+        if total := usage.get("MemTotal"):
+            used = total - usage.get("MemAvailable", 0)
+            self._set_usage(self.memory_usage_row, used / total, f"{_gib(used)} of {_gib(total)}")
+        swap_total = usage.get("SwapTotal", 0)
+        self.swap_usage_row.set_visible(swap_total > 0)
+        if swap_total:
+            used = swap_total - usage.get("SwapFree", 0)
+            self._set_usage(self.swap_usage_row, used / swap_total, f"{_gib(used)} of {_gib(swap_total)}")
+        disks = usage["disks"]
+        if "/" in disks:
+            used, size = disks["/"]
+            self._set_usage(self.disk_usage_row, used / size if size else 0, f"{_gib(used)} of {_gib(size)}")
+        from .lima import MACHINE_DATA_DIRECTORY
+        workspace = disks.get(MACHINE_DATA_DIRECTORY)
+        self.workspace_usage_row.set_visible(workspace is not None)
+        if workspace:
+            used, size = workspace
+            self._set_usage(self.workspace_usage_row, used / size if size else 0, f"{_gib(used)} of {_gib(size)}")
+        return False
+
+    @staticmethod
+    def _set_usage(row: Adw.ActionRow, fraction: float, text: str):
+        row.graph.add(min(max(fraction, 0), 1))
+        row.set_subtitle(text)
 
     # Widgets
 
@@ -257,3 +348,81 @@ class BuildMachineDetailsView(Gtk.Box):
         BuildMachineManager.shared().remove_machine(self.machine)
         if self.content_navigation_view:
             self.content_navigation_view.pop()
+
+def _gib(size: int) -> str:
+    return f"{size / 1024 ** 3:.1f} GiB"
+
+USAGE_HISTORY_SECONDS = 60
+USAGE_INTERVAL_SECONDS = 1
+
+class UsageGraph(Gtk.DrawingArea):
+    """Usage (0-1) during last minute, newest on the right. Drawn with accent color, orange and red when usage is
+    high (like level bars)."""
+
+    def __init__(self):
+        super().__init__(content_width=200, content_height=36, valign=Gtk.Align.CENTER)
+        self.values: list[float] = []
+        self.set_draw_func(self._draw)
+
+    def add(self, value: float):
+        self.values = (self.values + [value])[-(USAGE_HISTORY_SECONDS // USAGE_INTERVAL_SECONDS + 1):]
+        self.queue_draw()
+
+    def clear(self):
+        self.values = []
+        self.queue_draw()
+
+    def _color(self) -> tuple[float, float, float]:
+        latest = self.values[-1] if self.values else 0
+        if latest >= 0.9:
+            return (0xe0 / 255, 0x1b / 255, 0x24 / 255)
+        if latest >= 0.75:
+            return (0xff / 255, 0x78 / 255, 0x00 / 255)
+        try:
+            accent = Adw.StyleManager.get_default().get_accent_color_rgba()
+            return (accent.red, accent.green, accent.blue)
+        except AttributeError: # Older libadwaita.
+            return (0x35 / 255, 0x84 / 255, 0xe4 / 255)
+
+    @staticmethod
+    def _rounded_rectangle(context, x: float, y: float, width: float, height: float, radius: float):
+        import math
+        context.new_sub_path()
+        context.arc(x + width - radius, y + radius, radius, -math.pi / 2, 0)
+        context.arc(x + width - radius, y + height - radius, radius, 0, math.pi / 2)
+        context.arc(x + radius, y + height - radius, radius, math.pi / 2, math.pi)
+        context.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
+        context.close_path()
+
+    def _draw(self, area, context, width, height):
+        # Rounded frame, graph is clipped to it.
+        foreground = self.get_color()
+        self._rounded_rectangle(context, 0.5, 0.5, width - 1, height - 1, 6)
+        context.set_source_rgba(foreground.red, foreground.green, foreground.blue, 0.08)
+        context.fill_preserve()
+        context.set_source_rgba(foreground.red, foreground.green, foreground.blue, 0.15)
+        context.set_line_width(1)
+        context.stroke_preserve()
+        context.clip()
+        if not self.values:
+            return
+        samples = USAGE_HISTORY_SECONDS // USAGE_INTERVAL_SECONDS
+        step = width / samples
+        points = [(width - (len(self.values) - 1 - index) * step, height - value * (height - 2) - 1)
+                  for index, value in enumerate(self.values)]
+        red, green, blue = self._color()
+        # Area under line.
+        context.move_to(points[0][0], height)
+        for x, y in points:
+            context.line_to(x, y)
+        context.line_to(points[-1][0], height)
+        context.close_path()
+        context.set_source_rgba(red, green, blue, 0.25)
+        context.fill()
+        # Line.
+        context.move_to(*points[0])
+        for x, y in points[1:]:
+            context.line_to(x, y)
+        context.set_source_rgba(red, green, blue, 1)
+        context.set_line_width(1.5)
+        context.stroke()
