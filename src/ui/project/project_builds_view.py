@@ -163,8 +163,8 @@ class ProjectBuildsView(Gtk.Box):
                 details.append(size)
             if packages := (build.details.get("output") or {}).get("packages"):
                 details.append(f"{packages} packages")
-        # ISO of livecd stage, in build folder next to stage archive.
-        if build and build.path and (iso := (build.details.get("output") or {}).get("iso")):
+        # ISO of livecd stage, in build folder next to stage archive (builds made before ISO became their artifact).
+        if build and build.path and (iso := (build.details.get("output") or {}).get("iso")) and iso != build.artifact:
             iso_path = os.path.join(build.path, iso)
             if os.path.isfile(iso_path):
                 details.append(iso)

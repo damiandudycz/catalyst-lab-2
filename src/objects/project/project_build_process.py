@@ -672,7 +672,17 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             self.build.finished = datetime.now()
             self.build.details["output"] = output_details(self.build)
             if iso_file := next((filename for filename in moved if filename.endswith(".iso")), None):
-                self.build.details["output"]["iso"] = iso_file
+                # Livecd: ISO is result of build. Archive captured by catalyst contains the same files (root of ISO),
+                # it's removed after packages of stage are read from its CONTENTS.
+                for filename in moved:
+                    if filename == artifact or filename.startswith(artifact + "."):
+                        try:
+                            os.remove(os.path.join(self.build.path, filename))
+                        except OSError as e:
+                            self.log(f"Failed to remove {filename}: {e}")
+                self.log(f"Removed {artifact} (contains the same files as {iso_file})")
+                self.build.artifact = iso_file
+                self.build.details["output"]["size"] = os.path.getsize(os.path.join(self.build.path, iso_file))
             self.build.save(project)
             process.stage_builds[self.stage.id] = self.build
             self.complete(MultiStageProcessStageState.COMPLETED)
