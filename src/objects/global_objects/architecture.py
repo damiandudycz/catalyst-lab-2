@@ -25,6 +25,11 @@ class Architecture(Enum):
     def releng_base_arch(self) -> RelengBaseArch | None:
         return RelengBaseArch[self.name]
 
+    def releases_directory(self) -> str:
+        """Folder of architecture in releases of Gentoo mirrors (releases/<folder>/autobuilds), some architectures share
+        one (eg. ppc64 and ppc64le stages are in releases/ppc)."""
+        return _releases_directories_mapping.get(self, self.value)
+
     def qemu_user_binary(self) -> str | None:
         """Path of qemu user mode emulator for this architecture, used as catalyst interpreter."""
         name = _qemu_user_names_mapping.get(self)
@@ -98,6 +103,13 @@ _catalyst_arch_tables_mapping: dict[Architecture, list[CatalystArchTable]] = {
     # ppc64 table contains both endians, separate them by CHOST.
     Architecture.ppc64: [CatalystArchTable(name="ppc64", chost_prefix="powerpc64-")],
     Architecture.ppc64le: [CatalystArchTable(name="ppc64", chost_prefix="powerpc64le-")],
+}
+
+# Folders in releases of Gentoo mirrors, for architectures that don't have their own.
+_releases_directories_mapping = {
+    Architecture.ppc64: "ppc",
+    Architecture.ppc64le: "ppc",
+    Architecture.s390x: "s390",
 }
 
 # Names of qemu user mode emulators (qemu-<name>) for architectures.
