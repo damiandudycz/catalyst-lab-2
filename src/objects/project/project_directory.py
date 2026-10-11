@@ -124,16 +124,19 @@ class ProjectDirectory(GitDirectory):
 
     @property
     def status_indicator_values(self):
-        """Projects list: configuration error, failed last build (until project is opened), Git status (changes,
-        errors), blinking while building."""
+        """Projects list: configuration error, failed or completed last build (until project is opened), Git status
+        (changes, errors), blinking while building."""
         from .project_build import BuildRunResult
         from .status_indicator import StatusIndicatorState, StatusDetail, item_status
         result, building, timestamp = self._last_build_run()
         details = []
         if configuration_error := self.configuration_error:
             details.append(StatusDetail(StatusIndicatorState.ERROR, configuration_error))
-        if result == BuildRunResult.FAILED and (self.metadata is None or self.metadata.seen_build_timestamp != timestamp):
+        unseen = self.metadata is None or self.metadata.seen_build_timestamp != timestamp
+        if result == BuildRunResult.FAILED and unseen:
             details.append(StatusDetail(StatusIndicatorState.ERROR, "Last build failed"))
+        elif result == BuildRunResult.COMPLETED and unseen and not building:
+            details.append(StatusDetail(StatusIndicatorState.SUCCEEDED, "Last build completed"))
         details += self.status_details()
         if building:
             details.append(StatusDetail(StatusIndicatorState.LOADED, "Building"))
