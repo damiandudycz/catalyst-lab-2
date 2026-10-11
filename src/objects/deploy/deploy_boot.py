@@ -10,6 +10,9 @@ from .deploy_system import NetworkService, NETWORK_SERVICE_FILES
 
 _X86 = ("x86_64", "i686", "i586", "i486")
 
+
+RASPBERRY_PI_FIRMWARE_PACKAGE = "sys-boot/raspberrypi-firmware"
+
 class Bootloader(Enum):
     GRUB = "grub"
     SYSTEMD_BOOT = "systemd-boot"
@@ -39,7 +42,7 @@ class Bootloader(Enum):
             Bootloader.REFIND: "sys-boot/refind",
             Bootloader.EFI_STUB: "sys-boot/efibootmgr",
             # Boot files of older models (Raspberry Pi 5 has them in EEPROM).
-            Bootloader.RASPBERRY_PI: "sys-boot/raspberrypi-firmware",
+            Bootloader.RASPBERRY_PI: RASPBERRY_PI_FIRMWARE_PACKAGE,
         }.get(self)
 
     @property
@@ -228,10 +231,33 @@ fi
             lines.append('mkdir -p "$ROOT/etc/dracut.conf.d" && echo \'hostonly="no"\' > "$ROOT/etc/dracut.conf.d/catalystlab.conf"')
     if FIRMWARE_PACKAGE in packages:
         lines.append(f'mkdir -p "$ROOT/etc/portage/package.license" && echo "{FIRMWARE_PACKAGE} linux-fw-redistributable" > "$ROOT/etc/portage/package.license/catalystlab-firmware"')
+    if RASPBERRY_PI_FIRMWARE_PACKAGE in packages:
+        # Firmware package refuses to install over boot configuration that no package owns (stages made for Raspberry
+        # Pi have their own config.txt). Files of stage are kept aside while it's installed and put back after (also
+        # when installation fails), configuration of stage is used and package owns the files for its updates.
+        lines.append(r'''
+RPI_BOOT_FILES=""
+for FILE in config.txt cmdline.txt; do
+    if [ -f "$ROOT/boot/$FILE" ]; then
+        mv "$ROOT/boot/$FILE" "$ROOT/boot/$FILE.catalystlab-stage"
+        RPI_BOOT_FILES="$RPI_BOOT_FILES $FILE"
+    fi
+done
+restore_rpi_boot_files() {
+    for FILE in $RPI_BOOT_FILES; do
+        mv -f "$ROOT/boot/$FILE.catalystlab-stage" "$ROOT/boot/$FILE"
+    done
+    RPI_BOOT_FILES=""
+}
+# Replaces trap of chroot setup, mounts are released too.
+trap 'restore_rpi_boot_files; umount -l "$ROOT/run" "$ROOT/dev" "$ROOT/sys" "$ROOT/proc" 2>/dev/null' EXIT
+''')
     binpkgs = '$( [ -n "$(ls -A "$ROOT/etc/portage/binrepos.conf" 2>/dev/null)" ] && echo --getbinpkg )'
     atoms = " ".join(packages)
     lines.append(f'echo "Installing {atoms}"')
     lines.append(f'in_root emerge --noreplace --quiet-build=y {binpkgs} {atoms}')
+    if RASPBERRY_PI_FIRMWARE_PACKAGE in packages:
+        lines.append('restore_rpi_boot_files')
     return "\n".join(lines) + "\n"
 
 def bootloader_script(bootloader: Bootloader, architecture: str, uefi: bool, disk: str, root_device: str,

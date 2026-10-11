@@ -403,7 +403,7 @@ class DeployStepPackages(DeployStep):
         script = f"ROOT={quote(process.root)}\n" + packages_script(process.packages, platform, process.contents.init,
                                                                    generic_initramfs=process.machine.local,
                                                                    bootloader=process.settings.bootloader)
-        self.remote(script, "Failed to install packages, machine needs internet connection")
+        self.remote(script, "Failed to install packages (see output above, machine needs internet connection to download them)")
 
 class DeployStepNetwork(DeployStep):
     def __init__(self, multistage_process):
