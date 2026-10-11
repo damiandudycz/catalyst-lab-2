@@ -21,6 +21,7 @@ class CatalystlabApplication(Adw.Application):
     def __init__(self):
         super().__init__(application_id='com.damiandudycz.CatalystLab',
                          flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.restart_requested = False
         self.create_action('quit', lambda *_: self.quit(), ['<primary>q'])
         self.create_action('about', self.on_about_action)
         self.create_action('preferences', self.on_preferences_action)
@@ -62,6 +63,11 @@ class CatalystlabApplication(Adw.Application):
                 print(f"Failed to stop virtual machine {machine.name}: {e}")
         Gio.Application.do_shutdown(self)
 
+    def restart(self):
+        """Quits and starts app again (eg. after library changed)."""
+        self.restart_requested = True
+        self.quit()
+
     def on_about_action(self, widget, _):
         """Callback for the app.about action."""
         about = Adw.AboutWindow(transient_for=self.props.active_window,
@@ -96,4 +102,20 @@ def main(version):
     """The application's entry point."""
     app_info.set_app_version(version)
     app = CatalystlabApplication()
-    return app.run(sys.argv)
+    result = app.run(sys.argv)
+    if app.restart_requested:
+        _start_again()
+    return result
+
+def _start_again():
+    """Starts new instance of app, after this one finished (it's single instance app)."""
+    import os, subprocess
+    if getattr(sys, "frozen", False):
+        bundle = os.path.dirname(os.path.dirname(os.path.dirname(sys.executable)))
+        if sys.platform == "darwin" and bundle.endswith(".app"):
+            subprocess.Popen(["open", "-n", bundle])
+            return
+        # Started executable of PyInstaller is new instance, not part of this one.
+        os.environ["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+    os.execv(sys.executable, [sys.executable, *sys.argv])
