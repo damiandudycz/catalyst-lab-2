@@ -138,6 +138,7 @@ catalystlab_sources = [
   'ui/main_window/main_window.py',
   'ui/main_window/main_window_side_menu_button.py',
   'ui/main_window/main_window_side_menu.py',
+  'ui/main_window/main_window_processes_list.py',
   'ui/overlay/overlay_create_view.py',
   'ui/overlay/overlay_details_view.py',
   'ui/project/project_create_view.py',
