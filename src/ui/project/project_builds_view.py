@@ -168,7 +168,7 @@ class ProjectBuildsView(Gtk.Box):
             subtitle += f"\n{failure}"
         row = Adw.ActionRow(title=GLib.markup_escape_text(stage_name), subtitle=GLib.markup_escape_text(subtitle))
         if build and (build.details.get("failure") or {}).get("logs"):
-            row.set_tooltip_text("Logs for bug reports (build.log, environment, emerge --info) are in failure folder of build")
+            row.set_tooltip_text("Details of failure are in failure folder of build: summary.txt with errors of failed packages, their logs, emerge --info and configuration of stage")
         icon = Gtk.Image.new_from_icon_name(_state_icon(state))
         icon.set_pixel_size(24)
         if css_class := _state_css_class(state):
