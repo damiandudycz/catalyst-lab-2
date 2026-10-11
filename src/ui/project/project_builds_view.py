@@ -5,6 +5,8 @@ from enum import Enum
 from gi.repository import Gtk, Adw, GLib, Gio
 from .project_directory import ProjectDirectory
 from .project_build import StageBuildStatus, load_project_builds
+from .project_build_record import load_build_record, delete_build_record
+from .multistage_process_execution_view import MultistageProcessExecutionView
 from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, running_project_build
 from .project_build_view import ProjectBuildView
 from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState, MultiStageProcessState
@@ -94,8 +96,16 @@ class ProjectBuildsView(Gtk.Box):
             is_running = running_build is not None and timestamp == running_build.timestamp
             title = f"Started {_format_timestamp(timestamp, fallback=entries[0][1].date if entries and entries[0][1] else datetime.now())}"
             group = Adw.PreferencesGroup(title=title, description=_run_summary([state for _, _, state in entries]))
+            header_buttons = Gtk.Box(spacing=6)
+            group.set_header_suffix(header_buttons)
+            # Steps of run, like build progress (also of runs finished before app was started).
+            steps_button = Gtk.Button(icon_name="checklist-minimalistic-svgrepo-com-symbolic", tooltip_text="Show build steps",
+                                      valign=Gtk.Align.CENTER)
+            steps_button.add_css_class("flat")
+            steps_button.connect("clicked", lambda _, timestamp=timestamp, run_builds=run_builds: self._show_run_steps(timestamp, run_builds))
+            header_buttons.append(steps_button)
             if not is_running:
-                group.set_header_suffix(self._delete_button(
+                header_buttons.append(self._delete_button(
                     tooltip="Remove builds",
                     heading="Remove builds?",
                     body=(
@@ -103,7 +113,8 @@ class ProjectBuildsView(Gtk.Box):
                         if len(run_builds) > 1 else
                         f"Build started {title.removeprefix('Started ')} will be removed with its files. This can't be undone."
                     ),
-                    builds=run_builds
+                    builds=run_builds,
+                    timestamp=timestamp
                 ))
             for stage_name, build, state in entries:
                 stage_removed = build is not None and build.stage_id not in stage_ids
@@ -189,29 +200,43 @@ class ProjectBuildsView(Gtk.Box):
     # Removing builds
     # --------------------------------------------------------------------------
 
-    def _delete_button(self, tooltip: str, heading: str, body: str, builds: list) -> Gtk.Button:
+    def _delete_button(self, tooltip: str, heading: str, body: str, builds: list, timestamp: str | None = None) -> Gtk.Button:
+        """Removes builds, and record of run with given timestamp (whole run is removed)."""
         button = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text=tooltip, valign=Gtk.Align.CENTER)
         button.add_css_class("flat")
-        button.connect("clicked", lambda _: self._confirm_delete(heading, body, builds))
+        button.connect("clicked", lambda _: self._confirm_delete(heading, body, builds, timestamp))
         return button
 
-    def _confirm_delete(self, heading: str, body: str, builds: list):
+    def _confirm_delete(self, heading: str, body: str, builds: list, timestamp: str | None = None):
         dialog = Adw.AlertDialog(heading=heading, body=body)
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("delete", "Remove")
         dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response("cancel")
         dialog.set_close_response("cancel")
-        dialog.connect("response", lambda _, response: self._delete_builds(builds) if response == "delete" else None)
+        dialog.connect("response", lambda _, response: self._delete_builds(builds, timestamp) if response == "delete" else None)
         dialog.present(self.get_root())
 
-    def _delete_builds(self, builds: list):
+    def _delete_builds(self, builds: list, timestamp: str | None = None):
         for build in builds:
             try:
                 build.delete()
             except Exception as e:
                 print(f"Error removing build {build.path}: {e}")
+        if timestamp is not None:
+            delete_build_record(self.project_directory, timestamp)
         self.load_builds()
+
+    def _show_run_steps(self, timestamp: str, builds: list):
+        """Build progress of run: running or finished in this session (with all its output), or from its record."""
+        process = next((build for build in MultiStageProcess.get_started_processes_by_class(ProjectBuild)
+                        if build.project_directory.id == self.project_directory.id and build.timestamp == timestamp), None)
+        if process is not None:
+            self._open_build_progress(process)
+            return
+        view = MultistageProcessExecutionView()
+        view.set_multistage_process(load_build_record(self.project_directory, timestamp, builds))
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, view, "Build stages", 640, 480)
 
     def _update_build_row(self, running_build):
         """Only one build runs at a time (also of different projects), toolset can't be busy with other operation."""

@@ -28,6 +28,8 @@ class MultistageProcessExecutionView(Gtk.Box):
         self.multistage_process: MultiStageProcess | None = None
         # Bottom bar is as high as progress bar, which is drawn over line.
         self.progress_overlay.set_measure_overlay(self.progress_bar, True)
+        # Result of finished process is seen when this view shows it.
+        self.connect("map", lambda widget: self._mark_result_seen())
 
     def set_multistage_process(self, multistage_process: MultiStageProcess | None = None):
         """Call when multistage_process is started"""
@@ -103,7 +105,13 @@ class MultistageProcessExecutionView(Gtk.Box):
             vadjustment.set_value(bottom)
         GLib.timeout_add(100, _scroll)
 
+    def _mark_result_seen(self):
+        process = self.multistage_process
+        if process is not None and self.get_mapped() and process.status in (MultiStageProcessState.COMPLETED, MultiStageProcessState.FAILED):
+            process.mark_result_seen()
+
     def _set_current_stage(self, stage: MultiStageProcessState):
+        self._mark_result_seen()
         self.cancel_button.set_visible(stage == MultiStageProcessState.IN_PROGRESS)
         self.finish_button.set_visible(stage != MultiStageProcessState.IN_PROGRESS)
         # Add label with summary for completion states:
