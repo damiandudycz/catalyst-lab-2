@@ -57,8 +57,10 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         self._refresh_buttons_state()
 
     def _setup_welcome_page(self):
-        if not self.show_welcome_screen:
+        # Realize can happen again (eg. when view pushed in main window is shown again), welcome page is added once.
+        if not self.show_welcome_screen or getattr(self, "_welcome_page_set_up", False):
             return
+        self._welcome_page_set_up = True
         # Root: GtkScrolledWindow
         scrolled_window = Gtk.ScrolledWindow()
         scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -144,6 +146,10 @@ class WizardView(Adw.Bin, Gtk.Buildable):
 
     def do_add_child(self, builder, child, type_):
         # Called ONLY for external <child> in other .ui files
+        # Welcome page is added before other pages (properties of view are set then). Added when view is shown, it
+        # would be placed before page carousel already shows (view pushed in main window), carousel keeps showing that
+        # page then.
+        self._setup_welcome_page()
         if type_ == "welcome":
             self.welcome_page = child
             self.carousel.prepend(child)
