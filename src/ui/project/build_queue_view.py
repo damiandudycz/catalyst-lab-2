@@ -86,8 +86,17 @@ class QueuedBuildView(Gtk.Box):
         self._window = None
         self.entry = entry
         self.queue = BuildQueue.shared()
-        self.banner = Adw.Banner(revealed=True, use_markup=False)
-        self.banner.connect("button-clicked", lambda banner: self.queue.start())
+        # Line about waiting in queue, like line about template in project page.
+        self.banner = Gtk.Box(spacing=8, margin_start=24, margin_end=24, margin_top=6, margin_bottom=6)
+        self.banner_label = Gtk.Label(xalign=0, hexpand=True, wrap=True)
+        self.banner_label.add_css_class("caption")
+        self.banner_label.add_css_class("dimmed")
+        self.banner_button = Gtk.Button(label="Start queue", valign=Gtk.Align.CENTER)
+        self.banner_button.add_css_class("caption")
+        self.banner_button.add_css_class("small-button")
+        self.banner_button.connect("clicked", lambda button: self.queue.start())
+        self.banner.append(self.banner_label)
+        self.banner.append(self.banner_button)
         self.append(self.banner)
         self.execution_view = MultistageProcessExecutionView(vexpand=True)
         self.execution_view.set_multistage_process(QueuedBuildPreview(entry))
@@ -102,13 +111,13 @@ class QueuedBuildView(Gtk.Box):
         running = running_build()
         if self.queue.paused:
             reason = f": {self.queue.pause_reason}" if self.queue.pause_reason else ""
-            self.banner.set_title(f"Waiting in queue, queue is paused{reason}")
-            self.banner.set_button_label("Start queue")
+            self.banner_label.set_label(f"Waiting in queue, queue is paused{reason}")
+            self.banner_button.set_visible(True)
         else:
             waiting = f"after build of {running.project_directory.name}" if running is not None else "to start"
             ahead = f" and {position - 1} queued build{'s' if position > 2 else ''}" if position > 1 else ""
-            self.banner.set_title(f"Waiting in queue {waiting}{ahead}")
-            self.banner.set_button_label(None)
+            self.banner_label.set_label(f"Waiting in queue {waiting}{ahead}")
+            self.banner_button.set_visible(False)
 
     def _on_queue_changed(self, *args):
         if self.entry in self.queue.entries:
@@ -124,7 +133,7 @@ class QueuedBuildView(Gtk.Box):
         if build is None:
             self.close()
             return False
-        self.banner.set_revealed(False)
+        self.banner.set_visible(False)
         self.remove(self.execution_view)
         self.execution_view = MultistageProcessExecutionView(vexpand=True)
         self.execution_view.set_multistage_process(build)
