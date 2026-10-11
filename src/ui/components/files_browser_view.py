@@ -21,9 +21,12 @@ def _format_size(size: int) -> str:
 class FilesBrowserView(Gtk.Box):
     """Folders and files of folder inside root (folders first), read when view is loaded."""
 
-    def __init__(self, root: str, path: str | None = None, content_navigation_view: Adw.NavigationView | None = None):
+    def __init__(self, root: str, path: str | None = None, content_navigation_view: Adw.NavigationView | None = None,
+                 title: str | None = None):
+        """Title replaces path in title of root folder."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         self.root = root
+        self.title = title
         self.path = path or root
         self.content_navigation_view = content_navigation_view
         self.group = None
@@ -37,7 +40,8 @@ class FilesBrowserView(Gtk.Box):
         if self.group is not None:
             self.remove(self.group)
         relative = os.path.relpath(self.path, self.root)
-        self.group = Adw.PreferencesGroup(title=GLib.markup_escape_text("/" if relative == "." else f"/{relative}"))
+        title = (self.title or "/") if relative == "." else f"/{relative}"
+        self.group = Adw.PreferencesGroup(title=GLib.markup_escape_text(title))
         self.append(self.group)
         try:
             entries = [entry for entry in os.scandir(self.path) if entry.name not in _HIDDEN_NAMES]

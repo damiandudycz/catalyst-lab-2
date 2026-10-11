@@ -25,6 +25,24 @@ class PackageFailure:
     reason: str | None        # Known reason found in output (eg. out of memory).
     project_directory: object
     build: object             # StageBuild.
+    index: int                # Position in failed packages of build (its state is saved there).
+
+    def _item(self) -> dict:
+        return self.build.details["failure"]["packages"][self.index]
+
+    @property
+    def fixed(self) -> bool:
+        return bool(self._item().get("fixed"))
+
+    def set_fixed(self, fixed: bool):
+        """Marks failure as fixed (or not), saved in build."""
+        self._item()["fixed"] = fixed
+        self.build.save(self.project_directory)
+
+    def remove(self):
+        """Removes failure from Bugs (build and its logs stay), saved in build."""
+        self._item()["removed"] = True
+        self.build.save(self.project_directory)
 
     @property
     def atom(self) -> str:
@@ -75,9 +93,10 @@ def collect_package_failures() -> list[PackageFailure]:
             if build.status != StageBuildStatus.FAILED:
                 continue
             failure = (build.details or {}).get("failure") or {}
-            for item in failure.get("packages") or []:
-                if package := item.get("package"):
+            for index, item in enumerate(failure.get("packages") or []):
+                if (package := item.get("package")) and not item.get("removed"):
                     failures.append(PackageFailure(package=package, repository=item.get("repository"), phase=item.get("phase"),
-                                                   reason=failure.get("reason"), project_directory=project, build=build))
+                                                   reason=failure.get("reason"), project_directory=project, build=build,
+                                                   index=index))
     failures.sort(key=lambda failure: failure.date, reverse=True)
     return failures
