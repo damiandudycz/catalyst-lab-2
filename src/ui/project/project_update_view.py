@@ -27,6 +27,15 @@ class ProjectUpdateView(Gtk.Box):
                                margin_top=12, margin_bottom=24)
         scrolled_window.set_child(self.content)
         self.append(scrolled_window)
+        # Finish button closes view when update is done (also when there was nothing to update, or it failed), like
+        # in installations.
+        self.finish_bar = Gtk.Box(halign=Gtk.Align.CENTER, margin_start=24, margin_end=24, margin_top=12,
+                                  margin_bottom=12, visible=False)
+        finish_button = Gtk.Button(label="Finish")
+        finish_button.add_css_class("suggested-action")
+        finish_button.connect("clicked", lambda button: self._close())
+        self.finish_bar.append(finish_button)
+        self.append(self.finish_bar)
         self.selected = None # Options of template chosen for update.
         if source == "template":
             # Options of latest template, with values selected before.
@@ -90,7 +99,8 @@ class ProjectUpdateView(Gtk.Box):
         box.append(self.loading_label)
         self._set_content([box])
 
-    def _set_content(self, widgets: list[Gtk.Widget]):
+    def _set_content(self, widgets: list[Gtk.Widget], finished: bool = False):
+        self.finish_bar.set_visible(finished)
         while child := self.content.get_first_child():
             self.content.remove(child)
         for widget in widgets:
@@ -198,7 +208,7 @@ class ProjectUpdateView(Gtk.Box):
         status = Adw.StatusPage(icon_name=icon_name, title=GLib.markup_escape_text(title),
                                 description=GLib.markup_escape_text(description), vexpand=True)
         status.add_css_class("compact")
-        self._set_content([status])
+        self._set_content([status], finished=True)
 
     def _on_apply(self, row):
         row.set_sensitive(False)
@@ -209,5 +219,9 @@ class ProjectUpdateView(Gtk.Box):
             return
         finally:
             self.update.cleanup()
+        self._show_message("check-square-svgrepo-com-symbolic", "Project updated",
+                           f"Changes from {self.source_name} were applied to project.")
+
+    def _close(self):
         if self._window:
             self._window.close()
