@@ -655,11 +655,14 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             values = _spec_values(spec)
             output_name = f"{values['target']}-{values['subarch']}-{values['version_stamp']}"
             output_directory = os.path.join(process.builds_directory, values["rel_type"])
+            # ISO of livecd-stage2 is written to path from livecd/iso (relative paths are in builds/<rel_type>/ too).
+            iso = values.get("livecd/iso") or None
+            iso_name = iso if iso and "/" not in iso else None
             if process.rootless:
                 # Files written by namespace root are already owned by user.
-                moved = _move_stage_build_files(source_directory=output_directory, name=output_name, destination_directory=self.build.path)
+                moved = _move_stage_build_files(source_directory=output_directory, name=output_name, destination_directory=self.build.path, iso_name=iso_name)
             else:
-                moved = move_stage_build_files(source_directory=output_directory, name=output_name, destination_directory=self.build.path)
+                moved = move_stage_build_files(source_directory=output_directory, name=output_name, destination_directory=self.build.path, iso_name=iso_name)
             artifact = next((filename for filename in moved if filename.endswith(STAGE_ARCHIVE_EXTENSIONS)), None)
             if artifact is None:
                 raise RuntimeError(f"Built stage {output_name} not found in {output_directory}")
@@ -668,6 +671,8 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             self.build.status = StageBuildStatus.COMPLETED
             self.build.finished = datetime.now()
             self.build.details["output"] = output_details(self.build)
+            if iso_file := next((filename for filename in moved if filename.endswith(".iso")), None):
+                self.build.details["output"]["iso"] = iso_file
             self.build.save(project)
             process.stage_builds[self.stage.id] = self.build
             self.complete(MultiStageProcessStageState.COMPLETED)
@@ -870,22 +875,30 @@ def prepare_loop_devices() -> list[str]:
     devices = sorted(glob.glob("/dev/loop[0-9]*"), key=lambda path: int(re.sub(r"\D", "", path)))
     return (["/dev/loop-control"] if os.path.exists("/dev/loop-control") else []) + devices
 
-def _move_stage_build_files(source_directory: str, name: str, destination_directory: str) -> list[str]:
+def _is_build_file(filename: str, name: str, iso_name: str | None) -> bool:
+    """Files of build: archive of stage with DIGESTS, CONTENTS..., and ISO of livecd with its files."""
+    return filename.startswith(name + ".") or (iso_name is not None and (filename == iso_name or filename.startswith(iso_name + ".")))
+
+def _move_stage_build_files(source_directory: str, name: str, destination_directory: str, iso_name: str | None = None) -> list[str]:
     """Like move_stage_build_files, for files already owned by user (rootless builds)."""
     os.makedirs(destination_directory, exist_ok=True)
     moved = []
     if not os.path.isdir(source_directory):
         return moved
     for filename in sorted(os.listdir(source_directory)):
-        if filename.startswith(name + "."):
+        if _is_build_file(filename, name, iso_name):
             shutil.move(os.path.join(source_directory, filename), os.path.join(destination_directory, filename))
             moved.append(filename)
+    # Folder of target left by catalyst (eg. root of livecd ISO, already in ISO and tarball).
+    leftover = os.path.join(source_directory, name)
+    if moved and os.path.isdir(leftover) and not os.path.islink(leftover):
+        shutil.rmtree(leftover, ignore_errors=True)
     return moved
 
 @root_function
-def move_stage_build_files(source_directory: str, name: str, destination_directory: str) -> list[str]:
-    """Moves files produced by catalyst for given build name (archive, DIGESTS, CONTENTS...) to destination,
-    and makes them owned by user."""
+def move_stage_build_files(source_directory: str, name: str, destination_directory: str, iso_name: str | None = None) -> list[str]:
+    """Moves files produced by catalyst for given build name (archive, DIGESTS, CONTENTS..., ISO of livecd) to
+    destination, and makes them owned by user. Folder of target left by catalyst (root of livecd ISO) is removed."""
     import os, shutil
     uid = RootHelperServer.shared().uid
     os.makedirs(destination_directory, exist_ok=True)
@@ -893,9 +906,12 @@ def move_stage_build_files(source_directory: str, name: str, destination_directo
     if not os.path.isdir(source_directory):
         return moved
     for filename in sorted(os.listdir(source_directory)):
-        if filename.startswith(name + "."):
+        if filename.startswith(name + ".") or (iso_name is not None and (filename == iso_name or filename.startswith(iso_name + "."))):
             target = os.path.join(destination_directory, filename)
             shutil.move(os.path.join(source_directory, filename), target)
             os.chown(target, uid, uid)
             moved.append(filename)
+    leftover = os.path.join(source_directory, name)
+    if moved and os.path.isdir(leftover) and not os.path.islink(leftover):
+        shutil.rmtree(leftover, ignore_errors=True)
     return moved

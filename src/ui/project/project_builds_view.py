@@ -163,6 +163,13 @@ class ProjectBuildsView(Gtk.Box):
                 details.append(size)
             if packages := (build.details.get("output") or {}).get("packages"):
                 details.append(f"{packages} packages")
+        # ISO of livecd stage, in build folder next to stage archive.
+        if build and build.path and (iso := (build.details.get("output") or {}).get("iso")):
+            iso_path = os.path.join(build.path, iso)
+            if os.path.isfile(iso_path):
+                details.append(iso)
+                if size := get_file_size_string(iso_path):
+                    details.append(size)
         subtitle = " · ".join(details)
         if state == BuildRowState.FAILED and (failure := _failure_summary(build)):
             subtitle += f"\n{failure}"
