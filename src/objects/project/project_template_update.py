@@ -451,6 +451,8 @@ class ProjectUpdate:
     temporary_directory: str
     fast_forward: bool # Project has no own commits since base, it's moved to new version.
     architecture: Any = None # Architecture set by template (it can change with options).
+    # Project is moved to new version also when it has own commits (they are discarded, they stay in Git reflog).
+    drop_project_changes: bool = False
 
     def cleanup(self):
         shutil.rmtree(self.temporary_directory, ignore_errors=True)
@@ -459,9 +461,10 @@ class ProjectUpdate:
         project_path = project_directory.directory_path()
         if has_unsaved_changes(project_path):
             raise TemplateError("Project has not saved changes, save or discard them first")
-        if self.fast_forward:
+        if self.fast_forward or self.drop_project_changes:
             old_head = _git(project_path, "rev-parse", "HEAD")
-            _git(project_path, "update-ref", "-m", "Catalyst Lab: update", "HEAD", self.onto, old_head)
+            message = "Catalyst Lab: update, project changes dropped" if self.drop_project_changes else "Catalyst Lab: update"
+            _git(project_path, "update-ref", "-m", message, "HEAD", self.onto, old_head)
             _git(project_path, "reset", "--hard", "--quiet", self.onto)
         else:
             rebase_project(project_path, self.onto, self.base, self.changes, self.temporary_directory, log)
@@ -520,9 +523,10 @@ def template_base_commit(project_path: str) -> str | None:
     return _git(project_path, "log", "-1", "--format=%H", "--", TEMPLATE_STATE_FILE, check=False) or None
 
 def prepare_template_update(project_directory, log: Callable[[str], None],
-                            selected: dict[str, Any] | None = None) -> ProjectUpdate | None:
+                            selected: dict[str, Any] | None = None, force: bool = False) -> ProjectUpdate | None:
     """Downloads latest version of template, generates project from it (as commit on top of base) and compares it with
-    project. Options are the ones selected before, or new selected values. None when template didn't change project."""
+    project. Options are the ones selected before, or new selected values. None when template didn't change project,
+    unless forced (clean version of template is prepared to drop changes of project)."""
     project_path = project_directory.directory_path()
     state = TemplateState.load(project_path)
     if state is None:
@@ -551,7 +555,7 @@ def prepare_template_update(project_directory, log: Callable[[str], None],
         changes = compare_versions(base_version, read_project_version(project_path), read_project_version(generated))
         commit = repository_commit(repository)
         options_changed = selected is not None and selected != state.selected
-        if not changes and commit == state.commit and not options_changed:
+        if not changes and commit == state.commit and not options_changed and not force:
             shutil.rmtree(temporary, ignore_errors=True)
             return None
         names = template.resolve(selected if selected is not None else state.selected, project_name=project_directory.name)
@@ -584,8 +588,9 @@ def repository_origin(project_path: str) -> RepositoryOrigin | None:
     branch = _git(project_path, "symbolic-ref", "--short", "HEAD", check=False) or None
     return RepositoryOrigin(url=url, branch=branch)
 
-def prepare_repository_update(project_directory, log: Callable[[str], None]) -> ProjectUpdate | None:
-    """Downloads changes of remote branch and compares them with project. None when there is nothing new."""
+def prepare_repository_update(project_directory, log: Callable[[str], None], force: bool = False) -> ProjectUpdate | None:
+    """Downloads changes of remote branch and compares them with project. None when there is nothing new, unless
+    forced (remote version is prepared to drop changes of project)."""
     project_path = project_directory.directory_path()
     origin = repository_origin(project_path)
     if origin is None:
@@ -596,8 +601,8 @@ def prepare_repository_update(project_directory, log: Callable[[str], None]) -> 
     upstream = _git(project_path, "rev-parse", "@{upstream}", check=False) or _git(project_path, "rev-parse", "origin/HEAD")
     head = _git(project_path, "rev-parse", "HEAD")
     base = _git(project_path, "merge-base", "HEAD", upstream)
-    if base == upstream:
-        return None # Remote has nothing new.
+    if base == upstream and not (force and head != upstream):
+        return None # Remote has nothing new (or project is the same as remote).
     temporary = _new_temporary_directory("repository-update-")
     try:
         changes = compare_versions(_read_commit(project_path, base, os.path.join(temporary, "base")),
