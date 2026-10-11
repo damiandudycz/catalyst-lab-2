@@ -65,23 +65,42 @@ class BugsSection(Gtk.Box):
             self._add(Adw.StatusPage(icon_name="edit-find-symbolic", title="No results",
                                      description="Try a different search term."))
             return
-        _, group_key, group_title = _GROUPINGS[max(self.grouping_toggle.get_active(), 0)]
-        grouped: dict = {}
-        for failure in failures: # Newest first, so groups are ordered by their newest failure.
-            grouped.setdefault(group_key(failure), []).append(failure)
-        grouping = _GROUPINGS[max(self.grouping_toggle.get_active(), 0)][0]
-        by_package = grouping == "Package"
-        for items in grouped.values():
+        grouping, group_key, group_title = _GROUPINGS[max(self.grouping_toggle.get_active(), 0)]
+        if grouping == "Package":
+            # Packages are entries of one list.
+            groups = {None: failures}
+        else:
+            groups = {}
+            for failure in failures: # Newest first, so groups are ordered by their newest failure.
+                groups.setdefault(group_key(failure), []).append(failure)
+        for items in groups.values():
             newest = items[0]
-            count = len(items)
-            description = f"Failed {count} time{'s' if count != 1 else ''}, last {newest.date.strftime('%Y-%m-%d %H:%M')}"
-            group = Adw.PreferencesGroup(title=GLib.markup_escape_text(group_title(newest)),
-                                         description=GLib.markup_escape_text(description))
-            if by_package and newest.is_gentoo:
-                group.set_header_suffix(self._bugzilla_button(newest))
+            if grouping == "Package":
+                group = Adw.PreferencesGroup(title="Failed packages")
+            else:
+                group = Adw.PreferencesGroup(title=GLib.markup_escape_text(group_title(newest)),
+                                             description=GLib.markup_escape_text(_failed_times(items)))
+            # Failures of the same package are one entry, its instances are shown when it's expanded.
+            packages: dict = {}
             for failure in items:
-                group.add(self._row(failure, grouping))
+                packages.setdefault(failure.atom, []).append(failure)
+            for instances in packages.values():
+                group.add(self._row(instances[0], grouping, show_package=True) if len(instances) == 1
+                          else self._package_row(instances, grouping))
             self._add(group)
+
+    def _package_row(self, instances: list[PackageFailure], grouping: str) -> Adw.ExpanderRow:
+        """Package that failed more times, expanded to its failures."""
+        newest = instances[0]
+        row = Adw.ExpanderRow(title=GLib.markup_escape_text(newest.atom), subtitle=GLib.markup_escape_text(_failed_times(instances)))
+        icon = Gtk.Image(icon_name="error-box-svgrepo-com-symbolic", pixel_size=24)
+        icon.add_css_class("error")
+        row.add_prefix(icon)
+        if newest.is_gentoo:
+            row.add_suffix(self._bugzilla_button(newest))
+        for failure in instances:
+            row.add_row(self._row(failure, grouping, show_package=False))
+        return row
 
     def _add(self, widget: Gtk.Widget):
         self.content.append(widget)
@@ -92,23 +111,23 @@ class BugsSection(Gtk.Box):
         return " ".join(str(value) for value in (failure.package, failure.repository, failure.phase, failure.reason,
                                                  failure.project_directory.name, failure.build.stage_name)).lower()
 
-    def _row(self, failure: PackageFailure, grouping: str) -> Adw.ActionRow:
-        # Grouped by package: rows show where it failed, otherwise which package failed. Rows don't repeat what title
-        # of group shows.
-        by_package = grouping == "Package"
-        if by_package:
-            title = f"{failure.project_directory.name} · {failure.build.stage_name}"
-            details = [failure.version]
-        else:
+    def _row(self, failure: PackageFailure, grouping: str, show_package: bool) -> Adw.ActionRow:
+        """Failure of package. Rows of package entries show where it failed instead of package. Rows don't repeat what
+        title of group shows."""
+        location = {"Project": failure.build.stage_name, "Stage": None}.get(
+            grouping, f"{failure.project_directory.name} · {failure.build.stage_name}")
+        if show_package:
             title = failure.package
             details = [] if failure.is_gentoo else [f"::{failure.repository}"]
-            if grouping == "Project":
-                details.append(failure.build.stage_name)
-            elif grouping == "Date":
-                details.append(f"{failure.project_directory.name} · {failure.build.stage_name}")
+            if location:
+                details.append(location)
+        else:
+            title = location or failure.date.strftime("%Y-%m-%d %H:%M")
+            details = [failure.version]
         if failure.phase:
             details.append(f"{failure.phase} phase")
-        details.append(failure.date.strftime("%Y-%m-%d %H:%M"))
+        if title != failure.date.strftime("%Y-%m-%d %H:%M"):
+            details.append(failure.date.strftime("%Y-%m-%d %H:%M"))
         subtitle = " · ".join(details)
         if failure.reason:
             subtitle += f"\n{failure.reason}"
@@ -116,7 +135,7 @@ class BugsSection(Gtk.Box):
         icon = Gtk.Image(icon_name="error-box-svgrepo-com-symbolic", pixel_size=24)
         icon.add_css_class("error")
         row.add_prefix(icon)
-        if not by_package and failure.is_gentoo:
+        if show_package and failure.is_gentoo:
             row.add_suffix(self._bugzilla_button(failure))
         if directory := failure.failure_directory or failure.build.path:
             button = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Open logs of failure", valign=Gtk.Align.CENTER)
@@ -142,3 +161,7 @@ class BugsSection(Gtk.Box):
     def _show_log(self, path: str, failure: PackageFailure):
         if self.content_navigation_view is not None:
             self.content_navigation_view.push_view(FileContentView(path), title=failure.package)
+
+def _failed_times(failures: list[PackageFailure]) -> str:
+    """Count of failures and date of newest (failures are newest first)."""
+    return f"Failed {len(failures)} time{'s' if len(failures) != 1 else ''}, last {failures[0].date.strftime('%Y-%m-%d %H:%M')}"
