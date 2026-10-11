@@ -39,12 +39,22 @@
           <object class="GtkBox">
             <property name="orientation">vertical</property>
 
-            <!-- Progress bar at the top -->
+            <!-- Line at the top (like in other bottom bars) with progress bar over it -->
             <child>
-              <object class="GtkProgressBar" id="progress_bar">
-                <style>
-                  <class name="osd"/>
-                </style>
+              <object class="GtkOverlay" id="progress_overlay">
+                <property name="child">
+                  <object class="GtkSeparator">
+                    <property name="valign">start</property>
+                  </object>
+                </property>
+                <child type="overlay">
+                  <object class="GtkProgressBar" id="progress_bar">
+                    <property name="valign">start</property>
+                    <style>
+                      <class name="osd"/>
+                    </style>
+                  </object>
+                </child>
               </object>
             </child>
 

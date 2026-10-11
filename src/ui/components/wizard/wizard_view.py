@@ -40,6 +40,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         self.setup_view.append(self.carousel)
         # Bottom bar:
         self._setup_bottom_bar()
+        self.setup_view.append(Gtk.Separator()) # Line above bottom bar, like in other bottom bars.
         self.setup_view.append(self.bottom_bar)
         # Welcome page:
         self.welcome_page: Gtk.Widget = None
