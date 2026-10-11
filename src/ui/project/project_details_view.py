@@ -12,6 +12,8 @@ from .app_events import app_event_bus, AppEvents
 from .stages_tree_view import StagesTreeView, TreeNode, StageNodeStatus
 from .project_stage_details_view import ProjectStageDetailsView
 from .project_build_view import ProjectBuildView
+from .build_queue_view import build_button_state, present_build_queue
+from .build_queue import BuildQueue, BuildQueueEvent
 from .project_build_process import ProjectBuild, ProjectBuildStepBuildStage, running_project_build
 from .project_builds_view import ProjectBuildsView
 from .multistage_process import MultiStageProcess, MultiStageProcessState, MultiStageProcessEvent, MultiStageProcessStageEvent, MultiStageProcessStageState
@@ -60,6 +62,7 @@ class ProjectDetailsView(Gtk.Box):
         self._observed_toolset = None # Toolset (and its machine) whose state allows building.
         self._build_refresh_scheduled = False
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._on_build_changed)
+        BuildQueue.shared().event_bus.subscribe(BuildQueueEvent.CHANGED, self._on_build_changed)
         self._refresh_build_state()
 
     def get_configuration(self):
@@ -175,16 +178,15 @@ class ProjectDetailsView(Gtk.Box):
                     step.event_bus.subscribe(MultiStageProcessStageEvent.STATE_CHANGED, self._on_build_changed)
                     step.event_bus.subscribe(MultiStageProcessStageEvent.PROGRESS_CHANGED, self._on_build_changed)
         running_build = running_project_build(self.project_directory)
-        # Only one build can run at a time, also for different projects. Toolset (and its virtual machine) can't be
-        # used by other operation then.
-        toolset = self.project_directory.get_toolset()
-        self._observe_toolset(toolset)
-        busy_reason = toolset.busy_reason if toolset else "Select toolset in project configuration"
+        # Only one build runs at a time, builds of other projects are added to queue meanwhile. Toolset (and its
+        # virtual machine) can't be used by other operation while build runs.
+        self._observe_toolset(self.project_directory.get_toolset())
+        state = build_button_state(self.project_directory)
         # Buttons are in separate lists sharing one row, lists are hidden with them.
-        self.build_list.set_visible(not running_builds)
-        self.build_row.set_sensitive(not running_builds and busy_reason is None)
-        self.build_row.set_title(GLib.markup_escape_text(busy_reason) if busy_reason else "Create build")
-        self.build_row.set_tooltip_text(busy_reason)
+        self.build_list.set_visible(state.visible)
+        self.build_row.set_sensitive(state.sensitive)
+        self.build_row.set_title(state.title)
+        self.build_row.set_tooltip_text(state.tooltip)
         self.build_progress_list.set_visible(running_build is not None)
         statuses = {}
         if running_build is not None:
@@ -442,7 +444,11 @@ class ProjectDetailsView(Gtk.Box):
         if error := self.project_directory.configuration_error:
             self.show_alert(message=error)
             return
-        if _running_builds():
+        state = build_button_state(self.project_directory)
+        if state.opens_queue:
+            present_build_queue()
+            return
+        if not state.visible:
             self._refresh_build_state()
             return
         app_event_bus.emit(AppEvents.PRESENT_VIEW, ProjectBuildView(project_directory=self.project_directory), "Build stages", 640, 480)

@@ -82,12 +82,14 @@ class ProcessesList(Gtk.Box):
         self.append(header)
         self.list_box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list_box.add_css_class("navigation-sidebar")
-        self.list_box.connect("row-activated", lambda list_box, row: present_process(row.process))
+        self.list_box.connect("row-activated", lambda list_box, row: row.open())
         self.append(self.list_box)
         self._rows: dict = {} # (process, step) -> row.
         self._observed = weakref.WeakSet()
         self._update_scheduled = False
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._schedule_update)
+        from .build_queue import BuildQueue, BuildQueueEvent
+        BuildQueue.shared().event_bus.subscribe(BuildQueueEvent.CHANGED, self._schedule_update)
         self._schedule_update()
 
     def _schedule_update(self, *args):
@@ -105,22 +107,58 @@ class ProcessesList(Gtk.Box):
     def _update(self):
         self._update_scheduled = False
         # Completed processes are removed from started processes, listed ones (kept by rows) stay until seen.
-        processes = list(dict.fromkeys(list(MultiStageProcess.started_processes) + [process for process, _ in self._rows]))
+        processes = list(dict.fromkeys(list(MultiStageProcess.started_processes)
+                                       + [key[0] for key in self._rows if isinstance(key[0], MultiStageProcess)]))
         for process in processes:
             self._observe(process.event_bus, process, MultiStageProcessEvent.STATE_CHANGED, MultiStageProcessEvent.PROGRESS_CHANGED)
             for step in process.stages:
                 self._observe(step.event_bus, step, MultiStageProcessStageEvent.STATE_CHANGED)
         entries = [entry for process in processes if _listed(process) for entry in _entries(process)]
+        # Queued builds, after running operations.
+        from .build_queue import BuildQueue
+        queue = BuildQueue.shared()
+        queued = {("queue", item.id): item for item in queue.entries}
+        entries += list(queued)
         for entry in list(self._rows):
             if entry not in entries:
                 self.list_box.remove(self._rows.pop(entry))
         for index, entry in enumerate(entries):
             if entry not in self._rows:
-                self._rows[entry] = ProcessRow(*entry)
+                self._rows[entry] = QueuedBuildRow(queued[entry]) if entry in queued else ProcessRow(*entry)
                 self.list_box.insert(self._rows[entry], index)
-            self._rows[entry].update()
+            row = self._rows[entry]
+            if isinstance(row, QueuedBuildRow):
+                row.update(position=list(queued).index(entry) + 1, paused=queue.paused)
+            else:
+                row.update()
         self.set_visible(bool(entries))
         return False
+
+class QueuedBuildRow(Gtk.ListBoxRow):
+    """Build waiting in queue, opens queue."""
+
+    def __init__(self, queued_build):
+        super().__init__(tooltip_text="Queued build")
+        project = queued_build.project_directory
+        box = Gtk.Box(spacing=10, margin_start=6, margin_end=6, margin_top=2, margin_bottom=2)
+        icon = Gtk.Image(icon_name="clock-square-svgrepo-com-symbolic", valign=Gtk.Align.CENTER)
+        icon.add_css_class("dimmed")
+        box.append(icon)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
+        labels.append(Gtk.Label(label=project.name if project else "Removed project", xalign=0, ellipsize=Pango.EllipsizeMode.END))
+        self.subtitle = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        self.subtitle.add_css_class("caption")
+        self.subtitle.add_css_class("dim-label")
+        labels.append(self.subtitle)
+        box.append(labels)
+        self.set_child(box)
+
+    def update(self, position: int, paused: bool):
+        self.subtitle.set_label(f"Queued{f' ({position})' if position > 1 else ''}{' · paused' if paused else ''}")
+
+    def open(self):
+        from .build_queue_view import present_build_queue
+        present_build_queue()
 
 class ProcessRow(Gtk.ListBoxRow):
     """Looks like rows of installation steps: status icon, name with state, and progress. Row of running step shows
@@ -150,6 +188,9 @@ class ProcessRow(Gtk.ListBoxRow):
         self.progress_label.add_css_class("dim-label")
         box.append(self.progress_label)
         self.set_child(box)
+
+    def open(self):
+        present_process(self.process)
 
     def update(self):
         failed = self.process.status == MultiStageProcessState.FAILED

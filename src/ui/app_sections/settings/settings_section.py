@@ -14,6 +14,7 @@ class SettingsSection(Gtk.Box):
 
     location_row = Gtk.Template.Child()
     navigation_style_row = Gtk.Template.Child()
+    pause_queue_row = Gtk.Template.Child()
 
     # Options of navigation style row, in order.
     NAVIGATION_STYLES = [NavigationStyle.MODAL, NavigationStyle.PUSH]
@@ -24,6 +25,8 @@ class SettingsSection(Gtk.Box):
         self.location_row.set_subtitle(collapse_home(library_directory()))
         self.navigation_style_row.set_selected(self.NAVIGATION_STYLES.index(Repository.Settings.value.navigation_style))
         self.navigation_style_row.connect("notify::selected", self._on_navigation_style_selected)
+        self.pause_queue_row.set_active(Repository.Settings.value.pause_queue_on_failure)
+        self.pause_queue_row.connect("notify::active", lambda row, _: setattr(Repository.Settings.value, "pause_queue_on_failure", row.get_active()))
 
     def _on_navigation_style_selected(self, row, _param):
         Repository.Settings.value.navigation_style = self.NAVIGATION_STYLES[row.get_selected()]
