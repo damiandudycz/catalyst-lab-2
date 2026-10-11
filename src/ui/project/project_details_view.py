@@ -164,10 +164,8 @@ class ProjectDetailsView(Gtk.Box):
     # --------------------------------------------------------------------------
 
     def _refresh_build_state(self):
-        """Shows states of stages in running build of this project and button to its progress."""
-        if self.get_mapped():
-            # Result of build finished while project is displayed is seen.
-            self.project_directory.mark_build_result_seen()
+        """Shows states of stages in running build of this project and button to its progress. Result of finished
+        build isn't shown here, so it isn't seen (build progress and builds list show it)."""
         running_builds = _running_builds()
         for build in running_builds:
             if id(build) not in self._observed_builds:
