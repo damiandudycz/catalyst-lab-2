@@ -56,7 +56,11 @@ def present_process(process: MultiStageProcess):
     app_event_bus.emit(AppEvents.PRESENT_VIEW, view, title, 640, height)
 
 def _listed(process: MultiStageProcess) -> bool:
-    return process.status in (MultiStageProcessState.IN_PROGRESS, MultiStageProcessState.FAILED)
+    """Running processes, and finished ones until their result is seen (shown in their view)."""
+    if process.status == MultiStageProcessState.IN_PROGRESS:
+        return True
+    return (process.status in (MultiStageProcessState.COMPLETED, MultiStageProcessState.FAILED)
+            and not getattr(process, "result_seen", False))
 
 def _entries(process: MultiStageProcess) -> list:
     """Rows of process: its running steps, or process itself when it failed or no step is running (between steps)."""
@@ -67,7 +71,7 @@ def _entries(process: MultiStageProcess) -> list:
     return [(process, None)]
 
 class ProcessesList(Gtk.Box):
-    """Running steps of processes and failed processes, hidden when there are none."""
+    """Running steps of processes, and finished processes until their result is seen. Hidden when there are none."""
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
@@ -100,7 +104,8 @@ class ProcessesList(Gtk.Box):
 
     def _update(self):
         self._update_scheduled = False
-        processes = list(MultiStageProcess.started_processes)
+        # Completed processes are removed from started processes, listed ones (kept by rows) stay until seen.
+        processes = list(dict.fromkeys(list(MultiStageProcess.started_processes) + [process for process, _ in self._rows]))
         for process in processes:
             self._observe(process.event_bus, process, MultiStageProcessEvent.STATE_CHANGED, MultiStageProcessEvent.PROGRESS_CHANGED)
             for step in process.stages:
@@ -148,9 +153,12 @@ class ProcessRow(Gtk.ListBoxRow):
 
     def update(self):
         failed = self.process.status == MultiStageProcessState.FAILED
+        finished = self.process.status in (MultiStageProcessState.COMPLETED, MultiStageProcessState.FAILED)
         stopped = failed and getattr(self.process, "cancelled", False)
         progress = None
-        if stopped:
+        if self.process.status == MultiStageProcessState.COMPLETED:
+            icon_name, style, state = "check-square-svgrepo-com-symbolic", "success", "Completed"
+        elif stopped:
             icon_name, style, state = "stop-square-symbolic", "dimmed", "Stopped"
         elif failed:
             icon_name, style, state = "error-box-svgrepo-com-symbolic", "error", "Failed"
@@ -161,10 +169,10 @@ class ProcessRow(Gtk.ListBoxRow):
             icon_name, style, state = "menu-dots-square-svgrepo-com-symbolic", None, "In progress"
             progress = self.process.progress
         self.status_icon.set_from_icon_name(icon_name)
-        for css_class in ("dimmed", "error"):
+        for css_class in ("dimmed", "error", "success"):
             self.status_icon.remove_css_class(css_class)
         if style:
             self.status_icon.add_css_class(style)
         self.subtitle.set_label(state)
         self.progress_label.set_label(f"{int(progress * 100)}%" if progress is not None else "")
-        self.progress_label.set_visible(progress is not None)
+        self.progress_label.set_visible(progress is not None and not finished)

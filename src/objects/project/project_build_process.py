@@ -273,6 +273,9 @@ class ProjectBuild(MultiStageProcess):
                     build.save(self.project_directory)
             except (OSError, ValueError, KeyError) as e:
                 print(f"Failed to update build of {stage.name}: {e}")
+        # Steps of run can be shown later from builds list.
+        from .project_build_record import save_build_record
+        save_build_record(self)
 
 def running_project_build(project_directory, timestamp: str | None = None) -> ProjectBuild | None:
     """Build of project that is currently in progress, optionally only build started with given timestamp."""

@@ -118,6 +118,18 @@ class MultiStageProcess(ABC):
     def complete_process(self, success: bool):
         pass
 
+    def mark_result_seen(self):
+        """Finished process was shown (its view was visible when it finished, or was opened later): side menu doesn't
+        list it anymore."""
+        if getattr(self, "result_seen", False):
+            return
+        self.result_seen = True
+        MultiStageProcess.event_bus.emit(
+            MultiStageProcessEvent.STARTED_PROCESSES_CHANGED,
+            self.__class__,
+            MultiStageProcess.get_started_processes_by_class(self.__class__)
+        )
+
     def clean_from_started_processes(self):
         if self.status == MultiStageProcessState.COMPLETED or self.status == MultiStageProcessState.FAILED or self.status == MultiStageProcessState.SETUP:
             if self in MultiStageProcess.started_processes:
