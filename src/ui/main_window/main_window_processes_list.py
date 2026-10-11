@@ -54,16 +54,6 @@ def present_process(process: MultiStageProcess):
             title, height = process.title, 480
     app_event_bus.emit(AppEvents.PRESENT_VIEW, view, title, 640, height)
 
-def _process_icon(process: MultiStageProcess) -> str:
-    name = type(process).__name__
-    for prefix, icon in (("Snapshot", "video-frame-svgrepo-com-symbolic"), ("Toolset", "toolbox-symbolic"),
-                         ("BuildMachine", "toolbox-symbolic"), ("Releng", "book-minimalistic-svgrepo-com-symbolic"),
-                         ("Overlay", "layers-minimalistic-svgrepo-com-symbolic"), ("ProjectBuild", "box-minimalistic-svgrepo-com-symbolic"),
-                         ("Project", "notes-minimalistic-svgrepo-com-symbolic"), ("Deploy", "deploy-symbolic")):
-        if name.startswith(prefix):
-            return icon
-    return "sledgehammer-svgrepo-com-symbolic"
-
 def _listed(process: MultiStageProcess) -> bool:
     return process.status in (MultiStageProcessState.IN_PROGRESS, MultiStageProcessState.FAILED)
 
@@ -114,13 +104,15 @@ class ProcessesList(Gtk.Box):
         return False
 
 class ProcessRow(Gtk.ListBoxRow):
-    """Looks like rows of installations in sections: icon of item, name, state, and progress or failure icon."""
+    """Looks like rows of installation steps: status icon, name with state, and progress."""
 
     def __init__(self, process: MultiStageProcess):
         super().__init__(tooltip_text=process.title)
         self.process = process
         box = Gtk.Box(spacing=10, margin_start=6, margin_end=6, margin_top=2, margin_bottom=2)
-        box.append(Gtk.Image(icon_name=_process_icon(process)))
+        # Status icon like in rows of installation steps.
+        self.status_icon = Gtk.Image(valign=Gtk.Align.CENTER)
+        box.append(self.status_icon)
         labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
         try:
             name = process.name()
@@ -136,17 +128,22 @@ class ProcessRow(Gtk.ListBoxRow):
         self.progress_label.add_css_class("caption")
         self.progress_label.add_css_class("dim-label")
         box.append(self.progress_label)
-        self.status_icon = Gtk.Image(icon_name="error-box-svgrepo-com-symbolic", valign=Gtk.Align.CENTER)
-        self.status_icon.add_css_class("error")
-        box.append(self.status_icon)
         self.set_child(box)
 
     def update(self):
         failed = self.process.status == MultiStageProcessState.FAILED
-        if failed:
-            self.subtitle.set_label("Stopped" if getattr(self.process, "cancelled", False) else "Failed")
+        stopped = failed and getattr(self.process, "cancelled", False)
+        if stopped:
+            icon_name, style, state = "stop-square-symbolic", "dimmed", "Stopped"
+        elif failed:
+            icon_name, style, state = "error-box-svgrepo-com-symbolic", "error", "Failed"
         else:
-            self.subtitle.set_label("In progress")
+            icon_name, style, state = "menu-dots-square-svgrepo-com-symbolic", None, "In progress"
             self.progress_label.set_label(f"{int(self.process.progress * 100)}%")
+        self.status_icon.set_from_icon_name(icon_name)
+        for css_class in ("dimmed", "error"):
+            self.status_icon.remove_css_class(css_class)
+        if style:
+            self.status_icon.add_css_class(style)
+        self.subtitle.set_label(state)
         self.progress_label.set_visible(not failed)
-        self.status_icon.set_visible(failed)
