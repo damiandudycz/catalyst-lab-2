@@ -3,7 +3,7 @@ import threading
 from gi.repository import Gtk, GLib, Adw
 from .cl_toggle_group import CLToggle, CLToggleGroup
 from .project_template_update import (
-    prepare_template_update, prepare_repository_update, describe_value, TemplateChange, TemplateState
+    prepare_template_update, prepare_repository_update, describe_value, TemplateChange, TemplateState, own_commits_count
 )
 from .project_template import fetch_template_repository, ProjectTemplate
 from .project_template_views import ProjectTemplateOptionsView
@@ -27,18 +27,24 @@ class ProjectUpdateView(Gtk.Box):
                                margin_top=12, margin_bottom=24)
         scrolled_window.set_child(self.content)
         self.append(scrolled_window)
-        # Finish button closes view when update is done (also when there was nothing to update, or it failed), like
-        # in installations.
-        # Line above bottom bar like in initial setup.
-        self.finish_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)
-        self.finish_bar.append(Gtk.Separator())
-        finish_button = Gtk.Button(label="Finish", halign=Gtk.Align.CENTER, margin_start=24, margin_end=24,
-                                   margin_top=12, margin_bottom=12)
-        finish_button.add_css_class("suggested-action")
-        finish_button.connect("clicked", lambda button: self._close())
-        self.finish_bar.append(finish_button)
-        self.append(self.finish_bar)
+        # Bottom bar with line above it, like in wizards: action of page on the right (Continue, Apply update), or
+        # Finish in the middle when update is done (also when there was nothing to update, or it failed).
+        self.bottom_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)
+        self.bottom_bar.append(Gtk.Separator())
+        buttons = Gtk.CenterBox(margin_start=24, margin_end=24, margin_top=12, margin_bottom=12)
+        self.finish_button = Gtk.Button(label="Finish")
+        self.finish_button.add_css_class("suggested-action")
+        self.finish_button.connect("clicked", lambda button: self._close())
+        buttons.set_center_widget(self.finish_button)
+        self.action_button = Gtk.Button()
+        self.action_button.add_css_class("suggested-action")
+        self.action_button.connect("clicked", lambda button: self._action and self._action())
+        buttons.set_end_widget(self.action_button)
+        self.bottom_bar.append(buttons)
+        self.append(self.bottom_bar)
+        self._action = None
         self.selected = None # Options of template chosen for update.
+        self.force = False # Clean version is prepared also when there is nothing new (to drop changes of project).
         if source == "template":
             # Options of latest template, with values selected before.
             self._show_loading("Downloading options of latest template…")
@@ -75,20 +81,15 @@ class ProjectUpdateView(Gtk.Box):
         options.set_template(template, selected)
         description = self._label("Options of the latest version of template, with values selected for project. "
                                   "Changed options change generated stages and files.")
-        continue_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        continue_list.add_css_class("boxed-list")
-        continue_row = Adw.ButtonRow(title="Continue", end_icon_name="go-next-symbolic")
-        continue_row.add_css_class("suggested-action")
-        def on_continue(row):
+        def on_continue():
             self.selected = dict(options.selected)
             self._start_update()
-        continue_row.connect("activated", on_continue)
-        continue_list.append(continue_row)
+        self._set_content([description, options])
+        self._set_action("Continue", on_continue)
         def on_changed():
-            continue_row.set_sensitive(options.generated is not None)
+            self.action_button.set_sensitive(options.generated is not None)
         options.on_changed = on_changed
         on_changed()
-        self._set_content([description, options, continue_list])
         return False
 
     # Preparing:
@@ -102,7 +103,10 @@ class ProjectUpdateView(Gtk.Box):
         self._set_content([box])
 
     def _set_content(self, widgets: list[Gtk.Widget], finished: bool = False):
-        self.finish_bar.set_visible(finished)
+        self.bottom_bar.set_visible(finished)
+        self.finish_button.set_visible(finished)
+        self.action_button.set_visible(False)
+        self._action = None
         while child := self.content.get_first_child():
             self.content.remove(child)
         for widget in widgets:
@@ -122,9 +126,9 @@ class ProjectUpdateView(Gtk.Box):
                 self.overlay_errors.append(f"{overlay.name}: {e}")
         try:
             if self.source == "template":
-                update = prepare_template_update(self.project_directory, log, selected=self.selected)
+                update = prepare_template_update(self.project_directory, log, selected=self.selected, force=self.force)
             else:
-                update = prepare_repository_update(self.project_directory, log)
+                update = prepare_repository_update(self.project_directory, log, force=self.force)
             GLib.idle_add(self._show_update, update, None)
         except Exception as e:
             GLib.idle_add(self._show_update, None, e)
@@ -133,6 +137,8 @@ class ProjectUpdateView(Gtk.Box):
 
     def _show_update(self, update, error):
         self.update = update
+        if update is not None and getattr(self, "_drop_project_changes", False):
+            update.drop_project_changes = True
         if error is not None:
             self._show_message("dialog-error-symbolic", "Update failed", str(error))
             return False
@@ -141,7 +147,7 @@ class ProjectUpdateView(Gtk.Box):
                 self._show_message("dialog-error-symbolic", "Overlays were not updated", "\n".join(self.overlay_errors))
                 return False
             self._show_message("check-square-svgrepo-com-symbolic", "Project is up to date",
-                               f"There are no changes in {self.source_name} to apply.")
+                               f"There are no changes in {self.source_name} to apply.", restore=True)
             return False
         automatic = [change for change in update.changes if not change.conflict]
         conflicts = [change for change in update.changes if change.conflict]
@@ -151,10 +157,36 @@ class ProjectUpdateView(Gtk.Box):
         if update.fast_forward:
             widgets.append(self._label(f"Project has no own commits, it's moved to the latest version of {self.source_name}."))
         else:
-            widgets.append(self._label(f"Own commits of project are replayed on top of the latest version of "
-                                       f"{self.source_name}, with versions chosen below."))
+            # Description follows choice of dropping changes of project.
+            own_commits = own_commits_count(self.project_directory.directory_path())
+            intro = self._label("")
+            def describe():
+                if update.drop_project_changes:
+                    intro.set_label(f"Project gets clean latest version of {self.source_name}, "
+                                    f"{own_commits} own commit{'s' if own_commits != 1 else ''} of project "
+                                    f"{'are' if own_commits != 1 else 'is'} dropped.")
+                else:
+                    intro.set_label(f"Own commits of project are replayed on top of the latest version of "
+                                    f"{self.source_name}, with versions chosen below.")
+            describe()
+            widgets.append(intro)
+        conflicts_group = None
+        if not update.fast_forward:
+            # Project can get clean version instead, its own changes are dropped.
+            group = Adw.PreferencesGroup()
+            drop_row = Adw.SwitchRow(title="Drop project changes", subtitle=(
+                f"Project gets clean version of {self.source_name}. Its own commits are discarded "
+                "(they stay in Git reflog of project)."), active=update.drop_project_changes)
+            def on_drop_toggled(row, _):
+                update.drop_project_changes = row.get_active()
+                describe()
+                if conflicts_group is not None:
+                    conflicts_group.set_sensitive(not row.get_active())
+            drop_row.connect("notify::active", on_drop_toggled)
+            group.add(drop_row)
+            widgets.append(group)
         if conflicts:
-            group = Adw.PreferencesGroup(
+            group = conflicts_group = Adw.PreferencesGroup(
                 title=f"Changed in project and in {self.source_name}",
                 description=f"Choose version to use for every change.")
             for change in conflicts:
@@ -171,16 +203,12 @@ class ProjectUpdateView(Gtk.Box):
                 row.set_subtitle_lines(3)
                 group.add(row)
             widgets.append(group)
-        if not update.changes:
+        if not update.changes and update.fast_forward:
             widgets.append(self._label(f"Files of project don't change, only version of {self.source_name} is recorded."))
-        apply_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        apply_list.add_css_class("boxed-list")
-        apply_row = Adw.ButtonRow(title="Apply update", start_icon_name="check-square-svgrepo-com-symbolic")
-        apply_row.add_css_class("suggested-action")
-        apply_row.connect("activated", self._on_apply)
-        apply_list.append(apply_row)
-        widgets.append(apply_list)
         self._set_content([widget for widget in widgets if widget is not None])
+        if conflicts_group is not None:
+            conflicts_group.set_sensitive(not update.drop_project_changes)
+        self._set_action("Apply update", self._on_apply)
         return False
 
     def _conflict_row(self, change: TemplateChange) -> Adw.ActionRow:
@@ -199,21 +227,42 @@ class ProjectUpdateView(Gtk.Box):
         row.add_suffix(toggle_group)
         return row
 
-    def _label(self, text: str) -> Gtk.Label | None:
-        if not text:
-            return None
+    def _label(self, text: str) -> Gtk.Label:
         label = Gtk.Label(label=text, wrap=True, xalign=0)
         label.add_css_class("dimmed")
         return label
 
-    def _show_message(self, icon_name: str, title: str, description: str):
+    def _set_action(self, label: str, action):
+        """Button of page in bottom bar (on the right, like Next in wizards)."""
+        self.bottom_bar.set_visible(True)
+        self.action_button.set_label(label)
+        self.action_button.set_sensitive(True)
+        self.action_button.set_visible(True)
+        self._action = action
+
+    def _show_message(self, icon_name: str, title: str, description: str, restore: bool = False):
+        """Result of update. Up to date project with own changes can be restored to clean version (restore)."""
         status = Adw.StatusPage(icon_name=icon_name, title=GLib.markup_escape_text(title),
                                 description=GLib.markup_escape_text(description), vexpand=True)
         status.add_css_class("compact")
+        if restore and own_commits_count(self.project_directory.directory_path()) > 0:
+            restore_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, halign=Gtk.Align.CENTER)
+            restore_list.add_css_class("boxed-list")
+            restore_row = Adw.ButtonRow(title=f"Restore clean {self.source_name}", start_icon_name="edit-undo-symbolic")
+            restore_row.set_tooltip_text(f"Drops changes of project, it gets clean version of {self.source_name}")
+            restore_row.connect("activated", lambda row: self._restore_clean())
+            restore_list.append(restore_row)
+            status.set_child(restore_list)
         self._set_content([status], finished=True)
 
-    def _on_apply(self, row):
-        row.set_sensitive(False)
+    def _restore_clean(self):
+        """Prepares clean version (also when nothing is new), with changes of project dropped."""
+        self.force = True
+        self._drop_project_changes = True
+        self._start_update()
+
+    def _on_apply(self):
+        self.action_button.set_sensitive(False)
         try:
             self.update.apply(self.project_directory, log=print)
         except Exception as e:
@@ -221,8 +270,12 @@ class ProjectUpdateView(Gtk.Box):
             return
         finally:
             self.update.cleanup()
-        self._show_message("check-square-svgrepo-com-symbolic", "Project updated",
-                           f"Changes from {self.source_name} were applied to project.")
+        if self.update.drop_project_changes:
+            self._show_message("check-square-svgrepo-com-symbolic", "Project updated",
+                               f"Project has clean version of {self.source_name}, its own changes were dropped.")
+        else:
+            self._show_message("check-square-svgrepo-com-symbolic", "Project updated",
+                               f"Changes from {self.source_name} were applied to project.")
 
     def _close(self):
         if self._window:
