@@ -96,16 +96,8 @@ class ProjectBuildsView(Gtk.Box):
             is_running = running_build is not None and timestamp == running_build.timestamp
             title = f"Started {_format_timestamp(timestamp, fallback=entries[0][1].date if entries and entries[0][1] else datetime.now())}"
             group = Adw.PreferencesGroup(title=title, description=_run_summary([state for _, _, state in entries]))
-            header_buttons = Gtk.Box(spacing=6)
-            group.set_header_suffix(header_buttons)
-            # Steps of run, like build progress (also of runs finished before app was started).
-            steps_button = Gtk.Button(icon_name="checklist-minimalistic-svgrepo-com-symbolic", tooltip_text="Show build steps",
-                                      valign=Gtk.Align.CENTER)
-            steps_button.add_css_class("flat")
-            steps_button.connect("clicked", lambda _, timestamp=timestamp, run_builds=run_builds: self._show_run_steps(timestamp, run_builds))
-            header_buttons.append(steps_button)
             if not is_running:
-                header_buttons.append(self._delete_button(
+                group.set_header_suffix(self._delete_button(
                     tooltip="Remove builds",
                     heading="Remove builds?",
                     body=(
@@ -118,7 +110,9 @@ class ProjectBuildsView(Gtk.Box):
                 ))
             for stage_name, build, state in entries:
                 stage_removed = build is not None and build.stage_id not in stage_ids
-                group.add(self._build_row(stage_name, build, state, stage_removed, running_build if is_running else None))
+                # Rows open steps of their run, like build progress (also of runs finished before app was started).
+                group.add(self._build_row(stage_name, build, state, stage_removed, running_build if is_running else None,
+                                          on_activated=lambda timestamp=timestamp, run_builds=run_builds: self._show_run_steps(timestamp, run_builds)))
             self._add_group(group)
 
     def _running_build_entries(self, running_build, run_builds: list) -> list[tuple]:
@@ -147,7 +141,8 @@ class ProjectBuildsView(Gtk.Box):
         self.content.append(group)
         self.groups.append(group)
 
-    def _build_row(self, stage_name: str, build, state: BuildRowState, stage_removed: bool, running_build) -> Adw.ActionRow:
+    def _build_row(self, stage_name: str, build, state: BuildRowState, stage_removed: bool, running_build,
+                   on_activated=None) -> Adw.ActionRow:
         details = [state.value]
         if stage_removed:
             details.append("stage was removed from project")
@@ -188,10 +183,10 @@ class ProjectBuildsView(Gtk.Box):
                 body=f"Build of \"{stage_name}\" will be removed with its files. This can't be undone.",
                 builds=[build]
             ))
-        if running_build:
-            # Stages of running build open progress of whole build.
+        if on_activated is not None:
+            # Stages open steps of whole run (progress of running build).
             row.set_activatable(True)
-            row.connect("activated", lambda _: self._open_build_progress(running_build))
+            row.connect("activated", lambda _: on_activated())
             arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
             arrow.add_css_class("dimmed")
             row.add_suffix(arrow)

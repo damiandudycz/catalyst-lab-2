@@ -20,11 +20,12 @@ def _record_path(project_directory, timestamp: str) -> str:
     return os.path.join(build_records_directory(project_directory), f"{timestamp}.json")
 
 def save_build_record(process):
-    """Saves steps of finished build run (ProjectBuild)."""
+    """Saves steps of build run (ProjectBuild). Saved while it runs too (when steps change), so runs interrupted by
+    closing app can be shown."""
     from .project_build_process import ProjectBuildStepBuildStage
     steps = []
     for step in process.stages:
-        data = {"name": step.name, "description": step.description, "state": step.state.name}
+        data = {"name": step.name, "description": step.description, "state": step.state.name, "progress": step.progress}
         if isinstance(step, ProjectBuildStepBuildStage):
             data["stage_name"] = step.stage.name
             data["started"] = step.build is not None # Output is in build.log of stage build.
@@ -32,11 +33,13 @@ def save_build_record(process):
             data["output"] = step.output_lines[-_MAX_RECORDED_LINES:]
         steps.append(data)
     stopped = getattr(process, "cancelled", False)
+    from .multistage_process import MultiStageProcessState as State
+    status = "stopped" if stopped else "interrupted" if process.status == State.IN_PROGRESS else process.status.name.lower()
     record = {
         "format": RECORD_FORMAT,
         "timestamp": process.timestamp,
         "title": process.title,
-        "status": "stopped" if stopped else process.status.name.lower(),
+        "status": status,
         "steps": steps,
     }
     path = _record_path(process.project_directory, process.timestamp)
@@ -63,7 +66,7 @@ def load_build_record(project_directory, timestamp: str, builds: list) -> Record
             output = data.get("output")
             if output is None:
                 output = _stage_log(project_directory, data.get("stage_name"), timestamp) if data.get("started") else []
-            steps.append((data["name"], data.get("description", ""), _step_state(data.get("state")), output))
+            steps.append((data["name"], data.get("description", ""), _step_state(data.get("state")), output, data.get("progress")))
         return RecordedBuild(project_directory, record.get("title") or f"Building {project_directory.name}",
                              record.get("status"), steps)
     except (OSError, ValueError, KeyError):
@@ -75,9 +78,9 @@ def load_build_record(project_directory, timestamp: str, builds: list) -> Record
         state = (MultiStageProcessStageState.COMPLETED if build.status == StageBuildStatus.COMPLETED
                  else MultiStageProcessStageState.FAILED if started else MultiStageProcessStageState.SCHEDULED)
         output = _stage_log(project_directory, build.stage_name, timestamp) if started else []
-        steps.append((f"Build {build.stage_name}", "Builds stage with catalyst", state, output))
+        steps.append((f"Build {build.stage_name}", "Builds stage with catalyst", state, output, None))
     stopped = any(build.status in (StageBuildStatus.STOPPED, StageBuildStatus.CANCELLED) for build in builds)
-    failed = any(state == MultiStageProcessStageState.FAILED for _, _, state, _ in steps)
+    failed = any(step[2] == MultiStageProcessStageState.FAILED for step in steps)
     status = "stopped" if stopped else "failed" if failed else "completed"
     return RecordedBuild(project_directory, f"Building {project_directory.name}", status, steps)
 
@@ -102,11 +105,12 @@ def _stage_log(project_directory, stage_name: str | None, timestamp: str) -> lis
 class RecordedBuildStep(MultiStageProcessStage):
     """Step of finished build, with its saved result and output."""
 
-    def __init__(self, name: str, description: str, state: MultiStageProcessStageState, output: list[str], process):
+    def __init__(self, name: str, description: str, state: MultiStageProcessStageState, output: list[str],
+                 progress: float | None, process):
         super().__init__(name=name, description=description, multistage_process=process)
         self.state = state
         self.output_lines = list(output)
-        self.progress = 1.0 if state == MultiStageProcessStageState.COMPLETED else None
+        self.progress = 1.0 if state == MultiStageProcessStageState.COMPLETED else progress
 
     def start(self):
         pass
@@ -126,7 +130,8 @@ class RecordedBuild(MultiStageProcess):
         return self.project_directory.name
 
     def setup_stages(self):
-        self.stages = [RecordedBuildStep(name, description, state, output, self) for name, description, state, output in self._steps]
+        self.stages = [RecordedBuildStep(name, description, state, output, progress, self)
+                       for name, description, state, output, progress in self._steps]
 
     def complete_process(self, success: bool):
         pass
