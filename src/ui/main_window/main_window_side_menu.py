@@ -24,7 +24,9 @@ class CatalystlabWindowSideMenu(Gtk.Box):
                 self.section_list.append(button)
         app_event_bus.subscribe(AppEvents.OPEN_APP_SECTION, self.opened_app_section)
         # Running and failed installers, at the bottom.
-        self.append(ProcessesList())
+        # Kept here: event bus refers to it weakly, its Python object would be collected otherwise.
+        self.processes_list = ProcessesList()
+        self.append(self.processes_list)
         # Statuses of sections come from items with status indicators (toolsets, machines, git directories) and
         # running processes. Their state events refresh side menu, like they refresh rows in sections.
         # Observed items and processes, weak so removed ones are forgotten (their ids can be reused by new objects).

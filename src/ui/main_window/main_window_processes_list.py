@@ -1,7 +1,8 @@
 import weakref
 from gi.repository import Gtk, GLib, Pango
 from .app_events import AppEvents, app_event_bus
-from .multistage_process import MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState
+from .multistage_process import (MultiStageProcess, MultiStageProcessEvent, MultiStageProcessState, MultiStageProcessStage,
+                                 MultiStageProcessStageEvent, MultiStageProcessStageState)
 
 # ------------------------------------------------------------------------------
 # Installers and setups (installations, builds, deploys...) running or failed, listed at the bottom of side menu.
@@ -57,8 +58,16 @@ def present_process(process: MultiStageProcess):
 def _listed(process: MultiStageProcess) -> bool:
     return process.status in (MultiStageProcessState.IN_PROGRESS, MultiStageProcessState.FAILED)
 
+def _entries(process: MultiStageProcess) -> list:
+    """Rows of process: its running steps, or process itself when it failed or no step is running (between steps)."""
+    if process.status == MultiStageProcessState.IN_PROGRESS:
+        steps = [step for step in process.stages if step.state == MultiStageProcessStageState.IN_PROGRESS]
+        if steps:
+            return [(process, step) for step in steps]
+    return [(process, None)]
+
 class ProcessesList(Gtk.Box):
-    """Running and failed processes, hidden when there are none."""
+    """Running steps of processes and failed processes, hidden when there are none."""
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
@@ -71,7 +80,7 @@ class ProcessesList(Gtk.Box):
         self.list_box.add_css_class("navigation-sidebar")
         self.list_box.connect("row-activated", lambda list_box, row: present_process(row.process))
         self.append(self.list_box)
-        self._rows: dict = {} # Process -> row.
+        self._rows: dict = {} # (process, step) -> row.
         self._observed = weakref.WeakSet()
         self._update_scheduled = False
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._schedule_update)
@@ -83,42 +92,49 @@ class ProcessesList(Gtk.Box):
             self._update_scheduled = True
             GLib.idle_add(self._update)
 
+    def _observe(self, event_bus, owner, *events):
+        if owner not in self._observed:
+            self._observed.add(owner)
+            for event in events:
+                event_bus.subscribe(event, self._schedule_update)
+
     def _update(self):
         self._update_scheduled = False
         processes = list(MultiStageProcess.started_processes)
         for process in processes:
-            if process not in self._observed:
-                self._observed.add(process)
-                process.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._schedule_update)
-                process.event_bus.subscribe(MultiStageProcessEvent.PROGRESS_CHANGED, self._schedule_update)
-        listed = [process for process in processes if _listed(process)]
-        for process in list(self._rows):
-            if process not in listed:
-                self.list_box.remove(self._rows.pop(process))
-        for process in listed:
-            if process not in self._rows:
-                self._rows[process] = ProcessRow(process)
-                self.list_box.append(self._rows[process])
-            self._rows[process].update()
-        self.set_visible(bool(listed))
+            self._observe(process.event_bus, process, MultiStageProcessEvent.STATE_CHANGED, MultiStageProcessEvent.PROGRESS_CHANGED)
+            for step in process.stages:
+                self._observe(step.event_bus, step, MultiStageProcessStageEvent.STATE_CHANGED)
+        entries = [entry for process in processes if _listed(process) for entry in _entries(process)]
+        for entry in list(self._rows):
+            if entry not in entries:
+                self.list_box.remove(self._rows.pop(entry))
+        for index, entry in enumerate(entries):
+            if entry not in self._rows:
+                self._rows[entry] = ProcessRow(*entry)
+                self.list_box.insert(self._rows[entry], index)
+            self._rows[entry].update()
+        self.set_visible(bool(entries))
         return False
 
 class ProcessRow(Gtk.ListBoxRow):
-    """Looks like rows of installation steps: status icon, name with state, and progress."""
+    """Looks like rows of installation steps: status icon, name with state, and progress. Row of running step shows
+    step with name of its process, row of process shows its state."""
 
-    def __init__(self, process: MultiStageProcess):
+    def __init__(self, process: MultiStageProcess, step: MultiStageProcessStage | None = None):
         super().__init__(tooltip_text=process.title)
         self.process = process
+        self.step = step
         box = Gtk.Box(spacing=10, margin_start=6, margin_end=6, margin_top=2, margin_bottom=2)
         # Status icon like in rows of installation steps.
         self.status_icon = Gtk.Image(valign=Gtk.Align.CENTER)
         box.append(self.status_icon)
         labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
         try:
-            name = process.name()
+            self.process_name = process.name()
         except Exception:
-            name = process.title
-        labels.append(Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.END))
+            self.process_name = process.title
+        labels.append(Gtk.Label(label=step.name if step else self.process_name, xalign=0, ellipsize=Pango.EllipsizeMode.END))
         self.subtitle = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.subtitle.add_css_class("caption")
         self.subtitle.add_css_class("dim-label")
@@ -133,17 +149,22 @@ class ProcessRow(Gtk.ListBoxRow):
     def update(self):
         failed = self.process.status == MultiStageProcessState.FAILED
         stopped = failed and getattr(self.process, "cancelled", False)
+        progress = None
         if stopped:
             icon_name, style, state = "stop-square-symbolic", "dimmed", "Stopped"
         elif failed:
             icon_name, style, state = "error-box-svgrepo-com-symbolic", "error", "Failed"
+        elif self.step is not None:
+            icon_name, style, state = "menu-dots-square-svgrepo-com-symbolic", None, self.process_name
+            progress = self.step.progress
         else:
             icon_name, style, state = "menu-dots-square-svgrepo-com-symbolic", None, "In progress"
-            self.progress_label.set_label(f"{int(self.process.progress * 100)}%")
+            progress = self.process.progress
         self.status_icon.set_from_icon_name(icon_name)
         for css_class in ("dimmed", "error"):
             self.status_icon.remove_css_class(css_class)
         if style:
             self.status_icon.add_css_class(style)
         self.subtitle.set_label(state)
-        self.progress_label.set_visible(not failed)
+        self.progress_label.set_label(f"{int(progress * 100)}%" if progress is not None else "")
+        self.progress_label.set_visible(progress is not None)
