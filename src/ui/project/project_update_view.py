@@ -29,9 +29,11 @@ class ProjectUpdateView(Gtk.Box):
         self.append(scrolled_window)
         # Finish button closes view when update is done (also when there was nothing to update, or it failed), like
         # in installations.
-        self.finish_bar = Gtk.Box(halign=Gtk.Align.CENTER, margin_start=24, margin_end=24, margin_top=12,
-                                  margin_bottom=12, visible=False)
-        finish_button = Gtk.Button(label="Finish")
+        # Line above bottom bar like in initial setup.
+        self.finish_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)
+        self.finish_bar.append(Gtk.Separator())
+        finish_button = Gtk.Button(label="Finish", halign=Gtk.Align.CENTER, margin_start=24, margin_end=24,
+                                   margin_top=12, margin_bottom=12)
         finish_button.add_css_class("suggested-action")
         finish_button.connect("clicked", lambda button: self._close())
         self.finish_bar.append(finish_button)
