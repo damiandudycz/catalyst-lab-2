@@ -56,8 +56,10 @@ class ProjectBuildsView(Gtk.Box):
     # --------------------------------------------------------------------------
 
     def load_builds(self):
-        # Result of newest build is seen when builds are displayed (opened, or build finished while open).
-        if self.get_mapped() or not getattr(self, "_result_seen", False):
+        # Result of newest build is seen when builds are displayed (opened, or build finished while open in active
+        # window, not behind build progress).
+        root = self.get_root()
+        if (self.get_mapped() and root is not None and root.is_active()) or not getattr(self, "_result_seen", False):
             self._result_seen = True
             self.project_directory.mark_build_result_seen()
         for group in self.groups:

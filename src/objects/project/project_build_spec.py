@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, re, shutil, uuid
 from dataclasses import dataclass, field
+from typing import Callable
 from .repository import Repository
 from .snapshot import PortageProfile
 from .project_stage import load_catalyst_stage_arguments_details
@@ -28,6 +29,7 @@ class StageSpecContext:
     cache_paths: dict = field(default_factory=dict) # Enabled caches (pkgcache_path, kerncache_path), as seen by catalyst.
     root_overlay: str | None = None # Generated root overlay, as seen by catalyst.
     snapshot: object | None = None # Snapshot selected for build, project snapshot when not set.
+    path_mapper: Callable[[str], str] | None = None # Path of host folder as seen by catalyst (project, releng, overlays).
 
 def snapshot_treeish(project_directory, snapshot=None) -> str | None:
     """Catalyst finds snapshot as snapshots/gentoo-<treeish>.sqfs. Snapshot of project, unless other is given."""
@@ -41,12 +43,13 @@ def generate_stage_spec(project_directory, stage, context: StageSpecContext) -> 
     """Spec file contents, with automatic options resolved and placeholders replaced. Raises if required value is missing."""
     arguments = load_catalyst_stage_arguments_details(toolset=project_directory.get_toolset(), target_name=stage.target)
     releng_directory = project_directory.get_releng_directory()
+    mapped = context.path_mapper or (lambda path: path)
     placeholders = {
         "@TIMESTAMP@": context.timestamp,
-        "@REPO_DIR@": releng_directory.directory_path() if releng_directory else "",
-        # Files kept in project (eg. added by project templates), available in toolset at the same paths.
-        "@PROJECT_DIR@": project_directory.directory_path(),
-        "@STAGE_DIR@": project_directory.stage_directory_path(name=stage.name),
+        "@REPO_DIR@": mapped(releng_directory.directory_path()) if releng_directory else "",
+        # Files kept in project (eg. added by project templates), available in toolset (paths without whitespace).
+        "@PROJECT_DIR@": mapped(project_directory.directory_path()),
+        "@STAGE_DIR@": mapped(project_directory.stage_directory_path(name=stage.name)),
         "@TREEISH@": snapshot_treeish(project_directory, context.snapshot) or "",
     }
     lines, missing = [], []
@@ -54,7 +57,7 @@ def generate_stage_spec(project_directory, stage, context: StageSpecContext) -> 
         if name in _virtual_arguments:
             continue
         value = _argument_value(project_directory, stage, name, argument, context)
-        text = _format_value(value)
+        text = _format_value(value, mapped)
         if text is None:
             if argument.required:
                 missing.append(argument.display_name)
@@ -66,7 +69,7 @@ def generate_stage_spec(project_directory, stage, context: StageSpecContext) -> 
     if StageArgumentDetails.boot_kernel.value in arguments:
         from .project_stage_kernels import kernel_spec_values
         for name, value in kernel_spec_values(project_directory, stage):
-            if (text := _format_value(value)) is None:
+            if (text := _format_value(value, mapped)) is None:
                 continue
             for placeholder, replacement in placeholders.items():
                 text = text.replace(placeholder, replacement)
@@ -115,11 +118,11 @@ def _automatic_value(project_directory, argument):
             return architecture.qemu_user_binary() if architecture and is_emulated_build(architecture) else None
     return None
 
-def _format_value(value) -> str | None:
+def _format_value(value, path_mapper=lambda path: path) -> str | None:
     if value is None or value is UNRESOLVED or isinstance(value, StageAutomaticOption) or value == "" or value == []:
         return None
     if isinstance(value, list):
-        items = [text for item in value if (text := _format_value(item)) is not None]
+        items = [text for item in value if (text := _format_value(item, path_mapper)) is not None]
         return ("\n\t" + "\n\t".join(items)) if len(items) > 1 else (items[0] if items else None)
     if isinstance(value, bool):
         return "yes" if value else "no"
@@ -130,7 +133,7 @@ def _format_value(value) -> str | None:
     if isinstance(value, uuid.UUID):
         # Repos are stored by overlay id, catalyst needs their location.
         overlay = next((item for item in Repository.OverlayDirectory.value if item.id == value), None)
-        return overlay.directory_path() if overlay else None
+        return path_mapper(overlay.directory_path()) if overlay else None
     return str(value)
 
 # ------------------------------------------------------------------------------
