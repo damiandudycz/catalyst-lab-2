@@ -56,6 +56,7 @@ class TargetMachine:
     local: bool = False
     firmware: TargetFirmware | None = None
     model: str = "" # Device tree model (eg. Raspberry Pi 5 Model B Rev 1.0), empty on machines without device tree.
+    image: bool = False # Disk image file (local), its only disk is the image.
 
     _SCRIPT = r'''
 echo "architecture=$(uname -m)"
@@ -126,8 +127,18 @@ echo "dns=$(awk '/^nameserver/ {print $2}' /etc/resolv.conf | tr '\n' ' ')"
         machine.disks.sort(key=lambda disk: (disk.in_use, not disk.external))
         return machine
 
+    @classmethod
+    def for_image(cls, connection, architecture: str, firmware: TargetFirmware, image_path: str, size: int) -> TargetMachine:
+        """Disk image file created through connection (root helper, or virtual machine). Its disk is the image, path of
+        loop device is set when it's attached."""
+        disk = TargetDisk(path=image_path, size=size, model="Disk image file")
+        return cls(architecture=architecture, uefi=firmware == TargetFirmware.UEFI, memory=0, hostname=connection.host,
+                   disks=[disk], local=True, firmware=firmware, image=True)
+
     @property
     def description(self) -> str:
+        if self.image:
+            return f"Image boots on {self.architecture} machine with {self.firmware.display_name(self.architecture)} firmware"
         if self.local:
             return f"Installed system runs on {self.architecture} machine with {self.firmware.display_name(self.architecture)} firmware"
         firmware = "Raspberry Pi" if self.raspberry_pi else "UEFI" if self.uefi else "BIOS"
@@ -330,6 +341,20 @@ class TargetPartition:
 
 _MOUNT_POINT = re.compile(r"^/([A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*)?$")
 
+def default_image_layout(uefi: bool, architecture: str, table: PartitionTable = PartitionTable.GPT,
+                         raspberry_pi: bool = False) -> list[PartitionSpec]:
+    """Disk image: boot partition and root using the rest. Root is last, so it can grow to fill disk image is written
+    to, and there's no swap or /home."""
+    layout = []
+    if raspberry_pi:
+        layout.append(PartitionSpec(PartitionType.FIRMWARE, 512 * MIB, mount_point="/boot"))
+    elif uefi:
+        layout.append(PartitionSpec(PartitionType.EFI, 512 * MIB, mount_point="/efi"))
+    elif architecture in ("x86_64", "i686", "i586", "i486") and table == PartitionTable.GPT:
+        layout.append(PartitionSpec(PartitionType.BIOS_BOOT, 1 * MIB))
+    layout.append(PartitionSpec(PartitionType.LINUX, None, TargetFilesystem.EXT4, "/"))
+    return layout
+
 def default_layout(disk: TargetDisk, uefi: bool, memory: int, architecture: str,
                    table: PartitionTable = PartitionTable.GPT, raspberry_pi: bool = False) -> list[PartitionSpec]:
     """EFI system (UEFI) or BIOS boot partition (x86 BIOS with GPT), /boot, swap (size of memory, up to 8 GiB), root
@@ -371,6 +396,16 @@ class PartitionPlan:
     root: str = "/mnt/gentoo" # Where root filesystem is mounted during installation.
     raspberry_pi: bool = False # Boots with Raspberry Pi firmware from FAT /boot partition.
     local: bool = False # Disk of this computer, only its own partitions are unmounted (not all swap and mounts).
+    image_path: str | None = None # Disk image file, disk is its loop device when attached.
+    compress_image: bool = True # Image is compressed (.img.xz) when it's done.
+
+    @property
+    def image(self) -> bool:
+        return self.image_path is not None
+
+    @property
+    def root_index(self) -> int | None:
+        return self.index_of(lambda spec: spec.type == PartitionType.LINUX and spec.mount_point == "/")
 
     @property
     def partitions(self) -> list[TargetPartition]:
@@ -435,6 +470,10 @@ class PartitionPlan:
                 return "Partitions must have at least 1 MiB"
         if self.remaining_size < (1 * GIB if self.layout[-1].size is None else 0):
             return f"Partitions don't fit on disk, {format_size(self.usable_size)} available"
+        if self.image:
+            root = self.layout[self.root_index - 1]
+            if self.root_index != len(self.layout) or root.size is not None or root.effective_filesystem != TargetFilesystem.EXT4:
+                return "Root partition of image must be last ext4 partition using remaining space, it's shrunk to contents and grows to fill disk"
         if self.raspberry_pi and not any(spec.type == PartitionType.FIRMWARE and spec.mount_point == "/boot" for spec in self.layout):
             return "Raspberry Pi needs firmware boot (FAT) partition mounted at /boot"
         efi = [spec for spec in self.layout if spec.type == PartitionType.EFI]
@@ -459,7 +498,7 @@ class PartitionPlan:
                 and not any(spec.type == PartitionType.BIOS_BOOT for spec in self.layout)):
             warnings.append("GRUB on BIOS machine needs BIOS boot partition")
         root = next((spec for spec in self.layout if spec.mount_point == "/" and spec.type == PartitionType.LINUX), None)
-        if root and self.size_of(root) < 16 * GIB:
+        if root and self.size_of(root) < 16 * GIB and not self.image:
             warnings.append("Root partition is small")
         return warnings
 
@@ -535,7 +574,7 @@ sfdisk -l {disk}
             lines.append(f'echo "Mounting {device} ({partition.mount_point}) at {target}"')
             lines.append(f"mount {quote(device)} {quote(target)}")
         # All mounted filesystems of installed system, not only root.
-        lines.append(f"df -h $(findmnt -R -n -o TARGET {quote(self.root)})")
+        lines.append(f"df -h $(findmnt -R -l -n -o TARGET {quote(self.root)})")
         return "\n".join(lines) + "\n"
 
     def fstab_script(self) -> str:
@@ -559,5 +598,7 @@ sfdisk -l {disk}
 
     def required_tools(self) -> list[str]:
         tools = ["wipefs", "sfdisk", "blkid", "tar", "chroot", "findmnt"] + (["lsblk"] if self.local else [])
+        if self.image:
+            tools += ["losetup", "truncate", "e2fsck", "resize2fs", "dumpe2fs"] + (["xz"] if self.compress_image else [])
         tools += sorted({partition.format_command.split()[0] for partition in self.partitions if partition.format_command})
         return tools

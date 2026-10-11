@@ -114,7 +114,11 @@ class DeployInstallation(MultiStageProcess):
         super().__init__(title="Deploy")
 
     def setup_stages(self):
-        self.stages.append(DeployStepCheck(multistage_process=self))
+        if self.plan.image:
+            from .deploy_image_steps import DeployStepCreateImage
+            self.stages.append(DeployStepCreateImage(multistage_process=self))
+        else:
+            self.stages.append(DeployStepCheck(multistage_process=self))
         self.stages.append(DeployStepPartition(multistage_process=self))
         self.stages.append(DeployStepFormat(multistage_process=self))
         self.stages.append(DeployStepMount(multistage_process=self))
@@ -126,12 +130,29 @@ class DeployInstallation(MultiStageProcess):
             self.stages.append(DeployStepNetwork(multistage_process=self))
         if self.settings.bootloader != Bootloader.NONE:
             self.stages.append(DeployStepBootloader(multistage_process=self))
+        if self.plan.image:
+            from .deploy_image_steps import DeployStepGrowRoot
+            self.stages.append(DeployStepGrowRoot(multistage_process=self))
         self.stages.append(DeployStepFinish(multistage_process=self))
+        if self.plan.image:
+            from .deploy_image_steps import DeployStepShrinkImage, DeployStepCompressImage
+            self.stages.append(DeployStepShrinkImage(multistage_process=self))
+            if self.plan.compress_image:
+                self.stages.append(DeployStepCompressImage(multistage_process=self))
 
     @property
     def target_name(self) -> str:
-        """Machine, or disk of this computer."""
+        """Machine, disk of this computer, or image file."""
+        if self.plan.image:
+            return os.path.basename(self.plan.image_path) + (".xz" if self.plan.compress_image else "")
         return self.plan.disk.path if self.machine.local else self.connection.host
+
+    @property
+    def result_path(self) -> str | None:
+        """Created image file."""
+        if not self.plan.image:
+            return None
+        return self.plan.image_path + (".xz" if self.plan.compress_image else "")
 
     def name(self) -> str:
         return f"{self.build.stage_name} on {self.target_name}"
@@ -158,7 +179,7 @@ class DeployInstallation(MultiStageProcess):
         if not self.build.path:
             return None
         from datetime import datetime
-        target = os.path.basename(self.plan.disk.path) if self.machine.local else self.connection.host
+        target = "image" if self.plan.image else os.path.basename(self.plan.disk.path) if self.machine.local else self.connection.host
         host = "".join(character if character.isalnum() or character in ".-" else "_" for character in target)
         return os.path.join(self.build.path, f"deploy-{datetime.now().strftime('%Y%m%dT%H%M%S')}-{host}.log")
 
@@ -181,6 +202,19 @@ class DeployInstallation(MultiStageProcess):
                 self.mounted = False
             except Exception as e:
                 print(f"Failed to unmount {self.root}: {e}")
+        if self.plan.image:
+            # Image is detached from loop device, unfinished image is removed.
+            from .deploy_image import detach_image_script
+            from .ssh_connection import quote as shell_quote
+            script = detach_image_script(self.plan.image_path)
+            if not success:
+                script += f"\nrm -f {shell_quote(self.plan.image_path)} {shell_quote(self.plan.image_path + '.xz')}; echo 'Unfinished image removed'"
+            try:
+                self.connection.run(script, self.write_log)
+            except Exception as e:
+                print(f"Failed to detach image: {e}")
+            if success and self.result_path:
+                self.write_log(f"Image: {self.result_path}")
         self.write_log(f"=== Deployment {'completed' if success else 'failed'}")
         if self._log_file:
             self._log_file.close()
@@ -406,6 +440,10 @@ class DeployStepFinish(DeployStep):
     def run(self):
         process = self.multistage_process
         root = quote(process.root)
+        if process.plan.image:
+            self.remote(f"sync && umount -R {root} && rmdir {root} && echo 'Installation finished'", "Failed to unmount filesystems")
+            process.mounted = False
+            return
         if process.machine.local:
             self.remote(f"sync && umount -R {root} && rmdir {root} && echo 'Installation finished, disk can be removed'",
                         "Failed to unmount filesystems")
