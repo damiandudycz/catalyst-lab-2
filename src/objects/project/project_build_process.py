@@ -149,12 +149,19 @@ class ProjectBuild(MultiStageProcess):
 
     def synced_caches(self, stage) -> list[tuple[str, str]]:
         """Caches of machine build kept in shared folders between builds, as (saved path, path in working space).
-        Working space is deleted after build, caches are saved as plain files (shared folders can't store owners)."""
+        Working space is deleted after build, caches are saved as plain files (shared folders can't store owners).
+        Kernel cache isn't saved: it contains kernel sources, which have files with names differing only in case
+        (eg. xt_CONNMARK.h and xt_connmark.h), and shared folders of macOS are case-insensitive, so saved sources were
+        broken and next builds failed using them. It's used only by stages of the same build then (in working space).
+        Saving it wouldn't make builds faster anyway: genkernel cleans sources (make mrproper) and compiles kernel
+        again, only unpacking of sources is skipped."""
         if not self.machine:
             return []
         caches = [(distfiles_directory(), distfiles_directory(self.executor))]
         used_paths = self.stage_cache_paths(stage)
         for argument in CACHE_ARGUMENTS:
+            if argument == StageArgumentDetails.kerncache_path:
+                continue
             saved = stage_cache_path(self.project_directory, stage, argument)
             if saved and self._machine_cache_path(saved) and argument in used_paths:
                 caches.append((saved, used_paths[argument]))
