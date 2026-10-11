@@ -45,6 +45,7 @@ class ProjectUpdateView(Gtk.Box):
         self._action = None
         self.selected = None # Options of template chosen for update.
         self.force = False # Clean version is prepared also when there is nothing new (to drop changes of project).
+        self._drop_project_changes = False # Chosen before update is prepared (options of template, or restore).
         if source == "template":
             # Options of latest template, with values selected before.
             self._show_loading("Downloading options of latest template…")
@@ -81,10 +82,29 @@ class ProjectUpdateView(Gtk.Box):
         options.set_template(template, selected)
         description = self._label("Options of the latest version of template, with values selected for project. "
                                   "Changed options change generated stages and files.")
+        widgets = [description]
+        # Project with own commits can get clean version of template, chosen before options.
+        own_commits = own_commits_count(self.project_directory.directory_path())
+        drop_row = None
+        if own_commits > 0:
+            group = Adw.PreferencesGroup()
+            drop_row = Adw.SwitchRow(title="Drop project changes", subtitle=(
+                f"Project gets clean version of template, {own_commits} own commit{'s' if own_commits != 1 else ''} "
+                f"of project {'are' if own_commits != 1 else 'is'} discarded (they stay in Git reflog of project)."),
+                active=self._drop_project_changes)
+            group.add(drop_row)
+            widgets.append(group)
+        widgets.append(options)
         def on_continue():
             self.selected = dict(options.selected)
+            if drop_row is not None and drop_row.get_active():
+                self._drop_project_changes = True
+                self.force = True # Clean version is prepared also when template has nothing new.
+            else:
+                self._drop_project_changes = False
+                self.force = False
             self._start_update()
-        self._set_content([description, options])
+        self._set_content(widgets)
         self._set_action("Continue", on_continue)
         def on_changed():
             self.action_button.set_sensitive(options.generated is not None)
@@ -137,7 +157,7 @@ class ProjectUpdateView(Gtk.Box):
 
     def _show_update(self, update, error):
         self.update = update
-        if update is not None and getattr(self, "_drop_project_changes", False):
+        if update is not None and self._drop_project_changes:
             update.drop_project_changes = True
         if error is not None:
             self._show_message("dialog-error-symbolic", "Update failed", str(error))
@@ -171,7 +191,7 @@ class ProjectUpdateView(Gtk.Box):
             describe()
             widgets.append(intro)
         conflicts_group = None
-        if not update.fast_forward:
+        if not update.fast_forward and self.source != "template":
             # Project can get clean version instead, its own changes are dropped.
             group = Adw.PreferencesGroup()
             drop_row = Adw.SwitchRow(title="Drop project changes", subtitle=(

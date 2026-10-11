@@ -566,6 +566,8 @@ def prepare_template_update(project_directory, log: Callable[[str], None],
         record_template_state(generated, template, state.selected, commit, stage_ids,
                               template_tree(repository, state.repository_path))
         onto = _commit_directory(project_path, generated, f"Update from template {template.name}", [base])
+        if _git(project_path, "rev-parse", f"{onto}^{{tree}}") == _git(project_path, "rev-parse", f"{base}^{{tree}}"):
+            onto = base # Template didn't change (prepared to drop changes of project), project returns to base.
         head = _git(project_path, "rev-parse", "HEAD")
         return ProjectUpdate(source="template", onto=onto, base=base, changes=changes, temporary_directory=temporary,
                              fast_forward=head == base, architecture=architecture)
@@ -622,7 +624,8 @@ def own_commits_count(project_path: str) -> int:
         base = _git(project_path, "rev-parse", "@{upstream}", check=False)
     if not base:
         return 0
-    count = _git(project_path, "rev-list", "--count", f"{base}..HEAD", check=False)
+    # Commits not changing files (eg. made by restoring clean template) are not own changes.
+    count = _git(project_path, "rev-list", "--count", f"{base}..HEAD", "--", ".", check=False)
     return int(count) if count.isdigit() else 0
 
 def project_overlays(project_directory) -> list:
