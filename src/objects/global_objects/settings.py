@@ -44,7 +44,7 @@ class Settings(Serializable):
         temporary_location: str = library_path("Temporary"),
         packages_location: str = library_path("Packages"),
         auto_clean_snapshots: bool = False,
-        navigation_style: NavigationStyle = NavigationStyle.MODAL
+        navigation_style: NavigationStyle = NavigationStyle.PUSH
     ):
         self._initial_setup_done = initial_setup_done
         self._keep_root_unlocked = keep_root_unlocked
@@ -313,4 +313,4 @@ def _navigation_style(value) -> NavigationStyle:
     try:
         return NavigationStyle(value)
     except ValueError:
-        return NavigationStyle.MODAL
+        return NavigationStyle.PUSH
