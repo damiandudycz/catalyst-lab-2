@@ -236,12 +236,35 @@ provision:
 """
 
 # Version of machine setup, increased when setup script changes. Existing machines are updated when started.
-MACHINE_SETUP_VERSION = 3
+MACHINE_SETUP_VERSION = 4
 _MACHINE_SETUP_VERSION_FILE = "/etc/catalystlab-setup-version"
 
 # QEMU user emulators, to build stages for other architectures (like on Linux hosts, binfmt_misc with F flag makes
 # them work in chroots and namespaces).
 _QEMU_ARCHITECTURES = "x86_64 i386 arm armeb aarch64 riscv64 ppc ppc64 ppc64le s390x mips mipsel mips64 mips64el sparc sparc64 alpha m68k loongarch64 hppa sh4"
+
+# Rules of qemu-binfmt (Alpine) for some architectures (eg. ppc64) match only ELF files with OS ABI 0 (SYSV), programs
+# marked with GNU/Linux ABI (3), like gcc and ldconfig of Gentoo ppc64 stages, fail then with Exec format error. Rules
+# are registered again on every boot (after qemu-binfmt, by local service), ignoring OS ABI and ABI version bytes of
+# ELF header, like rules of QEMU for most architectures.
+_BINFMT_FIX_SCRIPT = r"""#!/bin/sh
+cd /proc/sys/fs/binfmt_misc || exit 0
+for entry in qemu-*; do
+    [ -f "$entry" ] || continue
+    offset=$(sed -n 's/^offset //p' "$entry")
+    magic=$(sed -n 's/^magic //p' "$entry")
+    mask=$(sed -n 's/^mask //p' "$entry")
+    interpreter=$(sed -n 's/^interpreter //p' "$entry")
+    flags=$(sed -n 's/^flags: //p' "$entry")
+    [ "$offset" = 0 ] && [ -n "$magic" ] && [ -n "$mask" ] || continue
+    # Bytes 7 and 8 of ELF header are hex digits 15-18.
+    fixed_mask="$(echo "$mask" | cut -c1-14)0000$(echo "$mask" | cut -c19-)"
+    [ "$fixed_mask" = "$mask" ] && continue
+    echo -1 > "$entry"
+    printf ':%s:M:0:%s:%s:%s:%s\n' "$entry" "$(echo "$magic" | sed 's/../\\x&/g')" \
+        "$(echo "$fixed_mask" | sed 's/../\\x&/g')" "$interpreter" "$flags" > register
+done
+"""
 
 def machine_setup_script() -> str:
     """Prepares machine (as root, idempotent): tools for working without root, subordinate ids of user, working space
@@ -281,6 +304,11 @@ retry apk add $apk_options --cache-predownload bash coreutils findutils grep sed
 rm -rf /var/cache/catalystlab-apk
 rc-update add qemu-binfmt default
 rc-service qemu-binfmt restart || rc-service qemu-binfmt start
+mkdir -p /etc/local.d
+echo {_shell_base64(_BINFMT_FIX_SCRIPT)} | base64 -d > /etc/local.d/catalystlab-binfmt.start
+chmod +x /etc/local.d/catalystlab-binfmt.start
+rc-update add local default
+/etc/local.d/catalystlab-binfmt.start
 # User of machine (same uid as on host) gets subordinate ids for files of toolsets.
 user=$(getent passwd | awk -F: '$3 >= 500 && $3 < 60000 {{ print $1; exit }}')
 grep -q "^$user:" /etc/subuid || echo "$user:100000:65536" >> /etc/subuid
