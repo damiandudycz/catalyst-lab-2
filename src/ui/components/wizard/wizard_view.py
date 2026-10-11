@@ -50,6 +50,7 @@ class WizardView(Adw.Bin, Gtk.Buildable):
         self._all_pages: [Gtk.Widget] = [] # Also hidden pages, in order of adding (keeps them alive while hidden).
         # Signals:
         self.carousel.connect('page-changed', self.on_page_changed)
+        self.connect("notify::parent", lambda *args: self._update_can_go_back())
         self.connect("realize", self.on_realize)
 
     def on_realize(self, widget):
@@ -211,7 +212,8 @@ class WizardView(Adw.Bin, Gtk.Buildable):
             self.on_back_pressed(None)
 
     def _update_can_go_back(self):
-        can_go_back = self.get_child() is self.setup_view and self.current_page > 0
+        # Wizard replaced by other view (eg. queued build) doesn't handle back of navigation anymore.
+        can_go_back = self.get_parent() is not None and self.get_child() is self.setup_view and self.current_page > 0
         if self.can_go_back != can_go_back:
             self.can_go_back = can_go_back
 
