@@ -309,7 +309,8 @@ def _state_icon(state: BuildRowState) -> str:
         case BuildRowState.COMPLETED: return "check-square-svgrepo-com-symbolic"
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error-box-svgrepo-com-symbolic"
         case BuildRowState.BUILDING: return "menu-dots-square-svgrepo-com-symbolic"
-        case BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.STOPPED | BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
+        case BuildRowState.CANCELLED | BuildRowState.STOPPED: return "stop-square-symbolic"
+        case BuildRowState.SKIPPED | BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
         case _: return "clock-square-svgrepo-com-symbolic"
 
 def _state_css_class(state: BuildRowState) -> str | None:

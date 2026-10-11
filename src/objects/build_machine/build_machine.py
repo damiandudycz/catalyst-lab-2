@@ -192,6 +192,7 @@ class BuildMachine:
             self._set_status(self.STATUS_STARTING)
             try:
                 self._update_provision_script(output_handler, process_holder)
+                self._update_mounts(output_handler, process_holder)
                 self._prepare_swap_disk(output_handler, process_holder)
                 success = run_limactl(["start", self.instance_name], output_handler, process_holder, home=self.lima_home)
             finally:
@@ -294,6 +295,25 @@ class BuildMachine:
         expression = f'.provision = [{{"mode": "system", "script": {json.dumps(script)}}}]'
         if not run_limactl(["edit", "--set", expression, self.instance_name], output_handler, process_holder, home=self.lima_home):
             output_handler(f"Warning: provisioning of virtual machine {self.name} was not updated")
+
+    def _update_mounts(self, output_handler, process_holder: list | None = None):
+        """Machine shares current folders of Catalyst Lab (they change when library is moved to other place)."""
+        import json, re
+        from .build_machine_manager import shared_paths
+        paths = shared_paths()
+        try:
+            with open(os.path.join(self.machine_directory, "lima.yaml"), encoding="utf-8") as file:
+                configuration = file.read()
+        except OSError:
+            return
+        section = re.search(r"^mounts:\n((?:[ -].*\n)*)", configuration, re.MULTILINE)
+        current = re.findall(r'location:\s*"?([^"\n]+)"?', section.group(1)) if section else []
+        if sorted(path.strip() for path in current) == sorted(paths):
+            return
+        output_handler(f"Updating shared folders of virtual machine {self.name}")
+        expression = f".mounts = {json.dumps([{'location': path, 'writable': True} for path in paths])}"
+        if not run_limactl(["edit", "--set", expression, self.instance_name], output_handler, process_holder, home=self.lima_home):
+            output_handler(f"Warning: shared folders of virtual machine {self.name} were not updated")
 
     def _swap_disk_attached(self) -> bool:
         try:

@@ -49,12 +49,15 @@ def default_lima_home() -> str:
 def lima_home() -> str:
     """Lima directory (LIMA_HOME) for new machines: machines directory, or ~/.lima when socket paths in machines
     directory would be too long."""
-    import pwd
     directory = machines_directory()
-    if len(os.path.join(directory, _INSTANCE_NAME_EXAMPLE, "ssh.sock.1234567890123456")) >= _MAX_SOCKET_PATH:
+    if lima_home_too_long(directory):
         print(f"Path of machines directory {directory} is too long for Lima, using ~/.lima")
         return default_lima_home()
     return directory
+
+def lima_home_too_long(directory: str) -> bool:
+    """Socket paths of machines in Lima directory would be too long."""
+    return len(os.path.join(directory, _INSTANCE_NAME_EXAMPLE, "ssh.sock.1234567890123456")) >= _MAX_SOCKET_PATH
 
 def lima_environment(home: str | None = None) -> dict:
     """Environment of limactl, with Lima directory of machine (or for new machines)."""

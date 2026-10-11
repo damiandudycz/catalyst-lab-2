@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, threading
-from .repository import Repository
+from .repository import Repository, library_directory
 from .build_machine import BuildMachine
 from .lima import run_limactl
 
@@ -41,7 +41,7 @@ def shared_paths() -> list[str]:
     """Folders of Catalyst Lab shared with machines, mounted at the same paths. Locations inside other ones are skipped."""
     settings = Repository.Settings.value
     locations = [
-        "~/CatalystLab", settings.toolsets_location, settings.snapshots_location, settings.releng_location,
+        library_directory(), settings.toolsets_location, settings.snapshots_location, settings.releng_location,
         settings.overlay_location, settings.project_location, settings.builds_location, settings.cache_location,
         settings.temporary_location, settings.packages_location
     ]

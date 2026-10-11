@@ -7,19 +7,60 @@ from .event_bus import EventBus
 from enum import Enum, auto
 from typing import final
 
-APP_DIRECTORY = "~/CatalystLab"
+# Library: folder with all data of app (toolsets, snapshots, projects, builds...) and its configuration. User can
+# keep it in other place (Settings section), its location is stored outside of it.
+DEFAULT_LIBRARY_DIRECTORY = "~/CatalystLab"
+
+def _system_config_directory() -> str:
+    if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
+        return os.path.expanduser(f"~/.var/app/{os.environ.get('FLATPAK_ID')}/config")
+    return os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+
+def _library_location_file() -> str:
+    return os.path.join(_system_config_directory(), "catalystlab-library.json")
+
+_library_directory: str | None = None
+
+def library_directory() -> str:
+    """Absolute path of library. Read once, app is restarted when library changes."""
+    global _library_directory
+    if _library_directory is None:
+        location = DEFAULT_LIBRARY_DIRECTORY
+        try:
+            with open(_library_location_file(), encoding="utf-8") as file:
+                location = json.load(file).get("library") or location
+        except (OSError, ValueError, AttributeError):
+            pass
+        _library_directory = os.path.abspath(os.path.expanduser(location))
+    return _library_directory
+
+def store_library_directory(path: str):
+    """Library used after app restarts."""
+    os.makedirs(_system_config_directory(), exist_ok=True)
+    temporary = _library_location_file() + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as file:
+        json.dump({"library": collapse_home(path)}, file, indent=4)
+    os.replace(temporary, _library_location_file())
+
+def collapse_home(path: str) -> str:
+    """Path in home folder written with ~, so it stays valid when home folder is renamed."""
+    home = os.path.expanduser("~")
+    path = os.path.abspath(os.path.expanduser(path))
+    return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
+
+def library_path(*names: str) -> str:
+    """Location in library (default locations of settings)."""
+    return collapse_home(os.path.join(library_directory(), *names))
 
 def config_directory() -> str:
-    """Stored repositories and settings, in app directory with all other data, so removing app directory resets app."""
-    directory = os.path.join(os.path.expanduser(APP_DIRECTORY), "Config")
+    """Stored repositories and settings, in library with all other data, so removing library resets app."""
+    directory = os.path.join(library_directory(), "Config")
     _migrate_legacy_config(directory)
     return directory
 
 def _legacy_config_directory() -> str:
     """Config directory used by older versions."""
-    if RuntimeEnv.current() == RuntimeEnv.FLATPAK:
-        return os.path.expanduser(f"~/.var/app/{os.environ.get('FLATPAK_ID')}/config/catalystlab")
-    return os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "catalystlab")
+    return os.path.join(_system_config_directory(), "catalystlab")
 
 _legacy_config_checked = False
 
@@ -40,7 +81,7 @@ def _migrate_legacy_config(directory: str):
         locations = [value for key, value in settings.items() if key.endswith("_location") and isinstance(value, str)]
     except (OSError, ValueError, AttributeError):
         locations = []
-    locations.append(APP_DIRECTORY)
+    locations.append(library_directory())
     if any(os.path.isdir(os.path.expanduser(location)) for location in locations):
         print(f"Moving configuration from {legacy} to {directory}")
         os.makedirs(os.path.dirname(directory), exist_ok=True)

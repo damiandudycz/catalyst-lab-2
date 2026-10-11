@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import final
 from enum import Enum, auto
 from .event_bus import EventBus
-from .repository import Serializable, Repository
+from .repository import Serializable, Repository, library_path
 
 @final
 class SettingsEvents(Enum):
@@ -27,15 +27,15 @@ class Settings(Serializable):
         self,
         initial_setup_done: bool = False,
         keep_root_unlocked: bool = True,
-        toolsets_location: str = "~/CatalystLab/Toolsets",
-        snapshots_location: str = "~/CatalystLab/Snapshots",
-        releng_location: str = "~/CatalystLab/Releng",
-        overlay_location: str = "~/CatalystLab/Overlays",
-        project_location: str = "~/CatalystLab/Projects",
-        builds_location: str = "~/CatalystLab/Builds",
-        cache_location: str = "~/CatalystLab/Cache",
-        temporary_location: str = "~/CatalystLab/Temporary",
-        packages_location: str = "~/CatalystLab/Packages",
+        toolsets_location: str = library_path("Toolsets"),
+        snapshots_location: str = library_path("Snapshots"),
+        releng_location: str = library_path("Releng"),
+        overlay_location: str = library_path("Overlays"),
+        project_location: str = library_path("Projects"),
+        builds_location: str = library_path("Builds"),
+        cache_location: str = library_path("Cache"),
+        temporary_location: str = library_path("Temporary"),
+        packages_location: str = library_path("Packages"),
         auto_clean_snapshots: bool = False
     ):
         self._initial_setup_done = initial_setup_done
@@ -64,10 +64,10 @@ class Settings(Serializable):
                 overlay_location=data["overlay_location"],
                 project_location=data["project_location"],
                 # Added later, settings stored by older versions don't contain it.
-                builds_location=data.get("builds_location", "~/CatalystLab/Builds"),
-                cache_location=data.get("cache_location", "~/CatalystLab/Cache"),
-                temporary_location=data.get("temporary_location", "~/CatalystLab/Temporary"),
-                packages_location=data.get("packages_location", "~/CatalystLab/Packages"),
+                builds_location=data.get("builds_location", library_path("Builds")),
+                cache_location=data.get("cache_location", library_path("Cache")),
+                temporary_location=data.get("temporary_location", library_path("Temporary")),
+                packages_location=data.get("packages_location", library_path("Packages")),
                 auto_clean_snapshots=data.get("auto_clean_snapshots", False)
             )
         except:

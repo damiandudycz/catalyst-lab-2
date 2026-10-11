@@ -12,6 +12,7 @@
     <file preprocess="xml-stripblanks">ui/app_sections/builds/builds_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/releng/releng_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/snapshots/snapshots_section.ui</file>
+    <file preprocess="xml-stripblanks">ui/app_sections/settings/settings_section.ui</file>
     <file preprocess="xml-stripblanks">ui/app_sections/welcome/welcome_section.ui</file>
     <file preprocess="xml-stripblanks">ui/components/multistage_process_execution_view/multistage_process_execution_view.ui</file>
     <file preprocess="xml-stripblanks">ui/components/repository_list/repository_list_view.ui</file>
