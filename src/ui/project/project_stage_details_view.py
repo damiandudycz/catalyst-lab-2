@@ -33,7 +33,7 @@ from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cach
 from .project_stage_kernels import (
     live_cd_kernel_warning,
     KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_kernel_names, kernel_setting, own_kernel_settings,
-    set_kernel_setting, kernel_name_error, stage_inherits_kernels, set_kernel_names, remove_kernel,
+    set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
 from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package, derived_distkernel
@@ -189,6 +189,15 @@ class ProjectStageDetailsView(Gtk.Box):
             return # Target doesn't build kernels.
         names = stage_kernel_names(self.project_directory, self.stage)
         inherits = stage_inherits_kernels(self.stage)
+        releng_names = releng_kernel_names(self.project_directory, self.stage)
+        if inherits or releng_names:
+            # Kernels list follows releng template (like inherited settings), or is own list of stage.
+            inherit_row = Adw.SwitchRow(title="Use kernels of Releng template", active=inherits,
+                                        subtitle=GLib.markup_escape_text(", ".join(releng_names) if releng_names else "Releng template has no kernels"))
+            set_row_description(inherit_row, "On: kernels follow releng template of stage. Off: stage has own list of "
+                                             "kernels, copied from template. Adding, removing or renaming kernel turns it off.")
+            inherit_row.connect("notify::active", self._on_inherit_kernels_changed)
+            self._add_kernel_row(inherit_row)
         warnings = []
         for name in names:
             row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name,
@@ -209,9 +218,8 @@ class ProjectStageDetailsView(Gtk.Box):
         add_row.connect("activated", self._on_add_kernel)
         self._add_kernel_row(add_row)
         required = "This stage needs at least one kernel. " if self.boot_kernel_argument.required and not names else ""
-        releng = "Kernels of releng spec, adding, removing or renaming kernel makes stage use its own list. " if inherits and names else ""
         self.kernels_pref_group.set_description(
-            "".join(warnings) + required + releng + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
+            "".join(warnings) + required + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
         if args:
             self.apply_mode() # Kernel rows changed after argument was saved.
 
@@ -241,6 +249,15 @@ class ProjectStageDetailsView(Gtk.Box):
         self._expand_kernel = {new_name}
         GLib.idle_add(lambda: self.load_kernel_rows(True) and False) # After apply signal of row being replaced.
         return None
+
+    def _on_inherit_kernels_changed(self, row, _param):
+        inherit = row.get_active()
+        if inherit == stage_inherits_kernels(self.stage):
+            return
+        # Own list starts as copy of kernels of template.
+        names = None if inherit else stage_kernel_names(self.project_directory, self.stage)
+        set_kernel_names(self.project_directory, self.stage, names)
+        GLib.idle_add(lambda: self.load_kernel_rows(True) and False) # After signal of row being replaced.
 
     def _remove_kernel(self, name: str):
         remove_kernel(self.project_directory, self.stage, name)
