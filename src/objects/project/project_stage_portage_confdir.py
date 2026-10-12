@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os
+import filecmp, os
 from enum import Enum
 from .architecture import Architecture
 from .project_stage_arguments import StageArgumentDetails, StageArgumentOption
@@ -288,3 +288,56 @@ def root_overlay_options(project_directory, stage, argument: StageArgumentDetail
         subtitle=f"{_files_text(stage_files)} in {_FILE_OVERLAY_FOLDERS.get(argument, 'root_overlay')} folder of stage, overwrite releng and parent files"
     )
     return [releng, parent, own]
+
+# ------------------------------------------------------------------------------
+# Files of stage overlays that stage already inherits from parent overlays.
+
+def _same_file(path: str, other: str) -> bool:
+    if os.path.islink(path) or os.path.islink(other):
+        return os.path.islink(path) and os.path.islink(other) and os.readlink(path) == os.readlink(other)
+    return os.path.isfile(other) and filecmp.cmp(path, other, shallow=False)
+
+def remove_inherited_files(folder: str, inherited_folders: list[str]) -> list[str]:
+    """Removes files of folder identical to files inherited from folders combined before it (later folders overwrite
+    files of earlier ones), so folder keeps only what it adds or changes. Folders left empty are removed. Returns
+    removed files, relative to folder."""
+    removed = []
+    if not inherited_folders or not os.path.isdir(folder):
+        return removed
+    for root, directories, files in os.walk(folder, topdown=False):
+        for name in files + [directory for directory in directories if os.path.islink(os.path.join(root, directory))]:
+            path = os.path.join(root, name)
+            relative = os.path.relpath(path, folder)
+            # File used from inherited folders is the one of last folder that has it.
+            inherited = next((os.path.join(item, relative) for item in reversed(inherited_folders)
+                              if os.path.lexists(os.path.join(item, relative))), None)
+            if inherited is not None and _same_file(path, inherited):
+                os.remove(path)
+                removed.append(relative)
+        if root != folder and not os.path.islink(root) and not os.listdir(root):
+            os.rmdir(root)
+    if not os.listdir(folder):
+        os.rmdir(folder)
+    return sorted(removed)
+
+def remove_stage_overlays_inherited_files(project_directory, stage) -> dict[str, list[str]]:
+    """Removes files of stage overlay folders (Portage configuration, root and ISO overlays) that stage already gets
+    from parent overlays. Only folders of overlays using parent overlay are changed. Returns removed files by folder."""
+    removed = {}
+    folders = []
+    if StagePortageConfdirSource.PARENT_OVERLAY in portage_confdir_sources(stage):
+        folders.append((stage_overlay_path(project_directory, stage),
+                        [stage_overlay_path(project_directory, item) for item in parent_overlay_stages(project_directory, stage)]))
+    for argument in FILE_OVERLAY_ARGUMENTS:
+        if argument in ROOT_OVERLAY_ARGUMENTS and argument != root_overlay_argument(stage):
+            continue
+        if argument == StageArgumentDetails.livecd_overlay and (getattr(stage, "target", None) or "").replace("-", "_") != "livecd_stage2":
+            continue
+        if StagePortageConfdirSource.PARENT_OVERLAY in root_overlay_values(project_directory, stage, argument):
+            folders.append((stage_root_overlay_path(project_directory, stage, argument),
+                            [stage_root_overlay_path(project_directory, item, argument)
+                             for item in parent_root_overlay_stages(project_directory, stage, argument)]))
+    for folder, inherited in folders:
+        if files := remove_inherited_files(folder, inherited):
+            removed[os.path.basename(folder)] = files
+    return removed
