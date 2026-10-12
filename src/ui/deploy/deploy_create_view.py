@@ -6,7 +6,7 @@ import re
 from .deploy_installation import DeployInstallation, DeploySystemSettings, DeployUser, DEFAULT_USER_GROUPS, local_mount_point
 from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, default_bootloader, bootloader_warnings
 from .deploy_system import (
-    NetworkService, NetworkSettings, LocalizationSettings, default_network_service, local_localization, local_public_keys
+    NetworkService, NetworkSettings, LocalizationSettings, WifiSettings, default_network_service, local_localization, local_public_keys
 )
 from .deploy_target import (
     TargetMachine, TargetFilesystem, PartitionPlan, PartitionSpec, PartitionType, GIB, MIB, format_size,
@@ -124,6 +124,7 @@ class DeployCreateView(Gtk.Box):
         super().__init__()
         for row in (self.target_firmware_row, self.table_row, self.network_service_row, self.network_mode_row, self.kernel_row, self.bootloader_row):
             fit_popup_to_items(row)
+        self._setup_wifi_rows()
         self.installation_in_progress = installation_in_progress
         self.content_navigation_view = content_navigation_view
         self.project_directory = project_directory
@@ -597,14 +598,42 @@ class DeployCreateView(Gtk.Box):
         network = self._network()
         static = network.service != NetworkService.NONE and network.static
         self.network_mode_row.set_visible(network.service != NetworkService.NONE)
+        self.wifi_row.set_visible(network.service != NetworkService.NONE)
+        if network.service != NetworkService.NONE:
+            self.wifi_row.set_subtitle("NetworkManager connection" if network.service == NetworkService.NETWORK_MANAGER
+                                       else "wpa_supplicant on wlan0, installed if stage doesn't have it")
         for widget in (self.interface_row, self.address_row, self.gateway_row, self.dns_row):
             widget.set_visible(static)
         # Errors are shown under groups of fields they refer to.
         _show_error(self.hostname_status_label, self._hostname_error())
         _show_error(self.localization_status_label, self._localization().error())
-        _show_error(self.network_status_label, network.error())
+        _show_error(self.network_status_label, network.error() or (self._wifi().error() if self._wifi() else None))
         self.wizard_view._refresh_buttons_state()
         self.on_boot_changed() # Lists packages installed for selected network service.
+
+    # Wi-Fi
+
+    def _setup_wifi_rows(self):
+        """Wi-Fi network connected by selected network service (NetworkManager connection, or wpa_supplicant)."""
+        self.wifi_row = Adw.ExpanderRow(title="Wi-Fi", subtitle="Network connected automatically", show_enable_switch=True,
+                                        enable_expansion=False)
+        self.wifi_row.connect("notify::enable-expansion", self.on_system_changed)
+        self.wifi_ssid_row = Adw.EntryRow(title="Network name")
+        self.wifi_password_row = Adw.PasswordEntryRow(title="Password, empty for open network")
+        self.wifi_hidden_row = Adw.SwitchRow(title="Hidden network", subtitle="Network doesn't broadcast its name")
+        self.wifi_country_row = Adw.EntryRow(title="Country code, eg. PL (channels allowed in country)")
+        for row in (self.wifi_ssid_row, self.wifi_password_row, self.wifi_country_row):
+            row.connect("changed", self.on_system_changed)
+        self.wifi_hidden_row.connect("notify::active", self.on_system_changed)
+        for row in (self.wifi_ssid_row, self.wifi_password_row, self.wifi_hidden_row, self.wifi_country_row):
+            self.wifi_row.add_row(row)
+        self.network_service_row.get_ancestor(Adw.PreferencesGroup).add(self.wifi_row)
+
+    def _wifi(self) -> WifiSettings | None:
+        if not self.wifi_row.get_enable_expansion() or self._network().service == NetworkService.NONE:
+            return None
+        return WifiSettings(ssid=self.wifi_ssid_row.get_text(), password=self.wifi_password_row.get_text(),
+                            hidden=self.wifi_hidden_row.get_active(), country=self.wifi_country_row.get_text().strip())
 
     # Users
 
@@ -757,7 +786,8 @@ class DeployCreateView(Gtk.Box):
         self.bootloader_row.set_subtitle(GLib.markup_escape_text(", ".join(warning.summary for warning in warnings)))
 
     def _system_error(self) -> str | None:
-        return self._hostname_error() or self._localization().error() or self._network().error()
+        wifi = self._wifi()
+        return self._hostname_error() or self._localization().error() or self._network().error() or (wifi.error() if wifi else None)
 
     def _hostname_error(self) -> str | None:
         hostname = self.hostname_row.get_text().strip()
@@ -877,6 +907,7 @@ class DeployCreateView(Gtk.Box):
             kernel=self._selected_kernel(),
             install_firmware=self._install_firmware(),
             reboot=self.reboot_row.get_active() and not self.machine.local,
+            wifi=self._wifi(),
         )
         installation = DeployInstallation(
             build=self.build, project_name=self.project_directory.name if self.project_directory else "",
