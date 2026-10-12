@@ -33,6 +33,21 @@ for tool in flatpak flatpak-builder; do
     command -v "$tool" > /dev/null || { echo "$tool is required, install it with package manager of your system"; exit 1; }
 done
 
+# flatpak-builder unmounts its rofiles-fuse mounts with fusermount (FUSE 2). Systems with only FUSE 3 have
+# fusermount3: mounts stay after every step and next step fails ("failed to access mountpoint"). It's provided for
+# the build, and mounts left by failed build are removed.
+if ! command -v fusermount > /dev/null && command -v fusermount3 > /dev/null; then
+    SHIM=$(mktemp -d)
+    trap 'rm -rf "$SHIM"' EXIT
+    ln -s "$(command -v fusermount3)" "$SHIM/fusermount"
+    export PATH="$SHIM:$PATH"
+fi
+if [ -d "$WORK/state/rofiles" ]; then
+    for mount in "$WORK"/state/rofiles/rofiles-*; do
+        [ -d "$mount" ] && mountpoint -q "$mount" && { fusermount -u "$mount" 2>/dev/null || fusermount3 -u "$mount" 2>/dev/null || true; }
+    done
+fi
+
 step "Building $APP_ID"
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 options=(--user --install-deps-from=flathub --force-clean --ccache --state-dir="$WORK/state" --repo="$WORK/repo")
