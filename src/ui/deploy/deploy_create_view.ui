@@ -422,7 +422,7 @@
                 <child>
                   <object class="AdwPreferencesGroup" id="users_group">
                     <property name="title">Users</property>
-                    <property name="description">Groups not existing in stage are skipped.</property>
+                    <property name="description">Groups are the ones existing in stage. Members of wheel group can use sudo and doas: Gentoo doesn't allow it by default, deploy enables it.</property>
                     <property name="header-suffix">
                       <object class="GtkButton">
                         <property name="child">

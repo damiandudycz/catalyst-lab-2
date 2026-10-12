@@ -76,6 +76,29 @@ class DeployUser:
 # Groups suggested for new users.
 DEFAULT_USER_GROUPS = ["wheel", "audio", "video", "usb", "users"]
 
+# Groups of users shown as switches in deploy (when they exist in stage), with what they give access to.
+USER_GROUPS: list[tuple[str, str]] = [
+    ("wheel", "Administration: sudo and doas (deploy allows wheel group to use them)"),
+    ("users", "Regular users"),
+    ("audio", "Sound devices"),
+    ("video", "Graphics and video devices, cameras"),
+    ("render", "GPU rendering and compute"),
+    ("input", "Input devices (eg. remote desktop, some games)"),
+    ("usb", "USB devices"),
+    ("plugdev", "Removable devices"),
+    ("cdrom", "Optical drives"),
+    ("dialout", "Serial ports (eg. microcontrollers, modems)"),
+    ("uucp", "Serial ports (older programs)"),
+    ("lp", "Printers"),
+    ("lpadmin", "Administration of printers"),
+    ("kvm", "Virtual machines with KVM"),
+    ("libvirt", "Virtual machines with libvirt"),
+    ("docker", "Docker without sudo"),
+    ("pipewire", "PipeWire audio server"),
+    ("portage", "Portage (logs, emerge --pretend)"),
+    ("wireshark", "Capturing network traffic"),
+]
+
 @dataclass
 class DeploySystemSettings:
     hostname: str | None = None
@@ -141,6 +164,23 @@ def system_configuration_script(settings: DeploySystemSettings) -> list[str]:
             f"echo {quote(user.name + ':' + user.password)} | chroot \"$ROOT\" chpasswd",
             f'echo "User {user.name} created${{GROUPS_LIST:+, groups $GROUPS_LIST}}"',
         ]
+    if any("wheel" in user.groups for user in settings.users):
+        # Gentoo doesn't allow wheel group to use sudo (or doas) by default, users added to it expect administration.
+        script.append(r'''if [ -x "$ROOT/usr/bin/sudo" ]; then
+    if grep -qsE '^[[:space:]]*%wheel[[:space:]]' "$ROOT/etc/sudoers" "$ROOT"/etc/sudoers.d/*; then
+        echo "Members of wheel group can use sudo"
+    else
+        mkdir -p "$ROOT/etc/sudoers.d"
+        echo '%wheel ALL=(ALL:ALL) ALL' > "$ROOT/etc/sudoers.d/wheel"
+        chmod 0440 "$ROOT/etc/sudoers.d/wheel"
+        echo "Members of wheel group can use sudo (/etc/sudoers.d/wheel)"
+    fi
+fi
+if [ -x "$ROOT/usr/bin/doas" ] && ! grep -qs ':wheel' "$ROOT/etc/doas.conf"; then
+    echo 'permit persist :wheel' >> "$ROOT/etc/doas.conf"
+    chmod 0600 "$ROOT/etc/doas.conf"
+    echo "Members of wheel group can use doas"
+fi''')
     script.append(authorized_keys_script(settings.ssh_keys, [user.name for user in settings.users]))
     return script
 
