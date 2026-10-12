@@ -127,6 +127,7 @@ catalystlab_sources = [
   'ui/app_sections/welcome/welcome_section.py',
   'ui/app_sections/welcome/initial_setup_page.py',
   'ui/components/root_access_button.py',
+  'ui/components/usage_graph.py',
   'ui/components/status_indicator.py',
   'ui/components/multistage_process_execution_view/multistage_process_execution_view.py',
   'ui/components/repository_list/repository_list_view.py',

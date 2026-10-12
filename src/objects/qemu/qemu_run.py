@@ -293,6 +293,19 @@ class QemuRun:
             except OSError:
                 pass
 
+    def read_usage(self) -> tuple[float, int] | None:
+        """Host CPU fraction of assigned vCPUs and QEMU resident memory in bytes."""
+        if not self.is_running:
+            return None
+        try:
+            result = subprocess.run(["ps", "-p", str(self.process.pid), "-o", "%cpu=", "-o", "rss="],
+                                    capture_output=True, text=True, check=True)
+            cpu_percent, resident_kib = result.stdout.split()
+            cpu_fraction = float(cpu_percent) / (max(self.cpus, 1) * 100)
+            return min(max(cpu_fraction, 0), 1), int(resident_kib) * 1024
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+
     # Monitor (QMP).
 
     def monitor(self, command: str, arguments: dict | None = None) -> dict | None:

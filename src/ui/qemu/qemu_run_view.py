@@ -1,9 +1,10 @@
 from __future__ import annotations
-import os, re
+import os, re, threading
 from gi.repository import Gtk, Gdk, Adw, GLib, Pango
 from .qemu_run import QemuRun, QemuRunEvent, QemuBuildKind, qemu_support, stage_image_ready, stage_image_directory, stage_image_script
 from .vnc_view import VncView
 from .cl_toggle_group import CLToggle, CLToggleGroup
+from .usage_graph import UsageGraph, USAGE_INTERVAL_SECONDS
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState, MultiStageProcessEvent, MultiStageProcessState
 
 # ------------------------------------------------------------------------------
@@ -11,6 +12,9 @@ from .multistage_process import MultiStageProcess, MultiStageProcessStage, Multi
 # disk image made first (once, kept in build folder).
 
 _ANSI = re.compile(r"\x1b\[[0-9;?=<>:]*[A-Za-z]|\x1b[()][A-Za-z0-9]|\x1b[=>78]|\r")
+
+def _gib(size: int) -> str:
+    return f"{size / 1024 ** 3:.1f} GiB"
 
 class QemuImagePreparation(MultiStageProcess):
     """Creates disk image of stage for QEMU (in virtual machine on macOS, as root on Linux)."""
@@ -82,7 +86,7 @@ class QemuRunView(Gtk.Box):
         self.view_toggle = CLToggleGroup(valign=Gtk.Align.CENTER)
         self.view_toggle.add_css_class("round")
         self.view_toggle.add_css_class("caption")
-        for title in ("Screen", "Console", "QEMU"):
+        for title in ("Screen", "Console", "QEMU", "Usage"):
             self.view_toggle.add(CLToggle(label=title))
         self.view_toggle.set_active(0)
         self.view_toggle.connect("notify::active", self._on_view_toggle)
@@ -125,6 +129,23 @@ class QemuRunView(Gtk.Box):
         self.stack.add_titled_with_icon(console, "console", "Console", "utilities-terminal-symbolic")
         self.log_view, log = self._text_view(editable_input=False)
         self.stack.add_titled_with_icon(log, "log", "QEMU", "text-x-generic-symbolic")
+        self.usage_cpu_row = self._usage_row("CPU (host)")
+        self.usage_memory_row = self._usage_row("Memory (resident)")
+        self.usage_group = Adw.PreferencesGroup(
+            title="VM usage",
+            description="Usage of the QEMU process on this computer. Memory is resident memory, not guest-reported usage.",
+            visible=False,
+        )
+        self.usage_group.add(self.usage_cpu_row)
+        self.usage_group.add(self.usage_memory_row)
+        usage_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_start=24, margin_end=24,
+                             margin_top=18, margin_bottom=24)
+        usage_page.append(self.usage_group)
+        self.stack.add_titled_with_icon(usage_page, "usage", "Usage", "utilities-system-monitor-symbolic")
+        self._usage_timer: int | None = None
+        self._reading_usage = False
+        self.connect("map", lambda _: self._start_usage_updates())
+        self.connect("unmap", lambda _: self._stop_usage_updates())
         self.append(self.stack)
         # Machine stops when view is closed: its page is popped from navigation (not when other page covers it), or
         # its window is closed.
@@ -136,13 +157,13 @@ class QemuRunView(Gtk.Box):
         return [self.view_toggle]
 
     def _on_view_toggle(self, toggle_group, _param):
-        names = ("screen", "console", "log")
+        names = ("screen", "console", "log", "usage")
         index = toggle_group.get_active()
         if 0 <= index < len(names):
             self.stack.set_visible_child_name(names[index])
 
     def _on_stack_page_changed(self, stack, _param):
-        names = ("screen", "console", "log")
+        names = ("screen", "console", "log", "usage")
         name = stack.get_visible_child_name()
         if name in names and self.view_toggle.get_active() != names.index(name):
             self.view_toggle.set_active(names.index(name))
@@ -253,8 +274,60 @@ class QemuRunView(Gtk.Box):
                 self.vnc_view.disconnect_vnc()
                 self.vnc_view.clear()
             self.log_view.get_buffer().set_text("\n".join(run.output) + "\n")
+            self.usage_group.set_visible(running)
+            if not running:
+                self._clear_usage()
             return False
         GLib.idle_add(update)
+
+    @staticmethod
+    def _usage_row(title: str) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=title, subtitle="Waiting for sample…")
+        row.graph = UsageGraph()
+        row.add_suffix(row.graph)
+        return row
+
+    def _start_usage_updates(self):
+        if self._usage_timer is None:
+            self._usage_timer = GLib.timeout_add_seconds(USAGE_INTERVAL_SECONDS, self._read_usage)
+            self._read_usage()
+
+    def _stop_usage_updates(self):
+        if self._usage_timer is not None:
+            GLib.source_remove(self._usage_timer)
+            self._usage_timer = None
+
+    def _read_usage(self) -> bool:
+        run = self.run
+        if run is not None and run.is_running and not self._reading_usage:
+            self._reading_usage = True
+            def work():
+                usage = run.read_usage()
+                GLib.idle_add(self._show_usage, run, usage)
+            threading.Thread(target=work, daemon=True).start()
+        return True
+
+    def _show_usage(self, run: QemuRun, usage: tuple[float, int] | None):
+        self._reading_usage = False
+        if run is not self.run or not run.is_running:
+            return False
+        self.usage_group.set_visible(True)
+        if usage is None:
+            self.usage_cpu_row.set_subtitle("Usage sample unavailable")
+            self.usage_memory_row.set_subtitle("Usage sample unavailable")
+            return False
+        cpu_fraction, resident_bytes = usage
+        self.usage_cpu_row.graph.add(cpu_fraction)
+        self.usage_cpu_row.set_subtitle(f"{cpu_fraction:.0%} of {run.cpus} vCPUs")
+        memory_limit = run.memory_mib * 1024 * 1024
+        self.usage_memory_row.graph.add(min(resident_bytes / memory_limit, 1) if memory_limit else 0)
+        self.usage_memory_row.set_subtitle(f"{_gib(resident_bytes)} of {run.memory_mib / 1024:.1f} GiB configured")
+        return False
+
+    def _clear_usage(self):
+        for row in (self.usage_cpu_row, self.usage_memory_row):
+            row.graph.clear()
+            row.set_subtitle("Waiting for sample…")
 
     def _on_serial(self, text: str):
         def append():
