@@ -131,13 +131,12 @@ class LiveIsoDeployView(Gtk.Box):
             return row
         system = group("Live system", "Settings changed in live system of ISO. Empty ones keep it as it's built. Live "
                        "system is unpacked and packed again, which takes several minutes.")
-        self.hostname_row = entry(system, "Hostname")
         self.root_password_row = entry(system, "Root password", password=True)
         self.root_password_confirm_row = entry(system, "Confirm root password", password=True)
         self.ssh_row = Adw.SwitchRow(title="Start SSH server", subtitle="Remote login, with root password or SSH keys")
         self.ssh_row.connect("notify::active", self._on_system_changed)
         system.add(self.ssh_row)
-        self.keys_group = group("SSH keys", "Keys of this computer allowed to log in as root and users.")
+        self.keys_group = group("SSH keys", "Keys of this computer allowed to log in as root.")
         self.key_checks: list[tuple[Gtk.CheckButton, str]] = []
         for key in local_public_keys():
             check = Gtk.CheckButton(active=False, valign=Gtk.Align.CENTER)
@@ -149,11 +148,6 @@ class LiveIsoDeployView(Gtk.Box):
             self.key_checks.append((check, key.key))
         if not self.key_checks:
             self.keys_group.add(Adw.ActionRow(title="No SSH keys found in ~/.ssh"))
-        self.users_group = group("Users", "Accounts added to live system. Consoles log in automatically as first user.")
-        self.user_rows = []
-        add_user = Adw.ButtonRow(title="Add user", start_icon_name="add-square-svgrepo-com-symbolic")
-        add_user.connect("activated", self._on_add_user)
-        self.users_group.add(add_user)
         localization = group("Localization")
         self.localization_row = Adw.ExpanderRow(title="Change localization", subtitle="Suggested from this computer",
                                                 show_enable_switch=True, enable_expansion=False)
@@ -167,21 +161,6 @@ class LiveIsoDeployView(Gtk.Box):
         self.keymap_row.set_text(suggested.keymap)
         self.locales_row.set_text(", ".join(suggested.locales))
         self.system_box.append(self.system_status_label)
-
-    def _on_add_user(self, row):
-        from .deploy_create_view import UserRow
-        user_row = UserRow(on_changed=lambda: self._on_system_changed(), on_remove=self._remove_user)
-        user_row.set_expanded(True)
-        self.users_group.remove(row)
-        self.users_group.add(user_row)
-        self.users_group.add(row)
-        self.user_rows.append(user_row)
-        self._on_system_changed()
-
-    def _remove_user(self, user_row):
-        self.users_group.remove(user_row)
-        self.user_rows.remove(user_row)
-        self._on_system_changed()
 
     def _on_system_changed(self, *args):
         error = self._system_error()
@@ -197,32 +176,20 @@ class LiveIsoDeployView(Gtk.Box):
                                     keymap=self.keymap_row.get_text().strip())
 
     def _system_error(self) -> str | None:
-        hostname = self.hostname_row.get_text().strip()
-        if hostname and not all(part and len(part) <= 63 and part.replace("-", "").isalnum() for part in hostname.split(".")):
-            return "Invalid hostname"
         if self.root_password_row.get_text() != self.root_password_confirm_row.get_text():
             return "Root passwords don't match"
-        names = set()
-        for row in self.user_rows:
-            if error := row.error():
-                return error
-            if row.user().name in names:
-                return f"User {row.user().name} is added more than once"
-            names.add(row.user().name)
         return self._localization().error()
 
     def _system_settings(self) -> DeploySystemSettings | None:
         """Settings applied to live system, None when nothing is changed."""
         settings = DeploySystemSettings(
-            hostname=self.hostname_row.get_text().strip() or None,
             root_password=self.root_password_row.get_text() or None,
-            users=[row.user() for row in self.user_rows],
             enable_ssh=self.ssh_row.get_active(),
             ssh_keys=[key for check, key in self.key_checks if check.get_active()],
             localization=self._localization(),
         )
         localization = settings.localization
-        changed = (settings.hostname or settings.root_password or settings.users or settings.enable_ssh or settings.ssh_keys
+        changed = (settings.root_password or settings.enable_ssh or settings.ssh_keys
                    or localization.timezone or localization.locales or localization.keymap)
         return settings if changed else None
 
