@@ -2,7 +2,7 @@ from __future__ import annotations
 import re, subprocess
 from dataclasses import dataclass, field
 from enum import Enum
-from .deploy_system import NetworkService, NETWORK_SERVICE_FILES
+from .deploy_system import NetworkService, NETWORK_SERVICE_FILES, WPA_SUPPLICANT_FILE
 
 # ------------------------------------------------------------------------------
 # Booting deployed system: bootloaders found in stage archive, and installing them (with packages from Gentoo
@@ -146,6 +146,7 @@ class StageContents:
     init: str | None = None # openrc or systemd.
     network_services: set[NetworkService] = field(default_factory=set)
     firmware: bool = False # linux-firmware is installed.
+    wpa_supplicant: bool = False # Wi-Fi of network services other than NetworkManager.
 
     @classmethod
     def scan(cls, archive_path: str, process_holder: list | None = None) -> StageContents:
@@ -165,6 +166,8 @@ class StageContents:
                     contents.network_services.add(service)
             if not contents.firmware and _FIRMWARE.match(path):
                 contents.firmware = True
+            if not contents.wpa_supplicant and WPA_SUPPLICANT_FILE.match(path):
+                contents.wpa_supplicant = True
             if _KERNEL.match(path):
                 contents.kernels.append(path.removeprefix("boot/"))
             elif _INITRAMFS.match(path):

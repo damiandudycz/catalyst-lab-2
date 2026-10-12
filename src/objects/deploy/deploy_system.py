@@ -90,6 +90,12 @@ def enable_service_script(openrc: str | None, systemd: str | None) -> str:
         lines.append(f'if [ -e "$ROOT/usr/lib/systemd/system/{systemd}.service" ]; then mkdir -p "$ROOT/etc/systemd/system/multi-user.target.wants" && ln -sf /usr/lib/systemd/system/{systemd}.service "$ROOT/etc/systemd/system/multi-user.target.wants/{systemd}.service" && echo "Enabled {systemd} (systemd)"; fi')
     return "\n".join(lines)
 
+def enable_systemd_instance_script(unit: str, instance: str) -> str:
+    """Enables instance of systemd template unit (eg. wpa_supplicant@wlan0 of wpa_supplicant@.service)."""
+    wants = "$ROOT/etc/systemd/system/multi-user.target.wants"
+    return (f'if [ -e "$ROOT/usr/lib/systemd/system/{unit}@.service" ]; then mkdir -p "{wants}" && '
+            f'ln -sf /usr/lib/systemd/system/{unit}@.service "{wants}/{unit}@{instance}.service" && echo "Enabled {unit}@{instance} (systemd)"; fi')
+
 def network_script(settings: NetworkSettings) -> str:
     service = settings.service
     if service == NetworkService.NONE:
@@ -302,22 +308,80 @@ class WifiSettings:
             return "Country must be two letter code, eg. PL"
         return None
 
-def wifi_script(settings: WifiSettings) -> str:
-    """Connection of NetworkManager in $ROOT (readable by root only, it contains password) and regulatory domain."""
-    import base64
-    lines = ["[connection]", f"id={settings.ssid}", "type=wifi", "autoconnect=true", "",
-             "[wifi]", "mode=infrastructure", f"ssid={settings.ssid}"] + (["hidden=true"] if settings.hidden else []) + [""]
+WIFI_INTERFACE = "wlan0" # Wireless interface configured for services other than NetworkManager (name on Raspberry Pi).
+WPA_SUPPLICANT_PACKAGE = "net-wireless/wpa_supplicant"
+WPA_SUPPLICANT_FILE = re.compile(r"^usr/s?bin/wpa_supplicant$")
+
+def _wpa_supplicant_config(settings: WifiSettings) -> str:
+    """Configuration of wpa_supplicant: network name in hex, key derived from password (no quoting of special
+    characters, password isn't stored as text)."""
+    import hashlib
+    lines = ["ctrl_interface=/run/wpa_supplicant", "ctrl_interface_group=wheel", "update_config=1"]
+    if settings.country:
+        lines.append(f"country={settings.country.upper()}")
+    network = [f"    ssid={settings.ssid.encode().hex()}"]
     if settings.password:
-        lines += ["[wifi-security]", "key-mgmt=wpa-psk", f"psk={settings.password}", ""]
-    lines += ["[ipv4]", "method=auto", "", "[ipv6]", "method=auto", ""]
-    encoded = base64.b64encode("\n".join(lines).encode()).decode()
-    script = [
-        '[ -d "$ROOT/etc/NetworkManager" ] || echo "Warning: NetworkManager is not installed, Wi-Fi connection is not used"',
-        'mkdir -p "$ROOT/etc/NetworkManager/system-connections"',
-        f'echo {encoded} | base64 -d > "$ROOT/etc/NetworkManager/system-connections/catalystlab-wifi.nmconnection"',
-        'chmod 600 "$ROOT/etc/NetworkManager/system-connections/catalystlab-wifi.nmconnection"',
-        f'echo "Wi-Fi network connected automatically:" {quote(settings.ssid)}',
-    ]
+        key = hashlib.pbkdf2_hmac("sha1", settings.password.encode(), settings.ssid.encode(), 4096, 32).hex()
+        network.append(f"    psk={key}")
+    else:
+        network.append("    key_mgmt=NONE")
+    if settings.hidden:
+        network.append("    scan_ssid=1")
+    return "\n".join(lines + ["network={", *network, "}"]) + "\n"
+
+def wifi_script(settings: WifiSettings, service: NetworkService = NetworkService.NETWORK_MANAGER) -> str:
+    """Wi-Fi network connected automatically by network service of $ROOT, and regulatory domain. NetworkManager gets
+    its connection (readable by root only, it contains password), other services use wpa_supplicant on wlan0."""
+    import base64
+    script = []
+    if service == NetworkService.NETWORK_MANAGER:
+        lines = ["[connection]", f"id={settings.ssid}", "type=wifi", "autoconnect=true", "",
+                 "[wifi]", "mode=infrastructure", f"ssid={settings.ssid}"] + (["hidden=true"] if settings.hidden else []) + [""]
+        if settings.password:
+            lines += ["[wifi-security]", "key-mgmt=wpa-psk", f"psk={settings.password}", ""]
+        lines += ["[ipv4]", "method=auto", "", "[ipv6]", "method=auto", ""]
+        encoded = base64.b64encode("\n".join(lines).encode()).decode()
+        script += [
+            '[ -d "$ROOT/etc/NetworkManager" ] || echo "Warning: NetworkManager is not installed, Wi-Fi connection is not used"',
+            'mkdir -p "$ROOT/etc/NetworkManager/system-connections"',
+            f'echo {encoded} | base64 -d > "$ROOT/etc/NetworkManager/system-connections/catalystlab-wifi.nmconnection"',
+            'chmod 600 "$ROOT/etc/NetworkManager/system-connections/catalystlab-wifi.nmconnection"',
+        ]
+    elif service != NetworkService.NONE:
+        interface = WIFI_INTERFACE
+        encoded = base64.b64encode(_wpa_supplicant_config(settings).encode()).decode()
+        config = f"$ROOT/etc/wpa_supplicant/wpa_supplicant-{interface}.conf" if service == NetworkService.SYSTEMD_NETWORKD \
+            else "$ROOT/etc/wpa_supplicant/wpa_supplicant.conf"
+        script += [
+            'mkdir -p "$ROOT/etc/wpa_supplicant"',
+            f'echo {encoded} | base64 -d > "{config}"',
+            f'chmod 600 "{config}"',
+        ]
+        if service == NetworkService.SYSTEMD_NETWORKD:
+            network = ["[Match]", "Name=wl*", "", "[Network]", "DHCP=yes"]
+            script += [enable_systemd_instance_script("wpa_supplicant", interface),
+                       'mkdir -p "$ROOT/etc/systemd/network"',
+                       f'printf "%s\\n" {quote(chr(10).join(network))} > "$ROOT/etc/systemd/network/25-wireless.network"']
+        elif service == NetworkService.DHCPCD:
+            # wpa_supplicant connects network, dhcpcd gets address of interface.
+            script += [
+                'if [ -d "$ROOT/etc/runlevels" ]; then',
+                f'    [ -f "$ROOT/etc/conf.d/wpa_supplicant" ] && sed -i \'s|^wpa_supplicant_args=.*|wpa_supplicant_args="-i {interface}"|\' "$ROOT/etc/conf.d/wpa_supplicant"',
+                f'    grep -q "^wpa_supplicant_args=" "$ROOT/etc/conf.d/wpa_supplicant" 2>/dev/null || echo \'wpa_supplicant_args="-i {interface}"\' >> "$ROOT/etc/conf.d/wpa_supplicant"',
+                '    ' + enable_service_script("wpa_supplicant", None),
+                'else',
+                f'    ln -sf wpa_supplicant.conf "$ROOT/etc/wpa_supplicant/wpa_supplicant-{interface}.conf"',
+                '    ' + enable_systemd_instance_script("wpa_supplicant", interface),
+                'fi',
+            ]
+        elif service == NetworkService.NETIFRC:
+            config_lines = [f'modules_{interface}="wpa_supplicant"', f'config_{interface}="dhcp"']
+            script += [
+                f'printf "%s\\n" {quote(chr(10).join(config_lines))} >> "$ROOT/etc/conf.d/net"',
+                f'ln -sf net.lo "$ROOT/etc/init.d/net.{interface}"',
+                f'ln -sf /etc/init.d/net.{interface} "$ROOT/etc/runlevels/default/net.{interface}" && echo "Enabled net.{interface} (OpenRC)"',
+            ]
+    script.append(f'echo "Wi-Fi network connected automatically:" {quote(settings.ssid)}')
     if settings.country:
         country = settings.country.upper()
         script += [f'mkdir -p "$ROOT/etc/modprobe.d" && echo "options cfg80211 ieee80211_regdom={country}" > "$ROOT/etc/modprobe.d/catalystlab-wifi.conf"',

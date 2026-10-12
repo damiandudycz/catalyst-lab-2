@@ -229,6 +229,10 @@ class DeployInstallation(MultiStageProcess):
         service = self.settings.network.service
         if service.package and service not in self.contents.network_services:
             packages.append(service.package)
+        if (self.settings.wifi is not None and service not in (NetworkService.NETWORK_MANAGER, NetworkService.NONE)
+                and not self.contents.wpa_supplicant):
+            from .deploy_system import WPA_SUPPLICANT_PACKAGE
+            packages.append(WPA_SUPPLICANT_PACKAGE) # Connects Wi-Fi for other network services.
         if self.settings.install_firmware and not self.contents.firmware:
             packages.append(FIRMWARE_PACKAGE) # Before kernel, so its initramfs includes firmware.
         if self.settings.kernel.package:
@@ -453,7 +457,11 @@ class DeployStepNetwork(DeployStep):
     def __init__(self, multistage_process):
         super().__init__(name="Configure network", description=f"Enables {multistage_process.settings.network.service.display_name}", multistage_process=multistage_process)
     def run(self):
-        script = network_script(self.multistage_process.settings.network)
+        settings = self.multistage_process.settings
+        script = network_script(settings.network)
+        if settings.wifi is not None:
+            from .deploy_system import wifi_script
+            script += "\n" + wifi_script(settings.wifi, settings.network.service)
         self.remote(f"set -e\nROOT={quote(self.multistage_process.root)}\n{script}\n", "Failed to configure network")
 
 class DeployStepBootloader(DeployStep):
