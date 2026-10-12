@@ -499,7 +499,7 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
     def load_state(self):
         if self.argument.details and self.argument.details.type == StageArgumentType.select:
             current_value = getattr(self.stage, self.argument.details.name, None) # Mapped to object
-            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
+            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument, project_directory=self.project_directory)
             options = automatic_options + (load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or [])
             # Add entries for unsupported values
             option_values = {opt.value for opt in options}
@@ -518,7 +518,7 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             if self.argument.details in FILE_OVERLAY_ARGUMENTS:
                 # Values stored by older versions (inherit options, path of stage folder) are shown as sources.
                 current_values = root_overlay_values(self.project_directory, self.stage, self.argument.details)
-            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
+            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument, project_directory=self.project_directory)
             options = automatic_options + (load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or [])
             # Add entries for unsupported values
             option_values = {opt.value for opt in options}
@@ -529,7 +529,7 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
             self.set_static_list(list=options)
         if self.argument.details and self.argument.details.type == StageArgumentType.boolean:
             current_value = getattr(self.stage, self.argument.details.name, None) # Mapped to object
-            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
+            automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument, project_directory=self.project_directory)
             options = automatic_options + load_catalyst_stage_arguments_options_for_boolean(arg_details=self.argument)
             # Add entries for unsupported values
             option_values = {opt.value for opt in options}
@@ -656,7 +656,7 @@ class StageTextSourceRow(Adw.ExpanderRow):
         """Adds rows to select automatic option or custom value. Without automatic options only custom value is used.
         Arguments joining inherited values with own value (allows_additions) have check boxes, so inherit options and
         custom value can be selected together, others have radio buttons."""
-        self.automatic_options: list[StageArgumentOption] = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument) or []
+        self.automatic_options: list[StageArgumentOption] = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument, project_directory=self.project_directory) or []
         # Add entries for unsupported values (automatic option stored, but not allowed for this argument)
         current_value = getattr(self.stage, self.argument.attribute_name, None)
         stored_options = current_value if isinstance(current_value, list) else [current_value]
@@ -699,7 +699,7 @@ class StageTextSourceRow(Adw.ExpanderRow):
         """Updates availability of automatic options, which depends on other arguments (parent, releng template)."""
         if not self.source_rows:
             return
-        self.automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument) or []
+        self.automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument, project_directory=self.project_directory) or []
         self._update_source_subtitles()
         self.update_display()
 
