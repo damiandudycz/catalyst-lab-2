@@ -5,13 +5,15 @@ from .project_directory import ProjectDirectory
 from .project_build import load_project_builds
 from .project_stage import stage_target_icon
 from .deploy_installation import is_deployable
+from .deploy_live_iso import is_live_iso_build
 from .deploy_create_view import DeployCreateView
 from .app_events import app_event_bus, AppEvents
 from .helper_functions import get_file_size_string
 
 class ProjectDeployView(Gtk.Box):
-    """Builds of project that can be deployed (stage3, stage4), newest first. Selecting build opens deploy wizard.
-    Shown from Deploy section, like project builds are shown from Builds section."""
+    """Builds of project that can be deployed (stage3, stage4 and live CD ISO images), newest first. Selecting build
+    opens deploy wizard of stage or of ISO. Shown from Deploy section, like project builds are shown from Builds
+    section."""
 
     def __init__(self, project_directory: ProjectDirectory, content_navigation_view: Adw.NavigationView | None = None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -30,13 +32,14 @@ class ProjectDeployView(Gtk.Box):
         for group in self.groups:
             self.content.remove(group)
         self.groups = []
-        builds = [build for build in load_project_builds(self.project_directory) if is_deployable(self.project_directory, build)]
+        builds = [build for build in load_project_builds(self.project_directory)
+                  if is_deployable(self.project_directory, build) or is_live_iso_build(build)]
         if not builds:
             group = Adw.PreferencesGroup()
             group.add(Adw.StatusPage(
                 icon_name="deploy-symbolic",
                 title="No builds to deploy",
-                description="Build stage3 or stage4 of this project from its Stages page."
+                description="Build stage3, stage4 or live CD of this project from its Stages page."
             ))
             self._add_group(group)
             return
@@ -56,10 +59,17 @@ class ProjectDeployView(Gtk.Box):
             arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
             arrow.add_css_class("dimmed")
             row.add_suffix(arrow)
-            row.connect("activated", lambda _, build=build: app_event_bus.emit(
-                AppEvents.PRESENT_VIEW, DeployCreateView(project_directory=self.project_directory, build=build), "Deploy build", 640, 560))
+            row.connect("activated", lambda _, build=build: self._open_wizard(build))
             group.add(row)
         self._add_group(group)
+
+    def _open_wizard(self, build):
+        if is_live_iso_build(build):
+            from .live_iso_deploy_view import LiveIsoDeployView
+            view, title = LiveIsoDeployView(project_directory=self.project_directory, build=build), "Deploy Live CD"
+        else:
+            view, title = DeployCreateView(project_directory=self.project_directory, build=build), "Deploy build"
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, view, title, 640, 560)
 
     def _add_group(self, group: Adw.PreferencesGroup):
         self.content.append(group)

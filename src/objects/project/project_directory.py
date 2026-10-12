@@ -154,9 +154,10 @@ class ProjectDirectory(GitDirectory):
         """Builds of project that can be deployed, for Deploy section."""
         from .project_build import load_project_builds
         from .deploy_installation import is_deployable
-        builds = [build for build in load_project_builds(self) if is_deployable(self, build)]
+        from .deploy_live_iso import is_live_iso_build
+        builds = [build for build in load_project_builds(self) if is_deployable(self, build) or is_live_iso_build(build)]
         if not builds:
-            return "No stage3 or stage4 builds"
+            return "No stage3, stage4 or live CD builds"
         return f"{len(builds)} build{'s' if len(builds) != 1 else ''} ready to deploy, last {builds[0].date.strftime('%Y-%m-%d %H:%M')}"
 
     @property

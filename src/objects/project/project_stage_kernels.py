@@ -239,3 +239,38 @@ def merge_kernel_settings(existing: dict, added: dict) -> dict:
 
 def _is_empty(value) -> bool:
     return value is None or value == "" or value == []
+
+# ------------------------------------------------------------------------------
+# Live CD kernels built by genkernel: its initramfs finds live system on media with ISO 9660 filesystem, but doesn't
+# include isofs module, so ISO 9660 has to be built into kernel (distribution kernels use dracut, which includes it).
+
+_ISO9660_BUILT_IN = re.compile(r"^CONFIG_ISO9660_FS=y\s*$", re.MULTILINE)
+
+def kernel_config_iso9660_warning(config_text: str) -> str | None:
+    """Warning when kernel configuration doesn't build ISO 9660 into kernel."""
+    if _ISO9660_BUILT_IN.search(config_text):
+        return None
+    return ("ISO 9660 filesystem is not built into kernel (CONFIG_ISO9660_FS=y), initramfs of genkernel can't find "
+            "live system on its media (Media not found)")
+
+def live_cd_kernel_warning(project_directory, stage, name: str) -> str | None:
+    """Warning about kernel of live CD stage (livecd-stage2) built by genkernel with own configuration."""
+    import os
+    if (getattr(stage, "target", None) or "").replace("-", "_") != "livecd_stage2":
+        return None
+    distkernel, _ = kernel_setting(project_directory, stage, name, "distkernel")
+    if str(distkernel).lower() in ("yes", "true", "1"):
+        return None
+    config, _ = kernel_setting(project_directory, stage, name, "config")
+    if not isinstance(config, str) or not config:
+        return None # Default configuration of kernel sources.
+    releng_directory = project_directory.get_releng_directory()
+    for placeholder, value in (("@STAGE_DIR@", project_directory.stage_directory_path(name=stage.name)),
+                               ("@PROJECT_DIR@", project_directory.directory_path()),
+                               ("@REPO_DIR@", releng_directory.directory_path() if releng_directory else "")):
+        config = config.replace(placeholder, value)
+    try:
+        with open(config, encoding="utf-8", errors="replace") as file:
+            return kernel_config_iso9660_warning(file.read())
+    except OSError:
+        return None

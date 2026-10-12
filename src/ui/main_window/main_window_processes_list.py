@@ -19,6 +19,7 @@ def present_process(process: MultiStageProcess):
     from .project_stage_installation import ProjectStageInstallation
     from .project_build_process import ProjectBuild
     from .deploy_installation import DeployInstallation
+    from .deploy_live_iso import LiveIsoDeployment
     match process:
         case SnapshotInstallation():
             from .snapshot_create_view import SnapshotCreateView
@@ -44,6 +45,9 @@ def present_process(process: MultiStageProcess):
         case ProjectBuild():
             from .project_build_view import ProjectBuildView
             view, title, height = ProjectBuildView(project_directory=process.project_directory, installation_in_progress=process), "Build stages", 480
+        case LiveIsoDeployment():
+            from .live_iso_deploy_view import LiveIsoDeployView
+            view, title, height = LiveIsoDeployView(installation_in_progress=process), "Deploy Live CD", 560
         case DeployInstallation():
             from .deploy_create_view import DeployCreateView
             view, title, height = DeployCreateView(installation_in_progress=process), "Deploy build", 560

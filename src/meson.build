@@ -49,6 +49,7 @@ catalystlab_sources = [
   'objects/deploy/deploy_installation.py',
   'objects/deploy/deploy_image.py',
   'objects/deploy/deploy_image_steps.py',
+  'objects/deploy/deploy_live_iso.py',
   'objects/global_objects/library.py',
   'objects/global_objects/modules_scanner.py',
   'objects/global_objects/multistage_process.py',
@@ -165,6 +166,7 @@ catalystlab_sources = [
   'ui/build_machine/build_machine_create_view.py',
   'ui/build_machine/build_machine_details_view.py',
   'ui/deploy/deploy_create_view.py',
+  'ui/deploy/live_iso_deploy_view.py',
   'ui/project/project_deploy_view.py',
   'ui/toolset/toolset_details_view.py',
 ]
