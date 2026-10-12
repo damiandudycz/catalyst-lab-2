@@ -88,19 +88,34 @@ class RepositoryListView(Gtk.Box):
         self._item_rows = []
 
         for item in self.repository.value:
-            item_row = ItemRow(
-                item                           = item,
-                item_title_property_name       = self.item_title_property_name,
-                item_subtitle_property_name    = self.item_subtitle_property_name,
-                item_status_property_name      = self.item_status_property_name,
-                item_unsupported_property_name = self.item_unsupported_property_name,
-                item_icon                      = self.item_icon
-            )
+            try:
+                item_row = ItemRow(
+                    item                           = item,
+                    item_title_property_name       = self.item_title_property_name,
+                    item_subtitle_property_name    = self.item_subtitle_property_name,
+                    item_status_property_name      = self.item_status_property_name,
+                    item_unsupported_property_name = self.item_unsupported_property_name,
+                    item_icon                      = self.item_icon
+                )
+            except Exception as error:
+                try:
+                    name = item.name
+                except Exception:
+                    name = "Unknown item"
+                item_row = self._broken_item_row(name, error)
             item_row.set_activatable(True)
-            icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
-            icon.add_css_class("dimmed")
-            item_row.add_suffix(icon)
-            item_row.connect("activated", self.on_item_row_pressed)
+            if getattr(item_row, "is_broken_item", False):
+                item_row.set_activatable(False)
+            else:
+                icon = Gtk.Image.new_from_icon_name("go-next-symbolic")
+                icon.add_css_class("dimmed")
+                item_row.add_suffix(icon)
+                item_row.connect("activated", self.on_item_row_pressed)
+            self.items_container.insert(item_row, 0)
+            self._item_rows.append(item_row)
+
+        for item in self.repository.broken_items:
+            item_row = self._broken_item_row(item.name, item.error)
             self.items_container.insert(item_row, 0)
             self._item_rows.append(item_row)
 
@@ -113,6 +128,20 @@ class RepositoryListView(Gtk.Box):
             self._item_rows.append(installation_row)
 
         self.items_container.set_visible(self._item_rows)
+
+    @staticmethod
+    def _broken_item_row(name: str, error: Exception | str) -> Adw.ActionRow:
+        detail = str(error)
+        row = Adw.ActionRow(title=str(name), subtitle=f"Broken · {detail}")
+        row.add_css_class("warning")
+        row.set_tooltip_text(detail)
+        row.set_activatable(False)
+        icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        icon.set_pixel_size(24)
+        icon.add_css_class("warning")
+        row.add_prefix(icon)
+        row.is_broken_item = True
+        return row
 
     def on_item_row_pressed(self, sender):
         self.emit("item-row-pressed", sender.item)

@@ -161,6 +161,7 @@ class Repository(Generic[T]):
         self._alias = alias or (cls.__name__.lower() if not collection else f"{cls.__name__.lower()}_list")
         self._default_factory = default_factory
         self.event_bus: EventBus[RepositoryEvent] = EventBus[RepositoryEvent]()
+        self.broken_items: list[BrokenRepositoryItem] = []
         if self._alias in Repository.registered_aliases:
             raise RuntimeError(f"Repository with alias {self._alias} is already in use. Use shared instance for the same values.")
         else:
@@ -178,7 +179,9 @@ class Repository(Generic[T]):
                 if self._collection:
                     if not isinstance(self._value, list):
                         raise TypeError("Expected a list of serializable items.")
-                    json.dump({"items": [item.serialize() for item in self._value]}, f, indent=2)
+                    items = [item.serialize() for item in self._value]
+                    items.extend(item.data for item in self.broken_items)
+                    json.dump({"items": items}, f, indent=2)
                 else:
                     json.dump(self._value.serialize(), f, indent=2)
         except Exception as e:
@@ -193,7 +196,14 @@ class Repository(Generic[T]):
                 data = json.load(f)
             if self._collection:
                 items_data = data.get("items", [])
-                return TrackedList([self._cls.init_from(item) for item in items_data], self.save)
+                items = []
+                self.broken_items = []
+                for item_data in items_data:
+                    try:
+                        items.append(self._cls.init_from(item_data))
+                    except Exception as error:
+                        self.broken_items.append(BrokenRepositoryItem(item_data, error))
+                return TrackedList(items, self.save)
             else:
                 return self._cls.init_from(data)
         except (FileNotFoundError, json.JSONDecodeError, ValueError, AttributeError):
@@ -203,6 +213,7 @@ class Repository(Generic[T]):
         path = self._config_file()
         if os.path.isfile(path):
             os.remove(path)
+        self.broken_items = []
         self._value = TrackedList([], self.save) if self._collection else self._default_factory()
 
     def reset(self):
@@ -226,4 +237,13 @@ class Repository(Generic[T]):
         else:
             self._value = new_value
             self.save()
+
+
+class BrokenRepositoryItem:
+    """Raw collection entry that failed to load, kept visible and preserved when the repository is saved."""
+
+    def __init__(self, data: dict, error: Exception):
+        self.data = data
+        self.name = data.get("name") or data.get("path") or data.get("id") or "Unknown item"
+        self.error = f"{type(error).__name__}: {error}"
 

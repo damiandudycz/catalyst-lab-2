@@ -57,6 +57,9 @@ class ProjectBuildsView(Gtk.Box):
         self.connect("map", lambda widget: self.load_builds())
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._on_started_processes_changed)
         BuildQueue.shared().event_bus.subscribe(BuildQueueEvent.CHANGED, self._on_started_processes_changed)
+        from .qemu_run import QemuRun, QemuRunEvent
+        QemuRun.running_runs_event_bus.subscribe(QemuRunEvent.RUNNING_RUNS_CHANGED,
+                                                 self._on_started_processes_changed, self)
 
     # Loading builds
     # --------------------------------------------------------------------------
@@ -185,57 +188,97 @@ class ProjectBuildsView(Gtk.Box):
         if css_class := _state_css_class(state):
             icon.add_css_class(css_class)
         row.add_prefix(icon)
-        if build and not running_build and is_deployable(self.project_directory, build):
-            button = Gtk.Button(icon_name="deploy-symbolic", tooltip_text="Deploy on another machine", valign=Gtk.Align.CENTER)
-            button.add_css_class("flat")
-            button.connect("clicked", lambda _, build=build: app_event_bus.emit(
-                AppEvents.PRESENT_VIEW, DeployCreateView(project_directory=self.project_directory, build=build), "Deploy build", 640, 560))
-            row.add_suffix(button)
+
+        actions = Gtk.Box(spacing=0, valign=Gtk.Align.CENTER)
+
+        def action_slot(button=None, tooltip: str | None = None):
+            slot = Gtk.Box(width_request=40, height_request=36, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+            if tooltip:
+                slot.set_tooltip_text(tooltip)
+            if button is not None:
+                slot.append(button)
+            actions.append(slot)
+
+        # Keep the same action positions in every build row: VM, deploy, folder, remove, details.
+        qemu_button = None
+        qemu_tooltip = None
         if build and not running_build:
-            from .qemu_run import qemu_support
+            from .qemu_run import QemuRun, qemu_support
             support = qemu_support(self.project_directory, build)
-            if support.kind is not None:
-                # Runnable builds (stages with kernel, live CDs), or why they can't run.
-                # Unavailable one is dimmed, its view shows why (insensitive buttons don't show tooltips).
-                button = Gtk.Button(icon_name="computer-symbolic", valign=Gtk.Align.CENTER,
-                                    tooltip_text="Run in QEMU" if support.available else f"Can't run in QEMU: {support.reason}")
-                button.add_css_class("flat")
-                if not support.available:
-                    button.add_css_class("dimmed")
-                button.connect("clicked", lambda _, build=build: self._run_in_qemu(build))
-                row.add_suffix(button)
-        if build and not running_build and is_live_iso_build(build) and not is_deployable(self.project_directory, build):
-            button = Gtk.Button(icon_name="deploy-symbolic", tooltip_text="Write to disk or save as ISO for other machine", valign=Gtk.Align.CENTER)
-            button.add_css_class("flat")
-            button.connect("clicked", lambda _, build=build: self._deploy_live_iso(build))
-            row.add_suffix(button)
+            running_qemu = QemuRun.running_for_build(self.project_directory, build)
+            if support.kind is not None or running_qemu:
+                other_vm_running = any(run.is_running and run is not running_qemu for run in QemuRun.running_runs)
+                qemu_tooltip = (
+                    "Another virtual machine is running. Stop it before starting this one."
+                    if other_vm_running else
+                    "Open running virtual machine" if running_qemu else
+                    "Run in QEMU" if support.available else
+                    f"Can't run in QEMU: {support.reason}"
+                )
+                qemu_button = Gtk.Button(icon_name="computer-symbolic", valign=Gtk.Align.CENTER)
+                qemu_button.add_css_class("flat")
+                qemu_button.set_sensitive(not other_vm_running and (support.available or running_qemu is not None))
+                if not support.available and not running_qemu:
+                    qemu_button.add_css_class("dimmed")
+                qemu_button.connect("clicked", lambda _, build=build: self._run_in_qemu(build))
+        action_slot(qemu_button, qemu_tooltip)
+
+        deploy_button = None
+        if build and not running_build and is_deployable(self.project_directory, build):
+            deploy_button = Gtk.Button(icon_name="deploy-symbolic", valign=Gtk.Align.CENTER)
+            deploy_button.add_css_class("flat")
+            deploy_button.set_tooltip_text("Deploy on another machine")
+            deploy_button.connect("clicked", lambda _, build=build: app_event_bus.emit(
+                AppEvents.PRESENT_VIEW, DeployCreateView(project_directory=self.project_directory, build=build), "Deploy build", 640, 560))
+        elif build and not running_build and is_live_iso_build(build) and not is_deployable(self.project_directory, build):
+            deploy_button = Gtk.Button(icon_name="deploy-symbolic", valign=Gtk.Align.CENTER)
+            deploy_button.add_css_class("flat")
+            deploy_button.set_tooltip_text("Write to disk or save as ISO for other machine")
+            deploy_button.connect("clicked", lambda _, build=build: self._deploy_live_iso(build))
+        action_slot(deploy_button)
+
+        folder_button = None
         if build and build.path and os.path.isdir(build.path):
-            button = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Open build folder", valign=Gtk.Align.CENTER)
-            button.add_css_class("flat")
-            button.connect("clicked", lambda _, path=build.path: Gtk.FileLauncher.new(Gio.File.new_for_path(path)).launch(self.get_root(), None, None))
-            row.add_suffix(button)
+            folder_button = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER)
+            folder_button.add_css_class("flat")
+            folder_button.set_tooltip_text("Open build folder")
+            folder_button.connect("clicked", lambda _, path=build.path: Gtk.FileLauncher.new(Gio.File.new_for_path(path)).launch(self.get_root(), None, None))
+        action_slot(folder_button)
+
+        delete_button = None
         if build and not running_build:
-            row.add_suffix(self._delete_button(
+            delete_button = self._delete_button(
                 tooltip="Remove build",
                 heading="Remove build?",
                 body=f"Build of \"{stage_name}\" will be removed with its files. This can't be undone.",
                 builds=[build]
-            ))
+            )
+        action_slot(delete_button)
+
         if on_activated is not None:
-            # Stages open steps of whole run (progress of running build).
             row.set_activatable(True)
             row.connect("activated", lambda _: on_activated())
             arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
             arrow.add_css_class("dimmed")
-            row.add_suffix(arrow)
+            action_slot(arrow)
+        else:
+            action_slot()
+
+        row.add_suffix(actions)
         return row
 
     # Removing builds
     # --------------------------------------------------------------------------
 
     def _run_in_qemu(self, build):
-        from .qemu_run_view import QemuRunView
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, QemuRunView(self.project_directory, build), f"{build.stage_name} in QEMU", 1024, 768)
+        from .qemu_run import QemuRun
+        from .qemu_run_view import present_qemu_run
+        if run := QemuRun.running_for_build(self.project_directory, build):
+            present_qemu_run(run)
+            return
+        from .qemu_launch_wizard import QemuLaunchWizard
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, QemuLaunchWizard(self.project_directory, build),
+                           f"Run {build.stage_name} in QEMU", 1024, 768)
 
     def _deploy_live_iso(self, build):
         from .live_iso_deploy_view import LiveIsoDeployView

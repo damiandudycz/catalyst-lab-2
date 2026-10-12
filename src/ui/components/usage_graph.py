@@ -55,10 +55,20 @@ class UsageGraph(Gtk.DrawingArea):
         if not self.values:
             return
         samples = USAGE_HISTORY_SECONDS // USAGE_INTERVAL_SECONDS
-        step = width / samples
-        points = [(width - (len(self.values) - 1 - index) * step, height - value * (height - 2) - 1)
+        # Keep every sample inside the clipped drawing area; placing the newest at
+        # exactly `width` clipped the live edge of the graph, especially when it
+        # had only just started collecting samples.
+        inset = 1.5
+        step = max(0, (width - inset * 2) / samples)
+        points = [(width - inset - (len(self.values) - 1 - index) * step,
+                   height - value * (height - 2) - 1)
                   for index, value in enumerate(self.values)]
         red, green, blue = self._color()
+        if len(points) == 1:
+            context.arc(points[0][0], points[0][1], 2, 0, 6.283185307179586)
+            context.set_source_rgba(red, green, blue, 1)
+            context.fill()
+            return
         context.move_to(points[0][0], height)
         for x, y in points:
             context.line_to(x, y)

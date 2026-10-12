@@ -222,17 +222,8 @@ class QemuRunRow(Gtk.ListBoxRow):
         self.subtitle.set_label("Running in QEMU" + speed)
 
     def open(self):
-        view = getattr(self.run, "view", None)
-        if view is None:
-            return
-        window = getattr(view, "_window", None)
-        if hasattr(window, "navigation_view"):
-            navigation = window.navigation_view
-            page = getattr(view, "_page", None)
-            if page is not None:
-                navigation.pop_to_page(page)
-        elif window is not None:
-            window.present()
+        from .qemu_run_view import present_qemu_run
+        present_qemu_run(self.run)
 
 class ProcessRow(Gtk.ListBoxRow):
     """Looks like rows of installation steps: status icon, name with state, and progress. Row of running step shows

@@ -170,6 +170,7 @@ catalystlab_sources = [
   'ui/deploy/deploy_create_view.py',
   'ui/deploy/live_iso_deploy_view.py',
   'ui/qemu/vnc_view.py',
+  'ui/qemu/qemu_launch_wizard.py',
   'ui/qemu/qemu_run_view.py',
   'ui/project/project_deploy_view.py',
   'ui/toolset/toolset_details_view.py',

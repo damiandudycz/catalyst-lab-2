@@ -9,11 +9,13 @@ from .event_bus import EventBus
 # kernel and initramfs started by QEMU, system in disk image made from stage archive). Display is served over VNC on
 # local socket and shown in the app, serial console and QEMU monitor (QMP) use sockets too.
 # Machine of the same architecture as this computer is accelerated (HVF on macOS, KVM on Linux), others are emulated.
-# Kernels of devices QEMU doesn't emulate (Raspberry Pi, PS3) can't be run.
+# Whether a build boots depends on its architecture and kernel support for the emulated machine. Do not infer target
+# compatibility from device or package names: the app supports projects beyond any specific board.
 
 _QEMU_SEARCH_PATHS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin")
 _FIRMWARE_DIRECTORIES = ("/opt/homebrew/share/qemu", "/usr/local/share/qemu", "/usr/share/qemu", "/usr/share/edk2",
-                         "/usr/share/edk2-ovmf", "/usr/share/AAVMF")
+                         "/usr/share/edk2-ovmf", "/usr/share/AAVMF", "/usr/share/qemu-efi-aarch64",
+                         "/usr/share/AAVMF")
 
 @dataclass
 class QemuMachine:
@@ -25,15 +27,31 @@ class QemuMachine:
     firmware: list[str] = field(default_factory=list) # UEFI firmware file names (first found is used), empty for BIOS.
     display: list[str] = field(default_factory=lambda: ["-device", "virtio-gpu-pci"])
     disk_interface: str = "virtio"
+    disk_device: str | None = None
+    device_bus: str = "pci"
+    usb: bool = True
     host_architecture: str = ""  # platform.machine() of computers that run it accelerated.
 
 _MACHINES = {
     "arm64": QemuMachine(binary="qemu-system-aarch64", machine=["-machine", "virt"], console="ttyAMA0", cpu_emulated="max",
                          firmware=["edk2-aarch64-code.fd", "AAVMF_CODE.fd", "QEMU_EFI.fd"], host_architecture="arm64|aarch64"),
+    "arm": QemuMachine(binary="qemu-system-arm", machine=["-machine", "virt"], console="ttyAMA0", cpu_emulated="cortex-a15",
+                       display=["-device", "virtio-gpu-device"], device_bus="device"),
     "amd64": QemuMachine(binary="qemu-system-x86_64", machine=["-machine", "q35"], console="ttyS0", cpu_emulated="max",
                          display=["-device", "virtio-vga"], host_architecture="x86_64|amd64"),
     "x86": QemuMachine(binary="qemu-system-i386", machine=["-machine", "pc"], console="ttyS0", cpu_emulated="max",
                        display=["-device", "VGA"], host_architecture=""),
+    "ppc": QemuMachine(binary="qemu-system-ppc", machine=["-machine", "40p"], console="ttyS0", cpu_emulated="604",
+                       display=["-device", "VGA"]),
+    "ppc64": QemuMachine(binary="qemu-system-ppc64", machine=["-machine", "pseries"], console="hvc0", cpu_emulated="POWER8",
+                         display=["-device", "virtio-gpu-pci"]),
+    "ppc64le": QemuMachine(binary="qemu-system-ppc64", machine=["-machine", "pseries"], console="hvc0", cpu_emulated="POWER8",
+                           display=["-device", "virtio-gpu-pci"]),
+    "riscv": QemuMachine(binary="qemu-system-riscv64", machine=["-machine", "virt"], console="ttyS0", cpu_emulated="max",
+                         display=["-device", "virtio-gpu-device"], device_bus="device"),
+    "s390x": QemuMachine(binary="qemu-system-s390x", machine=["-machine", "s390-ccw-virtio"], console="ttysclp0", cpu_emulated="qemu",
+                         display=["-device", "virtio-gpu-ccw"], disk_interface="none", disk_device="virtio-blk-ccw",
+                         device_bus="ccw", usb=False),
 }
 
 def qemu_binary(name: str) -> str | None:
@@ -41,13 +59,26 @@ def qemu_binary(name: str) -> str | None:
                                        if os.access(os.path.join(path, name), os.X_OK)), None)
 
 def install_hint() -> str:
-    return "brew install qemu" if sys.platform == "darwin" else "install QEMU (app-emulation/qemu on Gentoo)"
+    if sys.platform == "darwin":
+        return "brew install qemu"
+    if sys.platform.startswith("linux"):
+        return "install the QEMU system emulator for this architecture using your distribution's package manager"
+    return "install QEMU for this platform"
 
 def _firmware_path(names: list[str]) -> str | None:
     for directory in _FIRMWARE_DIRECTORIES:
         for name in names:
             if os.path.isfile(os.path.join(directory, name)):
                 return os.path.join(directory, name)
+        # Linux packages commonly put architecture-specific firmware one or two levels below these roots.
+        if os.path.isdir(directory):
+            for root, dirs, files in os.walk(directory):
+                relative_depth = os.path.relpath(root, directory).count(os.sep)
+                if relative_depth >= 2:
+                    dirs[:] = []
+                for name in names:
+                    if name in files:
+                        return os.path.join(root, name)
     return None
 
 # ------------------------------------------------------------------------------
@@ -71,6 +102,70 @@ class QemuSupport:
 
 _KERNEL = re.compile(r"\./boot/((vmlinuz|vmlinux|Image)-?[^/]*)$")
 _INITRAMFS = re.compile(r"\./boot/((initramfs|initrd)-?[^/]*)$")
+_ISO_LINUX = re.compile(r"^\s*linux(?:efi)?\s+([\"']?)([^\s\"']+)\1", re.MULTILINE)
+
+_KERNEL_ARCHITECTURES = {
+    "amd64": {0x8664},
+    "x86": {0x014C},
+    "arm64": {0xAA64},
+    "arm": {0x01C0, 0x01C2},
+    "ppc": {0x01F0},
+    "ppc64": {0x01F2},
+    "ppc64le": {0x01F2},
+    "riscv": {0x5032, 0x5064},
+    "s390x": {0xA641},
+}
+
+def _iso_kernel_architecture(iso_path: str) -> str | None:
+    """Read the architecture of a kernel selected by the ISO's GRUB config.
+
+    Linux EFI-stub kernels are PE/COFF images. This inspects the small header
+    after streaming the kernel from the ISO; it does not unpack the live image.
+    """
+    try:
+        config = subprocess.run(["bsdtar", "-xOf", iso_path, "boot/grub/grub.cfg"],
+                                check=True, capture_output=True, text=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    for match in _ISO_LINUX.finditer(config):
+        kernel_path = match.group(2).lstrip("/")
+        try:
+            kernel = subprocess.run(["bsdtar", "-xOf", iso_path, kernel_path],
+                                    check=True, capture_output=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        if len(kernel) >= 0x40 and kernel[:2] == b"MZ":
+            pe_offset = int.from_bytes(kernel[0x3C:0x40], "little")
+            if kernel[pe_offset:pe_offset + 4] == b"PE\0\0":
+                machine = int.from_bytes(kernel[pe_offset + 4:pe_offset + 6], "little")
+                for architecture, machines in _KERNEL_ARCHITECTURES.items():
+                    if machine in machines:
+                        return architecture
+        # ELF kernels are uncommon in ISO boot menus, but are used by several
+        # non-x86 Linux boot paths. Inspect only the ELF identification/header.
+        if len(kernel) >= 20 and kernel[:4] == b"\x7fELF":
+            endian = "little" if kernel[5] == 1 else "big" if kernel[5] == 2 else None
+            if endian:
+                machine = int.from_bytes(kernel[18:20], endian)
+                elf_architectures = {
+                    3: "x86", 62: "amd64", 40: "arm", 183: "arm64",
+                    20: "ppc", 21: "ppc64le" if endian == "little" else "ppc64",
+                    243: "riscv", 22: "s390x",
+                }
+                if architecture := elf_architectures.get(machine):
+                    return architecture
+        # ARM32 zImage magic (little-endian 0x016f2818 at offset 0x24).
+        if len(kernel) > 0x28 and kernel[0x24:0x28] == b"\x18\x28\x6f\x01":
+            return "arm"
+        # ARM64 Image and RISC-V Image boot header magic values.
+        if len(kernel) >= 0x40 and kernel[0x38:0x3C] == b"ARM\x64":
+            return "arm64"
+        if len(kernel) >= 0x38 and kernel[0x30:0x38] == b"RISCV\0\0\0":
+            return "riscv"
+        # Linux x86 boot protocol signature, used by non-PE bzImage kernels.
+        if len(kernel) > 0x208 and kernel[0x202:0x206] == b"HdrS":
+            return "amd64" if kernel[0x206] >= 0x20 else "x86"
+    return None
 
 def _stage_boot_files(build) -> tuple[list[str], list[str]]:
     """Kernels and initramfs images in /boot of stage, from listing of archive made by catalyst."""
@@ -90,7 +185,7 @@ def _stage_boot_files(build) -> tuple[list[str], list[str]]:
 def qemu_support(project_directory, build) -> QemuSupport:
     """Whether build can run in QEMU, how, or why not."""
     from .project_build import StageBuildStatus
-    from .deploy_live_iso import is_live_iso_build, raspberry_pi_kernels
+    from .deploy_live_iso import is_live_iso_build
     from .deploy_installation import is_deployable
     architecture = project_directory.get_architecture() if project_directory else None
     machine = _MACHINES.get(architecture.value) if architecture else None
@@ -98,18 +193,26 @@ def qemu_support(project_directory, build) -> QemuSupport:
         return QemuSupport(None, machine, reason="Build has no result")
     if is_live_iso_build(build):
         kind = QemuBuildKind.ISO
-        if raspberry_pi_kernels(build):
-            return QemuSupport(kind, machine, reason="Kernel of ISO is built for Raspberry Pi, QEMU can't emulate it")
         kernel = initramfs = None
+        if machine is None:
+            return QemuSupport(kind, None, reason=f"Running {architecture.value if architecture else 'this architecture'} in QEMU isn't supported yet")
+        if qemu_binary("bsdtar") is None:
+            return QemuSupport(kind, machine, reason="ISO inspection requires bsdtar (libarchive tools)")
+        kernel_architecture = _iso_kernel_architecture(build.artifact_path)
+        if kernel_architecture is None:
+            return QemuSupport(kind, machine, reason="ISO does not contain a supported Linux kernel")
+        if kernel_architecture != architecture.value:
+            return QemuSupport(kind, machine, reason=f"ISO kernel architecture ({kernel_architecture}) does not match build architecture ({architecture.value})")
     elif is_deployable(project_directory, build):
         kind = QemuBuildKind.STAGE
         kernels, images = _stage_boot_files(build)
         if not kernels:
             return QemuSupport(kind, machine, reason="Stage has no kernel in /boot")
-        generic = [kernel for kernel in kernels if not re.search(r"raspberrypi|ps3", kernel)]
-        if not generic:
-            return QemuSupport(kind, machine, reason="Kernel of stage is built for device QEMU can't emulate (Raspberry Pi, PS3)")
-        kernel = sorted(generic)[-1]
+        if machine is None:
+            return QemuSupport(kind, None, reason=f"Running {architecture.value if architecture else 'this architecture'} in QEMU isn't supported yet")
+        # Kernel filenames are user-defined by Catalyst. Use the newest available kernel and let QEMU determine
+        # whether it supports the selected virtual machine instead of guessing from target-specific names.
+        kernel = sorted(kernels)[-1]
         version = re.sub(r"^(vmlinuz|vmlinux|Image)-?", "", kernel)
         initramfs = next((image for image in images if version and version in image), images[0] if images else None)
     else:
@@ -117,7 +220,9 @@ def qemu_support(project_directory, build) -> QemuSupport:
     if machine is None:
         return QemuSupport(kind, None, reason=f"Running {architecture.value if architecture else 'this architecture'} in QEMU isn't supported yet")
     if qemu_binary(machine.binary) is None:
-        return QemuSupport(kind, machine, reason=f"QEMU is not installed ({install_hint()})")
+        return QemuSupport(kind, machine, reason=f"QEMU for this architecture is not installed ({install_hint()})")
+    if kind == QemuBuildKind.STAGE and qemu_binary("qemu-img") is None:
+        return QemuSupport(kind, machine, reason="Stage boot requires qemu-img, which is not installed")
     if machine.firmware and _firmware_path(machine.firmware) is None and kind == QemuBuildKind.ISO:
         return QemuSupport(kind, machine, reason="UEFI firmware of QEMU is not found")
     return QemuSupport(kind, machine, kernel=kernel, initramfs=initramfs)
@@ -179,6 +284,7 @@ echo "Disk image: $(du -h {image} | cut -f1) used of {size // (1024 ** 3)} GiB"
 class QemuRunEvent(Enum):
     STATE_CHANGED = auto()
     SERIAL_OUTPUT = auto()
+    OUTPUT_LINE_ADDED = auto()
     RUNNING_RUNS_CHANGED = auto()
 
 class QemuRun:
@@ -204,7 +310,16 @@ class QemuRun:
         self.ssh_port = _free_port()
         self.error: str | None = None
         self.output: list[str] = [] # QEMU own messages.
+        self.serial_output = "" # Last MiB is retained while the view is closed and restored when reopened.
         self._serial: socket.socket | None = None
+
+    @classmethod
+    def running_for_build(cls, project_directory, build) -> QemuRun | None:
+        project_id = getattr(project_directory, "id", None)
+        artifact_path = getattr(build, "artifact_path", None)
+        return next((run for run in cls.running_runs if run.is_running
+                     and getattr(run.project_directory, "id", None) == project_id
+                     and getattr(run.build, "artifact_path", None) == artifact_path), None)
 
     @property
     def name(self) -> str:
@@ -221,22 +336,31 @@ class QemuRun:
     def command(self) -> list[str]:
         machine = self.support.machine
         accelerator = self.accelerator
-        command = [qemu_binary(machine.binary), *machine.machine, "-m", str(self.memory_mib), "-smp", str(self.cpus),
+        binary = qemu_binary(machine.binary)
+        if binary is None:
+            raise RuntimeError(f"{machine.binary} is not installed")
+        command = [binary, *machine.machine, "-m", str(self.memory_mib), "-smp", str(self.cpus),
                    "-name", self.build.stage_name]
         command += ["-accel", accelerator, "-cpu", "host"] if accelerator else ["-accel", "tcg", "-cpu", machine.cpu_emulated]
         if machine.firmware and (firmware := _firmware_path(machine.firmware)):
             command += ["-drive", f"if=pflash,format=raw,readonly=on,file={firmware}"]
         command += machine.display
-        command += ["-device", "qemu-xhci", "-device", "usb-kbd", "-device", "usb-tablet"]
-        command += ["-netdev", f"user,id=net,hostfwd=tcp:127.0.0.1:{self.ssh_port}-:22", "-device", "virtio-net-pci,netdev=net"]
-        command += ["-device", "virtio-rng-pci"]
+        if machine.usb:
+            command += ["-device", "qemu-xhci", "-device", "usb-kbd", "-device", "usb-tablet"]
+        command += ["-netdev", f"user,id=net,hostfwd=tcp:127.0.0.1:{self.ssh_port}-:22",
+                    "-device", f"virtio-net-{machine.device_bus},netdev=net"]
+        command += ["-device", f"virtio-rng-{machine.device_bus}"]
         if self.support.kind == QemuBuildKind.ISO:
             command += ["-drive", f"file={self.build.artifact_path},format=raw,readonly=on,media=cdrom,if=none,id=cd",
                         "-device", "virtio-scsi-pci", "-device", "scsi-cd,drive=cd"]
         else:
             directory = stage_image_directory(self.build)
-            command += ["-drive", f"file={self.overlay},format=qcow2,if={machine.disk_interface}",
-                        "-kernel", os.path.join(directory, self.support.kernel),
+            if machine.disk_device:
+                command += ["-drive", f"file={self.overlay},format=qcow2,if=none,id=disk",
+                            "-device", f"{machine.disk_device},drive=disk"]
+            else:
+                command += ["-drive", f"file={self.overlay},format=qcow2,if={machine.disk_interface}"]
+            command += ["-kernel", os.path.join(directory, self.support.kernel),
                         "-append", f"root=/dev/vda rw rootwait console=tty0 console={machine.console}"]
             if self.support.initramfs:
                 command += ["-initrd", os.path.join(directory, self.support.initramfs)]
@@ -260,7 +384,10 @@ class QemuRun:
         if self.support.kind == QemuBuildKind.STAGE:
             # Changes of system are discarded when machine stops: it runs on overlay of disk image.
             image = os.path.join(stage_image_directory(self.build), "root.img")
-            subprocess.run([qemu_binary("qemu-img"), "create", "-q", "-f", "qcow2", "-F", "raw", "-b", image, self.overlay],
+            image_tool = qemu_binary("qemu-img")
+            if image_tool is None:
+                raise RuntimeError("qemu-img is not installed")
+            subprocess.run([image_tool, "create", "-q", "-f", "qcow2", "-F", "raw", "-b", image, self.overlay],
                            check=True)
         command = self.command()
         self.output.append("$ " + " ".join(command))
@@ -273,7 +400,9 @@ class QemuRun:
 
     def _read_output(self):
         for line in self.process.stdout:
-            self.output.append(line.rstrip("\n"))
+            line = line.rstrip("\n")
+            self.output.append(line)
+            self.event_bus.emit(QemuRunEvent.OUTPUT_LINE_ADDED, line)
         code = self.process.wait()
         if code != 0 and not self.error:
             self.error = next((line for line in reversed(self.output) if line.strip()), f"QEMU exited with code {code}")
@@ -295,7 +424,9 @@ class QemuRun:
                 break
             if not data:
                 break
-            self.event_bus.emit(QemuRunEvent.SERIAL_OUTPUT, data.decode("utf-8", errors="replace"))
+            text = data.decode("utf-8", errors="replace")
+            self.serial_output = (self.serial_output + text)[-1024 * 1024:]
+            self.event_bus.emit(QemuRunEvent.SERIAL_OUTPUT, text)
 
     def send_serial(self, data: bytes):
         if self._serial is not None:
@@ -309,12 +440,33 @@ class QemuRun:
         if not self.is_running:
             return None
         try:
-            result = subprocess.run(["ps", "-p", str(self.process.pid), "-o", "%cpu=", "-o", "rss="],
-                                    capture_output=True, text=True, check=True)
-            cpu_percent, resident_kib = result.stdout.split()
+            ps = next((path for path in ("/bin/ps", "/usr/bin/ps")
+                       if os.path.isfile(path) and os.access(path, os.X_OK)), None) or shutil.which("ps")
+            if ps is None:
+                return None
+            result = subprocess.run([ps, "-p", str(self.process.pid), "-o", "%cpu=", "-o", "rss="],
+                                    capture_output=True, text=True, check=True, timeout=3,
+                                    env={**os.environ, "LC_ALL": "C"})
+            fields = result.stdout.split()
+            if len(fields) != 2:
+                return None
+            cpu_percent, resident_kib = fields
             cpu_fraction = float(cpu_percent) / (max(self.cpus, 1) * 100)
             return min(max(cpu_fraction, 0), 1), int(resident_kib) * 1024
         except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+
+    def read_disk_usage(self) -> tuple[int, int] | None:
+        """Host storage allocated to the stage VM's writable overlay and its virtual disk capacity."""
+        if self.support.kind != QemuBuildKind.STAGE or not self.is_running:
+            return None
+        base_image = os.path.join(stage_image_directory(self.build), "root.img")
+        try:
+            overlay = os.stat(self.overlay)
+            base = os.stat(base_image)
+            allocated_bytes = getattr(overlay, "st_blocks", 0) * 512 or overlay.st_size
+            return allocated_bytes, base.st_size
+        except OSError:
             return None
 
     # Monitor (QMP).

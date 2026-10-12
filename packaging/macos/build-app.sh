@@ -20,7 +20,7 @@ LIMA_VERSION=${LIMA_VERSION:-2.2.1}
 PYTHON_FORMULA=python@3.14 # Same Python that Homebrew pygobject3 is built for.
 BREW_PACKAGES=(gtk4 libadwaita pygobject3 adwaita-icon-theme librsvg meson ninja squashfs "$PYTHON_FORMULA")
 
-MAKE_DMG=1
+MAKE_DMG=0
 KEEP_PACKAGES=0
 for argument in "$@"; do
     case "$argument" in
