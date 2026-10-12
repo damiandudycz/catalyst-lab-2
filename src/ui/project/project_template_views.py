@@ -120,6 +120,8 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self.on_changed: Callable[[], None] | None = None
         self._rebuild_scheduled = False
         self.options_group = Adw.PreferencesGroup(title="Options")
+        self.variable_groups: dict[str, Adw.PreferencesGroup] = {"Options": self.options_group}
+        self._section_rows: dict[str, list[Gtk.Widget]] = {"Options": []}
         self.groups_group = Adw.PreferencesGroup(description="Enabled configuration is added to selected stages.")
         self.overlays_group = Adw.PreferencesGroup(title="Overlays", description="Ebuild repositories used by stages. Overlays that are not added yet are downloaded to Overlays.")
         self.stages_group = Adw.PreferencesGroup(title="Stages", description="Stages created in project for selected options. Their settings can be changed later.")
@@ -162,8 +164,15 @@ class ProjectTemplateOptionsView(Gtk.Box):
         return False
 
     def _rebuild_rows(self):
-        for row in self._option_rows:
-            self.options_group.remove(row)
+        for section, rows in self._section_rows.items():
+            group = self.variable_groups[section]
+            for row in rows:
+                group.remove(row)
+        for section, group in list(self.variable_groups.items()):
+            if section != "Options":
+                self.remove(group)
+        self.variable_groups = {"Options": self.options_group}
+        self._section_rows = {"Options": []}
         for row in self._group_rows:
             self.groups_group.remove(row)
         for row in self._overlay_rows:
@@ -181,8 +190,17 @@ class ProjectTemplateOptionsView(Gtk.Box):
                 # are kept, also of groups not available now.
                 self.selected = {key: value for key, value in self.selected.items() if key.startswith("group:")} | {
                     variable.id: names[variable.id] for variable in self.template.variables}
+                previous_group = self.options_group
+                for section in dict.fromkeys(variable.section for variable in self.template.variables):
+                    if section == "Options":
+                        continue
+                    group = Adw.PreferencesGroup(title=GLib.markup_escape_text(section))
+                    self.insert_child_after(group, previous_group)
+                    self.variable_groups[section] = group
+                    self._section_rows[section] = []
+                    previous_group = group
                 for variable in self.template.visible_variables(names):
-                    self._add_variable_row(variable, names)
+                    self._add_variable_row(variable, names, self.variable_groups[variable.section])
                 self.generated = self.template.generate(names)
                 for group in self.template.available_groups(names):
                     self._add_group_row(group, names)
@@ -205,7 +223,8 @@ class ProjectTemplateOptionsView(Gtk.Box):
                     self._stage_rows.append(row)
             except TemplateError as e:
                 error = str(e)
-        self.options_group.set_visible(bool(self._option_rows))
+        for section, group in self.variable_groups.items():
+            group.set_visible(bool(self._section_rows[section]))
         self.groups_group.set_title(GLib.markup_escape_text(self.template.groups_title) if self.template else "")
         self.groups_group.set_visible(bool(self._group_rows))
         self.overlays_group.set_visible(bool(self._overlay_rows))
@@ -275,7 +294,7 @@ class ProjectTemplateOptionsView(Gtk.Box):
         self.selected[f"group:{group_id}"] = selection
         self._schedule_rebuild()
 
-    def _add_variable_row(self, variable, names: dict[str, Any]):
+    def _add_variable_row(self, variable, names: dict[str, Any], group: Adw.PreferencesGroup):
         if variable.type == TemplateVariableType.MULTIPLE:
             # Expander with switch for every available option.
             options = variable.available_options(names)
@@ -288,8 +307,9 @@ class ProjectTemplateOptionsView(Gtk.Box):
                     self._set_value(variable.id, current + [value] if option_row.get_active() else current)
                 option_row.connect("notify::active", on_toggled)
                 row.add_row(option_row)
-            self.options_group.add(row)
+            group.add(row)
             self._option_rows.append(row)
+            self._section_rows[variable.section].append(row)
             return
         if variable.type == TemplateVariableType.BOOLEAN:
             row = Adw.SwitchRow(title=GLib.markup_escape_text(variable.title))
@@ -304,8 +324,9 @@ class ProjectTemplateOptionsView(Gtk.Box):
             row.connect("notify::selected", lambda row, _: self._set_value(variable.id, values[row.get_selected()]))
         if variable.description:
             row.set_subtitle(GLib.markup_escape_text(variable.description))
-        self.options_group.add(row)
+        group.add(row)
         self._option_rows.append(row)
+        self._section_rows[variable.section].append(row)
 
     def _set_value(self, variable_id: str, value):
         if self.selected.get(variable_id) == value:

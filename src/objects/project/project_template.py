@@ -210,6 +210,8 @@ class TemplateVariable:
     options: list[TemplateOption]
     default: Any
     when: str | None
+    section: str = "Options"
+    previous_id: str | None = None
 
     def available_options(self, names: dict[str, Any]) -> list[TemplateOption]:
         return [option for option in self.options if evaluate_condition(option.when, names)]
@@ -409,7 +411,9 @@ class ProjectTemplate:
             variables.append(TemplateVariable(
                 id=variable_id, title=_text(variable_data, "title", context, required=False) or variable_id,
                 description=_text(variable_data, "description", context, required=False),
-                type=variable_type, options=options, default=default, when=_condition(variable_data, context)
+                type=variable_type, options=options, default=default, when=_condition(variable_data, context),
+                section=_text(variable_data, "section", context, required=False) or "Options",
+                previous_id=_text(variable_data, "previous_id", context, required=False)
             ))
         if sum(variable.type == TemplateVariableType.ARCHITECTURE for variable in variables) > 1:
             raise TemplateError("Template can have only one architecture variable")
@@ -519,13 +523,16 @@ class ProjectTemplate:
         if self.architecture is not None:
             names["architecture"] = self.architecture.name
         for variable in self.variables:
+            selected_value = selected.get(variable.id) if variable.id in selected else (
+                selected.get(variable.previous_id) if variable.previous_id else None
+            )
             if not evaluate_condition(variable.when, names):
                 names[variable.id] = None
                 continue
             options = [option.value for option in variable.available_options(names)]
             if variable.type == TemplateVariableType.MULTIPLE:
                 # Selection of user, or default, without options that are not available.
-                value = selected.get(variable.id)
+                value = selected_value
                 if isinstance(value, str):
                     value = [value] # Selected when variable was single choice (projects created by older template).
                 value = variable.default if not isinstance(value, list) else value
@@ -533,7 +540,7 @@ class ProjectTemplate:
                 continue
             if not options:
                 raise TemplateError(f"Variable {variable.id} has no available options")
-            value = selected.get(variable.id)
+            value = selected_value
             if value not in options:
                 value = variable.default if variable.default in options else options[0]
             names[variable.id] = value
