@@ -49,6 +49,7 @@ catalystlab_sources = [
   'objects/deploy/deploy_installation.py',
   'objects/deploy/deploy_image.py',
   'objects/deploy/deploy_image_steps.py',
+  'objects/deploy/deploy_live_iso.py',
   'objects/global_objects/library.py',
   'objects/global_objects/modules_scanner.py',
   'objects/global_objects/multistage_process.py',

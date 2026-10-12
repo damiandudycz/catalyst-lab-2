@@ -248,7 +248,7 @@ provision:
 """
 
 # Version of machine setup, increased when setup script changes. Existing machines are updated when started.
-MACHINE_SETUP_VERSION = 4
+MACHINE_SETUP_VERSION = 5
 _MACHINE_SETUP_VERSION_FILE = "/etc/catalystlab-setup-version"
 
 # QEMU user emulators, to build stages for other architectures (like on Linux hosts, binfmt_misc with F flag makes
@@ -312,7 +312,7 @@ for arch in {_QEMU_ARCHITECTURES}; do
 done
 # One transaction: package index is read once and packages are downloaded together.
 retry apk add $apk_options --cache-predownload bash coreutils findutils grep sed tar xz zstd bubblewrap util-linux util-linux-misc \\
-    shadow-subids squashfs-tools python3 curl e2fsprogs dosfstools xz qemu-openrc $emulators
+    shadow-subids squashfs-tools python3 curl e2fsprogs dosfstools mtools xorriso xz qemu-openrc $emulators
 rm -rf /var/cache/catalystlab-apk
 rc-update add qemu-binfmt default
 rc-service qemu-binfmt restart || rc-service qemu-binfmt start
