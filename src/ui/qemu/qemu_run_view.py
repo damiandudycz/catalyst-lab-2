@@ -86,7 +86,7 @@ class QemuRunView(Gtk.Box):
         self.view_toggle = CLToggleGroup(valign=Gtk.Align.CENTER)
         self.view_toggle.add_css_class("round")
         self.view_toggle.add_css_class("caption")
-        for title in ("Screen", "Console", "QEMU", "Usage"):
+        for title in ("Screen", "Console", "QEMU"):
             self.view_toggle.add(CLToggle(label=title))
         self.view_toggle.set_active(0)
         self.view_toggle.connect("notify::active", self._on_view_toggle)
@@ -128,7 +128,6 @@ class QemuRunView(Gtk.Box):
         self.console_view, console = self._text_view(editable_input=True)
         self.stack.add_titled_with_icon(console, "console", "Console", "utilities-terminal-symbolic")
         self.log_view, log = self._text_view(editable_input=False)
-        self.stack.add_titled_with_icon(log, "log", "QEMU", "text-x-generic-symbolic")
         self.usage_cpu_row = self._usage_row("CPU (host)")
         self.usage_memory_row = self._usage_row("Memory (resident)")
         self.usage_group = Adw.PreferencesGroup(
@@ -138,10 +137,14 @@ class QemuRunView(Gtk.Box):
         )
         self.usage_group.add(self.usage_cpu_row)
         self.usage_group.add(self.usage_memory_row)
-        usage_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_start=24, margin_end=24,
-                             margin_top=18, margin_bottom=24)
-        usage_page.append(self.usage_group)
-        self.stack.add_titled_with_icon(usage_page, "usage", "Usage", "utilities-system-monitor-symbolic")
+        qemu_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=24, margin_end=24,
+                            margin_top=12, margin_bottom=24)
+        qemu_page.append(self.usage_group)
+        log_title = Gtk.Label(label="QEMU log", xalign=0, margin_top=6)
+        log_title.add_css_class("heading")
+        qemu_page.append(log_title)
+        qemu_page.append(log)
+        self.stack.add_titled_with_icon(qemu_page, "log", "QEMU", "text-x-generic-symbolic")
         self._usage_timer: int | None = None
         self._reading_usage = False
         self.connect("map", lambda _: self._start_usage_updates())
@@ -157,13 +160,13 @@ class QemuRunView(Gtk.Box):
         return [self.view_toggle]
 
     def _on_view_toggle(self, toggle_group, _param):
-        names = ("screen", "console", "log", "usage")
+        names = ("screen", "console", "log")
         index = toggle_group.get_active()
         if 0 <= index < len(names):
             self.stack.set_visible_child_name(names[index])
 
     def _on_stack_page_changed(self, stack, _param):
-        names = ("screen", "console", "log", "usage")
+        names = ("screen", "console", "log")
         name = stack.get_visible_child_name()
         if name in names and self.view_toggle.get_active() != names.index(name):
             self.view_toggle.set_active(names.index(name))
