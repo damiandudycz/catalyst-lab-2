@@ -3,7 +3,7 @@ import os, shutil, sys, threading
 from enum import Enum
 from gi.repository import Gtk, Adw, GLib, Gio
 import re
-from .deploy_installation import DeployInstallation, DeploySystemSettings, DeployUser, DEFAULT_USER_GROUPS, local_mount_point
+from .deploy_installation import DeployInstallation, DeploySystemSettings, DeployUser, DEFAULT_USER_GROUPS, local_mount_point, DeployRepository
 from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, default_bootloader, bootloader_warnings
 from .deploy_system import (
     NetworkService, NetworkSettings, LocalizationSettings, WifiSettings, default_network_service, local_localization, local_public_keys
@@ -129,6 +129,7 @@ class DeployCreateView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         self.project_directory = project_directory
         self.build = build if build else installation_in_progress.build if installation_in_progress else None
+        self._setup_repository_row()
         self.connection: SSHConnection | LocalDiskConnection | None = None
         self.machine: TargetMachine | None = None
         self.connecting = False
@@ -611,6 +612,34 @@ class DeployCreateView(Gtk.Box):
         self.wizard_view._refresh_buttons_state()
         self.on_boot_changed() # Lists packages installed for selected network service.
 
+    # Gentoo repository
+
+    def _build_snapshot(self):
+        """Snapshot used to build stage, when it's still in library."""
+        from .repository import Repository
+        name = (((getattr(self.build, "details", None) or {}).get("inputs") or {}).get("snapshot") or {}).get("file")
+        return next((snapshot for snapshot in Repository.Snapshot.value if snapshot.filename == name), None) if name else None
+
+    def _setup_repository_row(self):
+        """Gentoo repository installed in system: none, snapshot used by build, or latest one (downloaded on machine)."""
+        snapshot = self._build_snapshot() if self.build else None
+        self.repository_options = [DeployRepository.NONE] + ([DeployRepository.BUILD_SNAPSHOT] if snapshot else []) + [DeployRepository.LATEST]
+        labels = {DeployRepository.NONE: "Not installed",
+                  DeployRepository.BUILD_SNAPSHOT: f"Snapshot of build ({snapshot.name if snapshot else ''})",
+                  DeployRepository.LATEST: "Latest snapshot, downloaded on machine"}
+        self.repository_row = Adw.ComboRow(title="Gentoo repository", model=Gtk.StringList.new([labels[option] for option in self.repository_options]))
+        self.repository_row.set_subtitle(
+            "Installed in /var/db/repos/gentoo, used by packages installed during deploy" if snapshot or not self.build else
+            "Installed in /var/db/repos/gentoo. Snapshot of build isn't in library anymore")
+        fit_popup_to_items(self.repository_row)
+        self.firmware_row.get_ancestor(Adw.PreferencesGroup).add(self.repository_row)
+
+    def _repository(self) -> tuple[DeployRepository, str | None]:
+        index = self.repository_row.get_selected()
+        option = self.repository_options[index] if 0 <= index < len(self.repository_options) else DeployRepository.NONE
+        snapshot = self._build_snapshot() if option == DeployRepository.BUILD_SNAPSHOT else None
+        return option, snapshot.file_path() if snapshot else None
+
     # Wi-Fi
 
     def _setup_wifi_rows(self):
@@ -916,6 +945,8 @@ class DeployCreateView(Gtk.Box):
             install_firmware=self._install_firmware(),
             reboot=self.reboot_row.get_active() and not self.machine.local,
             wifi=self._wifi(),
+            repository=self._repository()[0],
+            repository_snapshot=self._repository()[1],
         )
         installation = DeployInstallation(
             build=self.build, project_name=self.project_directory.name if self.project_directory else "",
