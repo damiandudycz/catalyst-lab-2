@@ -728,11 +728,19 @@ class DeployCreateView(Gtk.Box):
         self.kernel_row.set_selected(0)
         # Firmware is offered only when stage doesn't have it. Raspberry Pi kernel doesn't need linux-firmware.
         self.firmware_row.set_visible(not contents.firmware)
-        self.firmware_row.set_active(not contents.kernels and not contents.firmware and not raspberry_pi)
+        self.firmware_row.set_active(not contents.kernels and not contents.firmware and not raspberry_pi and not contents.firmware_conflict)
+        # Firmware package of stage that blocks linux-firmware (eg. Raspberry Pi Wi-Fi firmware), it can't be installed.
+        self.firmware_row.set_sensitive(not contents.firmware_conflict)
+        if not hasattr(self, "_firmware_subtitle"):
+            self._firmware_subtitle = self.firmware_row.get_subtitle()
+        self.firmware_row.set_subtitle(GLib.markup_escape_text(
+            f"Not available: stage has {contents.firmware_conflict}, which can't be installed together with it"
+            if contents.firmware_conflict else self._firmware_subtitle or ""))
         self.on_boot_changed()
 
     def _install_firmware(self) -> bool:
-        return self.firmware_row.get_active() and not (self.contents and self.contents.firmware)
+        return (self.firmware_row.get_active() and not (self.contents and self.contents.firmware)
+                and not (self.contents and self.contents.firmware_conflict))
 
     def _selected_kernel(self) -> Kernel:
         index = self.kernel_row.get_selected()

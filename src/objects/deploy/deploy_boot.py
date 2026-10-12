@@ -136,6 +136,8 @@ _BOOTLOADER_FILES = {
 _KERNEL = re.compile(r"^boot/(vmlinuz|vmlinux|kernel|Image)[^/]*$")
 _INITRAMFS = re.compile(r"^boot/(initramfs|initrd)[^/]*$")
 _FIRMWARE = re.compile(r"^var/db/pkg/sys-kernel/linux-firmware-[^/]+/")
+# Firmware packages that block linux-firmware (they install some of its files).
+_FIRMWARE_CONFLICTS = re.compile(r"^var/db/pkg/(sys-firmware/raspberrypi-wifi-ucode)-[^/]+/")
 
 @dataclass
 class StageContents:
@@ -147,6 +149,7 @@ class StageContents:
     network_services: set[NetworkService] = field(default_factory=set)
     firmware: bool = False # linux-firmware is installed.
     wpa_supplicant: bool = False # Wi-Fi of network services other than NetworkManager.
+    firmware_conflict: str | None = None # Installed package that can't be installed together with linux-firmware.
 
     @classmethod
     def scan(cls, archive_path: str, process_holder: list | None = None) -> StageContents:
@@ -168,6 +171,8 @@ class StageContents:
                 contents.firmware = True
             if not contents.wpa_supplicant and WPA_SUPPLICANT_FILE.match(path):
                 contents.wpa_supplicant = True
+            if contents.firmware_conflict is None and (match := _FIRMWARE_CONFLICTS.match(path)):
+                contents.firmware_conflict = match.group(1)
             if _KERNEL.match(path):
                 contents.kernels.append(path.removeprefix("boot/"))
             elif _INITRAMFS.match(path):
