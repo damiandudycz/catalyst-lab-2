@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from enum import Enum
 from gi.repository import Gtk, Adw, GLib, Gio
 from .deploy_live_iso import (
-    LiveIsoDeployment, LiveIsoTarget, RaspberryPiBootSettings, supports_raspberry_pi_iso, raspberry_pi_iso_path
+    LiveIsoDeployment, LiveIsoTarget, RaspberryPiBootSettings, supports_raspberry_pi_iso, raspberry_pi_iso_path,
+    live_iso_kernel_warning
 )
 from .deploy_target import TargetMachine, TargetFirmware, format_size, machine_architecture
 from .deploy_image import image_supported_reason
@@ -107,7 +108,8 @@ class LiveIsoDeployView(Gtk.Box):
             self.wizard_view.set_property("welcome_screen_description",
                 f"Writes {self.build.stage_name} ({self.build.artifact}, {format_size(size)}) to USB drive or SD card"
                 + (" connected to this computer" if sys.platform.startswith("linux") else "")
-                + ", or saves it as new ISO file to write later" + (" (for Raspberry Pi)" if self.raspberry_pi else "") + ".")
+                + ", or saves it as new ISO file to write later" + (" (for Raspberry Pi)" if self.raspberry_pi else "") + "."
+                + (f"\n\nWarning: {warning}" if (warning := live_iso_kernel_warning(self.build)) else ""))
         self.connect("realize", self.on_realize)
         self.connect("unrealize", self.on_unrealize)
 

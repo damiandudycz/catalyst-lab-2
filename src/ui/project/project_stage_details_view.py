@@ -31,6 +31,7 @@ from .project_stage_portage_confdir import (
 )
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 from .project_stage_kernels import (
+    live_cd_kernel_warning,
     KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_kernel_names, kernel_setting, own_kernel_settings,
     set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
@@ -189,6 +190,7 @@ class ProjectStageDetailsView(Gtk.Box):
         names = stage_kernel_names(self.project_directory, self.stage)
         inherits = stage_inherits_kernels(self.stage)
         releng_names = releng_kernel_names(self.project_directory, self.stage)
+        warnings = []
         for name in names:
             row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name,
                                  on_rename=self._rename_kernel)
@@ -198,6 +200,11 @@ class ProjectStageDetailsView(Gtk.Box):
             remove_button.add_css_class("flat")
             remove_button.connect("clicked", lambda _, name=name: self._remove_kernel(name))
             row.add_suffix(remove_button)
+            if warning := live_cd_kernel_warning(self.project_directory, self.stage, name):
+                icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic", tooltip_text=warning)
+                icon.add_css_class("warning")
+                row.add_suffix(icon)
+                warnings.append(f"Kernel {name}: {warning}. ")
             self._add_kernel_row(row)
         add_row = Adw.ButtonRow(title="Add kernel", start_icon_name="add-square-svgrepo-com-symbolic")
         add_row.connect("activated", self._on_add_kernel)
@@ -209,7 +216,7 @@ class ProjectStageDetailsView(Gtk.Box):
         required = "This stage needs at least one kernel. " if self.boot_kernel_argument.required and not names else ""
         releng = "Kernels of releng spec, adding, removing or renaming kernel makes stage use its own list. " if inherits and names else ""
         self.kernels_pref_group.set_description(
-            required + releng + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
+            "".join(warnings) + required + releng + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
         if args:
             self.apply_mode() # Kernel rows changed after argument was saved.
 

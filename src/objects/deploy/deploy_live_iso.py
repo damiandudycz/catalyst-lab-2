@@ -50,6 +50,27 @@ def supports_raspberry_pi_iso(project_directory, build) -> bool:
     return (is_live_iso_build(build) and architecture is not None and architecture.value in _RASPBERRY_PI_ARCHITECTURES
             and bool(raspberry_pi_kernels(build)))
 
+def live_iso_kernel_warning(build) -> str | None:
+    """Warning about kernels of ISO built by genkernel (from spec of build) whose configuration in ISO doesn't build
+    ISO 9660 into kernel: live system isn't found when it boots. None when it's fine or can't be checked."""
+    from .project_stage_kernels import kernel_config_iso9660_warning
+    try:
+        with open(os.path.join(build.path or "", "stage.spec"), encoding="utf-8") as file:
+            spec = file.read()
+    except OSError:
+        return None
+    names = (re.search(r"^boot/kernel:\s*(.*)$", spec, re.MULTILINE) or [None, ""])[1].split()
+    tool = shutil.which("bsdtar")
+    for name in names:
+        if re.search(rf"^boot/kernel/{re.escape(name)}/distkernel:\s*yes", spec, re.MULTILINE):
+            continue # Initramfs made by dracut.
+        if tool is None:
+            return None
+        result = subprocess.run([tool, "-xOf", build.artifact_path, f"boot/{name}-config"], capture_output=True, text=True, errors="replace")
+        if result.returncode == 0 and result.stdout and (warning := kernel_config_iso9660_warning(result.stdout)):
+            return f"Kernel {name}: {warning}. Rebuild live CD with ISO 9660 built into kernel."
+    return None
+
 def raspberry_pi_iso_path(build) -> str:
     """ISO prepared for Raspberry Pi, next to ISO of build."""
     return os.path.join(build.path, build.artifact.removesuffix(".iso") + RASPBERRY_PI_ISO_SUFFIX + ".iso")
