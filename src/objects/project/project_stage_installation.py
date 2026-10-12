@@ -86,6 +86,12 @@ class ProjectStageInstallationStepCreate(MultiStageProcessStage):
             except Exception as e:
                 # Stage can still be created and configured manually.
                 self.log(f"Failed to set default values: {e}")
+            # Kernels of releng template become kernels of stage (their settings still use template values).
+            from .project_stage_kernels import stage_inherits_kernels, releng_kernel_names
+            from .project_stage_arguments import StageArgumentDetails
+            if stage_inherits_kernels(stage) and (names := releng_kernel_names(self.project_directory, stage)):
+                setattr(stage, StageArgumentDetails.boot_kernel.name, names)
+                self.log(f"boot/kernel: {', '.join(names)} (from releng template)")
             self.project_directory.install_stage(stage=stage)
             self.multistage_process.stage = stage
             self.complete(MultiStageProcessStageState.COMPLETED)
