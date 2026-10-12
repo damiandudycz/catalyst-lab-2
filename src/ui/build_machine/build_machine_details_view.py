@@ -32,6 +32,8 @@ class BuildMachineDetailsView(Gtk.Box):
         self.name_used_row.add_css_class("error")
         information_group.add(self.name_used_row)
         information_group.add(Adw.ActionRow(title="Lima instance", subtitle=machine.instance_name, subtitle_selectable=True))
+        engine_name = "QEMU (managed by Lima)" if machine.vm_type == "qemu" else "Virtualization.framework (managed by Lima)"
+        information_group.add(Adw.ActionRow(title="VM engine", subtitle=engine_name))
         location = machine.machine_directory
         home = os.path.expanduser("~")
         information_group.add(Adw.ActionRow(

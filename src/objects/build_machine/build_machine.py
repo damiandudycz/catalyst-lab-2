@@ -25,13 +25,14 @@ class BuildMachine:
     DEFAULT_SWAP_GIB = 16
 
     def __init__(self, id: uuid.UUID | None = None, name: str = "", cpus: int = 4, memory_gib: int = 4, workspace_gib: int = 64,
-                 lima_home: str | None = None, swap_gib: int = DEFAULT_SWAP_GIB):
+                 lima_home: str | None = None, swap_gib: int = DEFAULT_SWAP_GIB, vm_type: str = "vz"):
         self.id = id or uuid.uuid4()
         self.name = name
         self.cpus = cpus
         self.memory_gib = memory_gib
         self.workspace_gib = workspace_gib # Maximum size of working space image (it grows only as it's used).
         self.swap_gib = swap_gib # Maximum size of swap disk (it grows only as it's used), 0 disables swap.
+        self.vm_type = vm_type # Lima VM driver, fixed when machine is created.
         self.lima_home = lima_home or default_new_lima_home() # Lima directory containing machine folder.
         self.event_bus = EventBus()
         self._status: str | None = None
@@ -51,13 +52,15 @@ class BuildMachine:
 
     def serialize(self) -> dict:
         return {"id": str(self.id), "name": self.name, "cpus": self.cpus, "memory_gib": self.memory_gib,
-                "workspace_gib": self.workspace_gib, "swap_gib": self.swap_gib, "lima_home": self.lima_home}
+                "workspace_gib": self.workspace_gib, "swap_gib": self.swap_gib, "lima_home": self.lima_home,
+                "vm_type": self.vm_type}
 
     @classmethod
     def init_from(cls, data: dict) -> Self:
         return cls(id=uuid.UUID(data["id"]), name=data["name"], cpus=data.get("cpus", 4),
                    memory_gib=data.get("memory_gib", 4), workspace_gib=data.get("workspace_gib", 64),
                    swap_gib=data.get("swap_gib", cls.DEFAULT_SWAP_GIB),
+                   vm_type=data.get("vm_type", "vz"),
                    # Machines created before machines directory are in ~/.lima.
                    lima_home=data.get("lima_home") or default_lima_home())
 
