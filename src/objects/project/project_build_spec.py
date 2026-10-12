@@ -28,6 +28,7 @@ class StageSpecContext:
     portage_confdir: str | None # Generated portage configuration, as seen by catalyst.
     cache_paths: dict = field(default_factory=dict) # Enabled caches (pkgcache_path, kerncache_path), as seen by catalyst.
     root_overlay: str | None = None # Generated root overlay, as seen by catalyst.
+    iso_overlay: str | None = None # Generated ISO overlay (livecd/overlay), as seen by catalyst.
     snapshot: object | None = None # Snapshot selected for build, project snapshot when not set.
     path_mapper: Callable[[str], str] | None = None # Path of host folder as seen by catalyst (project, releng, overlays).
 
@@ -92,6 +93,8 @@ def _argument_value(project_directory, stage, name: str, argument, context: Stag
             return context.cache_paths.get(argument.details)
         case StageArgumentDetails.stage4_root_overlay | StageArgumentDetails.livecd_root_overlay:
             return context.root_overlay
+        case StageArgumentDetails.livecd_overlay:
+            return context.iso_overlay
     value = resolve_stage_argument(project_directory, stage, name)
     if value is UNRESOLVED and _is_automatic(project_directory, stage, argument):
         value = _automatic_value(project_directory, argument)
@@ -164,13 +167,13 @@ def generate_portage_confdir(project_directory, stage, destination: str) -> bool
 # ------------------------------------------------------------------------------
 # Root overlay:
 
-def generate_root_overlay(project_directory, stage, destination: str) -> bool:
+def generate_root_overlay(project_directory, stage, destination: str, argument: StageArgumentDetails | None = None) -> bool:
     """Combines selected root overlay sources into destination folder (releng template overlays, parent overlays,
     stage overlay). Later sources overwrite files of earlier ones. Returns false if stage doesn't use root overlay or
     none of its folders exists."""
-    if not root_overlay_values(project_directory, stage):
+    if not root_overlay_values(project_directory, stage, argument):
         return False
-    folders = [folder for folder in root_overlay_folders(project_directory, stage) if os.path.isdir(folder)]
+    folders = [folder for folder in root_overlay_folders(project_directory, stage, argument) if os.path.isdir(folder)]
     if not folders:
         return False
     os.makedirs(destination, exist_ok=True)

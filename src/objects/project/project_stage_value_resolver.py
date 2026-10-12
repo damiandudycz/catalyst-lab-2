@@ -27,14 +27,19 @@ def resolve_stage_argument(project_directory, stage, argument_name: str, option:
     determined (missing parent or template, parents loop, automatic value not known before building)."""
     details = StageArgumentDetails.named(argument_name)
     value = option if option is not None else getattr(stage, details.name if details else argument_name, None)
-    # Inherited list with own entries added (inherit option followed by entries), duplicates are skipped.
-    if details is not None and details.allows_additions and (additions := split_additions(value)) is not None:
-        inherit_option, own = additions
-        inherited = resolve_stage_argument(project_directory, stage, argument_name, option=inherit_option, _visited=_visited)
-        if inherited is UNRESOLVED:
-            return UNRESOLVED
-        base = inherited if isinstance(inherited, list) else ([] if inherited is None else [inherited])
-        return list(dict.fromkeys(base + own))
+    # Inherited values joined with own value (inherit options followed by own entries): lists are joined without
+    # duplicates, texts (eg. compiler flags) are joined with spaces.
+    if details is not None and details.allows_additions and (combined := split_additions(value)) is not None:
+        options, own = combined
+        base = []
+        for inherit_option in options:
+            inherited = resolve_stage_argument(project_directory, stage, argument_name, option=inherit_option, _visited=_visited)
+            if inherited is UNRESOLVED:
+                return UNRESOLVED
+            base += inherited if isinstance(inherited, list) else ([] if inherited is None else [inherited])
+        if details.type == StageArgumentType.raw_single_line:
+            return " ".join(str(item) for item in base + own if str(item).strip()) or None
+        return list(dict.fromkeys(base + own)) or None
     # Multiselect arguments (repos, interpreter) store selected automatic option as single item list.
     if isinstance(value, list) and len(value) == 1 and isinstance(value[0], StageAutomaticOption):
         value = value[0]
@@ -58,15 +63,16 @@ def resolve_stage_argument(project_directory, stage, argument_name: str, option:
             return UNRESOLVED if value is None else value
     return UNRESOLVED
 
-def split_additions(value) -> tuple[StageAutomaticOption, list] | None:
-    """Inherit option and own entries of list combining them, None when value doesn't combine them."""
-    if not isinstance(value, list):
+def split_additions(value) -> tuple[list[StageAutomaticOption], list] | None:
+    """Inherit options and own entries of value joining them, None when value doesn't join inherited values (plain
+    value, single option, or single option stored as list by multiselect rows)."""
+    if not isinstance(value, list) or len(value) < 2:
         return None
     options = [item for item in value if isinstance(item, StageAutomaticOption)]
     own = [item for item in value if not isinstance(item, StageAutomaticOption)]
-    if len(options) != 1 or not own:
+    if not options:
         return None
-    return options[0], own
+    return list(dict.fromkeys(options)), own
 
 def parent_stage(project_directory, stage):
     parent_id = getattr(stage, StageArgumentDetails.parent.name, None)
