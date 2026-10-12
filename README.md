@@ -184,6 +184,11 @@ user. Run it with `flatpak run com.damiandudycz.CatalystLab`.
   - `--bundle` creates `dist/CatalystLab.flatpak`, which can be installed on other computers;
   - `--clean` starts from scratch.
 
+### Gentoo: Portage
+
+Ebuilds are in [packaging/gentoo](packaging/gentoo) (overlay with `dev-util/catalystlab`, live and release
+versions). Add it as a repository and `emerge dev-util/catalystlab`, see its README.
+
 ### Linux: directly on the host
 
 ```bash
