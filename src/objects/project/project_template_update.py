@@ -2,7 +2,7 @@
 
 Project created from template has project-template.json (template repository, its commit, selected options and ids of
 stages created from template stages). Commits that generate project from template ("Create project from template",
-"Update from template") change this file, the newest of them is base of update.
+"Update from template") usually change this file, the newest of them is base of update.
 
 Update compares three versions: base, project (its current commit, changes have to be saved first) and new version
 (project generated again from latest template, or latest commit of remote branch). Arguments of stages (stage.json)
@@ -518,9 +518,23 @@ class _RenderTarget:
             raise AttributeError(name)
         return getattr(self._project, name)
 
+# Messages of commits generating project from template.
+_TEMPLATE_COMMIT_MESSAGES = ("Create project from template ", "Update from template ") # Start of messages.
+
 def template_base_commit(project_path: str) -> str | None:
-    """Newest commit generating project from template (it changes project-template.json)."""
-    return _git(project_path, "log", "-1", "--format=%H", "--", TEMPLATE_STATE_FILE, check=False) or None
+    """Newest commit generating project from template. It changes project-template.json, unless only files generated
+    from the same template and options changed (eg. new version of app generates stages differently), so commits are
+    also found by their messages."""
+    by_state = _git(project_path, "log", "-1", "--format=%H", "--", TEMPLATE_STATE_FILE, check=False) or None
+    by_message = _git(project_path, "log", "-1", "--format=%H", "--extended-regexp",
+                      "--grep", "^(" + "|".join(_TEMPLATE_COMMIT_MESSAGES) + ")", check=False) or None
+    commits = [commit for commit in (by_state, by_message) if commit]
+    if len(commits) < 2 or by_state == by_message:
+        return by_state or by_message
+    # Newer of them (the other one is its ancestor).
+    is_ancestor = subprocess.run(["git", "-C", project_path, "merge-base", "--is-ancestor", by_state, by_message],
+                                 capture_output=True).returncode == 0
+    return by_message if is_ancestor else by_state
 
 def prepare_template_update(project_directory, log: Callable[[str], None],
                             selected: dict[str, Any] | None = None, force: bool = False) -> ProjectUpdate | None:
