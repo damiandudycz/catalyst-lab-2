@@ -126,6 +126,16 @@ def builds_location() -> str:
 def project_builds_directory(project_directory) -> str:
     return os.path.join(builds_location(), project_directory.sanitized_name())
 
+def delete_project_builds(project_directory):
+    """Removes all build output, logs, caches, seeds and run records of a project."""
+    root = builds_location()
+    path = project_builds_directory(project_directory)
+    real_path = os.path.realpath(path)
+    if real_path != os.path.abspath(path) or os.path.commonpath((root, real_path)) != root or real_path == root:
+        raise RuntimeError(f"Project builds directory is outside the configured builds location: {real_path}")
+    if os.path.isdir(real_path):
+        shutil.rmtree(real_path)
+
 def stage_builds_directory(project_directory, stage_name: str) -> str:
     return os.path.join(project_builds_directory(project_directory), "stages", project_directory.sanitized_name_for_name(stage_name))
 
