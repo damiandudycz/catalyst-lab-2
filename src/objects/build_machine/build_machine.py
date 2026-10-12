@@ -246,7 +246,8 @@ class BuildMachine:
                 success = self._stop_instance(output_handler)
             finally:
                 self.refresh_status(during_transition=True)
-            if success and self.status == self.STATUS_STOPPED:
+            if self.status == self.STATUS_STOPPED:
+                self._delete_workspace(lambda line: None)
                 # Swapped data is not needed after machine stops, its disk takes no space until next start.
                 self.delete_swap_disk(lambda line: None)
             return success
@@ -452,14 +453,31 @@ sudo chown "$(id -u):$(id -g)" {MACHINE_DATA_DIRECTORY}
     def _delete_workspace(self, output_handler):
         from .rootless import MachineExecutor
         image = self.workspace_image_path
+        if not os.path.exists(image):
+            return
         output_handler(f"Removing working space of {self.name}")
+        if self.is_running:
+            try:
+                # Do not unlink the backing file if the guest couldn't unmount it.
+                cleanup = (f'if mountpoint -q {MACHINE_DATA_DIRECTORY}; then sudo umount -l {MACHINE_DATA_DIRECTORY}; fi; '
+                           f'rm -f "{image}"')
+                if not MachineExecutor(self).run(cleanup, output_handler):
+                    output_handler(f"Failed to remove working space of {self.name}: guest unmount failed")
+                    return
+            except Exception as e:
+                output_handler(f"Failed to unmount working space: {e}")
+                return
         try:
-            if self.is_running:
-                MachineExecutor(self).run(f'sudo umount -l {MACHINE_DATA_DIRECTORY}; rm -f "{image}"', output_handler)
-        except Exception as e:
-            output_handler(f"Failed to unmount working space: {e}")
-        if os.path.exists(image):
-            os.remove(image)
+            if os.path.exists(image):
+                os.remove(image)
+        except OSError as e:
+            output_handler(f"Failed to remove working space of {self.name}: {e}")
+
+    def cleanup_workspace(self, output_handler=print):
+        """Removes a workspace left behind by a crashed or previously closed app."""
+        if self._workspace_users:
+            return
+        self._delete_workspace(output_handler)
 
 def build_machine_for_id(machine_id: uuid.UUID | None) -> BuildMachine | None:
     if machine_id is None:

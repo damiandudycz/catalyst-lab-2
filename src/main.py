@@ -29,6 +29,14 @@ class CatalystlabApplication(Adw.Application):
         # Before any operation starts, they keep their data there.
         from .rootless import clear_temporary_directory
         clear_temporary_directory()
+        # A killed app can leave the large sparse workspace image behind. It is safe to
+        # remove at startup because operation registrations are not restored across runs.
+        from .repository import Repository
+        for machine in Repository.BuildMachine.value:
+            try:
+                machine.cleanup_workspace()
+            except Exception as e:
+                print(f"Failed to clean working space of virtual machine {machine.name}: {e}")
         ToolsetManager.shared().refresh()
         SnapshotManager.shared().refresh()
         RelengManager.shared().refresh()
