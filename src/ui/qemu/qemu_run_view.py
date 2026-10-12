@@ -137,7 +137,7 @@ class QemuRunView(Gtk.Box):
         self.launch_message = Gtk.Label(wrap=True, xalign=0, visible=False)
         self.launch_message.add_css_class("error")
         self.launch_panel.append(self.launch_message)
-        self.launch_button = Gtk.Button(label="Start virtual machine", halign=Gtk.Align.END,
+        self.launch_button = Gtk.Button(label="Start virtual machine", halign=Gtk.Align.CENTER,
                                         margin_top=12)
         self.launch_button.add_css_class("suggested-action")
         self.launch_button.connect("clicked", lambda _: self.start())
