@@ -323,6 +323,8 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
     # incompatible binaries.
     StageArgumentDetails.pkgcache_path: [_AUTO],
     StageArgumentDetails.kerncache_path: [_AUTO],
+    # Packages of a stage4 may be inherited from its parent and joined with extra packages.
+    StageArgumentDetails.stage4_packages: [_PARENT, _RELENG],
     # Target specific (stage4/*, livecd/*, boot/kernel) are defined by releng templates.
     **{
         argument: [_RELENG]
@@ -330,7 +332,7 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
         if argument.value.split("/")[0] in ("stage4", "livecd", "boot")
         # Root and ISO overlays are combined from their own sources, like portage_confdir.
         and argument not in (StageArgumentDetails.stage4_root_overlay, StageArgumentDetails.livecd_root_overlay,
-                             StageArgumentDetails.livecd_overlay)
+                             StageArgumentDetails.livecd_overlay, StageArgumentDetails.stage4_packages)
     },
 }
 
