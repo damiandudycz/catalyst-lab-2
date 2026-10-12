@@ -3,6 +3,7 @@ import os, re
 from gi.repository import Gtk, Gdk, Adw, GLib, Pango
 from .qemu_run import QemuRun, QemuRunEvent, QemuBuildKind, qemu_support, stage_image_ready, stage_image_directory, stage_image_script
 from .vnc_view import VncView
+from .cl_toggle_group import CLToggle, CLToggleGroup
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState, MultiStageProcessEvent, MultiStageProcessState
 
 # ------------------------------------------------------------------------------
@@ -77,7 +78,17 @@ class QemuRunView(Gtk.Box):
         self.run: QemuRun | None = None
         self._serial_pending = ""
         self.preparation: QemuImagePreparation | None = None
-        # Status and controls.
+        # The view selector is added to the window's top header panel, like stage view options.
+        self.view_toggle = CLToggleGroup(valign=Gtk.Align.CENTER)
+        self.view_toggle.add_css_class("round")
+        self.view_toggle.add_css_class("caption")
+        for title in ("Screen", "Console", "QEMU"):
+            self.view_toggle.add(CLToggle(label=title))
+        self.view_toggle.set_active(0)
+        self.view_toggle.connect("notify::active", self._on_view_toggle)
+        self.stack = Adw.ViewStack(vexpand=True)
+        self.stack.connect("notify::visible-child-name", self._on_stack_page_changed)
+
         bar = Gtk.Box(spacing=6, margin_start=12, margin_end=12, margin_top=6, margin_bottom=6)
         self.status_label = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END, selectable=True)
         self.status_label.add_css_class("caption")
@@ -97,12 +108,15 @@ class QemuRunView(Gtk.Box):
         self.start_button.connect("clicked", lambda _: self.start())
         bar.append(self.start_button)
         self.append(bar)
-        self.append(Gtk.Separator())
         # Screen, console and log.
-        self.stack = Adw.ViewStack(vexpand=True)
         self.vnc_view = VncView()
         self.vnc_view.status_handler = self._set_screen_status
         screen = Gtk.Overlay(child=self.vnc_view)
+        screen.add_css_class("qemu-screen")
+        self._screen_css = Gtk.CssProvider()
+        self._screen_css.load_from_data(b".qemu-screen { background-color: #000; }")
+        Gtk.StyleContext.add_provider_for_display(self.get_display(), self._screen_css,
+                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.screen_status = Gtk.Label(wrap=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, visible=False)
         self.screen_status.add_css_class("dimmed")
         screen.add_overlay(self.screen_status)
@@ -111,15 +125,27 @@ class QemuRunView(Gtk.Box):
         self.stack.add_titled_with_icon(console, "console", "Console", "utilities-terminal-symbolic")
         self.log_view, log = self._text_view(editable_input=False)
         self.stack.add_titled_with_icon(log, "log", "QEMU", "text-x-generic-symbolic")
-        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE, halign=Gtk.Align.CENTER,
-                                    margin_top=6, margin_bottom=6)
-        self.append(switcher)
         self.append(self.stack)
         # Machine stops when view is closed: its page is popped from navigation (not when other page covers it), or
         # its window is closed.
         self.connect("realize", self._on_realize)
         self.connect("unrealize", lambda _: self.stop())
         GLib.idle_add(lambda: (self.start(), False)[1])
+
+    def header_bar_end_widgets(self) -> list[Gtk.Widget]:
+        return [self.view_toggle]
+
+    def _on_view_toggle(self, toggle_group, _param):
+        names = ("screen", "console", "log")
+        index = toggle_group.get_active()
+        if 0 <= index < len(names):
+            self.stack.set_visible_child_name(names[index])
+
+    def _on_stack_page_changed(self, stack, _param):
+        names = ("screen", "console", "log")
+        name = stack.get_visible_child_name()
+        if name in names and self.view_toggle.get_active() != names.index(name):
+            self.view_toggle.set_active(names.index(name))
 
     def _text_view(self, editable_input: bool):
         view = Gtk.TextView(monospace=True, editable=False, cursor_visible=editable_input, wrap_mode=Gtk.WrapMode.CHAR,
