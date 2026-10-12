@@ -131,7 +131,6 @@ class LiveIsoDeployView(Gtk.Box):
             return row
         system = group("Live system", "Settings changed in live system of ISO. Empty ones keep it as it's built. Live "
                        "system is unpacked and packed again, which takes several minutes.")
-        self.hostname_row = entry(system, "Hostname")
         self.root_password_row = entry(system, "Root password", password=True)
         self.root_password_confirm_row = entry(system, "Confirm root password", password=True)
         self.ssh_row = Adw.SwitchRow(title="Start SSH server", subtitle="Remote login, with root password or SSH keys")
@@ -197,9 +196,6 @@ class LiveIsoDeployView(Gtk.Box):
                                     keymap=self.keymap_row.get_text().strip())
 
     def _system_error(self) -> str | None:
-        hostname = self.hostname_row.get_text().strip()
-        if hostname and not all(part and len(part) <= 63 and part.replace("-", "").isalnum() for part in hostname.split(".")):
-            return "Invalid hostname"
         if self.root_password_row.get_text() != self.root_password_confirm_row.get_text():
             return "Root passwords don't match"
         names = set()
@@ -214,7 +210,6 @@ class LiveIsoDeployView(Gtk.Box):
     def _system_settings(self) -> DeploySystemSettings | None:
         """Settings applied to live system, None when nothing is changed."""
         settings = DeploySystemSettings(
-            hostname=self.hostname_row.get_text().strip() or None,
             root_password=self.root_password_row.get_text() or None,
             users=[row.user() for row in self.user_rows],
             enable_ssh=self.ssh_row.get_active(),
@@ -222,7 +217,7 @@ class LiveIsoDeployView(Gtk.Box):
             localization=self._localization(),
         )
         localization = settings.localization
-        changed = (settings.hostname or settings.root_password or settings.users or settings.enable_ssh or settings.ssh_keys
+        changed = (settings.root_password or settings.users or settings.enable_ssh or settings.ssh_keys
                    or localization.timezone or localization.locales or localization.keymap)
         return settings if changed else None
 
