@@ -259,19 +259,35 @@ class GitDirectoryDetailsView(Gtk.Box):
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
         is_project = self.manager_class is ProjectManager
-        builds_checkbox = Gtk.CheckButton(label="Also delete all builds, logs, caches and downloaded seeds") if is_project else None
+        extra_child = None
+        builds_checkbox = binpkgs_checkbox = None
         build_running = False
         if is_project:
+            extra_child = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            builds_checkbox = Gtk.CheckButton(label="Builds, logs, caches and downloaded seeds")
+            binpkgs_checkbox = Gtk.CheckButton(label="Binary packages")
+            extra_child.append(builds_checkbox)
+            extra_child.append(binpkgs_checkbox)
             from .project_build_process import running_project_build
             build_running = running_project_build(self.git_directory) is not None
             if build_running:
-                builds_checkbox.set_label("Builds are running; stop the build before deleting them")
+                builds_checkbox.set_label("Builds (a build is running; stop it before deleting)")
                 builds_checkbox.set_sensitive(False)
+            get_packages_directory = getattr(self.git_directory, "get_packages_directory", None)
+            packages_directory = get_packages_directory() if get_packages_directory else None
+            other_projects_use_packages = packages_directory is not None and any(
+                project is not self.git_directory for project in packages_directory.projects)
+            if packages_directory is None:
+                binpkgs_checkbox.set_label("Binary packages (none assigned)")
+                binpkgs_checkbox.set_sensitive(False)
+            elif other_projects_use_packages:
+                binpkgs_checkbox.set_label("Binary packages (shared with other projects)")
+                binpkgs_checkbox.set_sensitive(False)
         dialog = Adw.AlertDialog(
             heading=f"Delete {self.git_directory.name}?",
             body=("The project files and settings will be deleted. This can't be undone."
                   if is_project else "The directory and its files will be deleted. This can't be undone."),
-            extra_child=builds_checkbox,
+            extra_child=extra_child,
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("delete", "Delete")
@@ -282,18 +298,17 @@ class GitDirectoryDetailsView(Gtk.Box):
         def on_response(dialog, response):
             if response != "delete":
                 return
-            root = self.get_root()
-            # Binary packages folder of deleted project, when no other project uses it.
-            get_packages_directory = getattr(self.git_directory, "get_packages_directory", None)
-            packages_directory = get_packages_directory() if get_packages_directory else None
             delete_builds = builds_checkbox is not None and builds_checkbox.get_active()
+            delete_binpkgs = binpkgs_checkbox is not None and binpkgs_checkbox.get_active()
             project = self.git_directory
+            packages_directory = project.get_packages_directory() if delete_binpkgs else None
             if delete_builds:
                 from .project_build import delete_project_builds
                 delete_project_builds(project)
             self.manager_class.shared().remove_directory(directory=project)
-            if packages_directory is not None and not packages_directory.projects:
-                ask_delete_unused_packages_directory(root, packages_directory)
+            if packages_directory is not None:
+                from ...objects.packages.packages_directory import delete_packages_directory
+                delete_packages_directory(packages_directory)
             if hasattr(self, "_window"):
                 self._window.close()
             elif hasattr(self, "content_navigation_view"):
@@ -320,17 +335,3 @@ class GitDirectoryDetailsView(Gtk.Box):
         update_view.set_multistage_process(multistage_process=update)
         self.content_navigation_view.push_view(update_view, title="Updating Git repository")
 
-def ask_delete_unused_packages_directory(root, packages_directory):
-    """Binary packages folder isn't used by any project anymore (its last project was deleted): it's kept by default,
-    as packages can be used by other projects later."""
-    from .packages_directory import delete_packages_directory
-    dialog = Adw.AlertDialog(
-        heading=f"Delete binary packages folder {packages_directory.name}?",
-        body="No other project uses it. Packages in it can be reused by projects created later.")
-    dialog.add_response("keep", "Keep")
-    dialog.add_response("delete", "Delete")
-    dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
-    dialog.set_default_response("keep")
-    dialog.set_close_response("keep")
-    dialog.connect("response", lambda _, response: delete_packages_directory(packages_directory) if response == "delete" else None)
-    dialog.present(root)
