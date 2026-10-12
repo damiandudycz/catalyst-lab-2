@@ -24,7 +24,7 @@ from .project_stage import ProjectStage, StageArgumentOption
 from .item_select_expander_row import ItemSelectionExpanderRow
 from .event_bus import EventBus
 from .project_stage_automatic_option import StageAutomaticOption
-from .project_stage_value_resolver import resolved_stage_argument_display
+from .project_stage_value_resolver import resolved_stage_argument_display, resolve_stage_argument, split_additions
 from .project_stage_portage_confdir import (
     StagePortageConfdirSource, stage_overlay_path, stage_root_overlay_path, root_overlay_values, ROOT_OVERLAY_ARGUMENTS
 )
@@ -692,47 +692,94 @@ class StageTextSourceRow(Adw.ExpanderRow):
     def _on_source_toggled(self, button: Gtk.CheckButton, source: StageAutomaticOption | None):
         if self._loading or not button.get_active():
             return
-        self.value = source if source is not None else self.get_editor_value()
+        if source is None:
+            if self.allows_additions and self.source is not None:
+                # Custom list starts from inherited one with additions, so entries can be removed from it.
+                resolved = resolve_stage_argument(self.project_directory, self.stage, self.argument.name, option=self.source)
+                if isinstance(resolved, list):
+                    combined = list(dict.fromkeys((self.normalized_custom_value(resolved) or []) + (self.own_value() or [])))
+                    self.set_editor_value(combined)
+            self.value = self.get_editor_value()
+        elif self.allows_additions:
+            # Additions are kept when switching between inherit options.
+            additions = self.own_value() if self.source is not None else None
+            self.set_editor_value(additions)
+            self.value = self.combined_value(source, additions)
+        else:
+            self.value = source
         self.update_display()
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
+    @property
+    def allows_additions(self) -> bool:
+        """Own entries can be added to inherited list (stored as inherit option followed by entries)."""
+        return bool(self.argument.details and self.argument.details.allows_additions)
+
+    @property
+    def source(self) -> StageAutomaticOption | None:
+        """Selected automatic option, None for custom value."""
+        if isinstance(self.value, StageAutomaticOption):
+            return self.value
+        if self.allows_additions and (additions := split_additions(self.value)) is not None:
+            return additions[0]
+        return None
+
+    def own_value(self):
+        """Custom value, or entries added to inherited list."""
+        if self.source is None:
+            return self.value
+        additions = split_additions(self.value) if self.allows_additions else None
+        return additions[1] if additions else None
+
+    @staticmethod
+    def combined_value(source: StageAutomaticOption, additions):
+        return [source, *additions] if additions else source
+
     def is_custom(self) -> bool:
-        return not isinstance(self.value, StageAutomaticOption)
+        return self.source is None
 
     # State:
 
     def load_state(self):
         current_value = getattr(self.stage, self.argument.attribute_name, None)
         self._loading = True
+        additions = split_additions(current_value) if self.allows_additions else None
         if isinstance(current_value, StageAutomaticOption):
             self.value = current_value
             self.set_editor_value(None)
+        elif additions is not None:
+            own = self.normalized_custom_value(additions[1])
+            self.value = self.combined_value(additions[0], own)
+            self.set_editor_value(own)
         else:
             self.value = self.normalized_custom_value(current_value)
             self.set_editor_value(self.value)
-        source = self.value if isinstance(self.value, StageAutomaticOption) else None
-        if check_button := self.source_check_buttons.get(source):
+        if check_button := self.source_check_buttons.get(self.source):
             check_button.set_active(True)
         self._loading = False
         self.update_display()
 
     def apply_custom_value(self):
-        """Call from editor when custom value is applied."""
-        self.value = self.get_editor_value()
-        self.set_editor_value(self.value)
+        """Call from editor when custom value (or additions to inherited list) is applied."""
+        value = self.get_editor_value()
+        self.value = self.combined_value(self.source, value) if self.source is not None else value
+        self.set_editor_value(value)
         self.update_display()
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     def update_display(self):
-        self.editor_row.set_visible(self.is_custom())
-        automatic_option = next((option for option in self.unsupported_options + self.automatic_options if option.value == self.value), None)
+        self.editor_row.set_visible(self.is_custom() or self.allows_additions)
+        automatic_option = next((option for option in self.unsupported_options + self.automatic_options if option.value == self.source), None)
         if self.is_custom():
             subtitle = self.custom_value_display(self.value) if self.value else "(None)"
             show_warning = self.argument.required and not self.value
             warning = "This value is required"
         else:
-            resolved = self.resolved_values.get(self.value)
-            subtitle = (f"{automatic_option.display}: {resolved}" if resolved else automatic_option.display) if automatic_option else f"Unsupported value: {self.value.name}"
+            resolved = self.resolved_values.get(self.source)
+            subtitle = (f"{automatic_option.display}: {resolved}" if resolved else automatic_option.display) if automatic_option else f"Unsupported value: {self.source.name}"
+            if additions := self.own_value():
+                subtitle = (f"{automatic_option.display}" if automatic_option else f"Unsupported value: {self.source.name}") \
+                    + f" + {len(additions)} own: {self.custom_value_display(additions)}"
             show_warning = automatic_option is None or automatic_option.unsupported
             warning = "Selected option is not available for this stage"
         self.set_subtitle(GLib.markup_escape_text(subtitle))
@@ -940,14 +987,14 @@ class StageTextListRow(StageTextSourceRow):
         frame = Gtk.Frame()
         frame.set_child(self.text_view)
 
-        hint_label = Gtk.Label(label="One entry per line. Ctrl+Enter to apply.")
+        self.hint_label = hint_label = Gtk.Label(label="One entry per line. Ctrl+Enter to apply.", wrap=True, xalign=0)
         hint_label.set_halign(Gtk.Align.START)
         hint_label.set_hexpand(True)
         hint_label.add_css_class("dimmed")
         hint_label.add_css_class("caption")
-        self.revert_button = Gtk.Button(label="Revert")
-        self.revert_button.connect("clicked", lambda button: self.set_editor_value(self.value if self.is_custom() else None))
-        self.apply_button = Gtk.Button(label="Apply")
+        self.revert_button = Gtk.Button(label="Revert", valign=Gtk.Align.CENTER)
+        self.revert_button.connect("clicked", lambda button: self.set_editor_value(self.own_value()))
+        self.apply_button = Gtk.Button(label="Apply", valign=Gtk.Align.CENTER)
         self.apply_button.add_css_class("suggested-action")
         self.apply_button.connect("clicked", lambda button: self.apply_custom_value())
         buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -987,7 +1034,7 @@ class StageTextListRow(StageTextSourceRow):
         return f"{shown} (+{hidden_count} more)" if hidden_count > 0 else shown
 
     def is_modified(self) -> bool:
-        return self.get_editor_value() != (self.value if self.is_custom() else None)
+        return self.get_editor_value() != self.own_value()
 
     def on_buffer_changed(self, buffer):
         modified = self.is_modified()
@@ -1002,6 +1049,8 @@ class StageTextListRow(StageTextSourceRow):
 
     def update_display(self):
         super().update_display()
+        self.hint_label.set_label("One entry per line. Ctrl+Enter to apply." if self.is_custom() else
+                                  "Entries added to inherited ones, one per line. Ctrl+Enter to apply.")
         self.on_buffer_changed(self.text_view.get_buffer())
 
 class StageCacheRow(Adw.ExpanderRow):

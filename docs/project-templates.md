@@ -181,6 +181,11 @@ stage4_rcadd = "{{ stage4_services }}"
 - Arguments that are not set get the same defaults as stages added in the app (inherited from the parent or the Releng
   spec when possible). Values set by the template are shown as **Custom value** in stage settings.
 - In lists, items that are none are skipped, so expressions can leave them out.
+- Lists of packages, USE flags, services (`rcadd`, `rcdel`), `unmerge`, `empty`, `rm`, `modblacklist`, `catalyst_use`,
+  `hostuse` and `install_mask` can add own entries to inherited ones: put `"@releng"` (Releng spec) or `"@parent"`
+  (parent stage) in the list, for example `livecd_packages = ["@releng", "net-misc/networkmanager"]`. Inherited
+  entries can't be removed this way; to remove some, give the whole list without the marker. Groups adding entries to
+  such list keep the inherited entries too. Needs Catalyst Lab 0.3.1 or newer (`min_app_version = "0.3.1"`).
 - Values that are paths to files of the project (for example fsscript or kernel configuration added with
   `[[files]]`) should use placeholders, replaced when building: `@STAGE_DIR@` (directory of the stage),
   `@PROJECT_DIR@` (directory of the project), and like in Releng specs `@REPO_DIR@` (Releng directory). For example

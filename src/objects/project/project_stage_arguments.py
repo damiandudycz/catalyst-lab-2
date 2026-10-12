@@ -135,6 +135,12 @@ class StageArgumentDetails(Enum):
         return _automatic_options_mapping.get(self, [])
 
     @property
+    def allows_additions(self) -> bool:
+        """List whose own entries can be added to inherited value (inherit option selected together with own values,
+        stored as option followed by entries). Other lists are inherited, or replaced by own values."""
+        return self in _ARGUMENTS_WITH_ADDITIONS
+
+    @property
     def default_options(self) -> list[StageAutomaticOption]:
         """Automatic options preferred as default value of new stage, in order of preference. First one available for
         the stage is used (parent stage selected, releng template selected and defining this argument...)."""
@@ -476,3 +482,17 @@ STAGE_ARGUMENT_LEVELS: dict[StageArgumentDetails, StageArgumentLevel] = {
 def stage_argument_level(details: StageArgumentDetails | None) -> StageArgumentLevel:
     """Arguments not known to app (read from catalyst) are advanced."""
     return STAGE_ARGUMENT_LEVELS.get(details, StageArgumentLevel.ADVANCED) if details else StageArgumentLevel.ADVANCED
+
+# Lists where own entries are appended to inherited ones (packages, USE flags, services...). Ordered lists (decompressor
+# search order, filesystem operations) and structured ones (kernels) are not combined.
+_ARGUMENTS_WITH_ADDITIONS = {
+    StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages,
+    StageArgumentDetails.stage4_use, StageArgumentDetails.livecd_use,
+    StageArgumentDetails.stage4_rcadd, StageArgumentDetails.livecd_rcadd,
+    StageArgumentDetails.stage4_rcdel, StageArgumentDetails.livecd_rcdel,
+    StageArgumentDetails.stage4_unmerge, StageArgumentDetails.livecd_unmerge,
+    StageArgumentDetails.stage4_empty, StageArgumentDetails.livecd_empty,
+    StageArgumentDetails.stage4_rm, StageArgumentDetails.livecd_rm,
+    StageArgumentDetails.livecd_modblacklist,
+    StageArgumentDetails.catalyst_use, StageArgumentDetails.hostuse, StageArgumentDetails.install_mask,
+}

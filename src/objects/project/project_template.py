@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 from .architecture import Architecture
 from .project_stage_arguments import StageArgumentDetails
+from .project_stage_automatic_option import StageAutomaticOption
 from .project_stage_kernels import BOOT_KERNELS_ATTRIBUTE, kernel_settings_from_template, merge_kernel_settings
 
 TEMPLATE_FILE = "template.toml"
@@ -639,6 +640,9 @@ class ProjectTemplate:
                         continue
                     value = _template_argument_value(key, value, f"Group {group.id}, argument {key}")
                     existing = arguments.get(key)
+                    if isinstance(existing, StageAutomaticOption) and isinstance(value, list) and value \
+                            and (details := StageArgumentDetails.__members__.get(key)) and details.allows_additions:
+                        existing = [existing] # Inherited list, group adds own entries.
                     if isinstance(existing, list) and isinstance(value, list):
                         arguments[key] = existing + [item for item in value if item not in existing]
                     elif key == BOOT_KERNELS_ATTRIBUTE and isinstance(existing, dict):
@@ -709,7 +713,22 @@ def _template_argument_value(key: str, value, context: str):
     """Value of stage argument, or kernel settings (boot_kernels) given as tables."""
     if key == BOOT_KERNELS_ATTRIBUTE:
         return kernel_settings_from_template(value, context)
-    return _stage_argument_value(value, context)
+    value = _stage_argument_value(value, context)
+    if isinstance(value, list) and any(isinstance(item, str) and item in _INHERIT_MARKERS for item in value):
+        # "@releng" or "@parent" in list: inherited entries with own ones added.
+        details = StageArgumentDetails.__members__.get(key)
+        markers = [item for item in value if isinstance(item, str) and item in _INHERIT_MARKERS]
+        if details is None or not details.allows_additions:
+            raise TemplateError(f"{context}: own entries can't be added to inherited value of this argument")
+        if len(set(markers)) > 1:
+            raise TemplateError(f"{context}: list can inherit only from parent or releng template")
+        own = [item for item in value if item not in _INHERIT_MARKERS]
+        option = _INHERIT_MARKERS[markers[0]]
+        return [option, *own] if own else option
+    return value
+
+# List items of template that inherit list (own entries in list are added to it).
+_INHERIT_MARKERS = {"@releng": StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE, "@parent": StageAutomaticOption.INHERIT_FROM_PARENT}
 
 def _stage_argument_value(value, context: str):
     """Value of stage argument from template: texts, numbers, booleans and their lists are used directly, tables
