@@ -99,6 +99,8 @@ class ProcessesList(Gtk.Box):
         MultiStageProcess.event_bus.subscribe(MultiStageProcessEvent.STARTED_PROCESSES_CHANGED, self._schedule_update)
         from .build_queue import BuildQueue, BuildQueueEvent
         BuildQueue.shared().event_bus.subscribe(BuildQueueEvent.CHANGED, self._schedule_update)
+        from .qemu_run import QemuRun, QemuRunEvent
+        QemuRun.running_runs_event_bus.subscribe(QemuRunEvent.RUNNING_RUNS_CHANGED, self._schedule_update, self)
         self._schedule_update()
 
     def _schedule_update(self, *args):
@@ -128,16 +130,27 @@ class ProcessesList(Gtk.Box):
         queue = BuildQueue.shared()
         queued = {("queue", item.id): item for item in queue.entries}
         entries += list(queued)
+        from .qemu_run import QemuRun
+        qemu_entries = [("qemu", run) for run in QemuRun.running_runs if run.is_running]
+        entries += qemu_entries
         for entry in list(self._rows):
             if entry not in entries:
                 self.list_box.remove(self._rows.pop(entry))
         for index, entry in enumerate(entries):
             if entry not in self._rows:
-                self._rows[entry] = QueuedBuildRow(queued[entry]) if entry in queued else ProcessRow(*entry)
+                if entry in queued:
+                    row = QueuedBuildRow(queued[entry])
+                elif isinstance(entry, tuple) and entry and entry[0] == "qemu":
+                    row = QemuRunRow(entry[1])
+                else:
+                    row = ProcessRow(*entry)
+                self._rows[entry] = row
                 self.list_box.insert(self._rows[entry], index)
             row = self._rows[entry]
             if isinstance(row, QueuedBuildRow):
                 row.update(position=list(queued).index(entry) + 1, paused=queue.paused)
+            elif isinstance(row, QemuRunRow):
+                row.update()
             else:
                 row.update()
         self.set_visible(bool(entries))
@@ -183,6 +196,43 @@ class QueuedBuildRow(Gtk.ListBoxRow):
     def open(self):
         from .build_queue_view import present_queued_build
         present_queued_build(self.queued_build)
+
+class QemuRunRow(Gtk.ListBoxRow):
+    """Active QEMU machine; clicking returns to its existing view."""
+
+    def __init__(self, run):
+        super().__init__(tooltip_text="Running in QEMU")
+        self.run = run
+        box = Gtk.Box(spacing=10, margin_start=6, margin_end=6, margin_top=4, margin_bottom=4)
+        icon = Gtk.Image(icon_name="computer-symbolic", valign=Gtk.Align.CENTER)
+        box.append(icon)
+        labels = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, valign=Gtk.Align.CENTER)
+        labels.append(Gtk.Label(label=run.name, xalign=0, ellipsize=Pango.EllipsizeMode.END))
+        self.subtitle = Gtk.Label(label="Running in QEMU", xalign=0)
+        self.subtitle.add_css_class("caption")
+        self.subtitle.add_css_class("dim-label")
+        labels.append(self.subtitle)
+        box.append(labels)
+        self.set_child(box)
+
+    def update(self):
+        if not self.run.is_running:
+            return
+        speed = f" · {self.run.cpus} CPUs · {self.run.memory_mib // 1024} GiB"
+        self.subtitle.set_label("Running in QEMU" + speed)
+
+    def open(self):
+        view = getattr(self.run, "view", None)
+        if view is None:
+            return
+        window = getattr(view, "_window", None)
+        if hasattr(window, "navigation_view"):
+            navigation = window.navigation_view
+            page = getattr(view, "_page", None)
+            if page is not None:
+                navigation.pop_to_page(page)
+        elif window is not None:
+            window.present()
 
 class ProcessRow(Gtk.ListBoxRow):
     """Looks like rows of installation steps: status icon, name with state, and progress. Row of running step shows

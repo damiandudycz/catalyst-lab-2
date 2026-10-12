@@ -46,7 +46,9 @@ class Settings(Serializable):
         packages_location: str = library_path("Packages"),
         auto_clean_snapshots: bool = False,
         navigation_style: NavigationStyle = NavigationStyle.PUSH,
-        pause_queue_on_failure: bool = False
+        pause_queue_on_failure: bool = False,
+        qemu_memory_gib: int = 4,
+        qemu_cpus: int = 4
     ):
         self._initial_setup_done = initial_setup_done
         self._keep_root_unlocked = keep_root_unlocked
@@ -62,6 +64,8 @@ class Settings(Serializable):
         self._auto_clean_snapshots = auto_clean_snapshots # Snapshots not used by projects are removed (except newest).
         self._navigation_style = navigation_style
         self._pause_queue_on_failure = pause_queue_on_failure # Queued builds wait when build fails.
+        self._qemu_memory_gib = qemu_memory_gib
+        self._qemu_cpus = qemu_cpus
         self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
@@ -82,7 +86,9 @@ class Settings(Serializable):
                 packages_location=data.get("packages_location", library_path("Packages")),
                 auto_clean_snapshots=data.get("auto_clean_snapshots", False),
                 navigation_style=_navigation_style(data.get("navigation_style")),
-                pause_queue_on_failure=data.get("pause_queue_on_failure", False)
+                pause_queue_on_failure=data.get("pause_queue_on_failure", False),
+                qemu_memory_gib=data.get("qemu_memory_gib", 4),
+                qemu_cpus=data.get("qemu_cpus", 4)
             )
         except:
             return cls()
@@ -102,7 +108,9 @@ class Settings(Serializable):
             "packages_location": self.packages_location,
             "auto_clean_snapshots": self.auto_clean_snapshots,
             "navigation_style": self.navigation_style.value,
-            "pause_queue_on_failure": self.pause_queue_on_failure
+            "pause_queue_on_failure": self.pause_queue_on_failure,
+            "qemu_memory_gib": self.qemu_memory_gib,
+            "qemu_cpus": self.qemu_cpus
         }
 
     # --------------------------------------------------------------------------
@@ -328,6 +336,26 @@ class Settings(Serializable):
                 SettingsEvents.PAUSE_QUEUE_ON_FAILURE_CHANGED,
                 value
             )
+            Repository.Settings.save()
+
+    @property
+    def qemu_memory_gib(self) -> int:
+        return self._qemu_memory_gib
+    @qemu_memory_gib.setter
+    def qemu_memory_gib(self, value: int):
+        value = int(value)
+        if self._qemu_memory_gib != value:
+            self._qemu_memory_gib = value
+            Repository.Settings.save()
+
+    @property
+    def qemu_cpus(self) -> int:
+        return self._qemu_cpus
+    @qemu_cpus.setter
+    def qemu_cpus(self, value: int):
+        value = int(value)
+        if self._qemu_cpus != value:
+            self._qemu_cpus = value
             Repository.Settings.save()
 
 def _navigation_style(value) -> NavigationStyle:

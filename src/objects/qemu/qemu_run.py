@@ -179,11 +179,14 @@ echo "Disk image: $(du -h {image} | cut -f1) used of {size // (1024 ** 3)} GiB"
 class QemuRunEvent(Enum):
     STATE_CHANGED = auto()
     SERIAL_OUTPUT = auto()
+    RUNNING_RUNS_CHANGED = auto()
 
 class QemuRun:
     """QEMU process of build, with sockets of display (VNC), serial console and monitor (QMP)."""
 
     running_runs: list[QemuRun] = []
+    running_runs_event_bus = EventBus[QemuRunEvent]()
+    _start_lock = threading.Lock()
 
     def __init__(self, project_directory, build, support: QemuSupport, memory_mib: int = 4096, cpus: int = 4):
         self.project_directory = project_directory
@@ -248,6 +251,12 @@ class QemuRun:
         return os.path.join(self.directory, "disk.qcow2")
 
     def start(self):
+        with QemuRun._start_lock:
+            if any(run.is_running for run in QemuRun.running_runs):
+                raise RuntimeError("Only one QEMU machine can run at a time")
+            self._start_locked()
+
+    def _start_locked(self):
         if self.support.kind == QemuBuildKind.STAGE:
             # Changes of system are discarded when machine stops: it runs on overlay of disk image.
             image = os.path.join(stage_image_directory(self.build), "root.img")
@@ -257,6 +266,7 @@ class QemuRun:
         self.output.append("$ " + " ".join(command))
         self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         QemuRun.running_runs.append(self)
+        QemuRun.running_runs_event_bus.emit(QemuRunEvent.RUNNING_RUNS_CHANGED)
         threading.Thread(target=self._read_output, daemon=True).start()
         threading.Thread(target=self._read_serial, daemon=True).start()
         self.event_bus.emit(QemuRunEvent.STATE_CHANGED, self)
@@ -269,6 +279,7 @@ class QemuRun:
             self.error = next((line for line in reversed(self.output) if line.strip()), f"QEMU exited with code {code}")
         if self in QemuRun.running_runs:
             QemuRun.running_runs.remove(self)
+            QemuRun.running_runs_event_bus.emit(QemuRunEvent.RUNNING_RUNS_CHANGED)
         shutil.rmtree(self.directory, ignore_errors=True)
         self.event_bus.emit(QemuRunEvent.STATE_CHANGED, self)
 

@@ -15,6 +15,8 @@ class SettingsSection(Gtk.Box):
     location_row = Gtk.Template.Child()
     navigation_style_row = Gtk.Template.Child()
     pause_queue_row = Gtk.Template.Child()
+    qemu_cpus_row = Gtk.Template.Child()
+    qemu_memory_row = Gtk.Template.Child()
 
     # Options of navigation style row, in order.
     NAVIGATION_STYLES = [NavigationStyle.MODAL, NavigationStyle.PUSH]
@@ -27,6 +29,11 @@ class SettingsSection(Gtk.Box):
         self.navigation_style_row.connect("notify::selected", self._on_navigation_style_selected)
         self.pause_queue_row.set_active(Repository.Settings.value.pause_queue_on_failure)
         self.pause_queue_row.connect("notify::active", lambda row, _: setattr(Repository.Settings.value, "pause_queue_on_failure", row.get_active()))
+        settings = Repository.Settings.value
+        self.qemu_cpus_row.set_value(settings.qemu_cpus)
+        self.qemu_cpus_row.connect("notify::value", lambda row, _: setattr(settings, "qemu_cpus", round(row.get_value())))
+        self.qemu_memory_row.set_value(settings.qemu_memory_gib)
+        self.qemu_memory_row.connect("notify::value", lambda row, _: setattr(settings, "qemu_memory_gib", round(row.get_value())))
 
     def _on_navigation_style_selected(self, row, _param):
         Repository.Settings.value.navigation_style = self.NAVIGATION_STYLES[row.get_selected()]

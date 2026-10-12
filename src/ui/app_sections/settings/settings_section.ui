@@ -166,6 +166,47 @@
             </child>
 
             <child>
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">6</property>
+                <child>
+                  <object class="AdwPreferencesGroup">
+                    <property name="title">QEMU</property>
+                    <property name="description">Default resources for virtual machines. You can adjust them before each run.</property>
+                    <child>
+                      <object class="GtkListBox">
+                        <property name="selection-mode">none</property>
+                        <style><class name="boxed-list"/></style>
+                        <child>
+                          <object class="AdwSpinRow" id="qemu_cpus_row">
+                            <property name="title">CPUs</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">1</property><property name="upper">64</property>
+                                <property name="step-increment">1</property><property name="value">4</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="AdwSpinRow" id="qemu_memory_row">
+                            <property name="title">Memory (GiB)</property>
+                            <property name="adjustment">
+                              <object class="GtkAdjustment">
+                                <property name="lower">1</property><property name="upper">256</property>
+                                <property name="step-increment">1</property><property name="value">4</property>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+
+            <child>
               <object class="GtkSeparator"/>
             </child>
 

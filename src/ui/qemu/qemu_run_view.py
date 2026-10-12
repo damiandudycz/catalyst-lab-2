@@ -6,6 +6,7 @@ from .vnc_view import VncView
 from .cl_toggle_group import CLToggle, CLToggleGroup
 from .usage_graph import UsageGraph, USAGE_INTERVAL_SECONDS
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState, MultiStageProcessEvent, MultiStageProcessState
+from .repository import Repository
 
 # ------------------------------------------------------------------------------
 # Build running in QEMU: screen of machine (VNC), its serial console and QEMU log, with power controls. Stage gets
@@ -82,6 +83,7 @@ class QemuRunView(Gtk.Box):
         self.run: QemuRun | None = None
         self._serial_pending = ""
         self.preparation: QemuImagePreparation | None = None
+        settings = Repository.Settings.value
         # The view selector is added to the window's top header panel, like stage view options.
         self.view_toggle = CLToggleGroup(valign=Gtk.Align.CENTER)
         self.view_toggle.add_css_class("round")
@@ -124,6 +126,26 @@ class QemuRunView(Gtk.Box):
         self.screen_status = Gtk.Label(wrap=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, visible=False)
         self.screen_status.add_css_class("dimmed")
         screen.add_overlay(self.screen_status)
+        self.launch_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                                    halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
+                                    margin_start=24, margin_end=24, margin_top=24, margin_bottom=24)
+        self.launch_panel.add_css_class("card")
+        self.launch_group = Adw.PreferencesGroup(title="Run in QEMU", description="Choose resources for this run.")
+        self.launch_cpus_row = Adw.SpinRow(title="CPUs", adjustment=Gtk.Adjustment(
+            lower=1, upper=64, step_increment=1, value=settings.qemu_cpus))
+        self.launch_memory_row = Adw.SpinRow(title="Memory (GiB)", adjustment=Gtk.Adjustment(
+            lower=1, upper=256, step_increment=1, value=settings.qemu_memory_gib))
+        self.launch_group.add(self.launch_cpus_row)
+        self.launch_group.add(self.launch_memory_row)
+        self.launch_panel.append(self.launch_group)
+        self.launch_message = Gtk.Label(wrap=True, xalign=0, visible=False)
+        self.launch_message.add_css_class("error")
+        self.launch_panel.append(self.launch_message)
+        self.launch_button = Gtk.Button(label="Start virtual machine", halign=Gtk.Align.END)
+        self.launch_button.add_css_class("suggested-action")
+        self.launch_button.connect("clicked", lambda _: self.start())
+        self.launch_panel.append(self.launch_button)
+        screen.add_overlay(self.launch_panel)
         self.stack.add_titled_with_icon(screen, "screen", "Screen", "video-display-symbolic")
         self.console_view, console = self._text_view(editable_input=True)
         self.stack.add_titled_with_icon(console, "console", "Console", "utilities-terminal-symbolic")
@@ -147,6 +169,7 @@ class QemuRunView(Gtk.Box):
         self.stack.add_titled_with_icon(qemu_page, "log", "QEMU", "text-x-generic-symbolic")
         self._usage_timer: int | None = None
         self._reading_usage = False
+        QemuRun.running_runs_event_bus.subscribe(QemuRunEvent.RUNNING_RUNS_CHANGED, self._on_global_runs_changed, self)
         self.connect("map", lambda _: self._start_usage_updates())
         self.connect("unmap", lambda _: self._stop_usage_updates())
         self.append(self.stack)
@@ -154,7 +177,8 @@ class QemuRunView(Gtk.Box):
         # its window is closed.
         self.connect("realize", self._on_realize)
         self.connect("unrealize", lambda _: self.stop())
-        GLib.idle_add(lambda: (self.start(), False)[1])
+        self._set_status("Configure the virtual machine and start it")
+        self._update_launch_availability()
 
     def header_bar_end_widgets(self) -> list[Gtk.Widget]:
         return [self.view_toggle]
@@ -218,23 +242,53 @@ class QemuRunView(Gtk.Box):
         for button in self.buttons:
             button.set_sensitive(running)
         self.start_button.set_visible(not running and self.support.available)
+        self.launch_panel.set_visible(not running)
+        self._update_launch_availability()
+
+    def _update_launch_availability(self):
+        other = next((run for run in QemuRun.running_runs if run is not self.run and run.is_running), None)
+        if other is not None:
+            self.launch_message.set_label(f"Another QEMU machine is already running: {other.name}.")
+            self.launch_message.set_visible(True)
+            self.launch_button.set_sensitive(False)
+        else:
+            self.launch_message.set_visible(False)
+            self.launch_button.set_sensitive(self.support.available)
+
+    def _on_global_runs_changed(self):
+        GLib.idle_add(lambda: (self._update_launch_availability(), False)[1])
 
     def start(self):
+        if any(run is not self.run and run.is_running for run in QemuRun.running_runs):
+            self._update_launch_availability()
+            self._set_status("Only one QEMU machine can run at a time")
+            return
         if not self.support.available:
             self._set_status(self.support.reason)
             self._set_screen_status(self.support.reason)
             return
         if self.support.kind == QemuBuildKind.STAGE and not stage_image_ready(self.build, self.support):
+            self._launch_cpus = round(self.launch_cpus_row.get_value())
+            self._launch_memory_mib = round(self.launch_memory_row.get_value()) * 1024
+            self.launch_panel.set_visible(False)
             self._prepare_image()
             return
-        self.run = QemuRun(self.project_directory, self.build, self.support)
+        self._launch_cpus = round(self.launch_cpus_row.get_value())
+        self._launch_memory_mib = round(self.launch_memory_row.get_value()) * 1024
+        self.launch_panel.set_visible(False)
+        self.run = QemuRun(self.project_directory, self.build, self.support,
+                           memory_mib=self._launch_memory_mib, cpus=self._launch_cpus)
+        self.run.view = self
         self.run.event_bus.subscribe(QemuRunEvent.STATE_CHANGED, self._on_state_changed, self)
         self.run.event_bus.subscribe(QemuRunEvent.SERIAL_OUTPUT, self._on_serial, self)
         self.console_view.get_buffer().set_text("")
         try:
             self.run.start()
         except Exception as e:
+            self.run = None
             self._set_status(f"Failed to start QEMU: {e}")
+            self.launch_panel.set_visible(True)
+            self._update_launch_availability()
             return
         self.vnc_view.connect_vnc(self.run.vnc_socket, lambda: self.run is not None and self.run.is_running)
         self._set_screen_status("Starting machine…")
