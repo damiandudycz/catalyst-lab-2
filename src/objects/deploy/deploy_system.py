@@ -284,3 +284,42 @@ def authorized_keys_script(keys: list[str], users: list[str]) -> str:
         ]
     lines.append(f'echo "Authorized {len(keys)} SSH key(s) for {", ".join(["root"] + users)}"')
     return "\n".join(lines)
+
+@dataclass
+class WifiSettings:
+    """Wi-Fi network connected automatically (NetworkManager), eg. in live system prepared for given place."""
+    ssid: str
+    password: str = "" # WPA personal, empty for open network.
+    hidden: bool = False
+    country: str = "" # Regulatory domain (eg. PL), channels allowed in country.
+
+    def error(self) -> str | None:
+        if not self.ssid or len(self.ssid.encode()) > 32:
+            return "Wi-Fi network name must have 1 to 32 bytes"
+        if self.password and not 8 <= len(self.password) <= 63:
+            return "Wi-Fi password must have 8 to 63 characters"
+        if self.country and not re.match(r"^[A-Za-z]{2}$", self.country):
+            return "Country must be two letter code, eg. PL"
+        return None
+
+def wifi_script(settings: WifiSettings) -> str:
+    """Connection of NetworkManager in $ROOT (readable by root only, it contains password) and regulatory domain."""
+    import base64
+    lines = ["[connection]", f"id={settings.ssid}", "type=wifi", "autoconnect=true", "",
+             "[wifi]", "mode=infrastructure", f"ssid={settings.ssid}"] + (["hidden=true"] if settings.hidden else []) + [""]
+    if settings.password:
+        lines += ["[wifi-security]", "key-mgmt=wpa-psk", f"psk={settings.password}", ""]
+    lines += ["[ipv4]", "method=auto", "", "[ipv6]", "method=auto", ""]
+    encoded = base64.b64encode("\n".join(lines).encode()).decode()
+    script = [
+        '[ -d "$ROOT/etc/NetworkManager" ] || echo "Warning: NetworkManager is not installed, Wi-Fi connection is not used"',
+        'mkdir -p "$ROOT/etc/NetworkManager/system-connections"',
+        f'echo {encoded} | base64 -d > "$ROOT/etc/NetworkManager/system-connections/catalystlab-wifi.nmconnection"',
+        'chmod 600 "$ROOT/etc/NetworkManager/system-connections/catalystlab-wifi.nmconnection"',
+        f'echo "Wi-Fi network connected automatically:" {quote(settings.ssid)}',
+    ]
+    if settings.country:
+        country = settings.country.upper()
+        script += [f'mkdir -p "$ROOT/etc/modprobe.d" && echo "options cfg80211 ieee80211_regdom={country}" > "$ROOT/etc/modprobe.d/catalystlab-wifi.conf"',
+                   f'echo "Wi-Fi country: {country}"']
+    return "\n".join(script)

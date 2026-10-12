@@ -12,7 +12,7 @@ from .deploy_image import image_supported_reason
 from .local_disk_connection import LocalDiskConnection
 from .item_select_view import ItemSelectionViewEvent
 from .deploy_installation import DeploySystemSettings
-from .deploy_system import LocalizationSettings, local_localization, local_public_keys
+from .deploy_system import LocalizationSettings, WifiSettings, local_localization, local_public_keys
 
 class LiveIsoBoot(Enum):
     """How live CD is started."""
@@ -136,6 +136,14 @@ class LiveIsoDeployView(Gtk.Box):
         self.ssh_row = Adw.SwitchRow(title="Start SSH server", subtitle="Remote login, with root password or SSH keys")
         self.ssh_row.connect("notify::active", self._on_system_changed)
         system.add(self.ssh_row)
+        wifi = group("Wi-Fi", "Network connected automatically when live system starts (NetworkManager). Password is "
+                     "stored in ISO, readable by anyone who has the ISO file or drive.")
+        self.wifi_ssid_row = entry(wifi, "Network name")
+        self.wifi_password_row = entry(wifi, "Password, empty for open network", password=True)
+        self.wifi_hidden_row = Adw.SwitchRow(title="Hidden network", subtitle="Network doesn't broadcast its name")
+        self.wifi_hidden_row.connect("notify::active", self._on_system_changed)
+        wifi.add(self.wifi_hidden_row)
+        self.wifi_country_row = entry(wifi, "Country code, eg. PL (channels allowed in country)")
         self.keys_group = group("SSH keys", "Keys of this computer allowed to log in as root.")
         self.key_checks: list[tuple[Gtk.CheckButton, str]] = []
         for key in local_public_keys():
@@ -175,7 +183,18 @@ class LiveIsoDeployView(Gtk.Box):
         return LocalizationSettings(timezone=self.timezone_row.get_text().strip(), locales=locales,
                                     keymap=self.keymap_row.get_text().strip())
 
+    def _wifi(self) -> WifiSettings | None:
+        ssid = self.wifi_ssid_row.get_text()
+        if not ssid.strip():
+            return None
+        return WifiSettings(ssid=ssid, password=self.wifi_password_row.get_text(), hidden=self.wifi_hidden_row.get_active(),
+                            country=self.wifi_country_row.get_text().strip())
+
     def _system_error(self) -> str | None:
+        if (wifi := self._wifi()) is not None and (error := wifi.error()):
+            return error
+        if self.wifi_password_row.get_text() and self._wifi() is None:
+            return "Set Wi-Fi network name"
         if self.root_password_row.get_text() != self.root_password_confirm_row.get_text():
             return "Root passwords don't match"
         return self._localization().error()
@@ -187,9 +206,10 @@ class LiveIsoDeployView(Gtk.Box):
             enable_ssh=self.ssh_row.get_active(),
             ssh_keys=[key for check, key in self.key_checks if check.get_active()],
             localization=self._localization(),
+            wifi=self._wifi(),
         )
         localization = settings.localization
-        changed = (settings.root_password or settings.enable_ssh or settings.ssh_keys
+        changed = (settings.wifi or settings.root_password or settings.enable_ssh or settings.ssh_keys
                    or localization.timezone or localization.locales or localization.keymap)
         return settings if changed else None
 

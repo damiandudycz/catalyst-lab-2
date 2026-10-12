@@ -326,6 +326,13 @@ def apply_changes(project_path: str, changes: list[TemplateChange], project: Pro
             if os.path.isfile(path):
                 os.remove(path)
         else:
+            # File replaced by directory in template (eg. package.license as directory of files) is removed first.
+            parent = os.path.dirname(path)
+            while parent.startswith(project_path) and parent != project_path:
+                if os.path.isfile(parent):
+                    os.remove(parent)
+                    break
+                parent = os.path.dirname(parent)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as file:
                 file.write(change.template)

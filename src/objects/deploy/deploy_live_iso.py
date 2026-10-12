@@ -365,6 +365,9 @@ def live_system_script(live_directory: str, iso_path: str, system) -> str:
     lines += system_configuration_script(system)
     if system.network.service != NetworkService.NONE:
         lines.append(network_script(system.network))
+    if system.wifi is not None:
+        from .deploy_system import wifi_script
+        lines.append(wifi_script(system.wifi))
     if system.root_password:
         encoded = base64.b64encode(_LIVE_PWGEN.encode()).decode()
         lines.append(f'[ -e "$ROOT/etc/init.d/pwgen" ] && echo {encoded} | base64 -d > "$ROOT/etc/init.d/pwgen" && echo "Root password is not scrambled at boot"')
