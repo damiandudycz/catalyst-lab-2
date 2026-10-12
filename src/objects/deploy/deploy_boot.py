@@ -1,5 +1,5 @@
 from __future__ import annotations
-import re, subprocess
+import os, re, subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from .deploy_system import NetworkService, NETWORK_SERVICE_FILES, WPA_SUPPLICANT_FILE
@@ -136,6 +136,10 @@ _BOOTLOADER_FILES = {
 _KERNEL = re.compile(r"^boot/(vmlinuz|vmlinux|kernel|Image)[^/]*$")
 _INITRAMFS = re.compile(r"^boot/(initramfs|initrd)[^/]*$")
 _FIRMWARE = re.compile(r"^var/db/pkg/sys-kernel/linux-firmware-[^/]+/")
+# Firmware packages that block linux-firmware (they install some of its files).
+# Line of tar -tv listing: permissions, owner, size, date, time and path (symbolic link with its target).
+_LISTING_LINE = re.compile(r"^\S+\s+\S+\s+\d+\s+\S+\s+\S+\s+(.*?)(?: -> .*)?$")
+_FIRMWARE_CONFLICTS = re.compile(r"^var/db/pkg/(sys-firmware/raspberrypi-wifi-ucode)-[^/]+/")
 
 @dataclass
 class StageContents:
@@ -147,38 +151,56 @@ class StageContents:
     network_services: set[NetworkService] = field(default_factory=set)
     firmware: bool = False # linux-firmware is installed.
     wpa_supplicant: bool = False # Wi-Fi of network services other than NetworkManager.
+    firmware_conflict: str | None = None # Installed package that can't be installed together with linux-firmware.
 
     @classmethod
     def scan(cls, archive_path: str, process_holder: list | None = None) -> StageContents:
-        """Lists archive (tar of this computer handles all compressions used by catalyst)."""
+        """Reads listing of archive made by catalyst (CONTENTS.gz next to it, tar -tv format), or lists archive (tar of
+        this computer handles all compressions used by catalyst, it decompresses whole archive)."""
         contents = cls()
+        listing = archive_path + ".CONTENTS.gz"
+        if os.path.isfile(listing):
+            import gzip
+            with gzip.open(listing, "rt", encoding="utf-8", errors="replace") as file:
+                for line in file:
+                    if match := _LISTING_LINE.match(line.rstrip("\n")):
+                        contents._add_path(match.group(1).removeprefix("./"))
+            if contents.init or contents.kernels or contents.bootloaders:
+                return contents
+            contents = cls() # Listing in other format, archive is listed.
         process = subprocess.Popen(["tar", "-tf", archive_path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                    text=True, errors="replace")
         if process_holder is not None:
             process_holder.append(process)
         for line in process.stdout:
-            path = line.strip().removeprefix("./")
-            for bootloader, pattern in _BOOTLOADER_FILES.items():
-                if pattern.match(path):
-                    contents.bootloaders.add(bootloader)
-            for service, pattern in NETWORK_SERVICE_FILES.items():
-                if pattern.match(path):
-                    contents.network_services.add(service)
-            if not contents.firmware and _FIRMWARE.match(path):
-                contents.firmware = True
-            if not contents.wpa_supplicant and WPA_SUPPLICANT_FILE.match(path):
-                contents.wpa_supplicant = True
-            if _KERNEL.match(path):
-                contents.kernels.append(path.removeprefix("boot/"))
-            elif _INITRAMFS.match(path):
-                contents.initramfs.append(path.removeprefix("boot/"))
-            elif path in ("sbin/openrc-run", "usr/sbin/openrc-run", "usr/bin/openrc-run"):
-                contents.init = "openrc"
-            elif path in ("usr/lib/systemd/systemd", "lib/systemd/systemd") and contents.init is None:
-                contents.init = "systemd"
+            contents._add_path(line.strip().removeprefix("./"))
         if process.wait() != 0:
             raise RuntimeError("Failed to list stage archive")
         return contents
+
+    def _add_path(self, path: str):
+        """Records what path of archive shows (bootloader, services, kernel, init system...)."""
+        contents = self
+        for bootloader, pattern in _BOOTLOADER_FILES.items():
+            if pattern.match(path):
+                contents.bootloaders.add(bootloader)
+        for service, pattern in NETWORK_SERVICE_FILES.items():
+            if pattern.match(path):
+                contents.network_services.add(service)
+        if not contents.firmware and _FIRMWARE.match(path):
+            contents.firmware = True
+        if not contents.wpa_supplicant and WPA_SUPPLICANT_FILE.match(path):
+            contents.wpa_supplicant = True
+        if contents.firmware_conflict is None and (match := _FIRMWARE_CONFLICTS.match(path)):
+            contents.firmware_conflict = match.group(1)
+        if _KERNEL.match(path):
+            contents.kernels.append(path.removeprefix("boot/"))
+        elif _INITRAMFS.match(path):
+            contents.initramfs.append(path.removeprefix("boot/"))
+        elif path in ("sbin/openrc-run", "usr/sbin/openrc-run", "usr/bin/openrc-run"):
+            contents.init = "openrc"
+        elif path in ("usr/lib/systemd/systemd", "lib/systemd/systemd") and contents.init is None:
+            contents.init = "systemd"
 
     @property
     def summary(self) -> str:
