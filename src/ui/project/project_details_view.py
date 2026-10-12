@@ -244,7 +244,7 @@ class ProjectDetailsView(Gtk.Box):
             return
         self._checked_template_version = (state.commit, state.template_tree)
         def check():
-            available = template_update_available(path)
+            available = template_update_available(self.project_directory)
             def show():
                 self._updates_available = available
                 self._update_source_banner()
