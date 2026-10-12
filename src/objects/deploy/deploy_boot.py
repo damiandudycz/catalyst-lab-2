@@ -139,6 +139,10 @@ _FIRMWARE = re.compile(r"^var/db/pkg/sys-kernel/linux-firmware-[^/]+/")
 # Firmware packages that block linux-firmware (they install some of its files).
 # Line of tar -tv listing: permissions, owner, size, date, time and path (symbolic link with its target).
 _LISTING_LINE = re.compile(r"^\S+\s+\S+\s+\d+\s+\S+\s+\S+\s+(.*?)(?: -> .*)?$")
+# Groups of system: base ones of sys-apps/baselayout, others are created by acct-group packages.
+BASELAYOUT_GROUPS = frozenset("root bin daemon sys adm tty disk lp mem kmem wheel floppy news uucp console audio cdrom dialout "
+                              "tape video cdrw usb users portage utmp nogroup".split())
+_ACCOUNT_GROUP = re.compile(r"^var/db/pkg/acct-group/(.+?)-\d[^/]*/$")
 _FIRMWARE_CONFLICTS = re.compile(r"^var/db/pkg/(sys-firmware/raspberrypi-wifi-ucode)-[^/]+/")
 
 @dataclass
@@ -152,6 +156,12 @@ class StageContents:
     firmware: bool = False # linux-firmware is installed.
     wpa_supplicant: bool = False # Wi-Fi of network services other than NetworkManager.
     firmware_conflict: str | None = None # Installed package that can't be installed together with linux-firmware.
+    account_groups: set[str] = field(default_factory=set) # Groups created by acct-group packages.
+
+    @property
+    def groups(self) -> set[str]:
+        """Groups existing in stage."""
+        return set(BASELAYOUT_GROUPS) | self.account_groups
 
     @classmethod
     def scan(cls, archive_path: str, process_holder: list | None = None) -> StageContents:
@@ -191,6 +201,8 @@ class StageContents:
             contents.firmware = True
         if not contents.wpa_supplicant and WPA_SUPPLICANT_FILE.match(path):
             contents.wpa_supplicant = True
+        if path.startswith("var/db/pkg/acct-group/") and (match := _ACCOUNT_GROUP.match(path)):
+            contents.account_groups.add(match.group(1))
         if contents.firmware_conflict is None and (match := _FIRMWARE_CONFLICTS.match(path)):
             contents.firmware_conflict = match.group(1)
         if _KERNEL.match(path):
