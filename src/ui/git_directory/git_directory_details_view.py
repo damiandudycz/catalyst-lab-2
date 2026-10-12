@@ -258,17 +258,49 @@ class GitDirectoryDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def action_button_delete_clicked(self, sender):
-        root = self.get_root()
-        # Binary packages folder of deleted project, when no other project uses it.
-        get_packages_directory = getattr(self.git_directory, "get_packages_directory", None)
-        packages_directory = get_packages_directory() if get_packages_directory else None
-        self.manager_class.shared().remove_directory(directory=self.git_directory)
-        if packages_directory is not None and not packages_directory.projects:
-            ask_delete_unused_packages_directory(root, packages_directory)
-        if hasattr(self, "_window"):
-            self._window.close()
-        elif hasattr(self, "content_navigation_view"):
-            self.content_navigation_view.pop()
+        is_project = self.manager_class is ProjectManager
+        builds_checkbox = Gtk.CheckButton(label="Also delete all builds, logs, caches and downloaded seeds") if is_project else None
+        build_running = False
+        if is_project:
+            from .project_build_process import running_project_build
+            build_running = running_project_build(self.git_directory) is not None
+            if build_running:
+                builds_checkbox.set_label("Builds are running; stop the build before deleting them")
+                builds_checkbox.set_sensitive(False)
+        dialog = Adw.AlertDialog(
+            heading=f"Delete {self.git_directory.name}?",
+            body=("The project files and settings will be deleted. This can't be undone."
+                  if is_project else "The directory and its files will be deleted. This can't be undone."),
+            extra_child=builds_checkbox,
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def on_response(dialog, response):
+            if response != "delete":
+                return
+            root = self.get_root()
+            # Binary packages folder of deleted project, when no other project uses it.
+            get_packages_directory = getattr(self.git_directory, "get_packages_directory", None)
+            packages_directory = get_packages_directory() if get_packages_directory else None
+            delete_builds = builds_checkbox is not None and builds_checkbox.get_active()
+            project = self.git_directory
+            if delete_builds:
+                from .project_build import delete_project_builds
+                delete_project_builds(project)
+            self.manager_class.shared().remove_directory(directory=project)
+            if packages_directory is not None and not packages_directory.projects:
+                ask_delete_unused_packages_directory(root, packages_directory)
+            if hasattr(self, "_window"):
+                self._window.close()
+            elif hasattr(self, "content_navigation_view"):
+                self.content_navigation_view.pop()
+
+        dialog.connect("response", on_response)
+        dialog.present(self.get_root())
 
     def _add_changes_action(self, name, callback) -> Gio.SimpleAction:
         action = Gio.SimpleAction.new(name, None)
