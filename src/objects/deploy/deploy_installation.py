@@ -91,7 +91,8 @@ def tar_extract_command(artifact: str, root: str = MOUNT_POINT) -> str:
     ) if artifact.endswith(extension)), None)
     if compression is None:
         raise RuntimeError(f"Unsupported archive: {artifact}")
-    return f"tar -x -p {compression} --xattrs-include='*.*' --numeric-owner -C {quote(root)} -f -"
+    # Timestamps in the future are not reported (clock of machine is set before, but warnings would fill the log).
+    return f"tar -x -p {compression} --xattrs-include='*.*' --numeric-owner --warning=no-timestamp -C {quote(root)} -f -"
 
 def system_configuration_script(settings: DeploySystemSettings) -> list[str]:
     """Lines of script configuring system in $ROOT (prepared with CHROOT_SETUP): hostname, root password, SSH server,
@@ -315,8 +316,22 @@ for tool in {tools}; do command -v "$tool" > /dev/null || missing="$missing $too
 echo "Machine: $(uname -n), $(uname -m), kernel $(uname -r)"
 lsblk {quote(process.plan.disk.path)}
 """, "Machine doesn't have tools needed for installation")
+        if not process.machine.local:
+            self._set_clock()
         if not os.path.isfile(process.build.artifact_path or ""):
             raise RuntimeError("Build archive doesn't exist anymore")
+
+    def _set_clock(self):
+        """Clock of machine is set from this computer when it's wrong (eg. Raspberry Pi without RTC battery starts in
+        1970): downloads of repository and packages (HTTPS certificates) and files dates need correct time."""
+        import time
+        lines = []
+        self.multistage_process.connection.run("date -u +%s", lines.append, self.processes)
+        remote = next((int(line) for line in lines if line.strip().isdigit()), None)
+        now = int(time.time())
+        if remote is not None and abs(remote - now) > 300:
+            self.remote(f'date -u -s @{now} > /dev/null && echo "Clock set to $(date -u) (it was {time.strftime("%Y-%m-%d %H:%M", time.gmtime(remote))} UTC)"',
+                        "Failed to set clock of machine")
 
     def _check_local_disk(self):
         """Disk of this computer could be used since it was listed (mounted, swap, LVM...)."""
@@ -394,7 +409,8 @@ class DeployStepConfigure(DeployStep):
         # Stage3 doesn't contain kernel, system can't boot without it.
         if settings.kernel in (Kernel.STAGE, Kernel.NONE):
             script += [
-                'if ls "$ROOT"/boot/vmlinu* "$ROOT"/boot/kernel* "$ROOT"/boot/Image* > /dev/null 2>&1; then',
+                # ls fails when any pattern doesn't match, kernel is found when it lists something.
+                'if ls -d "$ROOT"/boot/vmlinu* "$ROOT"/boot/kernel* "$ROOT"/boot/Image* 2>/dev/null | grep -q .; then',
                 '    echo "Kernel: $(cd "$ROOT/boot" && ls vmlinu* kernel* Image* 2>/dev/null | tr \'\\n\' \' \')"',
                 'else',
                 '    echo "Warning: stage doesn\'t contain kernel in /boot, install one before booting (eg. sys-kernel/gentoo-kernel-bin)"',
