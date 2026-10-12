@@ -217,14 +217,17 @@ def root_overlay_stages(project_directory, stage, argument: StageArgumentDetails
     values = root_overlay_values(project_directory, stage, argument)
     stages = []
     if StagePortageConfdirSource.PARENT_OVERLAY in values:
-        stages += root_overlay_stages(project_directory, _parent_stage(project_directory, stage), argument, _visited | {stage.id})
+        # Parent uses root overlay argument of its own target (eg. stage4/root_overlay), ISO overlay is the same.
+        parent_argument = None if argument in ROOT_OVERLAY_ARGUMENTS else argument
+        stages += root_overlay_stages(project_directory, _parent_stage(project_directory, stage), parent_argument, _visited | {stage.id})
     if StagePortageConfdirSource.STAGE_OVERLAY in values:
         stages.append(stage)
     return stages
 
 def parent_root_overlay_stages(project_directory, stage, argument: StageArgumentDetails | None = None) -> list:
     argument = argument or root_overlay_argument(stage)
-    return root_overlay_stages(project_directory, _parent_stage(project_directory, stage), argument, frozenset({stage.id}))
+    parent_argument = None if argument in ROOT_OVERLAY_ARGUMENTS else argument
+    return root_overlay_stages(project_directory, _parent_stage(project_directory, stage), parent_argument, frozenset({stage.id}))
 
 def releng_root_overlay_paths(project_directory, stage, argument: StageArgumentDetails | None = None) -> list[str]:
     """Overlay folders defined by releng template of stage."""
@@ -267,7 +270,9 @@ def root_overlay_options(project_directory, stage, argument: StageArgumentDetail
             if releng_paths else f"{kind} defined by releng template (current template has none)"
     )
     # Parent overlay:
+    from .project_stage import parent_supports_argument
     has_parent = _parent_stage(project_directory, stage) is not None
+    parent_supported = parent_supports_argument(project_directory, stage, argument)
     parent_stages = parent_root_overlay_stages(project_directory, stage, argument)
     parent_files = sum(count_files(stage_root_overlay_path(project_directory, item, argument)) for item in parent_stages)
     parent = StageArgumentOption(
@@ -275,10 +280,11 @@ def root_overlay_options(project_directory, stage, argument: StageArgumentDetail
         display="Parent overlay",
         subtitle=(
             f"{kinds[0].upper() + kinds[1:]} used by parent stage" if not has_parent else
+            f"Target of parent stage doesn't have {kind.lower() if kind == 'Root overlay' else kind}" if not parent_supported else
             f"{_files_text(parent_files)} from {', '.join(item.name for item in parent_stages)}" if parent_stages else
             f"Parent stages don't use {kinds}"
         ),
-        unsupported=not has_parent
+        unsupported=not parent_supported
     )
     # Stage overlay:
     stage_files = count_files(stage_root_overlay_path(project_directory, stage, argument))

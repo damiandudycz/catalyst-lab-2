@@ -966,7 +966,8 @@ def _enable_stage_overlays(project_directory, stage, log: Callable[[str], None])
             continue
         value = getattr(stage, attribute, None)
         if not isinstance(value, list):
-            value = default_portage_confdir_sources(has_parent=getattr(stage, "parent", None) is not None)
+            from .project_stage import parent_supports_argument
+            value = default_portage_confdir_sources(has_parent=parent_supports_argument(project_directory, stage, StageArgumentDetails[attribute]))
         sources = [item for item in value if isinstance(item, StagePortageConfdirSource)]
         if StagePortageConfdirSource.STAGE_OVERLAY not in sources:
             sources.append(StagePortageConfdirSource.STAGE_OVERLAY)
@@ -1073,6 +1074,10 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
                                      architecture.releng_base_arch().value, generated_stage.releng_template)
             if not os.path.isfile(spec_path):
                 log(f"Warning: releng template {generated_stage.releng_template} not found in {releng_directory.name}")
+        # Parent can't give values of arguments its target doesn't have (eg. root overlay of stage3).
+        from .project_stage import remove_unsupported_parent_options
+        if changed := remove_unsupported_parent_options(project_directory, stage):
+            log(f"Not inheriting {', '.join(changed)} of {stage.name} from parent, its target doesn't have them")
         try:
             apply_default_stage_arguments(project_directory=project_directory, stage=stage)
         except Exception as e:
