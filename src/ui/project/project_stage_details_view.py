@@ -201,7 +201,7 @@ class ProjectStageDetailsView(Gtk.Box):
             remove_button.connect("clicked", lambda _, name=name: self._remove_kernel(name))
             row.add_suffix(remove_button)
             if warning := live_cd_kernel_warning(self.project_directory, self.stage, name):
-                icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic", tooltip_text=warning)
+                icon = Gtk.Image(icon_name="danger-triangle-svgrepo-com-symbolic", tooltip_text=warning)
                 icon.add_css_class("warning")
                 row.add_suffix(icon)
                 warnings.append(f"Kernel {name}: {warning}. ")
