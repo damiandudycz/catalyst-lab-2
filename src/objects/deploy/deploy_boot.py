@@ -386,7 +386,7 @@ PARTUUID=$(blkid -s PARTUUID -o value {root_device})
 FSTYPE=$(blkid -s TYPE -o value {root_device})
 echo "console=serial0,115200 console=tty1 root=PARTUUID=$PARTUUID rootfstype=$FSTYPE fsck.repair=yes rootwait" > "$ROOT/boot/cmdline.txt"
 if [ ! -f "$ROOT/boot/config.txt" ]; then
-    printf '%s\\n' "# Created by Catalyst Lab, see https://www.raspberrypi.com/documentation/computers/config_txt.html" {arm_64bit and f'"{arm_64bit}"'} 'dtparam=audio=on' 'auto_initramfs=1' > "$ROOT/boot/config.txt"
+    printf '%s\\n' "# Created by Catalyst Lab, see https://www.raspberrypi.com/documentation/computers/config_txt.html" {arm_64bit and f'"{arm_64bit}"'} 'dtparam=audio=on' 'dtoverlay=vc4-kms-v3d' 'max_framebuffers=2' 'auto_initramfs=1' > "$ROOT/boot/config.txt"
 fi
 echo "cmdline.txt:"; cat "$ROOT/boot/cmdline.txt"
 echo "config.txt:"; cat "$ROOT/boot/config.txt"
