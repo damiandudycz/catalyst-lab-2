@@ -2,7 +2,7 @@ from __future__ import annotations
 import os, sys, threading
 from dataclasses import dataclass
 from enum import Enum
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Gio
 from .deploy_live_iso import (
     LiveIsoDeployment, LiveIsoTarget, RaspberryPiBootSettings, supports_raspberry_pi_iso, raspberry_pi_iso_path
 )
@@ -118,8 +118,8 @@ class LiveIsoDeployView(Gtk.Box):
             LiveIsoMethod(LiveIsoTarget.LOCAL_DISK, "Disk of this computer",
                           "USB drive or SD card connected to this computer, booted later on other machine", disk_reason),
             LiveIsoMethod(LiveIsoTarget.ISO_FILE, "ISO image file",
-                          "New ISO saved next to build, written later to USB drive or SD card with dd, Raspberry Pi "
-                          "Imager or Etcher", iso_reason),
+                          "New ISO saved where you choose, written later to USB drive or SD card with dd, Raspberry "
+                          "Pi Imager or Etcher", iso_reason),
         ]
 
     def on_realize(self, widget):
@@ -272,27 +272,39 @@ class LiveIsoDeployView(Gtk.Box):
             dialog.add_response("deploy", "Erase and write")
             dialog.set_response_appearance("deploy", Adw.ResponseAppearance.DESTRUCTIVE)
         else:
-            path = raspberry_pi_iso_path(self.build)
-            replaced = " It replaces ISO created before." if os.path.isfile(path) else ""
-            dialog = Adw.AlertDialog(heading="Create ISO?",
-                                     body=f"{os.path.basename(path)} will be created next to {self.build.artifact}.{replaced}")
-            dialog.add_response("cancel", "Cancel")
-            dialog.add_response("deploy", "Create ISO")
-            dialog.set_response_appearance("deploy", Adw.ResponseAppearance.SUGGESTED)
+            # Location of new ISO (save dialog asks before replacing existing file).
+            name = os.path.basename(raspberry_pi_iso_path(self.build)) if self._raspberry_pi_settings() else self.build.artifact
+            downloads = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or os.path.expanduser("~")
+            file_dialog = Gtk.FileDialog(title="Save ISO", initial_name=name, modal=True,
+                                         initial_folder=Gio.File.new_for_path(downloads))
+            file_dialog.save(self.get_root(), None, self._on_save_location_selected)
+            return
         dialog.set_default_response("cancel")
         dialog.set_close_response("cancel")
         dialog.connect("response", self._on_confirm_response)
         dialog.present(self.get_root())
 
+    def _on_save_location_selected(self, file_dialog, result):
+        try:
+            file = file_dialog.save_finish(result)
+        except GLib.Error:
+            return # Cancelled.
+        path = file.get_path() if file else None
+        if path:
+            self._start(output_path=path if path.endswith(".iso") else path + ".iso")
+
     def _on_confirm_response(self, dialog, response: str):
-        if response != "deploy":
-            return
+        if response == "deploy":
+            self._start()
+
+    def _start(self, output_path: str | None = None):
         target = self._target()
         installation = LiveIsoDeployment(
             self.project_directory, self.build, target,
             disk=self.selected_disk if target == LiveIsoTarget.LOCAL_DISK else None,
             disk_connection=self.connection if target == LiveIsoTarget.LOCAL_DISK else None,
             raspberry_pi=self._raspberry_pi_settings(),
+            output_path=output_path,
         )
         if target != LiveIsoTarget.LOCAL_DISK and self.connection:
             threading.Thread(target=self.connection.close, daemon=True).start()

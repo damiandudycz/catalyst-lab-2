@@ -143,7 +143,7 @@ class LiveIsoDeployment(MultiStageProcess):
     disk of this computer (connection running scripts as root) or saved as new ISO file."""
 
     def __init__(self, project_directory, build, target: LiveIsoTarget, disk=None, disk_connection=None,
-                 raspberry_pi: RaspberryPiBootSettings | None = None):
+                 raspberry_pi: RaspberryPiBootSettings | None = None, output_path: str | None = None):
         self.project_directory = project_directory
         self.project_id = project_directory.id if project_directory else None
         self.build = build
@@ -153,10 +153,11 @@ class LiveIsoDeployment(MultiStageProcess):
         self.raspberry_pi = raspberry_pi
         self.iso_path = build.artifact_path
         self.work_directory = os.path.join(build.path, ".live-iso-deploy")
+        # ISO file selected by user (ISO_FILE). ISO is prepared in build folder (shared with virtual machine), then
+        # moved there.
+        self.output_path = output_path
         if raspberry_pi is None:
             self.prepared_iso = self.iso_path # Written as it is.
-        elif target == LiveIsoTarget.ISO_FILE:
-            self.prepared_iso = raspberry_pi_iso_path(build)
         else:
             self.prepared_iso = os.path.join(self.work_directory, os.path.basename(raspberry_pi_iso_path(build)))
         self.connection = None # Runs tools preparing ISO.
@@ -176,15 +177,19 @@ class LiveIsoDeployment(MultiStageProcess):
             self.stages.append(_StepWriteIso(multistage_process=self))
         if self.target == LiveIsoTarget.LOCAL_DISK:
             self.stages.append(_StepWriteDisk(multistage_process=self))
+        else:
+            self.stages.append(_StepSaveIso(multistage_process=self))
 
     @property
     def target_name(self) -> str:
-        return self.disk.path if self.target == LiveIsoTarget.LOCAL_DISK and self.disk else os.path.basename(self.prepared_iso)
+        if self.target == LiveIsoTarget.LOCAL_DISK:
+            return self.disk.path if self.disk else "disk"
+        return os.path.basename(self.output_path or self.prepared_iso)
 
     @property
     def result_path(self) -> str | None:
         """Created ISO file."""
-        return self.prepared_iso if self.target == LiveIsoTarget.ISO_FILE else None
+        return self.output_path if self.target == LiveIsoTarget.ISO_FILE else None
 
     def name(self) -> str:
         return f"{self.build.stage_name} on {self.target_name}"
@@ -199,9 +204,9 @@ class LiveIsoDeployment(MultiStageProcess):
 
     def complete_process(self, success: bool):
         shutil.rmtree(self.work_directory, ignore_errors=True)
-        if not success and self.result_path:
+        if not success and self.output_path:
             try:
-                os.remove(self.result_path + ".tmp")
+                os.remove(self.output_path + ".part")
             except OSError:
                 pass
         self.write_log(f"=== Deployment {'completed' if success else 'failed'}" + (f": {self.result_path}" if success and self.result_path else ""))
@@ -493,3 +498,29 @@ wipefs -a {device} > /dev/null
                                       self.log, lambda fraction: self._update_progress(fraction * 0.98), self.processes):
             raise RuntimeError(f"Failed to write {disk.path}")
         self.remote(f"sync; blockdev --rereadpt {device} 2>/dev/null || true; echo 'Written'", "Failed to finish writing")
+
+class _StepSaveIso(_Step):
+    def __init__(self, multistage_process):
+        super().__init__(name="Save ISO", description="Saves ISO in selected location", multistage_process=multistage_process)
+
+    def run(self):
+        process = self.multistage_process
+        source, destination = process.prepared_iso, process.output_path
+        if not destination:
+            raise RuntimeError("Location of ISO is not selected")
+        partial = destination + ".part"
+        size = os.path.getsize(source)
+        if source != process.iso_path and os.stat(source).st_dev == os.stat(os.path.dirname(destination) or ".").st_dev:
+            os.replace(source, destination) # Prepared ISO on the same disk is moved.
+        else:
+            # Copied with progress (ISO of build is kept, other disk).
+            copied = 0
+            with open(source, "rb") as input_file, open(partial, "wb") as output_file:
+                while chunk := input_file.read(8 * 1024 * 1024):
+                    if self._cancel_event.is_set():
+                        raise RuntimeError("Cancelled")
+                    output_file.write(chunk)
+                    copied += len(chunk)
+                    self._update_progress(copied / size * 0.99)
+            os.replace(partial, destination)
+        self.log(f"Saved {destination} ({size // (1024 * 1024)} MiB)")
