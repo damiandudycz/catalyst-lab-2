@@ -57,6 +57,8 @@ class MultiStageProcess(ABC):
 
     # TODO: Send and receive events about this with class information, to display only for given classes
     started_processes: list[MultiStageProcess] = [] # List of processes that were started. Processes remain there even after success/failure until cleared.
+    # Completed processes (removed from started ones) whose result wasn't seen yet, for statuses of sections.
+    finished_processes: list[MultiStageProcess] = []
     event_bus = EventBus[MultiStageProcessEvent]() # For class events.
 
     def __init__(self, title: str):
@@ -124,6 +126,10 @@ class MultiStageProcess(ABC):
         if getattr(self, "result_seen", False):
             return
         self.result_seen = True
+        if self in MultiStageProcess.finished_processes:
+            MultiStageProcess.finished_processes.remove(self)
+        if hook := getattr(self, "on_result_seen", None):
+            hook() # Eg. status of project shown with its result.
         MultiStageProcess.event_bus.emit(
             MultiStageProcessEvent.STARTED_PROCESSES_CHANGED,
             self.__class__,
@@ -170,6 +176,8 @@ class MultiStageProcess(ABC):
             next_step_thread.start()
         else:
             self.status = MultiStageProcessState.COMPLETED
+            if not getattr(self, "result_seen", False):
+                MultiStageProcess.finished_processes.append(self)
             self.event_bus.emit(MultiStageProcessEvent.STATE_CHANGED, self.status)
             try:
                 self._cleanup()

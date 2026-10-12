@@ -3,7 +3,7 @@ import hashlib, os, re, shutil, subprocess, sys, tarfile, urllib.request
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
-from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
+from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState, MultiStageProcessEvent
 from .ssh_connection import quote
 
 # ------------------------------------------------------------------------------
@@ -198,6 +198,18 @@ class LiveIsoDeployment(MultiStageProcess):
         self.log_path = os.path.join(build.path, f"deploy-{datetime.now().strftime('%Y%m%dT%H%M%S')}-live-cd.log")
         self._log_file = None
         super().__init__(title="Deploy Live CD")
+        self.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._notify_project)
+
+    # Status of project in Deploy section follows deployment (running, result until it's seen).
+    def _notify_project(self, *args):
+        from .repository import Repository
+        from .event_bus import SharedEvent
+        project = next((item for item in Repository.ProjectDirectory.value if item.id == self.project_id), None)
+        if project is not None:
+            project.event_bus.emit(SharedEvent.STATE_UPDATED, project)
+
+    def on_result_seen(self):
+        self._notify_project()
 
     @property
     def modified(self) -> bool:
