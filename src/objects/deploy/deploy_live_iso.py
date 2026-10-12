@@ -1,10 +1,14 @@
 from __future__ import annotations
 import hashlib, os, re, shutil, subprocess, sys, tarfile, urllib.request
+from dataclasses import dataclass
+from enum import Enum
+from datetime import datetime
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
 from .ssh_connection import quote
 
 # ------------------------------------------------------------------------------
-# Live CD builds (ISO images) prepared for machines that don't boot them as they are.
+# Deploying live CD builds (ISO images): written to disk of this computer (USB drive, SD card), or saved as new ISO
+# file. ISO is used as it is, or prepared for Raspberry Pi firmware when it has Raspberry Pi kernel.
 #
 # Raspberry Pi firmware doesn't boot ISO images (GRUB on EFI partition): it reads its configuration (config.txt),
 # kernel, initramfs and device trees from FAT partition. New ISO is made from ISO built by catalyst: the same ISO 9660
@@ -95,7 +99,16 @@ def parse_grub_entry(grub_cfg: str) -> tuple[str, str, str | None]:
     initrd = re.search(r"^\s*initrd\s+(\S+)", entry, re.MULTILINE)
     return linux.group(1), linux.group(2).strip(), initrd.group(1) if initrd else None
 
-def raspberry_pi_config(kernel: str, initramfs: str | None) -> str:
+@dataclass
+class RaspberryPiBootSettings:
+    """Boot configuration of ISO prepared for Raspberry Pi firmware."""
+    serial_console: bool = True # Console on serial port (GPIO 14/15, debug connector of Pi 5) too.
+    scan_delay: int = 3 # Seconds initramfs waits for USB disks before searching for live system.
+    extra_arguments: str = "" # Added to kernel arguments.
+    config_lines: str = "dtparam=audio=on\ndisable_overscan=1" # Added to config.txt.
+    older_models_firmware: bool = True # Firmware files of models before Pi 5 (Pi 5 has it in EEPROM).
+
+def raspberry_pi_config(kernel: str, initramfs: str | None, settings: RaspberryPiBootSettings) -> str:
     lines = [
         "# Created by Catalyst Lab: starts live system of this ISO.",
         "# See https://www.raspberrypi.com/documentation/computers/config_txt.html",
@@ -104,72 +117,103 @@ def raspberry_pi_config(kernel: str, initramfs: str | None) -> str:
     ]
     if initramfs:
         lines.append(f"initramfs {initramfs} followkernel")
-    lines += ["dtparam=audio=on", "disable_overscan=1"]
+    lines += [line.strip() for line in settings.config_lines.splitlines() if line.strip()]
     return "\n".join(lines) + "\n"
 
-def raspberry_pi_cmdline(arguments: str) -> str:
-    """Arguments of kernel from GRUB, with console on screen (and serial port) and delay letting USB disks appear before
-    initramfs searches for live system."""
+def raspberry_pi_cmdline(arguments: str, settings: RaspberryPiBootSettings) -> str:
+    """Arguments of kernel from GRUB, with console on screen (and serial port), delay letting USB disks appear before
+    initramfs searches for live system, and own arguments."""
     words = arguments.split()
-    extra = [] if any(word.startswith("console=") for word in words) else ["console=serial0,115200", "console=tty1"]
-    extra += [] if any(word.startswith("scandelay") for word in words) else ["scandelay=3"]
-    return " ".join(extra + words) + "\n"
+    extra = []
+    if not any(word.startswith("console=") for word in words):
+        extra += (["console=serial0,115200"] if settings.serial_console else []) + ["console=tty1"]
+    if settings.scan_delay > 0 and not any(word.startswith("scandelay") for word in words):
+        extra.append(f"scandelay={settings.scan_delay}")
+    return " ".join(extra + words + settings.extra_arguments.split()) + "\n"
 
 # ------------------------------------------------------------------------------
 # Process.
 
-class RaspberryPiIsoCreation(MultiStageProcess):
-    """Creates ISO for Raspberry Pi from live CD build (see top of module)."""
+class LiveIsoTarget(Enum):
+    ISO_FILE = "iso-file" # New ISO next to build.
+    LOCAL_DISK = "local-disk" # Disk of this computer, written with ISO.
 
-    def __init__(self, project_directory, build):
+class LiveIsoDeployment(MultiStageProcess):
+    """Deploys live CD build: ISO is prepared for Raspberry Pi (when raspberry_pi settings are given) and written to
+    disk of this computer (connection running scripts as root) or saved as new ISO file."""
+
+    def __init__(self, project_directory, build, target: LiveIsoTarget, disk=None, disk_connection=None,
+                 raspberry_pi: RaspberryPiBootSettings | None = None):
         self.project_directory = project_directory
         self.project_id = project_directory.id if project_directory else None
         self.build = build
+        self.target = target
+        self.disk = disk # TargetDisk, for LOCAL_DISK.
+        self.disk_connection = disk_connection
+        self.raspberry_pi = raspberry_pi
         self.iso_path = build.artifact_path
-        self.result_path = raspberry_pi_iso_path(build)
-        self.work_directory = os.path.join(build.path, ".raspberry-pi-iso")
-        self.connection = None
+        self.work_directory = os.path.join(build.path, ".live-iso-deploy")
+        if raspberry_pi is None:
+            self.prepared_iso = self.iso_path # Written as it is.
+        elif target == LiveIsoTarget.ISO_FILE:
+            self.prepared_iso = raspberry_pi_iso_path(build)
+        else:
+            self.prepared_iso = os.path.join(self.work_directory, os.path.basename(raspberry_pi_iso_path(build)))
+        self.connection = None # Runs tools preparing ISO.
         self.kernel_name = None # Files in ISO, from GRUB configuration.
         self.kernel_arguments = ""
         self.initramfs_name = None
         self.firmware_directory = None
-        self.log_path = os.path.join(build.path, "raspberry-pi-iso.log")
+        self.log_path = os.path.join(build.path, f"deploy-{datetime.now().strftime('%Y%m%dT%H%M%S')}-live-cd.log")
         self._log_file = None
-        super().__init__(title="Raspberry Pi ISO")
+        super().__init__(title="Deploy Live CD")
 
     def setup_stages(self):
-        self.stages.append(_StepReadIso(multistage_process=self))
-        self.stages.append(_StepFirmware(multistage_process=self))
-        self.stages.append(_StepBootPartition(multistage_process=self))
-        self.stages.append(_StepWriteIso(multistage_process=self))
+        if self.raspberry_pi is not None:
+            self.stages.append(_StepReadIso(multistage_process=self))
+            self.stages.append(_StepFirmware(multistage_process=self))
+            self.stages.append(_StepBootPartition(multistage_process=self))
+            self.stages.append(_StepWriteIso(multistage_process=self))
+        if self.target == LiveIsoTarget.LOCAL_DISK:
+            self.stages.append(_StepWriteDisk(multistage_process=self))
+
+    @property
+    def target_name(self) -> str:
+        return self.disk.path if self.target == LiveIsoTarget.LOCAL_DISK and self.disk else os.path.basename(self.prepared_iso)
+
+    @property
+    def result_path(self) -> str | None:
+        """Created ISO file."""
+        return self.prepared_iso if self.target == LiveIsoTarget.ISO_FILE else None
 
     def name(self) -> str:
-        return os.path.basename(self.result_path)
+        return f"{self.build.stage_name} on {self.target_name}"
 
     def write_log(self, line: str):
         try:
             if self._log_file is None:
-                self._log_file = open(self.log_path, "w", encoding="utf-8", buffering=1)
+                self._log_file = open(self.log_path, "a", encoding="utf-8", buffering=1)
             self._log_file.write(line + "\n")
         except OSError as e:
-            print(f"Failed to write log: {e}")
+            print(f"Failed to write deploy log: {e}")
 
     def complete_process(self, success: bool):
         shutil.rmtree(self.work_directory, ignore_errors=True)
-        if not success:
+        if not success and self.result_path:
             try:
                 os.remove(self.result_path + ".tmp")
             except OSError:
                 pass
-        self.write_log(f"=== {'Created ' + self.result_path if success else 'Failed'}")
+        self.write_log(f"=== Deployment {'completed' if success else 'failed'}" + (f": {self.result_path}" if success and self.result_path else ""))
         if self._log_file:
             self._log_file.close()
             self._log_file = None
-        if self.connection:
-            try:
-                self.connection.close()
-            except Exception as e:
-                print(f"Failed to close connection: {e}")
+        for connection in (self.connection, self.disk_connection):
+            if connection:
+                try:
+                    connection.close()
+                except Exception as e:
+                    print(f"Failed to close connection: {e}")
 
 class _Step(MultiStageProcessStage):
     def log(self, line: str):
@@ -367,6 +411,8 @@ class _StepBootPartition(_Step):
         boot = os.path.join(process.work_directory, "boot")
         # Firmware files and device trees, then kernel files of ISO.
         for name in os.listdir(process.firmware_directory):
+            if not process.raspberry_pi.older_models_firmware and re.match(r"(bootcode\.bin|start.*\.elf|fixup.*\.dat)$", name):
+                continue # Pi 5 has its firmware in EEPROM.
             source = os.path.join(process.firmware_directory, name)
             if os.path.isdir(source):
                 shutil.copytree(source, os.path.join(boot, name))
@@ -375,13 +421,13 @@ class _StepBootPartition(_Step):
         kernel = os.path.basename(process.kernel_name)
         initramfs = os.path.basename(process.initramfs_name) if process.initramfs_name else None
         with open(os.path.join(boot, "config.txt"), "w", encoding="utf-8") as file:
-            file.write(raspberry_pi_config(kernel, initramfs))
+            file.write(raspberry_pi_config(kernel, initramfs, process.raspberry_pi))
         with open(os.path.join(boot, "cmdline.txt"), "w", encoding="utf-8") as file:
-            file.write(raspberry_pi_cmdline(process.kernel_arguments))
+            file.write(raspberry_pi_cmdline(process.kernel_arguments, process.raspberry_pi))
         self.log("config.txt:")
-        for line in raspberry_pi_config(kernel, initramfs).splitlines():
+        for line in raspberry_pi_config(kernel, initramfs, process.raspberry_pi).splitlines():
             self.log(f"  {line}")
-        self.log(f"cmdline.txt: {raspberry_pi_cmdline(process.kernel_arguments).strip()}")
+        self.log(f"cmdline.txt: {raspberry_pi_cmdline(process.kernel_arguments, process.raspberry_pi).strip()}")
         size = sum(os.path.getsize(os.path.join(root, name)) for root, _, names in os.walk(boot) for name in names)
         # FAT32 with 512 byte clusters: files fit with little waste, enough clusters for FAT32 from 64 MiB.
         kib = max(64 * 1024, (size * 12 // 10) // 1024 + 16 * 1024)
@@ -402,7 +448,7 @@ class _StepWriteIso(_Step):
     def run(self):
         process = self.multistage_process
         work = process.work_directory
-        temporary = process.result_path + ".tmp"
+        temporary = process.prepared_iso + ".tmp"
         # Contents and El Torito boot of ISO are kept, boot configuration of Raspberry Pi is added in raspberry-pi folder
         # (xorriso writes new ISO only when its contents change). Partitions in MBR: FAT for Raspberry Pi first (its
         # firmware boots from it), EFI partition second (UEFI machines boot from USB drive with it).
@@ -418,5 +464,32 @@ test -s {quote(temporary)} || {{ echo "ISO was not created"; exit 1; }}
 xorriso -indev {quote(temporary)} -report_system_area plain 2>/dev/null | grep -i "mbr partition" || true
 chmod a+r {quote(temporary)}
 """, "Failed to create ISO")
-        os.replace(temporary, process.result_path)
-        self.log(f"Created {process.result_path} ({os.path.getsize(process.result_path) // (1024 * 1024)} MiB)")
+        os.replace(temporary, process.prepared_iso)
+        self.log(f"Created {process.prepared_iso} ({os.path.getsize(process.prepared_iso) // (1024 * 1024)} MiB)")
+
+class _StepWriteDisk(_Step):
+    def __init__(self, multistage_process):
+        super().__init__(name="Write to disk", description="Writes ISO to disk of this computer",
+                         multistage_process=multistage_process)
+
+    def run(self):
+        process = self.multistage_process
+        connection, disk = process.disk_connection, process.disk
+        if connection is None or not connection.is_alive():
+            raise RuntimeError("Root access ended, start again")
+        if not os.path.isfile(process.prepared_iso):
+            raise RuntimeError("ISO doesn't exist anymore")
+        device = quote(disk.path)
+        # Partitions mounted by desktop (inserted drive) are unmounted, disk is wiped of old signatures.
+        self.remote(f"""set -e
+for partition in $(lsblk -ln -o PATH,MOUNTPOINTS {device} | awk 'NF > 1 {{ print $1 }}'); do
+    echo "Unmounting $partition"; umount "$partition"
+done
+wipefs -a {device} > /dev/null
+""", f"Failed to prepare {disk.path}")
+        size = os.path.getsize(process.prepared_iso)
+        self.log(f"Writing {os.path.basename(process.prepared_iso)} ({size // (1024 * 1024)} MiB) to {disk.path}")
+        if not connection.stream_file(process.prepared_iso, f"dd of={device} bs=4M iflag=fullblock oflag=direct status=none",
+                                      self.log, lambda fraction: self._update_progress(fraction * 0.98), self.processes):
+            raise RuntimeError(f"Failed to write {disk.path}")
+        self.remote(f"sync; blockdev --rereadpt {device} 2>/dev/null || true; echo 'Written'", "Failed to finish writing")

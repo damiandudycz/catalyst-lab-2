@@ -16,6 +16,7 @@ from .app_events import app_event_bus, AppEvents
 from .helper_functions import get_file_size_string
 from .project_build_details import failure_details, format_duration
 from .deploy_installation import is_deployable
+from .deploy_live_iso import is_live_iso_build
 from .deploy_create_view import DeployCreateView
 
 class BuildRowState(Enum):
@@ -190,6 +191,11 @@ class ProjectBuildsView(Gtk.Box):
             button.connect("clicked", lambda _, build=build: app_event_bus.emit(
                 AppEvents.PRESENT_VIEW, DeployCreateView(project_directory=self.project_directory, build=build), "Deploy build", 640, 560))
             row.add_suffix(button)
+        elif build and not running_build and is_live_iso_build(build):
+            button = Gtk.Button(icon_name="deploy-symbolic", tooltip_text="Write to disk or save as ISO for other machine", valign=Gtk.Align.CENTER)
+            button.add_css_class("flat")
+            button.connect("clicked", lambda _, build=build: self._deploy_live_iso(build))
+            row.add_suffix(button)
         if build and build.path and os.path.isdir(build.path):
             button = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Open build folder", valign=Gtk.Align.CENTER)
             button.add_css_class("flat")
@@ -213,6 +219,11 @@ class ProjectBuildsView(Gtk.Box):
 
     # Removing builds
     # --------------------------------------------------------------------------
+
+    def _deploy_live_iso(self, build):
+        from .live_iso_deploy_view import LiveIsoDeployView
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, LiveIsoDeployView(project_directory=self.project_directory, build=build),
+                           "Deploy Live CD", 640, 560)
 
     def _delete_button(self, tooltip: str, heading: str, body: str, builds: list, timestamp: str | None = None) -> Gtk.Button:
         """Removes builds, and record of run with given timestamp (whole run is removed)."""
