@@ -33,7 +33,7 @@ from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cach
 from .project_stage_kernels import (
     live_cd_kernel_warning,
     KERNEL_SETTINGS, KERNEL_SETTING_LEVELS, stage_kernel_names, kernel_setting, own_kernel_settings,
-    set_kernel_setting, kernel_name_error, stage_inherits_kernels, releng_kernel_names, set_kernel_names, remove_kernel,
+    set_kernel_setting, kernel_name_error, stage_inherits_kernels, set_kernel_names, remove_kernel,
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
 from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package, derived_distkernel
@@ -189,7 +189,6 @@ class ProjectStageDetailsView(Gtk.Box):
             return # Target doesn't build kernels.
         names = stage_kernel_names(self.project_directory, self.stage)
         inherits = stage_inherits_kernels(self.stage)
-        releng_names = releng_kernel_names(self.project_directory, self.stage)
         warnings = []
         for name in names:
             row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name,
@@ -209,10 +208,6 @@ class ProjectStageDetailsView(Gtk.Box):
         add_row = Adw.ButtonRow(title="Add kernel", start_icon_name="add-square-svgrepo-com-symbolic")
         add_row.connect("activated", self._on_add_kernel)
         self._add_kernel_row(add_row)
-        if not inherits and releng_names:
-            releng_row = Adw.ButtonRow(title=f"Use kernels of releng spec ({', '.join(releng_names)})")
-            releng_row.connect("activated", lambda _: self._set_kernel_names(None))
-            self._add_kernel_row(releng_row)
         required = "This stage needs at least one kernel. " if self.boot_kernel_argument.required and not names else ""
         releng = "Kernels of releng spec, adding, removing or renaming kernel makes stage use its own list. " if inherits and names else ""
         self.kernels_pref_group.set_description(
@@ -249,10 +244,6 @@ class ProjectStageDetailsView(Gtk.Box):
 
     def _remove_kernel(self, name: str):
         remove_kernel(self.project_directory, self.stage, name)
-        self.load_kernel_rows(True)
-
-    def _set_kernel_names(self, names: list[str] | None):
-        set_kernel_names(self.project_directory, self.stage, names)
         self.load_kernel_rows(True)
 
     def create_row_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesRow:
