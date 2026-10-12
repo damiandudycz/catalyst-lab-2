@@ -90,22 +90,42 @@ def template_tree(repository: str, repository_path: str) -> str | None:
                             capture_output=True, text=True)
     return result.stdout.strip() if result.returncode == 0 else None
 
-def template_update_available(project_path: str) -> bool | None:
-    """Template of project changed since it was generated: tree of template directory in latest commit differs. Only
-    listing of files is downloaded. None when it can't be checked (eg. offline)."""
+def template_update_available(project_directory) -> bool | None:
+    """Update from template would change project: template directory changed in latest commit of its repository, or
+    project generated from the same template by this version of app differs from last generated version (eg. app
+    sets new settings or defaults). None when it can't be checked (eg. offline)."""
+    project_path = project_directory.directory_path()
     state = TemplateState.load(project_path)
     if state is None or not state.repository_url:
         return None
-    with tempfile.TemporaryDirectory() as temporary:
+    with tempfile.TemporaryDirectory(prefix="template-check-") as temporary:
+        repository = os.path.join(temporary, "repository")
         try:
-            _run_git(["git", "clone", "--depth", "1", "--filter=blob:none", "--no-checkout", "--quiet",
-                      state.repository_url, temporary], timeout=60)
+            _run_git(["git", "clone", "--depth", "1", "--quiet", state.repository_url, repository], timeout=60)
         except Exception as e:
             print(f"Failed to check updates of template: {e}")
             return None
         if state.template_tree:
-            return template_tree(temporary, state.repository_path) != state.template_tree
-        return repository_commit(temporary) != state.commit
+            if template_tree(repository, state.repository_path) != state.template_tree:
+                return True
+        elif repository_commit(repository) != state.commit:
+            return True
+        # Same template, generated again and compared with last generated version.
+        base = template_base_commit(project_path)
+        if base is None:
+            return None
+        try:
+            template = ProjectTemplate.load(os.path.join(repository, state.repository_path),
+                                            repository_url=state.repository_url, repository_path=state.repository_path)
+            generated = os.path.join(temporary, "template")
+            os.makedirs(generated)
+            apply_project_template(_RenderTarget(project_directory, generated), template,
+                                   template.resolve(state.selected, project_name=project_directory.name),
+                                   log=lambda message: None, stage_ids=state.uuid_stage_ids)
+            return _read_commit(project_path, base, os.path.join(temporary, "base")).entries != read_project_version(generated).entries
+        except Exception as e:
+            print(f"Failed to generate template to check updates: {e}")
+            return None
 
 # ------------------------------------------------------------------------------
 # Comparing versions.
