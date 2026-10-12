@@ -10,6 +10,8 @@ from .deploy_target import TargetMachine, TargetFirmware, format_size, machine_a
 from .deploy_image import image_supported_reason
 from .local_disk_connection import LocalDiskConnection
 from .item_select_view import ItemSelectionViewEvent
+from .deploy_installation import DeploySystemSettings
+from .deploy_system import LocalizationSettings, local_localization, local_public_keys
 
 class LiveIsoBoot(Enum):
     """How live CD is started."""
@@ -49,6 +51,8 @@ class LiveIsoDeployView(Gtk.Box):
     older_models_row = Gtk.Template.Child()
     kernel_arguments_row = Gtk.Template.Child()
     config_row = Gtk.Template.Child()
+    system_page = Gtk.Template.Child()
+    system_box = Gtk.Template.Child()
     disk_page = Gtk.Template.Child()
     disks_group = Gtk.Template.Child()
     find_disks_button = Gtk.Template.Child()
@@ -92,6 +96,7 @@ class LiveIsoDeployView(Gtk.Box):
         self.config_view.set_size_request(-1, 72)
         self.config_row.add_row(Gtk.ListBoxRow(activatable=False, selectable=False, child=Gtk.Frame(
             child=self.config_view, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)))
+        self._setup_system_page()
         self.methods = self._methods()
         self.method_selection_view.set_static_list(self.methods)
         self.method_selection_view.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.on_method_changed)
@@ -106,14 +111,123 @@ class LiveIsoDeployView(Gtk.Box):
         self.connect("realize", self.on_realize)
         self.connect("unrealize", self.on_unrealize)
 
+    # Live system settings (empty ones keep live CD as it is)
+
+    def _setup_system_page(self):
+        # Status is updated by rows below while they are filled.
+        self.system_status_label = Gtk.Label(wrap=True, xalign=0, visible=False)
+        self.system_status_label.add_css_class("caption")
+        self.system_status_label.add_css_class("error")
+        def group(title: str, description: str | None = None) -> Adw.PreferencesGroup:
+            widget = Adw.PreferencesGroup(title=title, description=description)
+            self.system_box.append(widget)
+            return widget
+        def entry(group_widget, title: str, password: bool = False):
+            row = (Adw.PasswordEntryRow if password else Adw.EntryRow)(title=title)
+            row.connect("changed", self._on_system_changed)
+            (group_widget.add_row if isinstance(group_widget, Adw.ExpanderRow) else group_widget.add)(row)
+            return row
+        system = group("Live system", "Settings changed in live system of ISO. Empty ones keep it as it's built. Live "
+                       "system is unpacked and packed again, which takes several minutes.")
+        self.hostname_row = entry(system, "Hostname")
+        self.root_password_row = entry(system, "Root password", password=True)
+        self.root_password_confirm_row = entry(system, "Confirm root password", password=True)
+        self.ssh_row = Adw.SwitchRow(title="Start SSH server", subtitle="Remote login, with root password or SSH keys")
+        self.ssh_row.connect("notify::active", self._on_system_changed)
+        system.add(self.ssh_row)
+        self.keys_group = group("SSH keys", "Keys of this computer allowed to log in as root and users.")
+        self.key_checks: list[tuple[Gtk.CheckButton, str]] = []
+        for key in local_public_keys():
+            check = Gtk.CheckButton(active=False, valign=Gtk.Align.CENTER)
+            check.connect("toggled", self._on_system_changed)
+            row = Adw.ActionRow(title=GLib.markup_escape_text(key.title), subtitle=GLib.markup_escape_text(key.subtitle))
+            row.add_prefix(check)
+            row.set_activatable_widget(check)
+            self.keys_group.add(row)
+            self.key_checks.append((check, key.key))
+        if not self.key_checks:
+            self.keys_group.add(Adw.ActionRow(title="No SSH keys found in ~/.ssh"))
+        self.users_group = group("Users", "Accounts added to live system. Consoles log in automatically as first user.")
+        self.user_rows = []
+        add_user = Adw.ButtonRow(title="Add user", start_icon_name="add-square-svgrepo-com-symbolic")
+        add_user.connect("activated", self._on_add_user)
+        self.users_group.add(add_user)
+        localization = group("Localization")
+        self.localization_row = Adw.ExpanderRow(title="Change localization", subtitle="Suggested from this computer",
+                                                show_enable_switch=True, enable_expansion=False)
+        self.localization_row.connect("notify::enable-expansion", self._on_system_changed)
+        localization.add(self.localization_row)
+        suggested = local_localization()
+        self.timezone_row = entry(self.localization_row, "Timezone")
+        self.keymap_row = entry(self.localization_row, "Keyboard layout")
+        self.locales_row = entry(self.localization_row, "Locales, first is system language")
+        self.timezone_row.set_text(suggested.timezone)
+        self.keymap_row.set_text(suggested.keymap)
+        self.locales_row.set_text(", ".join(suggested.locales))
+        self.system_box.append(self.system_status_label)
+
+    def _on_add_user(self, row):
+        from .deploy_create_view import UserRow
+        user_row = UserRow(on_changed=lambda: self._on_system_changed(), on_remove=self._remove_user)
+        user_row.set_expanded(True)
+        self.users_group.remove(row)
+        self.users_group.add(user_row)
+        self.users_group.add(row)
+        self.user_rows.append(user_row)
+        self._on_system_changed()
+
+    def _remove_user(self, user_row):
+        self.users_group.remove(user_row)
+        self.user_rows.remove(user_row)
+        self._on_system_changed()
+
+    def _on_system_changed(self, *args):
+        error = self._system_error()
+        self.system_status_label.set_visible(error is not None)
+        self.system_status_label.set_label(error or "")
+        self.wizard_view._refresh_buttons_state()
+
+    def _localization(self) -> LocalizationSettings:
+        if not self.localization_row.get_enable_expansion():
+            return LocalizationSettings()
+        locales = [locale for locale in self.locales_row.get_text().replace(",", " ").split() if locale]
+        return LocalizationSettings(timezone=self.timezone_row.get_text().strip(), locales=locales,
+                                    keymap=self.keymap_row.get_text().strip())
+
+    def _system_error(self) -> str | None:
+        hostname = self.hostname_row.get_text().strip()
+        if hostname and not all(part and len(part) <= 63 and part.replace("-", "").isalnum() for part in hostname.split(".")):
+            return "Invalid hostname"
+        if self.root_password_row.get_text() != self.root_password_confirm_row.get_text():
+            return "Root passwords don't match"
+        names = set()
+        for row in self.user_rows:
+            if error := row.error():
+                return error
+            if row.user().name in names:
+                return f"User {row.user().name} is added more than once"
+            names.add(row.user().name)
+        return self._localization().error()
+
+    def _system_settings(self) -> DeploySystemSettings | None:
+        """Settings applied to live system, None when nothing is changed."""
+        settings = DeploySystemSettings(
+            hostname=self.hostname_row.get_text().strip() or None,
+            root_password=self.root_password_row.get_text() or None,
+            users=[row.user() for row in self.user_rows],
+            enable_ssh=self.ssh_row.get_active(),
+            ssh_keys=[key for check, key in self.key_checks if check.get_active()],
+            localization=self._localization(),
+        )
+        localization = settings.localization
+        changed = (settings.hostname or settings.root_password or settings.users or settings.enable_ssh or settings.ssh_keys
+                   or localization.timezone or localization.locales or localization.keymap)
+        return settings if changed else None
+
     def _methods(self) -> list[LiveIsoMethod]:
         disk_reason = None if sys.platform.startswith("linux") else \
             "Not available: needs Linux, virtual machines on this system can't access disks of this computer"
-        iso_reason = None
-        if not self.raspberry_pi:
-            iso_reason = "Not available: ISO of build is used as it is, it can be written to disk directly"
-        elif reason := image_supported_reason(self.project_directory):
-            iso_reason = reason
+        iso_reason = image_supported_reason(self.project_directory) # Tools run in virtual machine on other systems.
         return [
             LiveIsoMethod(LiveIsoTarget.LOCAL_DISK, "Disk of this computer",
                           "USB drive or SD card connected to this computer, booted later on other machine", disk_reason),
@@ -142,6 +256,8 @@ class LiveIsoDeployView(Gtk.Box):
             return method is not None and not method.unavailable
         if page == self.disk_page:
             return self.selected_disk is not None and self.connection is not None
+        if page == self.system_page:
+            return self._system_error() is None
         return True
 
     @Gtk.Template.Callback()
@@ -273,7 +389,8 @@ class LiveIsoDeployView(Gtk.Box):
             dialog.set_response_appearance("deploy", Adw.ResponseAppearance.DESTRUCTIVE)
         else:
             # Location of new ISO (save dialog asks before replacing existing file).
-            name = os.path.basename(raspberry_pi_iso_path(self.build)) if self._raspberry_pi_settings() else self.build.artifact
+            name = os.path.basename(raspberry_pi_iso_path(self.build)) if self._raspberry_pi_settings() else \
+                self.build.artifact.removesuffix(".iso") + "-custom.iso"
             downloads = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or os.path.expanduser("~")
             file_dialog = Gtk.FileDialog(title="Save ISO", initial_name=name, modal=True,
                                          initial_folder=Gio.File.new_for_path(downloads))
@@ -305,6 +422,7 @@ class LiveIsoDeployView(Gtk.Box):
             disk_connection=self.connection if target == LiveIsoTarget.LOCAL_DISK else None,
             raspberry_pi=self._raspberry_pi_settings(),
             output_path=output_path,
+            system=self._system_settings(),
         )
         if target != LiveIsoTarget.LOCAL_DISK and self.connection:
             threading.Thread(target=self.connection.close, daemon=True).start()

@@ -93,6 +93,46 @@ def tar_extract_command(artifact: str, root: str = MOUNT_POINT) -> str:
         raise RuntimeError(f"Unsupported archive: {artifact}")
     return f"tar -x -p {compression} --xattrs-include='*.*' --numeric-owner -C {quote(root)} -f -"
 
+def system_configuration_script(settings: DeploySystemSettings) -> list[str]:
+    """Lines of script configuring system in $ROOT (prepared with CHROOT_SETUP): hostname, root password, SSH server,
+    localization, users and their SSH keys. Used for installed systems and live systems of ISO images."""
+    script = []
+    if settings.hostname:
+        hostname = quote(settings.hostname)
+        script += [
+            f'echo {hostname} > "$ROOT/etc/hostname"',
+            # OpenRC reads hostname from conf.d.
+            f'[ -f "$ROOT/etc/conf.d/hostname" ] && sed -i "s/^hostname=.*/hostname=\\"$(cat "$ROOT/etc/hostname")\\"/" "$ROOT/etc/conf.d/hostname"',
+            f'echo "Hostname set to {settings.hostname}"',
+        ]
+    if settings.root_password:
+        # Password is sent in script (stdin of ssh), not as command argument.
+        script += [f"echo {quote('root:' + settings.root_password)} | chroot \"$ROOT\" chpasswd", 'echo "Root password set"']
+    if settings.enable_ssh:
+        script += [
+            'if [ -x "$ROOT/sbin/openrc-run" ] || [ -x "$ROOT/usr/bin/openrc-run" ] || [ -d "$ROOT/etc/runlevels" ]; then',
+            '    if [ -e "$ROOT/etc/init.d/sshd" ]; then ln -sf /etc/init.d/sshd "$ROOT/etc/runlevels/default/sshd"; echo "SSH server enabled (OpenRC)"; else echo "Warning: SSH server is not installed in stage"; fi',
+            'elif [ -e "$ROOT/usr/lib/systemd/system/sshd.service" ]; then',
+            '    mkdir -p "$ROOT/etc/systemd/system/multi-user.target.wants"',
+            '    ln -sf /usr/lib/systemd/system/sshd.service "$ROOT/etc/systemd/system/multi-user.target.wants/sshd.service"',
+            '    echo "SSH server enabled (systemd)"',
+            'else',
+            '    echo "Warning: SSH server is not installed in stage"',
+            'fi',
+        ]
+    script.append(localization_script(settings.localization))
+    for user in settings.users:
+        # Groups missing in stage are skipped.
+        groups = " ".join(quote(group) for group in user.groups)
+        script += [
+            f'GROUPS_LIST=""; for group in {groups}; do if grep -q "^$group:" "$ROOT/etc/group"; then GROUPS_LIST="$GROUPS_LIST${{GROUPS_LIST:+,}}$group"; else echo "Group $group doesn\'t exist, skipped"; fi; done',
+            f'chroot "$ROOT" useradd -m -s /bin/bash -c {quote(user.gecos)} ${{GROUPS_LIST:+-G "$GROUPS_LIST"}} {quote(user.name)}',
+            f"echo {quote(user.name + ':' + user.password)} | chroot \"$ROOT\" chpasswd",
+            f'echo "User {user.name} created${{GROUPS_LIST:+, groups $GROUPS_LIST}}"',
+        ]
+    script.append(authorized_keys_script(settings.ssh_keys, [user.name for user in settings.users]))
+    return script
+
 class DeployInstallation(MultiStageProcess):
     """Installs stage build on disk of machine connected through SSH, or on disk of this computer (connection is
     LocalDiskConnection, plan has own mount point)."""
@@ -108,6 +148,7 @@ class DeployInstallation(MultiStageProcess):
         self.settings = settings
         self.contents = contents
         self.root = plan.root
+        self.output_path: str | None = None # Image saved where user selected (image is created next to build).
         self.mounted = False
         self._log_file = None
         self.log_path = self._new_log_path()
@@ -139,6 +180,8 @@ class DeployInstallation(MultiStageProcess):
             self.stages.append(DeployStepShrinkImage(multistage_process=self))
             if self.plan.compress_image:
                 self.stages.append(DeployStepCompressImage(multistage_process=self))
+            from .deploy_image_steps import DeployStepSaveImage
+            self.stages.append(DeployStepSaveImage(multistage_process=self))
 
     @property
     def target_name(self) -> str:
@@ -148,11 +191,16 @@ class DeployInstallation(MultiStageProcess):
         return self.plan.disk.path if self.machine.local else self.connection.host
 
     @property
-    def result_path(self) -> str | None:
-        """Created image file."""
+    def created_image_path(self) -> str | None:
+        """Image file created next to build."""
         if not self.plan.image:
             return None
         return self.plan.image_path + (".xz" if self.plan.compress_image else "")
+
+    @property
+    def result_path(self) -> str | None:
+        """Created image file, in location selected by user."""
+        return self.output_path or self.created_image_path
 
     def name(self) -> str:
         return f"{self.build.stage_name} on {self.target_name}"
@@ -342,40 +390,7 @@ class DeployStepConfigure(DeployStep):
         self.remote(process.plan.fstab_script(), "Failed to write fstab")
         # Commands run in installed system (locale-gen, useradd, chpasswd) need /proc, /sys and /dev mounted there.
         script = ["set -e", f"ROOT={quote(process.root)}", CHROOT_SETUP]
-        if settings.hostname:
-            hostname = quote(settings.hostname)
-            script += [
-                f'echo {hostname} > "$ROOT/etc/hostname"',
-                # OpenRC reads hostname from conf.d.
-                f'[ -f "$ROOT/etc/conf.d/hostname" ] && sed -i "s/^hostname=.*/hostname=\\"$(cat "$ROOT/etc/hostname")\\"/" "$ROOT/etc/conf.d/hostname"',
-                f'echo "Hostname set to {settings.hostname}"',
-            ]
-        if settings.root_password:
-            # Password is sent in script (stdin of ssh), not as command argument.
-            script += [f"echo {quote('root:' + settings.root_password)} | chroot \"$ROOT\" chpasswd", 'echo "Root password set"']
-        if settings.enable_ssh:
-            script += [
-                'if [ -x "$ROOT/sbin/openrc-run" ] || [ -x "$ROOT/usr/bin/openrc-run" ] || [ -d "$ROOT/etc/runlevels" ]; then',
-                '    if [ -e "$ROOT/etc/init.d/sshd" ]; then ln -sf /etc/init.d/sshd "$ROOT/etc/runlevels/default/sshd"; echo "SSH server enabled (OpenRC)"; else echo "Warning: SSH server is not installed in stage"; fi',
-                'elif [ -e "$ROOT/usr/lib/systemd/system/sshd.service" ]; then',
-                '    mkdir -p "$ROOT/etc/systemd/system/multi-user.target.wants"',
-                '    ln -sf /usr/lib/systemd/system/sshd.service "$ROOT/etc/systemd/system/multi-user.target.wants/sshd.service"',
-                '    echo "SSH server enabled (systemd)"',
-                'else',
-                '    echo "Warning: SSH server is not installed in stage"',
-                'fi',
-            ]
-        script.append(localization_script(settings.localization))
-        for user in settings.users:
-            # Groups missing in stage are skipped.
-            groups = " ".join(quote(group) for group in user.groups)
-            script += [
-                f'GROUPS_LIST=""; for group in {groups}; do if grep -q "^$group:" "$ROOT/etc/group"; then GROUPS_LIST="$GROUPS_LIST${{GROUPS_LIST:+,}}$group"; else echo "Group $group doesn\'t exist, skipped"; fi; done',
-                f'chroot "$ROOT" useradd -m -s /bin/bash -c {quote(user.gecos)} ${{GROUPS_LIST:+-G "$GROUPS_LIST"}} {quote(user.name)}',
-                f"echo {quote(user.name + ':' + user.password)} | chroot \"$ROOT\" chpasswd",
-                f'echo "User {user.name} created${{GROUPS_LIST:+, groups $GROUPS_LIST}}"',
-            ]
-        script.append(authorized_keys_script(settings.ssh_keys, [user.name for user in settings.users]))
+        script += system_configuration_script(settings)
         # Stage3 doesn't contain kernel, system can't boot without it.
         if settings.kernel in (Kernel.STAGE, Kernel.NONE):
             script += [

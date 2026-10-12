@@ -81,8 +81,13 @@ class _UserConnection:
             output_handler(line.rstrip("\n"))
         return process.wait() == 0
 
-def _connection(project_directory):
+def _connection(project_directory, root: bool):
+    """Runs tools preparing ISO. Live system is unpacked as root (owners of its files are kept), in working space of
+    virtual machine on other systems than Linux."""
     if sys.platform.startswith("linux"):
+        if root:
+            from .local_disk_connection import LocalDiskConnection
+            return LocalDiskConnection()
         return _UserConnection()
     from .deploy_image import MachineRootConnection, image_machine
     return MachineRootConnection(image_machine(project_directory))
@@ -143,7 +148,7 @@ class LiveIsoDeployment(MultiStageProcess):
     disk of this computer (connection running scripts as root) or saved as new ISO file."""
 
     def __init__(self, project_directory, build, target: LiveIsoTarget, disk=None, disk_connection=None,
-                 raspberry_pi: RaspberryPiBootSettings | None = None, output_path: str | None = None):
+                 raspberry_pi: RaspberryPiBootSettings | None = None, output_path: str | None = None, system=None):
         self.project_directory = project_directory
         self.project_id = project_directory.id if project_directory else None
         self.build = build
@@ -151,12 +156,15 @@ class LiveIsoDeployment(MultiStageProcess):
         self.disk = disk # TargetDisk, for LOCAL_DISK.
         self.disk_connection = disk_connection
         self.raspberry_pi = raspberry_pi
+        self.system = system # DeploySystemSettings applied to live system (repacked), None keeps it unchanged.
         self.iso_path = build.artifact_path
+        self.live_directory = None # Live system unpacked and packed again, where tools run.
+        self._workspace_machine = None
         self.work_directory = os.path.join(build.path, ".live-iso-deploy")
         # ISO file selected by user (ISO_FILE). ISO is prepared in build folder (shared with virtual machine), then
         # moved there.
         self.output_path = output_path
-        if raspberry_pi is None:
+        if not self.modified:
             self.prepared_iso = self.iso_path # Written as it is.
         else:
             self.prepared_iso = os.path.join(self.work_directory, os.path.basename(raspberry_pi_iso_path(build)))
@@ -169,11 +177,21 @@ class LiveIsoDeployment(MultiStageProcess):
         self._log_file = None
         super().__init__(title="Deploy Live CD")
 
+    @property
+    def modified(self) -> bool:
+        """New ISO is made (boot partition for Raspberry Pi, or configured live system)."""
+        return self.raspberry_pi is not None or self.system is not None
+
     def setup_stages(self):
+        if self.modified:
+            self.stages.append(_StepPrepare(multistage_process=self))
         if self.raspberry_pi is not None:
             self.stages.append(_StepReadIso(multistage_process=self))
             self.stages.append(_StepFirmware(multistage_process=self))
             self.stages.append(_StepBootPartition(multistage_process=self))
+        if self.system is not None:
+            self.stages.append(_StepLiveSystem(multistage_process=self))
+        if self.modified:
             self.stages.append(_StepWriteIso(multistage_process=self))
         if self.target == LiveIsoTarget.LOCAL_DISK:
             self.stages.append(_StepWriteDisk(multistage_process=self))
@@ -203,6 +221,14 @@ class LiveIsoDeployment(MultiStageProcess):
             print(f"Failed to write deploy log: {e}")
 
     def complete_process(self, success: bool):
+        if self.live_directory and self.connection:
+            try:
+                self.connection.run(f"umount -R -l {quote(self.live_directory)}/root/* 2>/dev/null; rm -rf {quote(self.live_directory)}", self.write_log)
+            except Exception as e:
+                print(f"Failed to remove live system: {e}")
+        if self._workspace_machine:
+            self._workspace_machine.release_workspace(user="Deploy Live CD")
+            self._workspace_machine = None
         shutil.rmtree(self.work_directory, ignore_errors=True)
         if not success and self.output_path:
             try:
@@ -249,6 +275,100 @@ class _Step(MultiStageProcessStage):
             if process.poll() is None:
                 process.terminate()
 
+class _StepPrepare(_Step):
+    def __init__(self, multistage_process):
+        super().__init__(name="Prepare", description="Checks tools that make new ISO", multistage_process=multistage_process)
+
+    def run(self):
+        process = self.multistage_process
+        if not os.path.isfile(process.iso_path):
+            raise RuntimeError("ISO of build doesn't exist anymore")
+        process.connection = _connection(process.project_directory, root=process.system is not None)
+        if error := process.connection.connect():
+            raise RuntimeError(error)
+        tools = ["xorriso"] + (["mkfs.vfat", "mcopy"] if process.raspberry_pi is not None else []) \
+            + (["unsquashfs", "mksquashfs", "chroot"] if process.system is not None else [])
+        self.remote(f"""
+missing=""
+for tool in {" ".join(tools)}; do command -v "$tool" > /dev/null || missing="$missing $tool"; done
+[ -z "$missing" ] || {{ echo "Missing tools:$missing (packages xorriso, dosfstools, mtools and squashfs-tools)"; exit 1; }}
+""", "Tools needed to create ISO are missing")
+        shutil.rmtree(process.work_directory, ignore_errors=True)
+        os.makedirs(process.work_directory)
+        if process.system is not None:
+            # Live system is unpacked in working space of virtual machine, or in /var/tmp (own filesystem keeps
+            # owners and special files).
+            import uuid
+            machine = getattr(process.connection, "machine", None)
+            if machine is not None:
+                from .lima import MACHINE_DATA_DIRECTORY
+                machine.acquire_workspace(self.log, self.processes, user="Deploy Live CD")
+                process._workspace_machine = machine
+                process.live_directory = f"{MACHINE_DATA_DIRECTORY}/Temporary/live-iso-{uuid.uuid4().hex[:8]}"
+            else:
+                process.live_directory = f"/var/tmp/catalystlab-live-iso-{uuid.uuid4().hex[:8]}"
+
+# Changes of live CD (Gentoo livecd-tools): root password is scrambled at boot by pwgen service, unless it's set
+# (pwgen does nothing then). SSH server is started by autoconfig when enabled in its configuration.
+_LIVE_PWGEN = """#!/sbin/openrc-run
+# Root password was set by Catalyst Lab, it's not scrambled.
+depend() {
+	before local
+}
+start() {
+	einfo "Root password set by Catalyst Lab is kept"
+}
+"""
+
+def live_system_script(live_directory: str, iso_path: str, system) -> str:
+    """Unpacks live system of ISO, configures it like installed system and packs it again (same compression)."""
+    from .deploy_boot import CHROOT_SETUP
+    from .deploy_installation import system_configuration_script
+    from .deploy_system import network_script, NetworkService
+    import base64
+    live = quote(live_directory)
+    lines = ["set -e", f"L={live}", 'rm -rf "$L"; mkdir -p "$L"',
+             f'xorriso -osirrox on -indev {quote(iso_path)} -extract /image.squashfs "$L/original.squashfs" 2>&1 | grep -v "^xorriso : UPDATE" || true',
+             'test -s "$L/original.squashfs" || { echo "ISO has no live system (image.squashfs)"; exit 1; }',
+             'INFO=$(unsquashfs -s "$L/original.squashfs")',
+             'COMPRESSION=$(echo "$INFO" | awk \'/^Compression/ { print $2 }\')',
+             'BLOCK=$(echo "$INFO" | awk \'/^Block size/ { print $3 }\')',
+             'echo "Unpacking live system (${COMPRESSION:-gzip} compression)"',
+             'unsquashfs -no-progress -d "$L/root" "$L/original.squashfs" > /dev/null',
+             'rm -f "$L/original.squashfs"',
+             'ROOT="$L/root"',
+             # Name resolution of this machine is used in chroot, live system gets its own back.
+             '[ -e "$ROOT/etc/resolv.conf" ] || [ -L "$ROOT/etc/resolv.conf" ] && mv "$ROOT/etc/resolv.conf" "$L/resolv.conf"',
+             CHROOT_SETUP]
+    lines += system_configuration_script(system)
+    if system.network.service != NetworkService.NONE:
+        lines.append(network_script(system.network))
+    if system.root_password:
+        encoded = base64.b64encode(_LIVE_PWGEN.encode()).decode()
+        lines.append(f'[ -e "$ROOT/etc/init.d/pwgen" ] && echo {encoded} | base64 -d > "$ROOT/etc/init.d/pwgen" && echo "Root password is not scrambled at boot"')
+    if system.enable_ssh:
+        lines.append('[ -f "$ROOT/etc/conf.d/autoconfig" ] && sed -i \'s/^SSHD=.*/SSHD="yes"/\' "$ROOT/etc/conf.d/autoconfig" && echo "SSH server started at boot"')
+    if system.localization.keymap:
+        lines.append('[ -e "$ROOT/etc/init.d/keymaps" ] && [ -d "$ROOT/etc/runlevels/boot" ] && ln -sf /etc/init.d/keymaps "$ROOT/etc/runlevels/boot/keymaps"')
+    lines += [
+        'umount -l "$ROOT/run" "$ROOT/dev" "$ROOT/sys" "$ROOT/proc" 2>/dev/null || true', "trap - EXIT",
+        'rm -f "$ROOT/etc/resolv.conf"; [ -e "$L/resolv.conf" ] || [ -L "$L/resolv.conf" ] && mv "$L/resolv.conf" "$ROOT/etc/resolv.conf"',
+        'echo "Packing live system"',
+        'mksquashfs "$ROOT" "$L/image.squashfs" -noappend -no-progress ${COMPRESSION:+-comp "$COMPRESSION"} ${BLOCK:+-b "$BLOCK"} > /dev/null',
+        'rm -rf "$ROOT"',
+        'echo "Live system: $(du -m "$L/image.squashfs" | cut -f1) MiB"',
+    ]
+    return "\n".join(lines) + "\n"
+
+class _StepLiveSystem(_Step):
+    def __init__(self, multistage_process):
+        super().__init__(name="Configure live system", description="Unpacks live system, applies settings and packs it again",
+                         multistage_process=multistage_process)
+
+    def run(self):
+        process = self.multistage_process
+        self.remote(live_system_script(process.live_directory, process.iso_path, process.system), "Failed to configure live system")
+
 class _StepReadIso(_Step):
     def __init__(self, multistage_process):
         super().__init__(name="Read ISO", description="Reads kernel, its arguments and EFI partition of ISO",
@@ -258,17 +378,6 @@ class _StepReadIso(_Step):
         process = self.multistage_process
         if not os.path.isfile(process.iso_path):
             raise RuntimeError("ISO of build doesn't exist anymore")
-        process.connection = _connection(process.project_directory)
-        if error := process.connection.connect():
-            raise RuntimeError(error)
-        tools = " ".join(_REQUIRED_TOOLS)
-        self.remote(f"""
-missing=""
-for tool in {tools}; do command -v "$tool" > /dev/null || missing="$missing $tool"; done
-[ -z "$missing" ] || {{ echo "Missing tools:$missing (packages xorriso, dosfstools and mtools)"; exit 1; }}
-""", "Tools needed to create ISO are missing")
-        shutil.rmtree(process.work_directory, ignore_errors=True)
-        os.makedirs(process.work_directory)
         work, iso = quote(process.work_directory), quote(process.iso_path)
         self.remote(f"""set -e
 xorriso -osirrox on -indev {iso} -extract /boot/grub/grub.cfg {work}/grub.cfg -extract /efi.img {work}/efi.img 2>&1 | grep -v '^xorriso : UPDATE' || true
@@ -447,30 +556,38 @@ mcopy -s -i {quote(image)} ./* ::/
 
 class _StepWriteIso(_Step):
     def __init__(self, multistage_process):
-        super().__init__(name="Create ISO", description="Writes ISO with boot partition for Raspberry Pi",
-                         multistage_process=multistage_process)
+        super().__init__(name="Create ISO", description="Writes new ISO with changes", multistage_process=multistage_process)
 
     def run(self):
         process = self.multistage_process
         work = process.work_directory
         temporary = process.prepared_iso + ".tmp"
-        # Contents and El Torito boot of ISO are kept, boot configuration of Raspberry Pi is added in raspberry-pi folder
-        # (xorriso writes new ISO only when its contents change). Partitions in MBR: FAT for Raspberry Pi first (its
-        # firmware boots from it), EFI partition second (UEFI machines boot from USB drive with it).
+        # Contents and El Torito boot of ISO are kept (xorriso writes new ISO only when its contents change).
+        arguments = []
+        if process.raspberry_pi is not None:
+            # Boot configuration of Raspberry Pi in raspberry-pi folder. Partitions in MBR: FAT for Raspberry Pi first
+            # (its firmware boots from it), EFI partition second (UEFI machines boot from USB drive with it).
+            arguments += ["-boot_image any keep",
+                          f"-map {quote(os.path.join(work, 'boot', 'config.txt'))} /raspberry-pi/config.txt",
+                          f"-map {quote(os.path.join(work, 'boot', 'cmdline.txt'))} /raspberry-pi/cmdline.txt",
+                          f"-append_partition 1 0x0c {quote(os.path.join(work, 'boot.img'))}",
+                          f"-append_partition 2 0xef {quote(os.path.join(work, 'efi.img'))}"]
+        else:
+            arguments.append("-boot_image any replay") # Partitions of ISO (boot from USB drive) are kept too.
+        if process.system is not None:
+            arguments.append(f"-map {quote(process.live_directory + '/image.squashfs')} /image.squashfs")
+        options = " \\\n    ".join(arguments)
         self.remote(f"""set -e
 rm -f {quote(temporary)}
-xorriso -indev {quote(process.iso_path)} -outdev {quote(temporary)} -boot_image any keep \\
-    -map {quote(os.path.join(work, "boot", "config.txt"))} /raspberry-pi/config.txt \\
-    -map {quote(os.path.join(work, "boot", "cmdline.txt"))} /raspberry-pi/cmdline.txt \\
-    -append_partition 1 0x0c {quote(os.path.join(work, "boot.img"))} \\
-    -append_partition 2 0xef {quote(os.path.join(work, "efi.img"))} \\
+xorriso -indev {quote(process.iso_path)} -outdev {quote(temporary)} \\
+    {options} \\
     -commit 2>&1 | grep -v '^xorriso : UPDATE' || true
 test -s {quote(temporary)} || {{ echo "ISO was not created"; exit 1; }}
-xorriso -indev {quote(temporary)} -report_system_area plain 2>/dev/null | grep -i "mbr partition" || true
+xorriso -indev {quote(temporary)} -report_system_area plain 2>/dev/null | grep -i "partition" || true
 chmod a+r {quote(temporary)}
 """, "Failed to create ISO")
         os.replace(temporary, process.prepared_iso)
-        self.log(f"Created {process.prepared_iso} ({os.path.getsize(process.prepared_iso) // (1024 * 1024)} MiB)")
+        self.log(f"Created ISO ({os.path.getsize(process.prepared_iso) // (1024 * 1024)} MiB)")
 
 class _StepWriteDisk(_Step):
     def __init__(self, multistage_process):

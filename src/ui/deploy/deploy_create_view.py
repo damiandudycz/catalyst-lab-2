@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, shutil, sys, threading
 from enum import Enum
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Gio
 import re
 from .deploy_installation import DeployInstallation, DeploySystemSettings, DeployUser, DEFAULT_USER_GROUPS, local_mount_point
 from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, default_bootloader, bootloader_warnings
@@ -56,7 +56,7 @@ class DeployMethod(Enum):
         description = {
             DeployMethod.SSH: "Other machine booted from Gentoo LiveCD, installed through SSH connection",
             DeployMethod.LOCAL_DISK: "SD card or external disk connected to this computer, booted later on other machine",
-            DeployMethod.IMAGE_FILE: "Image (.img.xz) saved next to build, written later to SD card or disk with Raspberry Pi Imager or dd. "
+            DeployMethod.IMAGE_FILE: "Image (.img.xz) saved where you choose, written later to SD card or disk with Raspberry Pi Imager or dd. "
                                      "It's sized to the system and grows to fill the disk at first start",
         }[self]
         return self.unavailable_reason or description
@@ -421,7 +421,7 @@ class DeployCreateView(Gtk.Box):
         if machine and machine.image:
             self.machine_row.set_title(GLib.markup_escape_text(f"Image {os.path.basename(machine.disks[0].path)}"))
             creator = f" by {self.connection.host}" if self.connection.host.startswith("virtual machine") else ""
-            self.machine_row.set_subtitle(GLib.markup_escape_text(f"{machine.description}\nCreated in {os.path.dirname(machine.disks[0].path)}{creator}"))
+            self.machine_row.set_subtitle(GLib.markup_escape_text(f"{machine.description}\nPrepared in build folder{creator}, saved where you choose when deploying"))
             if not self.hostname_row.get_text():
                 self.hostname_row.set_text("gentoo")
             self._update_boot_options()
@@ -831,14 +831,14 @@ class DeployCreateView(Gtk.Box):
             return
         owner = "this computer" if self.machine.local else self.connection.host
         if plan.image:
-            dialog = Adw.AlertDialog(
-                heading="Create image?",
-                body=f"{self.build.stage_name} will be installed in image {os.path.basename(plan.image_path)}"
-                     f"{'.xz' if plan.compress_image else ''} in {os.path.dirname(plan.image_path)}."
-            )
-            dialog.add_response("cancel", "Cancel")
-            dialog.add_response("deploy", "Create image")
-            dialog.set_response_appearance("deploy", Adw.ResponseAppearance.SUGGESTED)
+            # Location of image (save dialog asks before replacing existing file). Image is created next to build,
+            # where virtual machine can write, and moved there.
+            name = os.path.basename(plan.image_path) + (".xz" if plan.compress_image else "")
+            downloads = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or os.path.expanduser("~")
+            file_dialog = Gtk.FileDialog(title="Save image", initial_name=name, modal=True,
+                                         initial_folder=Gio.File.new_for_path(downloads))
+            file_dialog.save(self.get_root(), None, self._on_image_location_selected, plan)
+            return
         else:
             dialog = Adw.AlertDialog(
                 heading="Erase disk?",
@@ -852,7 +852,15 @@ class DeployCreateView(Gtk.Box):
         dialog.connect("response", self._on_confirm_response, plan)
         dialog.present(self.get_root())
 
-    def _on_confirm_response(self, dialog, response: str, plan: PartitionPlan):
+    def _on_image_location_selected(self, file_dialog, result, plan: PartitionPlan):
+        try:
+            file = file_dialog.save_finish(result)
+        except GLib.Error:
+            return # Cancelled.
+        if file and file.get_path():
+            self._on_confirm_response(None, "deploy", plan, output_path=file.get_path())
+
+    def _on_confirm_response(self, dialog, response: str, plan: PartitionPlan, output_path: str | None = None):
         if response != "deploy":
             return
         if self.machine.local:
@@ -876,6 +884,7 @@ class DeployCreateView(Gtk.Box):
             contents=self.contents or StageContents(),
         )
         installation.project_id = self.project_directory.id if self.project_directory else None
+        installation.output_path = output_path
         self.installation_in_progress = installation
         installation.start()
         self.wizard_view.set_installation(installation)

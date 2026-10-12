@@ -120,7 +120,27 @@
           </object>
         </child>
 
-        <!-- Page 3: Disk -->
+        <!-- Page 3: Live system -->
+        <child>
+          <object class="GtkScrolledWindow" id="system_page">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="hexpand">True</property>
+            <property name="vexpand">True</property>
+            <child>
+              <object class="GtkBox" id="system_box">
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-top">4</property>
+                <property name="margin-bottom">4</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">24</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Page 4: Disk -->
         <child>
           <object class="GtkScrolledWindow" id="disk_page">
             <property name="hscrollbar-policy">never</property>

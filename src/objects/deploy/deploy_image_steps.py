@@ -63,3 +63,30 @@ class DeployStepCompressImage(DeployStep):
         super().__init__(name="Compress image", description="Compresses image with xz", multistage_process=multistage_process)
     def run(self):
         self.remote(compress_image_script(self.multistage_process.plan.image_path), "Failed to compress image")
+
+class DeployStepSaveImage(DeployStep):
+    def __init__(self, multistage_process):
+        super().__init__(name="Save image", description="Moves image to selected location", multistage_process=multistage_process)
+    def run(self):
+        import os, shutil
+        process = self.multistage_process
+        source, destination = process.created_image_path, process.output_path
+        if not destination or destination == source:
+            self.log(f"Image: {source}")
+            return
+        if not os.path.isfile(source):
+            raise RuntimeError("Created image doesn't exist")
+        # Moved within the same disk, copied to other one (with progress) and removed.
+        try:
+            os.replace(source, destination)
+        except OSError:
+            size = os.path.getsize(source) or 1
+            copied = 0
+            with open(source, "rb") as input_file, open(destination + ".part", "wb") as output_file:
+                while chunk := input_file.read(8 * 1024 * 1024):
+                    output_file.write(chunk)
+                    copied += len(chunk)
+                    self._update_progress(copied / size * 0.99)
+            os.replace(destination + ".part", destination)
+            os.remove(source)
+        self.log(f"Image: {destination}")
