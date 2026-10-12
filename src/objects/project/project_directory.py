@@ -162,13 +162,17 @@ class ProjectDirectory(GitDirectory):
 
     @property
     def deploy_status_indicator_values(self):
-        """Blinking indicator while build of project is being deployed."""
+        """Deploy section: blinking while build of project is being deployed, result of finished deployment until it's
+        seen."""
         from .deploy_installation import DeployInstallation
-        from .multistage_process import MultiStageProcess, MultiStageProcessState
-        from .status_indicator import StatusIndicatorState, StatusDetail, item_status
-        deploying = any(process.project_id == self.id and process.status == MultiStageProcessState.IN_PROGRESS
-                        for process in MultiStageProcess.get_started_processes_by_class(DeployInstallation))
-        return item_status([StatusDetail(StatusIndicatorState.LOADED, "Deploying") if deploying else None], blinking=deploying)
+        from .deploy_live_iso import LiveIsoDeployment
+        from .multistage_process import MultiStageProcess
+        from .status_indicator import item_status, process_result_status
+        processes = [process for process in dict.fromkeys(MultiStageProcess.started_processes + MultiStageProcess.finished_processes)
+                     if isinstance(process, (DeployInstallation, LiveIsoDeployment)) and getattr(process, "project_id", None) == self.id]
+        values = [value for process in processes if (value := process_result_status(process)) is not None]
+        return item_status([detail for value in values for detail in value.details],
+                           blinking=any(value.blinking for value in values))
 
     def initialize_metadata(self) -> ProjectConfiguration:
         if not self.metadata:

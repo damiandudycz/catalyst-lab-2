@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, re
 from dataclasses import dataclass, field
-from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
+from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState, MultiStageProcessEvent
 from .ssh_connection import SSHConnection, quote
 from .deploy_target import TargetMachine, PartitionPlan, PartitionType
 from .deploy_boot import Bootloader, Kernel, FIRMWARE_PACKAGE, StageContents, packages_script, bootloader_script, grub_platform, CHROOT_SETUP
@@ -153,6 +153,18 @@ class DeployInstallation(MultiStageProcess):
         self._log_file = None
         self.log_path = self._new_log_path()
         super().__init__(title="Deploy")
+        self.event_bus.subscribe(MultiStageProcessEvent.STATE_CHANGED, self._notify_project)
+
+    # Status of project in Deploy section follows deployment (running, result until it's seen).
+    def _notify_project(self, *args):
+        from .repository import Repository
+        from .event_bus import SharedEvent
+        project = next((item for item in Repository.ProjectDirectory.value if item.id == self.project_id), None)
+        if project is not None:
+            project.event_bus.emit(SharedEvent.STATE_UPDATED, project)
+
+    def on_result_seen(self):
+        self._notify_project()
 
     def setup_stages(self):
         if self.plan.image:

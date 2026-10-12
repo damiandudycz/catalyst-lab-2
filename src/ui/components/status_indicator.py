@@ -169,16 +169,31 @@ def items_status(items, property_name: str = "status_indicator_values") -> list[
             print(f"Failed to read status of {item}: {e}")
     return result
 
+def process_result_status(process) -> StatusIndicatorValues | None:
+    """Running process blinks, finished one shows its result (completed, failed) until it's seen."""
+    from .multistage_process import MultiStageProcessState
+    if process.status == MultiStageProcessState.IN_PROGRESS:
+        return status_values(StatusIndicatorState.LOADED, blinking=True, description=process.title)
+    if getattr(process, "result_seen", False):
+        return None
+    if process.status == MultiStageProcessState.COMPLETED:
+        return status_values(StatusIndicatorState.SUCCEEDED, description=f"{process.title} completed")
+    if process.status == MultiStageProcessState.FAILED:
+        return status_values(StatusIndicatorState.ERROR, description=f"{process.title} failed")
+    return None
+
 def processes_status(*process_classes) -> list[StatusEntry]:
-    """Running processes (installations, updates, builds) of given classes, as blinking indicators."""
-    from .multistage_process import MultiStageProcess, MultiStageProcessState
-    return [
-        StatusEntry(key=("process", id(process)), label=process.name(),
-                    values=status_values(StatusIndicatorState.LOADED, blinking=True, description=process.title))
-        for process_class in process_classes
-        for process in MultiStageProcess.get_started_processes_by_class(process_class)
-        if process.status == MultiStageProcessState.IN_PROGRESS
-    ]
+    """Processes (installations, updates, builds, deploys) of given classes: running ones as blinking indicators,
+    finished ones with their result until it's seen."""
+    from .multistage_process import MultiStageProcess
+    processes = list(dict.fromkeys(MultiStageProcess.started_processes + MultiStageProcess.finished_processes))
+    entries = []
+    for process in processes:
+        if not isinstance(process, process_classes):
+            continue
+        if (values := process_result_status(process)) is not None:
+            entries.append(StatusEntry(key=("process", id(process)), label=process.name(), values=values))
+    return entries
 
 # Results (eg. completed or failed build), warnings and errors are reported in side menu until their section is opened.
 _HIDDEN_WHEN_SEEN = {StatusIndicatorState.SUCCEEDED, StatusIndicatorState.WARNING, StatusIndicatorState.ERROR}

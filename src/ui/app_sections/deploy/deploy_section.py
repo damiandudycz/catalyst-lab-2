@@ -1,6 +1,7 @@
 from gi.repository import Gtk, Adw
 from .app_section import app_section
 from .deploy_installation import DeployInstallation
+from .deploy_live_iso import LiveIsoDeployment
 from .status_indicator import items_status, processes_status
 from .app_events import app_event_bus, AppEvents
 from .deploy_create_view import DeployCreateView
@@ -13,8 +14,8 @@ class DeploySection(Gtk.Box):
 
     @staticmethod
     def section_status():
-        """Deployment running (side menu)."""
-        return processes_status(DeployInstallation)
+        """Deployments running, or finished and not seen (side menu)."""
+        return processes_status(DeployInstallation, LiveIsoDeployment)
 
     def __init__(self, content_navigation_view: Adw.NavigationView, **kwargs):
         super().__init__(**kwargs)
