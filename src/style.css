@@ -64,3 +64,7 @@ button.small-button {
 row.expander:checked row.expander:not(:checked) image.expander-row-arrow { opacity: var(--dim-opacity); color: inherit; }
 row.expander:checked row.expander:not(:checked) image.expander-row-arrow:dir(ltr) { -gtk-icon-transform: rotate(0.5turn); }
 row.expander:checked row.expander:not(:checked) image.expander-row-arrow:dir(rtl) { -gtk-icon-transform: rotate(-0.5turn); }
+
+/* Progress of operations in side menu, in place of line above them: as thin as separator, accent color. */
+progressbar.operations-progress > trough { min-height: 1px; border-radius: 0; background-color: var(--border-color, alpha(currentColor, 0.15)); }
+progressbar.operations-progress > trough > progress { min-height: 1px; border-radius: 0; }
