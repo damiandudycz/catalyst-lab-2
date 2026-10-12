@@ -89,14 +89,16 @@ class SnapshotManager:
         GLib.idle_add(clean)
 
     def unused_snapshots(self) -> list[Snapshot]:
-        """Snapshots removed by auto clean: not used by projects or running processes, not newest, and not added from
-        file (these can contain own changes)."""
+        """Snapshots removed by auto clean: not used by projects, builds that can be deployed (their repository can be
+        installed with them) or running processes, not newest, and not added from file (these can contain own
+        changes)."""
         from .multistage_process import MultiStageProcess, MultiStageProcessState
         snapshots = sorted_snapshots(Repository.Snapshot.value)
         used = {snapshot.filename for snapshot in snapshots[:1]}
         for project in Repository.ProjectDirectory.value:
             if snapshot := project.get_snapshot():
                 used.add(snapshot.filename)
+            used |= _deployable_builds_snapshots(project)
         for process in MultiStageProcess.started_processes:
             snapshot = getattr(process, "snapshot", None)
             if process.status == MultiStageProcessState.IN_PROGRESS and isinstance(snapshot, Snapshot):
@@ -125,3 +127,18 @@ class SnapshotManager:
             os.remove(snapshot.file_path())
         Repository.Snapshot.value.remove(snapshot)
 
+
+def _deployable_builds_snapshots(project) -> set[str]:
+    """Snapshots used by completed builds of project that can be deployed (stage3, stage4, live CD)."""
+    from .project_build import load_project_builds
+    from .deploy_installation import is_deployable
+    from .deploy_live_iso import is_live_iso_build
+    files = set()
+    try:
+        for build in load_project_builds(project):
+            if is_deployable(project, build) or is_live_iso_build(build):
+                if name := (((build.details or {}).get("inputs") or {}).get("snapshot") or {}).get("file"):
+                    files.add(name)
+    except Exception as e:
+        print(f"Failed to read builds of {project.name}: {e}")
+    return files

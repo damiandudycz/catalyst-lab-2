@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os, re
 from dataclasses import dataclass, field
+from enum import Enum
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState, MultiStageProcessEvent
 from .ssh_connection import SSHConnection, quote
 from .deploy_target import TargetMachine, PartitionPlan, PartitionType
@@ -54,6 +55,12 @@ class EmergeProgress:
                 result = completed / total
         return result
 
+class DeployRepository(Enum):
+    """Gentoo repository installed in deployed system."""
+    NONE = "none"
+    BUILD_SNAPSHOT = "build-snapshot" # Snapshot used to build stage, from library.
+    LATEST = "latest" # Downloaded on machine (emerge-webrsync).
+
 @dataclass
 class DeployUser:
     name: str
@@ -82,7 +89,9 @@ class DeploySystemSettings:
     kernel: Kernel = Kernel.STAGE
     install_firmware: bool = False
     reboot: bool = False
-    wifi: "WifiSettings | None" = None # Live systems only.
+    wifi: "WifiSettings | None" = None
+    repository: DeployRepository = DeployRepository.NONE
+    repository_snapshot: str | None = None # File of snapshot (BUILD_SNAPSHOT).
 
 def tar_extract_command(artifact: str, root: str = MOUNT_POINT) -> str:
     """Command extracting stage tarball read from stdin, keeping owners and extended attributes."""
@@ -179,6 +188,8 @@ class DeployInstallation(MultiStageProcess):
         self.stages.append(DeployStepMount(multistage_process=self))
         self.stages.append(DeployStepExtract(multistage_process=self))
         self.stages.append(DeployStepConfigure(multistage_process=self))
+        if self.settings.repository != DeployRepository.NONE:
+            self.stages.append(DeployStepRepository(multistage_process=self))
         if self.packages:
             self.stages.append(DeployStepPackages(multistage_process=self))
         if self.settings.network.service != NetworkService.NONE:
@@ -434,6 +445,40 @@ class DeployStepConfigure(DeployStep):
                 'fi',
             ]
         self.remote("\n".join(script) + "\n", "Failed to configure system")
+
+class DeployStepRepository(DeployStep):
+    def __init__(self, multistage_process):
+        source = "snapshot of build" if multistage_process.settings.repository == DeployRepository.BUILD_SNAPSHOT else "latest snapshot"
+        super().__init__(name="Install Gentoo repository", description=f"Installs Gentoo repository ({source})", multistage_process=multistage_process)
+    def run(self):
+        process = self.multistage_process
+        root = quote(process.root)
+        if process.settings.repository == DeployRepository.LATEST:
+            self.remote(f'set -e\nROOT={root}\n{CHROOT_SETUP}\necho "Downloading latest Gentoo repository"\nin_root emerge-webrsync -q\n'
+                        'echo "Gentoo repository: $(cat "$ROOT/var/db/repos/gentoo/metadata/timestamp.chk" 2>/dev/null)"\n',
+                        "Failed to download Gentoo repository (machine needs internet connection)")
+            return
+        snapshot = process.settings.repository_snapshot
+        if not snapshot or not os.path.isfile(snapshot):
+            raise RuntimeError("Snapshot of build doesn't exist anymore")
+        # Snapshot (squashfs) is sent to machine and unpacked there, or copied from it when machine has no unsquashfs.
+        target = f"{process.root}/var/tmp/catalystlab-snapshot.sqfs"
+        self.log(f"Sending {os.path.basename(snapshot)} ({os.path.getsize(snapshot) // (1024 * 1024)} MiB)")
+        if not process.connection.stream_file(snapshot, f"mkdir -p {quote(os.path.dirname(target))} && cat > {quote(target)}",
+                                              self.log, lambda fraction: self._update_progress(fraction * 0.8), self.processes):
+            raise RuntimeError("Failed to send snapshot")
+        self.remote(f"""set -e
+R={root}/var/db/repos/gentoo
+F={quote(target)}
+rm -rf "$R"; mkdir -p "$R"
+if command -v unsquashfs > /dev/null; then
+    unsquashfs -f -no-progress -d "$R" "$F" > /dev/null
+else
+    M=$(mktemp -d); mount -t squashfs -o loop,ro "$F" "$M"; cp -a "$M"/. "$R"/; umount "$M"; rmdir "$M"
+fi
+rm -f "$F"
+echo "Gentoo repository: snapshot $(cat "$R/metadata/timestamp.chk" 2>/dev/null)"
+""", "Failed to install Gentoo repository")
 
 class DeployStepPackages(DeployStep):
     def __init__(self, multistage_process):
