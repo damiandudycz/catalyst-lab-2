@@ -109,16 +109,12 @@ class QemuRunView(Gtk.Box):
             button.connect("clicked", lambda _, handler=handler: self.run and GLib.idle_add(lambda: (handler(), False)[1]))
             bar.append(button)
             self.buttons.append(button)
-        self.start_button = Gtk.Button(label="Start", valign=Gtk.Align.CENTER, visible=False)
-        self.start_button.add_css_class("suggested-action")
-        self.start_button.connect("clicked", lambda _: self.start())
-        bar.append(self.start_button)
         self.append(bar)
         # Screen, console and log.
         self.vnc_view = VncView()
         self.vnc_view.status_handler = self._set_screen_status
         screen = Gtk.Overlay(child=self.vnc_view)
-        screen.add_css_class("qemu-screen")
+        self._screen_widget = screen
         self._screen_css = Gtk.CssProvider()
         self._screen_css.load_from_data(b".qemu-screen { background-color: #000; }")
         Gtk.StyleContext.add_provider_for_display(self.get_display(), self._screen_css,
@@ -126,11 +122,11 @@ class QemuRunView(Gtk.Box):
         self.screen_status = Gtk.Label(wrap=True, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, visible=False)
         self.screen_status.add_css_class("dimmed")
         screen.add_overlay(self.screen_status)
-        self.launch_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                                    halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
+        self.launch_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                                    hexpand=True, vexpand=True,
                                     margin_start=24, margin_end=24, margin_top=24, margin_bottom=24)
-        self.launch_panel.add_css_class("card")
-        self.launch_group = Adw.PreferencesGroup(title="Run in QEMU", description="Choose resources for this run.")
+        self.launch_group = Adw.PreferencesGroup(title="Run settings",
+                                                  description="Choose the memory and CPU resources for this virtual machine.")
         self.launch_cpus_row = Adw.SpinRow(title="CPUs", adjustment=Gtk.Adjustment(
             lower=1, upper=64, step_increment=1, value=settings.qemu_cpus))
         self.launch_memory_row = Adw.SpinRow(title="Memory (GiB)", adjustment=Gtk.Adjustment(
@@ -141,7 +137,8 @@ class QemuRunView(Gtk.Box):
         self.launch_message = Gtk.Label(wrap=True, xalign=0, visible=False)
         self.launch_message.add_css_class("error")
         self.launch_panel.append(self.launch_message)
-        self.launch_button = Gtk.Button(label="Start virtual machine", halign=Gtk.Align.END)
+        self.launch_button = Gtk.Button(label="Start virtual machine", halign=Gtk.Align.END,
+                                        margin_top=12)
         self.launch_button.add_css_class("suggested-action")
         self.launch_button.connect("clicked", lambda _: self.start())
         self.launch_panel.append(self.launch_button)
@@ -241,7 +238,11 @@ class QemuRunView(Gtk.Box):
     def _set_running(self, running: bool):
         for button in self.buttons:
             button.set_sensitive(running)
-        self.start_button.set_visible(not running and self.support.available)
+        if running:
+            self._screen_widget.add_css_class("qemu-screen")
+        else:
+            self._screen_widget.remove_css_class("qemu-screen")
+            self.screen_status.set_visible(False)
         self.launch_panel.set_visible(not running)
         self._update_launch_availability()
 
@@ -327,7 +328,7 @@ class QemuRunView(Gtk.Box):
                 self._set_status(f"Running, {speed} · SSH: ssh -p {run.ssh_port} root@localhost")
             else:
                 self._set_status(f"Stopped: {run.error}" if run.error else "Stopped")
-                self._set_screen_status(f"Machine stopped{': ' + run.error if run.error else ''}")
+                self.screen_status.set_visible(False)
                 self.vnc_view.disconnect_vnc()
                 self.vnc_view.clear()
             self.log_view.get_buffer().set_text("\n".join(run.output) + "\n")
