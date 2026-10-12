@@ -79,7 +79,12 @@ class ProcessesList(Gtk.Box):
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
-        self.append(Gtk.Separator())
+        # Line above operations shows their total progress while some are running.
+        self.separator = Gtk.Separator()
+        self.append(self.separator)
+        self.progress_bar = Gtk.ProgressBar(visible=False)
+        self.progress_bar.add_css_class("operations-progress")
+        self.append(self.progress_bar)
         header = Gtk.Label(label="Operations", xalign=0, margin_start=18, margin_top=8)
         header.add_css_class("caption-heading")
         header.add_css_class("dimmed")
@@ -136,7 +141,17 @@ class ProcessesList(Gtk.Box):
             else:
                 row.update()
         self.set_visible(bool(entries))
+        self._update_total_progress(processes, len(queued))
         return False
+
+    def _update_total_progress(self, processes: list, queued_count: int):
+        """Average progress of running operations (progress of all their steps) and queued builds (not started)."""
+        running = [process for process in processes if process.status == MultiStageProcessState.IN_PROGRESS]
+        jobs = len(running) + queued_count
+        self.separator.set_visible(not running)
+        self.progress_bar.set_visible(bool(running))
+        if running:
+            self.progress_bar.set_fraction(sum(min(max(process.progress or 0, 0), 1) for process in running) / jobs)
 
 class QueuedBuildRow(Gtk.ListBoxRow):
     """Build waiting in queue, opens its steps."""
