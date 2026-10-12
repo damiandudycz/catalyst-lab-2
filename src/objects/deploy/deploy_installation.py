@@ -82,6 +82,7 @@ class DeploySystemSettings:
     kernel: Kernel = Kernel.STAGE
     install_firmware: bool = False
     reboot: bool = False
+    wifi: "WifiSettings | None" = None # Live systems only.
 
 def tar_extract_command(artifact: str, root: str = MOUNT_POINT) -> str:
     """Command extracting stage tarball read from stdin, keeping owners and extended attributes."""
