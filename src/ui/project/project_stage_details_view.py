@@ -24,6 +24,7 @@ from .project_stage import ProjectStage, StageArgumentOption
 from .item_select_expander_row import ItemSelectionExpanderRow
 from .event_bus import EventBus
 from .project_stage_automatic_option import StageAutomaticOption
+from .project_stage_argument_descriptions import stage_argument_description
 from .project_stage_value_resolver import resolved_stage_argument_display, resolve_stage_argument, split_additions
 from .project_stage_portage_confdir import (
     StagePortageConfdirSource, stage_overlay_path, stage_root_overlay_path, root_overlay_values, ROOT_OVERLAY_ARGUMENTS
@@ -36,6 +37,23 @@ from .project_stage_kernels import (
 )
 from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package, derived_distkernel
 
+
+def set_row_description(row: Gtk.Widget, description: str | None):
+    """Shows description in tooltip when hovering row. In expander rows it's shown only over their header, not over
+    rows inside."""
+    target = row
+    if isinstance(row, Adw.ExpanderRow):
+        def header(widget):
+            child = widget.get_first_child()
+            while child is not None:
+                if isinstance(child, Gtk.Revealer):
+                    return None # Rows inside expander.
+                if isinstance(child, Adw.ActionRow) or (found := header(child)) is not None:
+                    return child if isinstance(child, Adw.ActionRow) else found
+                child = child.get_next_sibling()
+            return None
+        target = header(row) or row
+    target.set_tooltip_text(description)
 
 @Gtk.Template(resource_path='/com/damiandudycz/CatalystLab/ui/project/project_stage_details_view.ui')
 class ProjectStageDetailsView(Gtk.Box):
@@ -119,6 +137,7 @@ class ProjectStageDetailsView(Gtk.Box):
 
     def load_stage_details(self):
         self.stage_name_row.set_text(self.stage.name)
+        set_row_description(self.stage_name_row, stage_argument_description(StageArgumentDetails.name.value))
 
     def load_configuration_rows(self):
         # Reset configuration rows
@@ -140,6 +159,7 @@ class ProjectStageDetailsView(Gtk.Box):
             group = self.pref_group_for_argument(argument=arg)
             if group:
                 row = self.create_row_for_argument(argument=arg)
+                set_row_description(row, stage_argument_description(arg.name))
                 row.pref_group = group
                 row.level = stage_argument_level(arg.details)
                 row.event_bus.subscribe(
@@ -173,6 +193,7 @@ class ProjectStageDetailsView(Gtk.Box):
             row = StageKernelRow(project_directory=self.project_directory, stage=self.stage, kernel_name=name,
                                  on_rename=self._rename_kernel)
             row.set_expanded(name in expanded)
+            set_row_description(row, "Kernel built for stage, expand it to see its settings.")
             remove_button = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Remove kernel", valign=Gtk.Align.CENTER)
             remove_button.add_css_class("flat")
             remove_button.connect("clicked", lambda _, name=name: self._remove_kernel(name))
@@ -1204,7 +1225,7 @@ class StageKernelRow(Adw.ExpanderRow):
                 case _:
                     row = Adw.EntryRow(show_apply_button=True)
                     row.connect("apply", lambda row, setting=setting: self._set(setting, row.get_text().strip()))
-            row.set_tooltip_text(setting.description)
+            set_row_description(row, setting.description)
             self.add_row(row)
             self.entry_rows.append((setting, row))
             if isinstance(row, KernelPackageRow):

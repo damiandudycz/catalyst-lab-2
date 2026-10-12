@@ -74,6 +74,7 @@ catalystlab_sources = [
   'objects/project/project_update.py',
   'objects/project/project_stage.py',
   'objects/project/project_stage_arguments.py',
+  'objects/project/project_stage_argument_descriptions.py',
   'objects/project/project_stage_compression_mode.py',
   'objects/project/project_stage_argument_serialization.py',
   'objects/project/project_stage_automatic_option.py',
