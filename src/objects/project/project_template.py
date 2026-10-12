@@ -715,16 +715,14 @@ def _template_argument_value(key: str, value, context: str):
         return kernel_settings_from_template(value, context)
     value = _stage_argument_value(value, context)
     if isinstance(value, list) and any(isinstance(item, str) and item in _INHERIT_MARKERS for item in value):
-        # "@releng" or "@parent" in list: inherited entries with own ones added.
+        # "@releng" and/or "@parent" in list: inherited values joined with own ones.
         details = StageArgumentDetails.__members__.get(key)
         markers = [item for item in value if isinstance(item, str) and item in _INHERIT_MARKERS]
         if details is None or not details.allows_additions:
-            raise TemplateError(f"{context}: own entries can't be added to inherited value of this argument")
-        if len(set(markers)) > 1:
-            raise TemplateError(f"{context}: list can inherit only from parent or releng template")
-        own = [item for item in value if item not in _INHERIT_MARKERS]
-        option = _INHERIT_MARKERS[markers[0]]
-        return [option, *own] if own else option
+            raise TemplateError(f"{context}: own value can't be joined with inherited value of this argument")
+        options = list(dict.fromkeys(_INHERIT_MARKERS[marker] for marker in markers))
+        own = [item for item in value if not (isinstance(item, str) and item in _INHERIT_MARKERS)]
+        return [*options, *own] if own or len(options) > 1 else options[0]
     return value
 
 # List items of template that inherit list (own entries in list are added to it).
@@ -953,15 +951,17 @@ def _stage_argument_names(project_directory, target: str) -> set[str] | None:
         return None
 
 def _enable_stage_overlays(project_directory, stage, log: Callable[[str], None]):
-    """Stage overlays (portage and root_overlay folders of stage) with files from template are used by stage, as
-    stage overlay source of Portage confdir and root overlay."""
+    """Stage overlays (portage, root_overlay and overlay folders of stage) with files from template are used by stage,
+    as stage overlay source of Portage confdir, root overlay and ISO overlay."""
     from .project_stage_portage_confdir import (
         StagePortageConfdirSource, PORTAGE_CONFDIR_SOURCES_ORDER, stage_overlay_path, stage_root_overlay_path,
         root_overlay_argument, count_files, default_portage_confdir_sources
     )
     from .project_stage_arguments import StageArgumentDetails
     for path, attribute in ((stage_overlay_path(project_directory, stage), StageArgumentDetails.portage_confdir.name),
-                            (stage_root_overlay_path(project_directory, stage), getattr(root_overlay_argument(stage), "name", None))):
+                            (stage_root_overlay_path(project_directory, stage), getattr(root_overlay_argument(stage), "name", None)),
+                            (stage_root_overlay_path(project_directory, stage, StageArgumentDetails.livecd_overlay),
+                             StageArgumentDetails.livecd_overlay.name if stage.target.replace("-", "_") == "livecd_stage2" else None)):
         if attribute is None or not os.path.isdir(path) or count_files(path) == 0:
             continue
         value = getattr(stage, attribute, None)

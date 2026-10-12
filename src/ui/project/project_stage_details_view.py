@@ -27,7 +27,7 @@ from .project_stage_automatic_option import StageAutomaticOption
 from .project_stage_argument_descriptions import stage_argument_description
 from .project_stage_value_resolver import resolved_stage_argument_display, resolve_stage_argument, split_additions
 from .project_stage_portage_confdir import (
-    StagePortageConfdirSource, stage_overlay_path, stage_root_overlay_path, root_overlay_values, ROOT_OVERLAY_ARGUMENTS
+    StagePortageConfdirSource, stage_overlay_path, stage_root_overlay_path, root_overlay_values, FILE_OVERLAY_ARGUMENTS
 )
 from .project_stage_cache import CACHE_ARGUMENTS, is_automatic_cache, stage_cache_path, display_path
 from .project_stage_kernels import (
@@ -515,9 +515,9 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
                 current_values = []
             elif not isinstance(current_values, list):
                 current_values = [current_values]
-            if self.argument.details in ROOT_OVERLAY_ARGUMENTS:
+            if self.argument.details in FILE_OVERLAY_ARGUMENTS:
                 # Values stored by older versions (inherit options, path of stage folder) are shown as sources.
-                current_values = root_overlay_values(self.project_directory, self.stage)
+                current_values = root_overlay_values(self.project_directory, self.stage, self.argument.details)
             automatic_options = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument)
             options = automatic_options + (load_catalyst_stage_arguments_options(project_directory=self.project_directory, stage=self.stage, arg_details=self.argument) or [])
             # Add entries for unsupported values
@@ -557,7 +557,7 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
     @property
     def uses_stage_overlay_folder(self) -> bool:
         """Argument combined from sources that include folder in stage directory (portage_confdir, root overlay)."""
-        return self.argument.details == StageArgumentDetails.portage_confdir or self.argument.details in ROOT_OVERLAY_ARGUMENTS
+        return self.argument.details == StageArgumentDetails.portage_confdir or self.argument.details in FILE_OVERLAY_ARGUMENTS
 
     def _add_open_stage_overlay_button(self):
         row = next((row for row in getattr(self, "rows", []) if row.item.value == StagePortageConfdirSource.STAGE_OVERLAY), None)
@@ -570,8 +570,8 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
 
     def _on_open_stage_overlay_clicked(self, button):
         # Folder is created when needed and kept when overlay is disabled, to allow enabling it back.
-        if self.argument.details in ROOT_OVERLAY_ARGUMENTS:
-            path = stage_root_overlay_path(self.project_directory, self.stage)
+        if self.argument.details in FILE_OVERLAY_ARGUMENTS:
+            path = stage_root_overlay_path(self.project_directory, self.stage, self.argument.details)
         else:
             path = stage_overlay_path(self.project_directory, self.stage)
         os.makedirs(path, exist_ok=True)
@@ -653,14 +653,19 @@ class StageTextSourceRow(Adw.ExpanderRow):
     # Sources:
 
     def _setup_sources(self):
-        """Adds rows to select automatic option or custom value. Without automatic options only custom value is used."""
+        """Adds rows to select automatic option or custom value. Without automatic options only custom value is used.
+        Arguments joining inherited values with own value (allows_additions) have check boxes, so inherit options and
+        custom value can be selected together, others have radio buttons."""
         self.automatic_options: list[StageArgumentOption] = load_catalyst_stage_automatic_arguments_options(stage=self.stage, arg_details=self.argument) or []
         # Add entries for unsupported values (automatic option stored, but not allowed for this argument)
         current_value = getattr(self.stage, self.argument.attribute_name, None)
-        missing_values = [current_value] if isinstance(current_value, StageAutomaticOption) and current_value not in {option.value for option in self.automatic_options} else []
+        stored_options = current_value if isinstance(current_value, list) else [current_value]
+        allowed = {option.value for option in self.automatic_options}
+        missing_values = list(dict.fromkeys(item for item in stored_options if isinstance(item, StageAutomaticOption) and item not in allowed))
         self.unsupported_options = create_unsupported_options(missing_values=missing_values, argument=self.argument.details)
         self.source_rows: dict[StageAutomaticOption | None, Adw.ActionRow] = {}
         self.source_check_buttons: dict[StageAutomaticOption | None, Gtk.CheckButton] = {}
+        self._custom_enabled = True
         if not self.automatic_options and not self.unsupported_options:
             return
         group: Gtk.CheckButton | None = None
@@ -675,16 +680,19 @@ class StageTextSourceRow(Adw.ExpanderRow):
                 item_icon=None
             ) if option else Adw.ActionRow(title="Custom value")
             check_button = Gtk.CheckButton()
-            if group:
-                check_button.set_group(group)
-            else:
-                group = check_button
+            if not self.allows_additions:
+                if group:
+                    check_button.set_group(group)
+                else:
+                    group = check_button
             check_button.connect("toggled", self._on_source_toggled, option.value if option else None)
             row.add_prefix(check_button)
             row.set_activatable_widget(check_button)
             self.add_row(row)
             self.source_rows[option.value if option else None] = row
             self.source_check_buttons[option.value if option else None] = check_button
+        if self.allows_additions:
+            self.source_rows[None].set_subtitle("Joined with selected inherited values")
         self._update_source_subtitles()
 
     def refresh_options(self):
@@ -711,98 +719,115 @@ class StageTextSourceRow(Adw.ExpanderRow):
                 row.remove_css_class('warning')
 
     def _on_source_toggled(self, button: Gtk.CheckButton, source: StageAutomaticOption | None):
-        if self._loading or not button.get_active():
+        if self._loading:
             return
-        if source is None:
-            if self.allows_additions and self.source is not None:
-                # Custom list starts from inherited one with additions, so entries can be removed from it.
-                resolved = resolve_stage_argument(self.project_directory, self.stage, self.argument.name, option=self.source)
-                if isinstance(resolved, list):
-                    combined = list(dict.fromkeys((self.normalized_custom_value(resolved) or []) + (self.own_value() or [])))
-                    self.set_editor_value(combined)
-            self.value = self.get_editor_value()
-        elif self.allows_additions:
-            # Additions are kept when switching between inherit options.
-            additions = self.own_value() if self.source is not None else None
-            self.set_editor_value(additions)
-            self.value = self.combined_value(source, additions)
+        if self.allows_additions:
+            # Check boxes: value joins all selected inherit options and custom value.
+            if source is None:
+                self._custom_enabled = button.get_active()
+            options = [option for option, check_button in self.source_check_buttons.items()
+                       if option is not None and check_button.get_active()]
+            self.value = self._joined_value(options, self.get_editor_value() if self._custom_enabled else None)
         else:
-            self.value = source
+            if not button.get_active():
+                return
+            self.value = source if source is not None else self.get_editor_value()
         self.update_display()
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     @property
     def allows_additions(self) -> bool:
-        """Own entries can be added to inherited list (stored as inherit option followed by entries)."""
+        """Inherited values can be joined with custom value (stored as inherit options followed by own entries)."""
         return bool(self.argument.details and self.argument.details.allows_additions)
 
-    @property
-    def source(self) -> StageAutomaticOption | None:
-        """Selected automatic option, None for custom value."""
+    def inherit_options(self) -> list[StageAutomaticOption]:
+        """Selected automatic options."""
         if isinstance(self.value, StageAutomaticOption):
-            return self.value
-        if self.allows_additions and (additions := split_additions(self.value)) is not None:
-            return additions[0]
-        return None
+            return [self.value]
+        if self.allows_additions and isinstance(self.value, list):
+            if (joined := split_additions(self.value)) is not None:
+                return joined[0]
+            if len(self.value) == 1 and isinstance(self.value[0], StageAutomaticOption):
+                return [self.value[0]]
+        return []
 
     def own_value(self):
-        """Custom value, or entries added to inherited list."""
-        if self.source is None:
-            return self.value
-        additions = split_additions(self.value) if self.allows_additions else None
-        return additions[1] if additions else None
+        """Custom value (joined with inherited values when they are selected too), None when it isn't used."""
+        if not self.is_custom():
+            return None
+        if self.allows_additions and (joined := split_additions(self.value)) is not None:
+            return self.normalized_custom_value(joined[1])
+        return None if self.inherit_options() else self.value
 
-    @staticmethod
-    def combined_value(source: StageAutomaticOption, additions):
-        return [source, *additions] if additions else source
+    def _joined_value(self, options: list[StageAutomaticOption], own):
+        own_items = (own if isinstance(own, list) else [own]) if own else []
+        if not options:
+            return own
+        if not own_items and len(options) == 1:
+            return options[0]
+        return [*options, *own_items]
 
     def is_custom(self) -> bool:
-        return self.source is None
+        """Custom value is used (alone, or joined with inherited values)."""
+        if self.allows_additions and self.source_rows:
+            return self._custom_enabled
+        return not self.inherit_options()
 
     # State:
 
     def load_state(self):
         current_value = getattr(self.stage, self.argument.attribute_name, None)
         self._loading = True
-        additions = split_additions(current_value) if self.allows_additions else None
-        if isinstance(current_value, StageAutomaticOption):
-            self.value = current_value
+        joined = split_additions(current_value) if self.allows_additions else None
+        if isinstance(current_value, StageAutomaticOption) or (isinstance(current_value, list) and current_value
+                                                                and all(isinstance(item, StageAutomaticOption) for item in current_value)):
+            self.value = current_value[0] if isinstance(current_value, list) and len(current_value) == 1 else current_value
+            self._custom_enabled = False
             self.set_editor_value(None)
-        elif additions is not None:
-            own = self.normalized_custom_value(additions[1])
-            self.value = self.combined_value(additions[0], own)
+        elif joined is not None:
+            own = self.normalized_custom_value(joined[1])
+            self.value = self._joined_value(joined[0], own)
+            self._custom_enabled = True
             self.set_editor_value(own)
         else:
             self.value = self.normalized_custom_value(current_value)
+            # Empty value with check boxes: nothing is selected.
+            self._custom_enabled = not (self.allows_additions and self.source_rows and self.value is None)
             self.set_editor_value(self.value)
-        if check_button := self.source_check_buttons.get(self.source):
-            check_button.set_active(True)
+        options = self.inherit_options()
+        for option, check_button in self.source_check_buttons.items():
+            check_button.set_active(self._custom_enabled if option is None else option in options)
         self._loading = False
         self.update_display()
 
     def apply_custom_value(self):
-        """Call from editor when custom value (or additions to inherited list) is applied."""
+        """Call from editor when custom value is applied."""
         value = self.get_editor_value()
-        self.value = self.combined_value(self.source, value) if self.source is not None else value
+        self.value = self._joined_value(self.inherit_options(), value) if self.allows_additions else value
         self.set_editor_value(value)
         self.update_display()
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     def update_display(self):
-        self.editor_row.set_visible(self.is_custom() or self.allows_additions)
-        automatic_option = next((option for option in self.unsupported_options + self.automatic_options if option.value == self.source), None)
-        if self.is_custom():
-            subtitle = self.custom_value_display(self.value) if self.value else "(None)"
-            show_warning = self.argument.required and not self.value
-            warning = "This value is required"
+        self.editor_row.set_visible(self.is_custom())
+        options = self.inherit_options()
+        known = {option.value: option for option in self.unsupported_options + self.automatic_options}
+        parts, unavailable = [], False
+        for value in options:
+            option = known.get(value)
+            if option is None or option.unsupported:
+                unavailable = True
+            display = option.display if option else f"Unsupported value: {value.name}"
+            resolved = self.resolved_values.get(value)
+            parts.append(f"{display}: {resolved}" if resolved and len(options) == 1 and not self.own_value() else display)
+        own = self.own_value()
+        if own:
+            parts.append(f"own: {self.custom_value_display(own)}" if options else self.custom_value_display(own))
+        subtitle = " + ".join(parts) or "(None)"
+        if unavailable:
+            show_warning, warning = True, "Selected option is not available for this stage"
         else:
-            resolved = self.resolved_values.get(self.source)
-            subtitle = (f"{automatic_option.display}: {resolved}" if resolved else automatic_option.display) if automatic_option else f"Unsupported value: {self.source.name}"
-            if additions := self.own_value():
-                subtitle = (f"{automatic_option.display}" if automatic_option else f"Unsupported value: {self.source.name}") \
-                    + f" + {len(additions)} own: {self.custom_value_display(additions)}"
-            show_warning = automatic_option is None or automatic_option.unsupported
-            warning = "Selected option is not available for this stage"
+            show_warning, warning = self.argument.required and not options and not own, "This value is required"
         self.set_subtitle(GLib.markup_escape_text(subtitle))
         self.warning_icon.set_visible(show_warning)
         self.warning_icon.set_tooltip_text(warning)
@@ -1070,8 +1095,8 @@ class StageTextListRow(StageTextSourceRow):
 
     def update_display(self):
         super().update_display()
-        self.hint_label.set_label("One entry per line. Ctrl+Enter to apply." if self.is_custom() else
-                                  "Entries added to inherited ones, one per line. Ctrl+Enter to apply.")
+        self.hint_label.set_label("Entries added to inherited ones, one per line. Ctrl+Enter to apply." if self.inherit_options()
+                                  else "One entry per line. Ctrl+Enter to apply.")
         self.on_buffer_changed(self.text_view.get_buffer())
 
 class StageCacheRow(Adw.ExpanderRow):

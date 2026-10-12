@@ -111,7 +111,8 @@ STAGE_ARGUMENT_DESCRIPTIONS: dict[str, str] = {
     "livecd/motd": "Message shown after logging in. Gentoo types of ISO have default message.",
     "livecd/readme": "README.txt in root of ISO. Gentoo types of ISO have default file.",
     "livecd/root_overlay": "Files copied into filesystem of live system. Sources selected here are combined.",
-    "livecd/overlay": "Files copied into ISO next to live system image (not into live system), eg. documentation.",
+    "livecd/overlay": "Files copied into ISO next to live system image (not into live system), eg. documentation. "
+                      "Sources selected here are combined.",
     "livecd/verify": "Checksums of ISO contents are created, so its files can be verified when booting.",
     "livecd/iso_extra_partition": "Size (in kilobytes, at least 300000) of extra XFS partition for persistent storage, "
                                   "added to ISO used as USB disk image.",

@@ -643,6 +643,8 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             has_confdir = generate_portage_confdir(project, self.stage, portage_path)
             root_overlay_path = os.path.join(work_directory, "root_overlay")
             has_root_overlay = generate_root_overlay(project, self.stage, root_overlay_path)
+            iso_overlay_path = os.path.join(work_directory, "iso_overlay")
+            has_iso_overlay = generate_root_overlay(project, self.stage, iso_overlay_path, StageArgumentDetails.livecd_overlay)
             cache_paths = process.stage_cache_paths(self.stage)
             process.make_directories(list(cache_paths.values()))
             spec = generate_stage_spec(project, self.stage, StageSpecContext(
@@ -650,6 +652,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                 source_subpath=source_subpath,
                 portage_confdir=process.container_path(portage_path) if has_confdir else None,
                 root_overlay=process.container_path(root_overlay_path) if has_root_overlay else None,
+                iso_overlay=process.container_path(iso_overlay_path) if has_iso_overlay else None,
                 cache_paths={argument: process.container_path(path) for argument, path in cache_paths.items()},
                 snapshot=process.snapshot,
                 path_mapper=process.container_path,

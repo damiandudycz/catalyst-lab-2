@@ -136,8 +136,9 @@ class StageArgumentDetails(Enum):
 
     @property
     def allows_additions(self) -> bool:
-        """List whose own entries can be added to inherited value (inherit option selected together with own values,
-        stored as option followed by entries). Other lists are inherited, or replaced by own values."""
+        """Argument whose inherited value can be joined with own value (inherit options selected together with custom
+        value, stored as options followed by own entries): lists are joined, texts are joined with spaces. Other
+        arguments are inherited, or replaced by own values."""
         return self in _ARGUMENTS_WITH_ADDITIONS
 
     @property
@@ -246,7 +247,7 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.interpreter: return StageArgumentType.multiselect
             case StageArgumentDetails.repos: return StageArgumentType.multiselect
             case StageArgumentDetails.portage_confdir: return StageArgumentType.multiselect # Sources combined when building.
-            case StageArgumentDetails.stage4_root_overlay | StageArgumentDetails.livecd_root_overlay: return StageArgumentType.multiselect # Like portage_confdir.
+            case StageArgumentDetails.stage4_root_overlay | StageArgumentDetails.livecd_root_overlay | StageArgumentDetails.livecd_overlay: return StageArgumentType.multiselect # Like portage_confdir.
             case StageArgumentDetails.update_seed: return StageArgumentType.boolean
             case StageArgumentDetails.keep_repos: return StageArgumentType.boolean
             case (
@@ -327,8 +328,9 @@ _automatic_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption
         argument: [_RELENG]
         for argument in StageArgumentDetails
         if argument.value.split("/")[0] in ("stage4", "livecd", "boot")
-        # Root overlay is combined from its own sources, like portage_confdir.
-        and argument not in (StageArgumentDetails.stage4_root_overlay, StageArgumentDetails.livecd_root_overlay)
+        # Root and ISO overlays are combined from their own sources, like portage_confdir.
+        and argument not in (StageArgumentDetails.stage4_root_overlay, StageArgumentDetails.livecd_root_overlay,
+                             StageArgumentDetails.livecd_overlay)
     },
 }
 
@@ -377,8 +379,9 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
         argument: [_RELENG]
         for argument in StageArgumentDetails
         if argument.value.split("/")[0] in ("stage4", "livecd", "boot")
-        # Root overlay is combined from its own sources, like portage_confdir.
-        and argument not in (StageArgumentDetails.stage4_root_overlay, StageArgumentDetails.livecd_root_overlay)
+        # Root and ISO overlays are combined from their own sources, like portage_confdir.
+        and argument not in (StageArgumentDetails.stage4_root_overlay, StageArgumentDetails.livecd_root_overlay,
+                             StageArgumentDetails.livecd_overlay)
     },
 }
 
@@ -483,9 +486,15 @@ def stage_argument_level(details: StageArgumentDetails | None) -> StageArgumentL
     """Arguments not known to app (read from catalyst) are advanced."""
     return STAGE_ARGUMENT_LEVELS.get(details, StageArgumentLevel.ADVANCED) if details else StageArgumentLevel.ADVANCED
 
-# Lists where own entries are appended to inherited ones (packages, USE flags, services...). Ordered lists (decompressor
-# search order, filesystem operations) and structured ones (kernels) are not combined.
+# Arguments where own value is joined with inherited one: lists (packages, USE flags, services, overlays...) and
+# texts made of options (compiler flags, arguments of genkernel and bootloader). Ordered lists (decompressor search
+# order, filesystem operations), structured ones (kernels) and single values (paths, names) are not joined.
 _ARGUMENTS_WITH_ADDITIONS = {
+    StageArgumentDetails.repos,
+    StageArgumentDetails.stage4_users, StageArgumentDetails.stage4_groups, StageArgumentDetails.livecd_users,
+    StageArgumentDetails.common_flags, StageArgumentDetails.cflags, StageArgumentDetails.cxxflags,
+    StageArgumentDetails.fcflags, StageArgumentDetails.fflags, StageArgumentDetails.asflags, StageArgumentDetails.ldflags,
+    StageArgumentDetails.stage4_gk_mainargs, StageArgumentDetails.livecd_gk_mainargs, StageArgumentDetails.livecd_bootargs,
     StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages,
     StageArgumentDetails.stage4_use, StageArgumentDetails.livecd_use,
     StageArgumentDetails.stage4_rcadd, StageArgumentDetails.livecd_rcadd,
