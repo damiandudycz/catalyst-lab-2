@@ -131,7 +131,8 @@ class RaspberryPiBootSettings:
     serial_console: bool = True # Console on serial port (GPIO 14/15, debug connector of Pi 5) too.
     scan_delay: int = 3 # Seconds initramfs waits for USB disks before searching for live system.
     extra_arguments: str = "" # Added to kernel arguments.
-    config_lines: str = "dtparam=audio=on\ndisable_overscan=1" # Added to config.txt.
+    # Added to config.txt. Graphics driver (KMS, firmware uses version for Pi 5 itself) is needed by desktops.
+    config_lines: str = "dtparam=audio=on\ndtoverlay=vc4-kms-v3d\nmax_framebuffers=2\ndisable_overscan=1"
     older_models_firmware: bool = True # Firmware files of models before Pi 5 (Pi 5 has it in EEPROM).
 
 def raspberry_pi_config(kernel: str, initramfs: str | None, settings: RaspberryPiBootSettings) -> str:
