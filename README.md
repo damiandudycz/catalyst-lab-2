@@ -101,6 +101,18 @@ The deploy wizard handles:
 - **Boot**: kernel (from the stage or a distribution kernel), linux-firmware and bootloader (GRUB, systemd-boot,
   rEFInd, EFI stub, or kboot for PS3 petitboot), with warnings about anything that needs manual updates later.
 
+### 🖥️ Run in QEMU *(being tested)*
+
+Builds with a generic kernel run in a virtual machine from their row in Builds:
+- **Live CD ISO images** boot with UEFI firmware of QEMU.
+- **stage3 and stage4 with kernel** boot their own kernel and initramfs, with system in disk image made from the stage
+  (once, kept with the build). Changes are discarded when the machine stops, root logs in without password.
+- Screen of the machine is shown in the app (keyboard and mouse), with its serial console and power controls. SSH is
+  forwarded to a local port.
+- Machines of the architecture of this computer are accelerated (HVF on macOS, KVM on Linux), others are emulated.
+- Kernels of devices QEMU doesn't emulate (Raspberry Pi, PS3) can't run, their builds show why.
+- Needs QEMU: `brew install qemu` on macOS, `app-emulation/qemu` on Gentoo.
+
 ### 🟢 Status indicators
 
 Items in lists and sections of the side menu have a colored dot showing their state:

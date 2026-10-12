@@ -191,7 +191,20 @@ class ProjectBuildsView(Gtk.Box):
             button.connect("clicked", lambda _, build=build: app_event_bus.emit(
                 AppEvents.PRESENT_VIEW, DeployCreateView(project_directory=self.project_directory, build=build), "Deploy build", 640, 560))
             row.add_suffix(button)
-        elif build and not running_build and is_live_iso_build(build):
+        if build and not running_build:
+            from .qemu_run import qemu_support
+            support = qemu_support(self.project_directory, build)
+            if support.kind is not None:
+                # Runnable builds (stages with kernel, live CDs), or why they can't run.
+                # Unavailable one is dimmed, its view shows why (insensitive buttons don't show tooltips).
+                button = Gtk.Button(icon_name="computer-symbolic", valign=Gtk.Align.CENTER,
+                                    tooltip_text="Run in QEMU" if support.available else f"Can't run in QEMU: {support.reason}")
+                button.add_css_class("flat")
+                if not support.available:
+                    button.add_css_class("dimmed")
+                button.connect("clicked", lambda _, build=build: self._run_in_qemu(build))
+                row.add_suffix(button)
+        if build and not running_build and is_live_iso_build(build) and not is_deployable(self.project_directory, build):
             button = Gtk.Button(icon_name="deploy-symbolic", tooltip_text="Write to disk or save as ISO for other machine", valign=Gtk.Align.CENTER)
             button.add_css_class("flat")
             button.connect("clicked", lambda _, build=build: self._deploy_live_iso(build))
@@ -219,6 +232,10 @@ class ProjectBuildsView(Gtk.Box):
 
     # Removing builds
     # --------------------------------------------------------------------------
+
+    def _run_in_qemu(self, build):
+        from .qemu_run_view import QemuRunView
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, QemuRunView(self.project_directory, build), f"{build.stage_name} in QEMU", 1024, 768)
 
     def _deploy_live_iso(self, build):
         from .live_iso_deploy_view import LiveIsoDeployView

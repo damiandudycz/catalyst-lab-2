@@ -34,6 +34,9 @@ class CatalystlabApplication(Adw.Application):
         RelengManager.shared().refresh()
         OverlayManager.shared().refresh()
         ProjectManager.shared().refresh()
+        # Virtual machines (QEMU) left running by killed app.
+        from .qemu_run import stop_orphaned_runs
+        stop_orphaned_runs()
         # Projects get binary packages folders, packages built before are moved to them.
         from .packages_directory import migrate_project_packages
         migrate_project_packages()
@@ -59,6 +62,8 @@ class CatalystlabApplication(Adw.Application):
         RootHelperClient.shared().stop_root_helper()
         # Virtual machines started automatically are stopped with app.
         from .repository import Repository
+        from .qemu_run import stop_all_runs
+        stop_all_runs()
         for machine in Repository.BuildMachine.value:
             try:
                 machine.stop_if_started_automatically()
