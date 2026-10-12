@@ -1078,6 +1078,10 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
         except Exception as e:
             # Stage can still be configured manually.
             log(f"Failed to set default values of {stage.name}: {e}")
+        # Files of template that stage already gets from parent overlays are not kept in its overlays.
+        from .project_stage_portage_confdir import remove_stage_overlays_inherited_files
+        for folder, files in remove_stage_overlays_inherited_files(project_directory, stage).items():
+            log(f"Skipped {len(files)} file{'s' if len(files) != 1 else ''} of {folder} of {stage.name} inherited from parent: {', '.join(files)}")
         _enable_stage_overlays(project_directory, stage, log)
         ProjectManager.shared().save_stage(project=project_directory, stage=stage)
         project_directory.stages.append(stage)
