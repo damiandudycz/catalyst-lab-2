@@ -145,13 +145,17 @@ class ProcessesList(Gtk.Box):
         return False
 
     def _update_total_progress(self, processes: list, queued_count: int):
-        """Average progress of running operations (progress of all their steps) and queued builds (not started)."""
-        running = [process for process in processes if process.status == MultiStageProcessState.IN_PROGRESS]
-        jobs = len(running) + queued_count
+        """Progress of listed jobs, each is the same part of total: running operations with progress of all their steps,
+        finished ones (not seen yet) as done, queued builds as not started. Shown while some operation runs."""
+        listed = [process for process in processes if _listed(process)]
+        running = any(process.status == MultiStageProcessState.IN_PROGRESS for process in listed)
+        jobs = len(listed) + queued_count
         self.separator.set_visible(not running)
-        self.progress_bar.set_visible(bool(running))
+        self.progress_bar.set_visible(running)
         if running:
-            self.progress_bar.set_fraction(sum(min(max(process.progress or 0, 0), 1) for process in running) / jobs)
+            done = sum(1.0 if process.status != MultiStageProcessState.IN_PROGRESS else min(max(process.progress or 0, 0), 1)
+                       for process in listed)
+            self.progress_bar.set_fraction(done / jobs)
 
 class QueuedBuildRow(Gtk.ListBoxRow):
     """Build waiting in queue, opens its steps."""
