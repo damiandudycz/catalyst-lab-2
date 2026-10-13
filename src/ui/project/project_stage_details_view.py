@@ -37,7 +37,7 @@ from .project_stage_kernels import (
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
 from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package, derived_distkernel
-from .stage_package_picker_view import StagePackagePickerView, StageInstalledPackagesView, _as_list
+from .stage_package_picker_view import StagePackagePickerView, StageUnmergePackagesEditor, _as_list, _package_rule_matches
 
 
 def set_row_description(row: Gtk.Widget, description: str | None):
@@ -366,6 +366,8 @@ class ProjectStageDetailsView(Gtk.Box):
             for r in self.configuration_rows:
                 if r.argument != row.argument and isinstance(r, (StageTextSourceRow, StageCacheRow)):
                     r.refresh_options()
+            if row.argument.details in (StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages):
+                self._refresh_unmerge_package_rows()
             return
         if row.argument.details.type == StageArgumentType.select:
             ProjectManager.shared().change_stage_argument(
@@ -394,6 +396,12 @@ class ProjectStageDetailsView(Gtk.Box):
                 r.load_state()
             elif r.argument != row.argument and isinstance(r, (StageTextSourceRow, StageCacheRow)):
                 r.refresh_options() # Keeps possibly unapplied text, only updates availability of automatic options.
+        self._refresh_unmerge_package_rows()
+
+    def _refresh_unmerge_package_rows(self):
+        for row in self.configuration_rows:
+            if isinstance(row, StageTextListRow) and row.uses_unmerge_picker:
+                row.refresh_unmerge_packages()
 
     def _on_unrealize(self, widget):
         if getattr(self, "_window_active_handler", None) and (root := self.get_root()):
@@ -662,6 +670,9 @@ class StageTextSourceRow(Adw.ExpanderRow):
         self.uses_package_picker = argument.details in (
             StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages
         )
+        self.uses_unmerge_picker = argument.details in (
+            StageArgumentDetails.stage4_unmerge, StageArgumentDetails.livecd_unmerge
+        )
         self.value = None
         self.resolved_values: dict[StageAutomaticOption, str] = {}
         self._loading = False
@@ -695,7 +706,7 @@ class StageTextSourceRow(Adw.ExpanderRow):
             return
         group: Gtk.CheckButton | None = None
         options = self.unsupported_options + self.automatic_options
-        if not self.uses_package_picker:
+        if not self.uses_package_picker and not self.uses_unmerge_picker:
             options.append(None) # None stands for custom value.
         for option in options:
             # Same rows as in option lists (eg. Profile), so unavailable options look the same.
@@ -756,6 +767,8 @@ class StageTextSourceRow(Adw.ExpanderRow):
             options = [option for option, check_button in self.source_check_buttons.items()
                        if option is not None and check_button.get_active()]
             self.value = self._joined_value(options, self.get_editor_value() if self._custom_enabled else None)
+            if self.uses_unmerge_picker:
+                self.refresh_unmerge_packages()
         else:
             if not button.get_active():
                 return
@@ -799,6 +812,8 @@ class StageTextSourceRow(Adw.ExpanderRow):
         """Custom value is used (alone, or joined with inherited values)."""
         if self.uses_package_picker:
             return True
+        if self.uses_unmerge_picker:
+            return True
         if self.allows_additions and self.source_rows:
             return self._custom_enabled
         return not self.inherit_options()
@@ -812,6 +827,8 @@ class StageTextSourceRow(Adw.ExpanderRow):
             inherited.update(map(str, _as_list(resolve_stage_argument(
                 self.project_directory, self.stage, self.argument.name, option=option
             ))))
+        if self.uses_unmerge_picker:
+            return [item for item in own if not any(_package_rule_matches(rule, item) for rule in inherited)]
         return [item for item in own if str(item) not in inherited]
 
     # State:
@@ -835,12 +852,14 @@ class StageTextSourceRow(Adw.ExpanderRow):
             # Empty value with check boxes: nothing is selected.
             self._custom_enabled = not (self.allows_additions and self.source_rows and self.value is None)
             self.set_editor_value(self.value)
-        if self.uses_package_picker:
+        if self.uses_package_picker or self.uses_unmerge_picker:
             self._custom_enabled = True
         options = self.inherit_options()
         for option, check_button in self.source_check_buttons.items():
             check_button.set_active(self._custom_enabled if option is None else option in options)
         self._loading = False
+        if self.uses_unmerge_picker:
+            self.refresh_unmerge_packages()
         self.update_display()
 
     def apply_custom_value(self):
@@ -1085,10 +1104,6 @@ class StageTextListRow(StageTextSourceRow):
         self.content_navigation_view = content_navigation_view
         self.own_packages = []
         super().__init__(project_directory, stage, argument)
-        if self.argument.details in (StageArgumentDetails.stage4_unmerge, StageArgumentDetails.livecd_unmerge):
-            button = Gtk.Button(label="Installed…", valign=Gtk.Align.CENTER, tooltip_text="Choose installed packages to unmerge")
-            button.connect("clicked", self._open_installed_packages)
-            self.add_suffix(button)
 
     def _create_editor_row(self) -> Gtk.Widget:
         if self.uses_package_picker:
@@ -1099,6 +1114,11 @@ class StageTextListRow(StageTextSourceRow):
             self.package_action_row.add_suffix(arrow)
             self.package_action_row.connect("activated", self._open_package_picker)
             return self.package_action_row
+        if self.uses_unmerge_picker:
+            self.unmerge_editor = StageUnmergePackagesEditor(
+                self.project_directory, self.stage, self.argument, self._on_unmerge_entries_changed
+            )
+            return self.unmerge_editor
 
         self.text_view = Gtk.TextView()
         self.text_view.set_monospace(True)
@@ -1154,19 +1174,35 @@ class StageTextListRow(StageTextSourceRow):
         view.content_navigation_view = self.content_navigation_view
         self.content_navigation_view.push_view(view, title="Browse packages")
 
-    def _open_installed_packages(self, *_):
-        if not self.content_navigation_view:
+    def refresh_unmerge_packages(self):
+        if not self.uses_unmerge_picker or not hasattr(self, "unmerge_editor"):
             return
         inherited_entries = []
         for option in self.inherit_options():
             inherited_entries.extend(_as_list(resolve_stage_argument(
                 self.project_directory, self.stage, self.argument.details.value, option=option
             )))
-        view = StageInstalledPackagesView(
-            self.project_directory, self.stage, self.own_value() or [], inherited_entries, self._apply_picker_value
+        packages_argument = (
+            StageArgumentDetails.stage4_packages
+            if self.argument.details == StageArgumentDetails.stage4_unmerge
+            else StageArgumentDetails.livecd_packages
         )
-        view.content_navigation_view = self.content_navigation_view
-        self.content_navigation_view.push_view(view, title="Installed packages")
+        stage_packages = _as_list(resolve_stage_argument(
+            self.project_directory, self.stage, packages_argument.value
+        ))
+        self.unmerge_editor.set_entries(self.own_value() or [], inherited_entries, stage_packages)
+
+    def _on_unmerge_entries_changed(self, entries):
+        self._custom_enabled = True
+        self.value = self._joined_value(self.inherit_options(), entries)
+        self.update_display()
+        ProjectManager.shared().change_stage_argument(
+            project=self.project_directory,
+            stage=self.stage,
+            argument=self.argument.details or self.argument.name,
+            value=self.value,
+        )
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     def _apply_picker_value(self, value, options=None):
         if not self.uses_package_picker:
@@ -1192,10 +1228,13 @@ class StageTextListRow(StageTextSourceRow):
             argument=self.argument.details or self.argument.name,
             value=self.value,
         )
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     def get_editor_value(self):
         if self.uses_package_picker:
             return self.own_packages or None
+        if self.uses_unmerge_picker:
+            return self.unmerge_editor.own_entries or None
         buffer = self.text_view.get_buffer()
         text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
         return [line.strip() for line in text.splitlines() if line.strip()] or None
@@ -1203,6 +1242,9 @@ class StageTextListRow(StageTextSourceRow):
     def set_editor_value(self, value):
         if self.uses_package_picker:
             self.own_packages = list(value or [])
+            return
+        if self.uses_unmerge_picker:
+            self.unmerge_editor.set_entries(value or [], self.unmerge_editor.inherited_entries)
             return
         self.text_view.get_buffer().set_text("\n".join(value or []))
 

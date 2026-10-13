@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+import fnmatch
 
 from gi.repository import Gtk, Adw, GLib
 
@@ -302,109 +303,124 @@ class _SelectableRepositoryView(Gtk.Box):
         self.status.set_visible(not self.filtered)
 
 
-class StageInstalledPackagesView(Gtk.Box):
-    """Pick packages from available parent build inventories for the stage's unmerge list."""
+class StageUnmergePackagesEditor(Gtk.Box):
+    """Inline package inventory selector for Unmerge stage arguments."""
 
-    def __init__(self, project, stage, own_entries: list[str], inherited_entries: list[str], on_apply):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+    def __init__(self, project, stage, argument, on_change):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                         margin_start=12, margin_end=12, margin_top=8, margin_bottom=12)
         self.project = project
         self.stage = stage
-        self.entries = list(own_entries or [])
-        self.inherited_entries = list(inherited_entries or [])
-        self.on_apply = on_apply
-        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        self.scroll = Gtk.ScrolledWindow(child=self.content, hexpand=True, vexpand=True,
-                                         hscrollbar_policy=Gtk.PolicyType.NEVER)
-        self.append(self.scroll)
-        inherited_group = Adw.PreferencesGroup(title="Parent and template Unmerge entries")
-        for item in dict.fromkeys(map(str, self.inherited_entries)):
-            inherited_group.add(Adw.ActionRow(title=item, subtitle="Already inherited"))
-        if not self.inherited_entries:
-            inherited_group.add(Adw.ActionRow(title="No inherited entries"))
-        self.content.append(inherited_group)
-        self.own_group = Adw.PreferencesGroup(title="This stage's Unmerge entries")
-        self.content.append(self.own_group)
-        self._render_own_entries()
-        self.list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
-                            margin_start=24, margin_end=24, margin_top=16, margin_bottom=24)
-        self.content.append(Gtk.Label(label="Package inventories are collected from saved parent builds. Inherited and current Unmerge entries are marked.",
-                                      xalign=0, wrap=True, margin_start=24, margin_end=24, margin_top=16))
-        self.content.append(self.list)
-        self.status = Adw.StatusPage(title="Loading installed package lists…", icon_name="system-run-symbolic")
-        self.content.append(self.status)
-        action_bar = Gtk.ActionBar()
-        apply_button = Gtk.Button(label="Apply selections")
-        apply_button.add_css_class("suggested-action")
-        apply_button.connect("clicked", self._apply)
-        action_bar.pack_end(apply_button)
-        self.append(action_bar)
+        self.argument = argument
+        self.on_change = on_change
+        self.own_entries = []
+        self.inherited_entries = []
+        self.stage_packages = []
+        self.packages = []
+        self._syncing = False
+        self.group = Adw.PreferencesGroup(title="Packages in parent build chain",
+                                          description="Packages removed by parent Unmerge settings are omitted.")
+        self.append(self.group)
+        self.status = Gtk.Label(label="Collecting packages from parent builds…", xalign=0)
+        self.status.add_css_class("dimmed")
+        self.status.add_css_class("caption")
+        self.append(self.status)
         threading.Thread(target=self._load, daemon=True).start()
 
     def _load(self):
-        result = []
+        chain = []
         builds = load_project_builds(self.project)
-        current = self.stage
+        parent_id = getattr(self.stage, StageArgumentDetails.parent.name, None)
         visited = set()
-        while current and current.id not in visited:
-            visited.add(current.id)
-            parent_id = getattr(current, StageArgumentDetails.parent.name, None)
-            current = next((item for item in self.project.stages if item.id == parent_id), None) if parent_id else None
-            if current is None:
+        while parent_id and parent_id not in visited:
+            visited.add(parent_id)
+            parent = next((item for item in self.project.stages if item.id == parent_id), None)
+            if parent is None:
                 break
-            matching_builds = [build for build in builds
-                               if build.stage_id == current.id and build.status == StageBuildStatus.COMPLETED]
-            build = next((item for item in matching_builds if item.path and os.path.isfile(os.path.join(item.path, StageBuild.PACKAGES_FILE))), None)
+            chain.append(parent)
+            parent_id = getattr(parent, StageArgumentDetails.parent.name, None)
+
+        # Apply each stage's removals in ancestry order. A later parent may install a
+        # package that an earlier stage removed, so filtering by the union of all Unmerge
+        # rules would incorrectly hide it.
+        packages = set()
+        for parent in reversed(chain):
+            build = next((item for item in builds if item.stage_id == parent.id
+                          and item.status == StageBuildStatus.COMPLETED and item.path
+                          and os.path.isfile(os.path.join(item.path, StageBuild.PACKAGES_FILE))), None)
             if build:
-                path = os.path.join(build.path, StageBuild.PACKAGES_FILE)
                 try:
-                    with open(path, encoding="utf-8") as file:
-                        packages = sorted({line.strip() for line in file if line.strip()})
-                    result.append((current.name, packages))
+                    with open(os.path.join(build.path, StageBuild.PACKAGES_FILE), encoding="utf-8") as file:
+                        packages.update(line.strip() for line in file if line.strip())
                 except OSError:
                     pass
-        GLib.idle_add(self._show, result)
+            rules = _as_list(resolve_stage_argument(self.project, parent, self.argument.name))
+            packages = {package for package in packages
+                        if not any(_package_rule_matches(rule, package) for rule in rules)}
+        GLib.idle_add(self._set_inventory, sorted(packages))
 
-    def _show(self, result):
-        if not result:
-            self.status.set_title("No saved package inventory")
-            self.status.set_description("Build a parent stage first; completed builds record installed packages when their archive contains CONTENTS metadata.")
-            return False
-        for stage_name, packages in result:
-            group = Adw.PreferencesGroup(title=stage_name)
-            for installed in packages:
-                atom = _installed_package_atom(installed)
-                inherited = any(_atom_matches(item, atom.lstrip("=")) for item in self.inherited_entries)
-                own = any(_atom_matches(item, atom.lstrip("=")) for item in self.entries)
-                row = Adw.ActionRow(title=installed, subtitle="Already included by inherited Unmerge" if inherited else "Installed in parent build")
-                check = Gtk.CheckButton(active=bool(inherited or own), sensitive=not inherited, valign=Gtk.Align.CENTER)
-                check.connect("toggled", self._toggle, atom)
-                row.add_prefix(check)
-                row.set_activatable_widget(check)
-                group.add(row)
-            self.list.add(group)
-        self.status.set_visible(False)
+    def _set_inventory(self, packages):
+        self.packages = packages
+        self._render()
         return False
 
-    def _toggle(self, check, _param, atom):
-        identity = atom.lstrip("=")
-        self.entries = [item for item in self.entries if not _atom_matches(item, identity)]
+    def set_entries(self, own_entries, inherited_entries, stage_packages=()):
+        self.own_entries = list(dict.fromkeys(map(str, own_entries or [])))
+        self.inherited_entries = list(dict.fromkeys(map(str, inherited_entries or [])))
+        self.stage_packages = list(dict.fromkeys(map(str, stage_packages or [])))
+        self._render()
+
+    def _render(self):
+        while child := self.group.get_first_child():
+            self.group.remove(child)
+        if not self.packages:
+            self.status.set_label("No saved package inventory in the parent build chain.")
+        else:
+            self.status.set_label("")
+
+        candidates = [(package, _installed_package_atom(package), "Installed in parent build chain")
+                      for package in self.packages]
+        for package in self.stage_packages:
+            if not any(_package_rule_matches(package, installed) for installed, _, _ in candidates):
+                candidates.append((package, package, "Selected in Packages"))
+        candidates.sort(key=lambda item: item[0].casefold())
+        displayed = set()
+        for installed, atom, source in candidates:
+            inherited = any(_package_rule_matches(rule, installed) for rule in self.inherited_entries)
+            own = any(_package_rule_matches(rule, installed) for rule in self.own_entries)
+            self._add_package_row(atom, installed,
+                                  "Selected by inherited Unmerge" if inherited else source,
+                                  inherited, inherited or own)
+            displayed.add(installed)
+
+        # Keep inherited entries visible and locked even when an earlier parent Unmerge means
+        # they no longer occur in the collected package inventory.
+        for entry in self.inherited_entries:
+            if not any(_package_rule_matches(entry, package) for package in displayed):
+                self._add_package_row(entry, entry, "Selected by inherited Unmerge", True, True)
+                displayed.add(entry)
+        for entry in self.own_entries:
+            if not any(_package_rule_matches(entry, package) for package in displayed):
+                self._add_package_row(entry, entry, "Custom Unmerge entry", False, True)
+                displayed.add(entry)
+
+    def _add_package_row(self, atom, title, subtitle, locked, active):
+        row = Adw.ActionRow(title=title, subtitle=subtitle)
+        check = Gtk.CheckButton(active=active, sensitive=not locked, valign=Gtk.Align.CENTER)
+        check.connect("toggled", self._toggle, atom, locked)
+        row.add_prefix(check)
+        row.set_activatable_widget(check)
+        self.group.add(row)
+
+    def _toggle(self, check, atom, locked):
+        if self._syncing or locked:
+            return
+        self.own_entries = [entry for entry in self.own_entries
+                            if not _package_rule_matches(entry, atom.lstrip("="))]
         if check.get_active():
-            self.entries.append(atom)
-        self._render_own_entries()
-
-    def _render_own_entries(self):
-        while child := self.own_group.get_first_child():
-            self.own_group.remove(child)
-        for item in dict.fromkeys(map(str, self.entries)):
-            self.own_group.add(Adw.ActionRow(title=item, subtitle="Custom entry"))
-        if not self.entries:
-            self.own_group.add(Adw.ActionRow(title="No custom entries"))
-
-    def _apply(self, *_):
-        self.on_apply(self.entries)
-        navigation = getattr(self, "content_navigation_view", None)
-        if navigation:
-            navigation.pop()
+            self.own_entries.append(atom)
+        self.on_change(self.own_entries)
+        self._render()
 
 
 def _as_list(value):
@@ -421,6 +437,14 @@ def _atom_matches(atom: str, package: str) -> bool:
         return True
     suffix = atom[len(package):] if atom.startswith(package) else ""
     return len(suffix) > 1 and suffix[0] == "-" and suffix[1].isdigit()
+
+
+def _package_rule_matches(rule: str, installed: str) -> bool:
+    """Matches a Portage package atom or wildcard against a recorded installed package."""
+    rule = str(rule).strip().lstrip("<>=~!")
+    rule = rule.split("::", 1)[0].split("[", 1)[0].split(":", 1)[0]
+    installed = str(installed).lstrip("<>=~!").split("::", 1)[0].split("[", 1)[0].split(":", 1)[0]
+    return fnmatch.fnmatchcase(installed, rule) or _atom_matches(rule, installed)
 
 
 def _selected_version_for_repo(atoms, base, repo_name):
