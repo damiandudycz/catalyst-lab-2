@@ -62,11 +62,13 @@ class ProjectStageCreateView(Gtk.Box):
         self.spec_type_selection_view.set_static_list(values)
 
     def load_releng_templates(self):
+        releng_directory = self.project_directory.get_releng_directory()
+        architecture = self.project_directory.get_architecture()
         template_subpaths = load_releng_templates(
-            releng_directory=self.project_directory.get_releng_directory(),
+            releng_directory=releng_directory,
             stage_name=self.spec_type_selection_view.selected_item,
-            architecture=self.project_directory.get_architecture()
-        ) if self.spec_type_selection_view.selected_item is not None else []
+            architecture=architecture
+        ) if self.spec_type_selection_view.selected_item is not None and releng_directory is not None and architecture is not None else []
         self.releng_base_selection_view.select(None)
         self.releng_base_selection_view.set_static_list(template_subpaths)
 
