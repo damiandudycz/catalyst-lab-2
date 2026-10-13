@@ -1282,9 +1282,9 @@ class StageTextListRow(StageTextSourceRow):
 
     def update_display(self):
         super().update_display()
-        # Package settings use a summary row that opens the package browser; they do not
-        # create the multiline editor controls used by the other list settings.
-        if self.uses_package_picker:
+        # Package and Unmerge settings use dedicated editors; they do not create the
+        # multiline text controls used by the other list settings.
+        if self.uses_package_picker or self.uses_unmerge_picker:
             return
         self.hint_label.set_label("Entries added to inherited ones, one per line. Ctrl+Enter to apply." if self.inherit_options()
                                   else "One entry per line. Ctrl+Enter to apply.")
