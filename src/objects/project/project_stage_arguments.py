@@ -195,16 +195,16 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.stage4_gk_mainargs: return "GK mainargs"
             case StageArgumentDetails.stage4_groups: return "Groups"
             case StageArgumentDetails.stage4_linuxrc: return "LinuxRC"
-            case StageArgumentDetails.stage4_packages: return "Packages"
+            case StageArgumentDetails.stage4_packages: return "Packages to install"
             case StageArgumentDetails.stage4_rcadd: return "RCadd"
             case StageArgumentDetails.stage4_rcdel: return "RCdel"
             case StageArgumentDetails.stage4_rm: return "RM"
             case StageArgumentDetails.stage4_root_overlay: return "Root overlay"
             case StageArgumentDetails.stage4_ssh_public_keys: return "SSH public keys"
-            case StageArgumentDetails.stage4_unmerge: return "Unmerge"
+            case StageArgumentDetails.stage4_unmerge: return "Packages to remove"
             case StageArgumentDetails.stage4_use: return "USE"
             case StageArgumentDetails.stage4_users: return "Users"
-            case StageArgumentDetails.livecd_packages: return "Packages"
+            case StageArgumentDetails.livecd_packages: return "Packages to install"
             case StageArgumentDetails.livecd_use: return "USE"
             case StageArgumentDetails.livecd_bootargs: return "BOOT args"
             case StageArgumentDetails.livecd_cdtar: return "CDTar"
@@ -225,7 +225,7 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.livecd_rm: return "RM"
             case StageArgumentDetails.livecd_root_overlay: return "Root overlay"
             case StageArgumentDetails.livecd_type: return "Type"
-            case StageArgumentDetails.livecd_unmerge: return "Unmerge"
+            case StageArgumentDetails.livecd_unmerge: return "Packages to remove"
             case StageArgumentDetails.livecd_users: return "Users"
             case StageArgumentDetails.livecd_verify: return "Verify"
             case StageArgumentDetails.livecd_volid: return "Vol ID"
@@ -451,7 +451,7 @@ STAGE_ARGUMENT_LEVELS: dict[StageArgumentDetails, StageArgumentLevel] = {
     StageArgumentDetails.stage4_ssh_public_keys: _BASIC,
     StageArgumentDetails.stage4_rcdel: _ADVANCED,
     StageArgumentDetails.stage4_groups: _ADVANCED,
-    StageArgumentDetails.stage4_unmerge: _ADVANCED,
+    StageArgumentDetails.stage4_unmerge: _BASIC,
     StageArgumentDetails.stage4_empty: _ADVANCED,
     StageArgumentDetails.stage4_rm: _ADVANCED,
     StageArgumentDetails.stage4_gk_mainargs: _ADVANCED,
@@ -470,7 +470,7 @@ STAGE_ARGUMENT_LEVELS: dict[StageArgumentDetails, StageArgumentLevel] = {
     StageArgumentDetails.livecd_rcdel: _ADVANCED,
     StageArgumentDetails.livecd_users: _ADVANCED,
     StageArgumentDetails.livecd_fsscript: _ADVANCED,
-    StageArgumentDetails.livecd_unmerge: _ADVANCED,
+    StageArgumentDetails.livecd_unmerge: _BASIC,
     StageArgumentDetails.livecd_empty: _ADVANCED,
     StageArgumentDetails.livecd_rm: _ADVANCED,
     StageArgumentDetails.livecd_depclean: _ADVANCED,

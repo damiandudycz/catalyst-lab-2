@@ -67,6 +67,7 @@ class ProjectStageDetailsView(Gtk.Box):
     architecture_pref_group = Gtk.Template.Child()
     release_pref_group = Gtk.Template.Child()
     packages_pref_group = Gtk.Template.Child()
+    package_contents_pref_group = Gtk.Template.Child()
     configuration_pref_group = Gtk.Template.Child()
     kernels_pref_group = Gtk.Template.Child()
 
@@ -119,7 +120,8 @@ class ProjectStageDetailsView(Gtk.Box):
         for row in getattr(self, "kernel_rows", []):
             if isinstance(row, StageKernelRow):
                 hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
-        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group, self.configuration_pref_group):
+        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group,
+                      self.package_contents_pref_group, self.configuration_pref_group):
             group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
         self.kernels_pref_group.set_visible(getattr(self, "boot_kernel_argument", None) is not None)
         self.hidden_settings_label.set_label(
@@ -267,6 +269,9 @@ class ProjectStageDetailsView(Gtk.Box):
     def create_row_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesRow:
         if argument.details in CACHE_ARGUMENTS:
             return StageCacheRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
+        if argument.details in (StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages):
+            return StagePackagesRow(project_directory=self.project_directory, stage=self.stage, argument=argument,
+                                    content_navigation_view=self.content_navigation_view)
         match argument.type:
             case StageArgumentType.select | StageArgumentType.multiselect | StageArgumentType.boolean:
                 return StageOptionExpanderRow(
@@ -343,6 +348,9 @@ class ProjectStageDetailsView(Gtk.Box):
                 StageArgumentDetails.snapshot_treeish
             ):
                 return self.packages_pref_group
+            case (StageArgumentDetails.stage4_packages | StageArgumentDetails.stage4_unmerge |
+                  StageArgumentDetails.livecd_packages | StageArgumentDetails.livecd_unmerge):
+                return self.package_contents_pref_group
             case _:
                 return self.configuration_pref_group
 
@@ -359,7 +367,7 @@ class ProjectStageDetailsView(Gtk.Box):
             )
             # Reloading option rows would discard unapplied edits of text rows, refresh only resolved values.
             for r in self.configuration_rows:
-                if r.argument != row.argument and isinstance(r, (StageTextSourceRow, StageCacheRow)):
+                if r.argument != row.argument and isinstance(r, (StageTextSourceRow, StagePackagesRow, StageCacheRow)):
                     r.refresh_options()
             return
         if row.argument.details.type == StageArgumentType.select:
@@ -387,7 +395,7 @@ class ProjectStageDetailsView(Gtk.Box):
         for r in self.configuration_rows:
             if r.argument != row.argument and isinstance(r, StageOptionExpanderRow):
                 r.load_state()
-            elif r.argument != row.argument and isinstance(r, (StageTextSourceRow, StageCacheRow)):
+            elif r.argument != row.argument and isinstance(r, (StageTextSourceRow, StagePackagesRow, StageCacheRow)):
                 r.refresh_options() # Keeps possibly unapplied text, only updates availability of automatic options.
 
     def _on_unrealize(self, widget):
@@ -669,9 +677,6 @@ class StageTextSourceRow(Adw.ExpanderRow):
         self.editor_row = self._create_editor_row()
         self.add_row(self.editor_row)
         self.load_state()
-        if self.uses_package_picker:
-            self.set_enable_expansion(False)
-            self.connect("activated", self._open_package_picker)
 
     # Sources:
 
@@ -1052,6 +1057,86 @@ class StageScriptRow(StageTextEntrySourceRow):
             self._save_script()
             return True
         return False
+
+class StagePackagesRow(Adw.ActionRow):
+    """Summary-only package setting. Activating the row opens the full package picker."""
+
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage,
+                 argument: StageArgumentTargetDetails, content_navigation_view=None):
+        super().__init__(title=argument.display_name)
+        self.project_directory = project_directory
+        self.stage = stage
+        self.argument = argument
+        self.content_navigation_view = content_navigation_view
+        self.set_activatable(True)
+        self.event_bus = EventBus[ItemSelectionViewEvent]()
+        self.value = getattr(stage, argument.attribute_name, None)
+        self.warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
+        self.warning_icon.add_css_class("warning")
+        self.add_suffix(self.warning_icon)
+        self.current_value = self.value
+        self._load_options()
+        self.connect("activated", self._open_picker)
+        self.update_display()
+
+    def _load_options(self):
+        current = self.current_value if isinstance(self.current_value, list) else [self.current_value]
+        self.selected_options = list(dict.fromkeys(item for item in current
+                                                   if isinstance(item, StageAutomaticOption)))
+        own = [item for item in current if item is not None and not isinstance(item, StageAutomaticOption)]
+        self.own_packages = _as_list(own)
+        self.automatic_options = load_catalyst_stage_automatic_arguments_options(
+            stage=self.stage, arg_details=self.argument, project_directory=self.project_directory
+        ) or []
+        self.unsupported_options = create_unsupported_options(
+            [item for item in self.selected_options
+             if item not in {option.value for option in self.automatic_options}], self.argument.details
+        )
+
+    def refresh_options(self):
+        self._load_options()
+        self.update_display()
+
+    def _open_picker(self, *_):
+        if not self.content_navigation_view:
+            return
+        options = [*self.unsupported_options, *self.automatic_options]
+        view = StagePackagePickerView(
+            self.project_directory, self.stage, self.argument, self.own_packages,
+            self._apply_selection, options, self.selected_options
+        )
+        view.content_navigation_view = self.content_navigation_view
+        self.content_navigation_view.push_view(view, title="Browse packages")
+
+    def _apply_selection(self, own_packages, selected_options):
+        self.own_packages = list(own_packages or [])
+        self.selected_options = list(selected_options)
+        if selected_options:
+            self.current_value = [*selected_options, *self.own_packages]
+            if not self.own_packages and len(selected_options) == 1:
+                self.current_value = selected_options[0]
+        else:
+            self.current_value = self.own_packages or None
+        self.value = self.current_value
+        self.update_display()
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+
+    def update_display(self):
+        options = {option.value: option for option in self.automatic_options + self.unsupported_options}
+        selected_names = [options[value].display if value in options else f"Unsupported: {value.name}"
+                          for value in self.selected_options]
+        summary = list(selected_names)
+        if self.own_packages:
+            summary.append(f"{len(self.own_packages)} additional package{'s' if len(self.own_packages) != 1 else ''}")
+        self.set_subtitle(" + ".join(summary) if summary else "Select packages")
+        unavailable = any(value not in options or options[value].unsupported for value in self.selected_options)
+        show_warning = unavailable or self.argument.required and not summary
+        self.warning_icon.set_visible(show_warning)
+        self.warning_icon.set_tooltip_text(
+            "Selected option is not available for this stage" if unavailable else "This value is required"
+        )
+        self.project_directory.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, self.project_directory)
+
 
 class StageTextListRow(StageTextSourceRow):
     """Edits list arguments (packages, use, rcadd...) one entry per line. Custom value is stored as list[str]."""
