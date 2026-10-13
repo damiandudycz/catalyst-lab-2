@@ -920,27 +920,16 @@ def _strip_archive_extension(path: str) -> str:
     return path
 
 def _add_qemu_cpu_portage_environment(portage_path: str) -> None:
-    """Use an emulation-safe x86 CPU baseline for package builds under QEMU user emulation.
+    """Expose QEMU's maximum x86 CPU features to package build processes under x86 user emulation.
 
     Catalyst starts package builds inside its chroot, where the build launcher environment is not retained.
-    Portage package.env ensures QEMU_CPU reaches binfmt_misc and caps compiler output at x86-64-v3.
-    The target may request newer instructions (for example znver4/AVX-512) that are unreliable in
-    QEMU TCG nested inside the ARM64 Lima VM used on macOS.
+    A Portage package.env entry ensures QEMU_CPU reaches the compiler helpers executed by binfmt_misc.
     """
     environment_path = os.path.join(portage_path, "env", "catalystlab", "qemu-user-max")
     os.makedirs(os.path.dirname(environment_path), exist_ok=True)
     if not os.path.exists(environment_path):
         with open(environment_path, "w", encoding="utf-8") as file:
-            file.write(
-                'QEMU_CPU="max"\n'
-                '# Nested QEMU TCG may advertise instructions it cannot reliably execute.\n'
-                'for flag in CFLAGS CXXFLAGS FFLAGS FCFLAGS; do\n'
-                '    eval "value=\\${$flag-}"\n'
-                '    value=$(printf \'%s\\n\' "$value" | sed -E \'s/-march=[^[:space:]]+/-march=x86-64-v3/g\')\n'
-                '    eval "$flag=\\$value"\n'
-                '    export "$flag"\n'
-                'done\n'
-            )
+            file.write('QEMU_CPU="max"\n')
 
     package_env_path = os.path.join(portage_path, "package.env")
     package_env_entry = "*/* catalystlab/qemu-user-max"
