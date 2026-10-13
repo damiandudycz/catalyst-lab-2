@@ -670,6 +670,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
             self.log("Spec:")
             for line in spec.splitlines():
                 self.log(f"  {line}")
+            values = _spec_values(spec)
             # Build:
             wrapper_path = None
             if process.rootless:
@@ -683,6 +684,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                     config_path=process.container_path(os.path.join(work_directory, "catalyst.conf")),
                     caches={_catalyst_cache_options[argument] for argument in cache_paths},
                     wrapper_path=process.container_path(wrapper_path) if wrapper_path else None,
+                    qemu_cpu_model="max" if os.path.basename(values.get("interpreter", "")) == "qemu-x86_64" else None,
                 ))
             if process.rootless:
                 if not self._run_rootless(spec=spec, work_directory=work_directory, build_script_path=build_script_path):
@@ -692,7 +694,6 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                 self._run_diagnostics(spec=spec, work_directory=work_directory)
                 raise RuntimeError("Catalyst build failed")
             # Move results to stage build directory (catalyst writes them to builds/<rel_type>/):
-            values = _spec_values(spec)
             output_name = f"{values['target']}-{values['subarch']}-{values['version_stamp']}"
             output_directory = os.path.join(process.builds_directory, values["rel_type"])
             # ISO of livecd-stage2 is written to path from livecd/iso (relative paths are in builds/<rel_type>/ too).
@@ -822,7 +823,13 @@ _catalyst_cache_options = {
     StageArgumentDetails.kerncache_path: "kerncache",
 }
 
-def _catalyst_build_script(spec_path: str, config_path: str, caches: set[str], wrapper_path: str | None = None) -> str:
+def _catalyst_build_script(
+    spec_path: str,
+    config_path: str,
+    caches: set[str],
+    wrapper_path: str | None = None,
+    qemu_cpu_model: str | None = None,
+) -> str:
     """Runs catalyst with /dev containing real device nodes. Catalyst bind mounts /dev into chroot without submounts,
     but device nodes in toolset /dev are bind mounts made by bwrap, so chroot would get empty files instead (portage
     fails with '/dev/null is not a character device'). Only standard nodes, loop devices and kvm are created.
@@ -836,7 +843,9 @@ def _catalyst_build_script(spec_path: str, config_path: str, caches: set[str], w
         run = f'exec python3 "{wrapper_path}" "${{CONFIG_ARGS[@]}}" -f "{spec_path}"'
     else:
         run = _CATALYST_DEV_SETUP + f'exec catalyst "${{CONFIG_ARGS[@]}}" -f "{spec_path}"'
+    qemu_cpu_setup = f"export QEMU_CPU={qemu_cpu_model}\n" if qemu_cpu_model else ""
     return f"""#!/bin/bash
+{qemu_cpu_setup}# QEMU user-mode needs to expose instructions used by x86-64 target compiler flags.
 # Fix of older catalyst: stage1 build.py concatenates portage Atom with str (TypeError with current portage). Fixed
 # upstream, applied to toolset copy of this build session only (changes are not stored in toolset).
 for build_py in /usr/share/catalyst/targets/stage1/build.py; do
