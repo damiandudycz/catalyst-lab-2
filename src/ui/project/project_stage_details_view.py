@@ -1092,20 +1092,12 @@ class StageTextListRow(StageTextSourceRow):
     def _create_editor_row(self) -> Gtk.Widget:
         if self.uses_package_picker:
             self.package_action_row = Adw.ActionRow(
-                title="Additional packages", subtitle="Choose packages and versions"
+                title="Additional packages", subtitle="Choose packages and versions", activatable=True
             )
-            self.package_action_row.set_activatable(False)
             arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
             self.package_action_row.add_suffix(arrow)
-            # Adw.ExpanderRow hosts these in an internal GtkListBox. A nested ListBoxRow's
-            # activate signal is not reliably emitted for pointer clicks there, so make the
-            # visible action an actual button and handle its clicked signal directly.
-            open_button = Gtk.Button(child=self.package_action_row, has_frame=False,
-                                     hexpand=True, tooltip_text="Browse package trees and choose versions")
-            open_button.add_css_class("flat")
-            open_button.connect("clicked", self._open_package_picker)
-            editor_row = Gtk.ListBoxRow(activatable=False, selectable=False, child=open_button)
-            return editor_row
+            self.package_action_row.connect("activated", self._open_package_picker)
+            return self.package_action_row
 
         self.text_view = Gtk.TextView()
         self.text_view.set_monospace(True)
