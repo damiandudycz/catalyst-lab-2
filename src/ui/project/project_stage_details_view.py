@@ -70,7 +70,8 @@ class ProjectStageDetailsView(Gtk.Box):
     package_contents_pref_group = Gtk.Template.Child()
     stage_setup_pref_group = Gtk.Template.Child()
     live_image_pref_group = Gtk.Template.Child()
-    configuration_pref_group = Gtk.Template.Child()
+    live_system_pref_group = Gtk.Template.Child()
+    build_behavior_pref_group = Gtk.Template.Child()
     kernels_pref_group = Gtk.Template.Child()
 
     # Basic or advanced settings (STAGE_ARGUMENT_LEVELS), last choice is used by stages opened later while app runs.
@@ -101,7 +102,7 @@ class ProjectStageDetailsView(Gtk.Box):
         self.hidden_settings_label = Gtk.Label(wrap=True, xalign=0, margin_start=12, margin_end=12, visible=False)
         self.hidden_settings_label.add_css_class("caption")
         self.hidden_settings_label.add_css_class("dimmed")
-        self.configuration_pref_group.get_parent().insert_child_after(self.hidden_settings_label, self.live_image_pref_group)
+        self.build_behavior_pref_group.get_parent().insert_child_after(self.hidden_settings_label, self.build_behavior_pref_group)
 
     def header_bar_end_widgets(self) -> list[Gtk.Widget]:
         return [self.mode_toggle]
@@ -124,7 +125,8 @@ class ProjectStageDetailsView(Gtk.Box):
                 hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
         for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group,
                       self.package_contents_pref_group, self.stage_setup_pref_group,
-                      self.live_image_pref_group, self.configuration_pref_group):
+                      self.live_image_pref_group, self.live_system_pref_group,
+                      self.build_behavior_pref_group):
             group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
         self.kernels_pref_group.set_visible(getattr(self, "boot_kernel_argument", None) is not None)
         self.hidden_settings_label.set_label(
@@ -302,7 +304,7 @@ class ProjectStageDetailsView(Gtk.Box):
 
     def pref_group_for_argument(self, argument: StageArgumentTargetDetails) -> Adw.PreferencesGroup | None:
         if not argument.details:
-            return self.configuration_pref_group
+            return self.build_behavior_pref_group
         match argument.details:
             case (
                 # Hidden, set by CatalystLab: name has own row, snapshot is selected for project and source_subpath is
@@ -351,18 +353,20 @@ class ProjectStageDetailsView(Gtk.Box):
             case (StageArgumentDetails.stage4_packages | StageArgumentDetails.stage4_unmerge |
                   StageArgumentDetails.livecd_packages | StageArgumentDetails.livecd_unmerge):
                 return self.package_contents_pref_group
-            case (StageArgumentDetails.livecd_use | StageArgumentDetails.livecd_bootargs | StageArgumentDetails.livecd_cdtar |
-                  StageArgumentDetails.livecd_depclean | StageArgumentDetails.livecd_empty |
-                  StageArgumentDetails.livecd_fsops | StageArgumentDetails.livecd_fsscript |
-                  StageArgumentDetails.livecd_fstype | StageArgumentDetails.livecd_gk_mainargs |
-                  StageArgumentDetails.livecd_iso | StageArgumentDetails.livecd_linuxrc |
-                  StageArgumentDetails.livecd_modblacklist | StageArgumentDetails.livecd_motd |
-                  StageArgumentDetails.livecd_overlay | StageArgumentDetails.livecd_readme |
-                  StageArgumentDetails.livecd_rcadd | StageArgumentDetails.livecd_rcdel |
-                  StageArgumentDetails.livecd_rm | StageArgumentDetails.livecd_root_overlay |
-                  StageArgumentDetails.livecd_type | StageArgumentDetails.livecd_users |
+            case (StageArgumentDetails.livecd_bootargs | StageArgumentDetails.livecd_cdtar |
+                  StageArgumentDetails.livecd_fstype | StageArgumentDetails.livecd_iso |
+                  StageArgumentDetails.livecd_motd | StageArgumentDetails.livecd_overlay |
+                  StageArgumentDetails.livecd_readme | StageArgumentDetails.livecd_type |
                   StageArgumentDetails.livecd_verify | StageArgumentDetails.livecd_volid):
                 return self.live_image_pref_group
+            case (StageArgumentDetails.livecd_use | StageArgumentDetails.livecd_depclean |
+                  StageArgumentDetails.livecd_empty | StageArgumentDetails.livecd_fsops |
+                  StageArgumentDetails.livecd_fsscript | StageArgumentDetails.livecd_gk_mainargs |
+                  StageArgumentDetails.livecd_linuxrc | StageArgumentDetails.livecd_modblacklist |
+                  StageArgumentDetails.livecd_rcadd | StageArgumentDetails.livecd_rcdel |
+                  StageArgumentDetails.livecd_rm | StageArgumentDetails.livecd_root_overlay |
+                  StageArgumentDetails.livecd_users):
+                return self.live_system_pref_group
             case (StageArgumentDetails.stage4_use | StageArgumentDetails.stage4_empty |
                   StageArgumentDetails.stage4_fsscript | StageArgumentDetails.stage4_gk_mainargs |
                   StageArgumentDetails.stage4_groups | StageArgumentDetails.stage4_linuxrc |
@@ -374,9 +378,9 @@ class ProjectStageDetailsView(Gtk.Box):
                   StageArgumentDetails.hostuse | StageArgumentDetails.install_mask |
                   StageArgumentDetails.portage_prefix | StageArgumentDetails.rename_regexp |
                   StageArgumentDetails.update_seed | StageArgumentDetails.update_seed_command):
-                return self.configuration_pref_group
+                return self.build_behavior_pref_group
             case _:
-                return self.configuration_pref_group
+                return self.build_behavior_pref_group
 
     def is_config_option_selectable(self, row, option):
         return self.can_change_argument(option=option)
