@@ -1,9 +1,8 @@
-import os, threading, time, sys
+import os, threading, time
 from gi.repository import Gtk, Adw, Gio, GLib, Pango
 from .app_section import app_section, AppSection
 from .repository import Repository, library_directory, collapse_home
-from .settings import NavigationStyle, ToolsetVmEngine
-from .lima import lima_unavailable_reason, qemu_vm_unavailable_reason
+from .settings import NavigationStyle
 from .library import LibraryChange, library_target, change_problem, change_library
 from .status_indicator import StatusIndicatorState
 
@@ -18,7 +17,6 @@ class SettingsSection(Gtk.Box):
     pause_queue_row = Gtk.Template.Child()
     qemu_cpus_row = Gtk.Template.Child()
     qemu_memory_row = Gtk.Template.Child()
-    toolset_vm_engine_row = Gtk.Template.Child()
 
     # Options of navigation style row, in order.
     NAVIGATION_STYLES = [NavigationStyle.MODAL, NavigationStyle.PUSH]
@@ -36,25 +34,9 @@ class SettingsSection(Gtk.Box):
         self.qemu_cpus_row.connect("notify::value", lambda row, _: setattr(settings, "qemu_cpus", round(row.get_value())))
         self.qemu_memory_row.set_value(settings.qemu_memory_gib)
         self.qemu_memory_row.connect("notify::value", lambda row, _: setattr(settings, "qemu_memory_gib", round(row.get_value())))
-        self.toolset_vm_engine_row.set_visible(sys.platform == "darwin")
-        self._toolset_vm_engines = [ToolsetVmEngine.LIMA]
-        if lima_unavailable_reason() is None and qemu_vm_unavailable_reason() is None:
-            self._toolset_vm_engines.append(ToolsetVmEngine.QEMU)
-        selected_engine = settings.toolset_vm_engine if settings.toolset_vm_engine in self._toolset_vm_engines else ToolsetVmEngine.LIMA
-        if sys.platform == "darwin" and selected_engine != settings.toolset_vm_engine:
-            settings.toolset_vm_engine = selected_engine
-        self.toolset_vm_engine_row.set_model(Gtk.StringList.new([
-            "Lima · Virtualization.framework" if engine == ToolsetVmEngine.LIMA else "QEMU · managed by Lima"
-            for engine in self._toolset_vm_engines
-        ]))
-        self.toolset_vm_engine_row.set_selected(self._toolset_vm_engines.index(selected_engine))
-        self.toolset_vm_engine_row.connect("notify::selected", self._on_toolset_vm_engine_selected)
 
     def _on_navigation_style_selected(self, row, _param):
         Repository.Settings.value.navigation_style = self.NAVIGATION_STYLES[row.get_selected()]
-
-    def _on_toolset_vm_engine_selected(self, row, _param):
-        Repository.Settings.value.toolset_vm_engine = self._toolset_vm_engines[row.get_selected()]
 
     # Library location:
 

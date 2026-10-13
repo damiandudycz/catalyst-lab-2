@@ -122,11 +122,16 @@ class ProjectStageDetailsView(Gtk.Box):
         for row in getattr(self, "kernel_rows", []):
             if isinstance(row, StageKernelRow):
                 hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
-        for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group,
-                      self.stage_setup_pref_group,
-                      self.live_image_pref_group, self.live_system_pref_group,
-                      self.build_behavior_pref_group):
-            group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
+        groups = (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group,
+                  self.stage_setup_pref_group, self.live_image_pref_group,
+                  self.live_system_pref_group, self.build_behavior_pref_group)
+        for group in groups:
+            has_visible_rows = any(
+                row.pref_group is group and row.get_visible() and row.get_child_visible()
+                for row in self.configuration_rows
+            )
+            group.set_visible(has_visible_rows)
+            group.set_child_visible(has_visible_rows)
         self.kernels_pref_group.set_visible(getattr(self, "boot_kernel_argument", None) is not None)
         self.hidden_settings_label.set_label(
             f"Advanced settings set by this stage: {', '.join(hidden_custom)}. Switch to Advanced to see them." if hidden_custom else "")

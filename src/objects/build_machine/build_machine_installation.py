@@ -3,8 +3,7 @@ import os, tempfile
 from .multistage_process import MultiStageProcess, MultiStageProcessStage, MultiStageProcessStageState
 from .build_machine import BuildMachine
 from .build_machine_manager import BuildMachineManager, shared_paths
-from .lima import lima_unavailable_reason, qemu_vm_unavailable_reason, machine_configuration, run_limactl
-from .repository import Repository
+from .lima import lima_unavailable_reason, machine_configuration, run_limactl
 from .rootless import MachineExecutor
 
 # ------------------------------------------------------------------------------
@@ -15,8 +14,7 @@ class BuildMachineInstallation(MultiStageProcess):
     """Creates Alpine Linux virtual machine with Lima, prepared for building without root privileges."""
 
     def __init__(self, name: str, cpus: int, memory_gib: int, workspace_gib: int, swap_gib: int = BuildMachine.DEFAULT_SWAP_GIB):
-        self.machine = BuildMachine(name=name, cpus=cpus, memory_gib=memory_gib, workspace_gib=workspace_gib, swap_gib=swap_gib,
-                                    vm_type=Repository.Settings.value.toolset_vm_engine.value)
+        self.machine = BuildMachine(name=name, cpus=cpus, memory_gib=memory_gib, workspace_gib=workspace_gib, swap_gib=swap_gib)
         super().__init__(title="Virtual machine creation")
 
     def setup_stages(self):
@@ -44,13 +42,11 @@ class BuildMachineStep(MultiStageProcessStage):
 
 class BuildMachineStepCheckLima(BuildMachineStep):
     def __init__(self, multistage_process: MultiStageProcess):
-        super().__init__(name="Check virtual machine tools", description="Checks that Lima and the selected VM driver are installed", multistage_process=multistage_process)
+        super().__init__(name="Check virtual machine tools", description="Checks that Lima is installed", multistage_process=multistage_process)
     def start(self):
         super().start()
         try:
             if reason := lima_unavailable_reason():
-                raise RuntimeError(reason)
-            if self.multistage_process.machine.vm_type == "qemu" and (reason := qemu_vm_unavailable_reason()):
                 raise RuntimeError(reason)
             self.complete(MultiStageProcessStageState.COMPLETED)
         except Exception as e:
@@ -67,8 +63,7 @@ class BuildMachineStepCreate(BuildMachineStep):
             machine = self.multistage_process.machine
             paths = shared_paths()
             self.log(f"Shared folders: {', '.join(paths)}")
-            configuration = machine_configuration(cpus=machine.cpus, memory_gib=machine.memory_gib, shared_paths=paths,
-                                                  vm_type=machine.vm_type)
+            configuration = machine_configuration(cpus=machine.cpus, memory_gib=machine.memory_gib, shared_paths=paths)
             with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as file:
                 file.write(configuration)
                 configuration_path = file.name

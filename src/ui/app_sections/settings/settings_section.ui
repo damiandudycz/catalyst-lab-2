@@ -171,30 +171,6 @@
                 <property name="spacing">6</property>
                 <child>
                   <object class="AdwPreferencesGroup">
-                    <property name="title">Toolset virtual machines</property>
-                    <property name="description">Choose the VM driver for new Toolset machines. Existing machines keep their current driver.</property>
-                    <child>
-                      <object class="GtkListBox">
-                        <property name="selection-mode">none</property>
-                        <style><class name="boxed-list"/></style>
-                        <child>
-                          <object class="AdwComboRow" id="toolset_vm_engine_row">
-                            <property name="title">VM engine</property>
-                          </object>
-                        </child>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
-
-            <child>
-              <object class="GtkBox">
-                <property name="orientation">vertical</property>
-                <property name="spacing">6</property>
-                <child>
-                  <object class="AdwPreferencesGroup">
                     <property name="title">QEMU</property>
                     <property name="description">Default resources for virtual machines. You can adjust them before each run.</property>
                     <child>
