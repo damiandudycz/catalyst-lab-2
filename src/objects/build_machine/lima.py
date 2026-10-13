@@ -75,6 +75,19 @@ def lima_unavailable_reason() -> str | None:
         return "Lima is not installed. Install it with Homebrew: brew install lima"
     return None
 
+def qemu_vm_unavailable_reason() -> str | None:
+    """Whether Lima can use its QEMU driver on this Mac."""
+    if sys.platform != "darwin":
+        return "The QEMU Toolset VM option is available on macOS only"
+    machine = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64", "amd64": "x86_64"}.get(os.uname().machine)
+    if machine is None:
+        return f"QEMU Toolset VMs are not supported on host architecture {os.uname().machine}"
+    for binary in (f"qemu-system-{machine}", "qemu-img"):
+        locations = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin")
+        if shutil.which(binary) is None and not any(os.access(os.path.join(directory, binary), os.X_OK) for directory in locations):
+            return f"{binary} is missing. Install QEMU with Homebrew: brew install qemu"
+    return None
+
 def list_instances(home: str | None = None) -> dict[str, dict]:
     """Lima instances by name, with their status (Running, Stopped...)."""
     path = limactl_path()
@@ -225,14 +238,15 @@ def _clean_log_line(line: str) -> str:
         return message[:-1].replace('\\"', '"') if message.endswith('"') else message
     return line
 
-def machine_configuration(cpus: int, memory_gib: int, shared_paths: list[str]) -> str:
+def machine_configuration(cpus: int, memory_gib: int, shared_paths: list[str], vm_type: str = "vz") -> str:
     """Lima configuration (YAML) of build machine."""
     mounts = "\n".join(f'- location: "{path}"\n  writable: true' for path in shared_paths)
     indented_setup = "\n".join("    " + line for line in machine_setup_script().splitlines())
     return f"""minimumLimaVersion: 2.0.0
 base:
 - {LIMA_TEMPLATE}
-vmType: vz
+vmType: {vm_type}
+{"mountType: 9p" if vm_type == "qemu" else ""}
 cpus: {cpus}
 memory: {memory_gib}GiB
 disk: {SYSTEM_DISK_GIB}GiB

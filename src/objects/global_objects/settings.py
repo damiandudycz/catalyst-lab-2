@@ -28,6 +28,12 @@ class NavigationStyle(Enum):
     PUSH = "push"   # Pushed in main window, closing them goes back.
 
 @final
+class ToolsetVmEngine(Enum):
+    """Lima driver used for newly created macOS Toolset VMs."""
+    LIMA = "vz"   # Apple Virtualization.framework, managed by Lima.
+    QEMU = "qemu" # QEMU driver, managed by Lima.
+
+@final
 class Settings(Serializable):
     """Global application settings."""
 
@@ -48,7 +54,8 @@ class Settings(Serializable):
         navigation_style: NavigationStyle = NavigationStyle.PUSH,
         pause_queue_on_failure: bool = False,
         qemu_memory_gib: int = 4,
-        qemu_cpus: int = 4
+        qemu_cpus: int = 4,
+        toolset_vm_engine: ToolsetVmEngine = ToolsetVmEngine.LIMA,
     ):
         self._initial_setup_done = initial_setup_done
         self._keep_root_unlocked = keep_root_unlocked
@@ -66,6 +73,7 @@ class Settings(Serializable):
         self._pause_queue_on_failure = pause_queue_on_failure # Queued builds wait when build fails.
         self._qemu_memory_gib = qemu_memory_gib
         self._qemu_cpus = qemu_cpus
+        self._toolset_vm_engine = toolset_vm_engine
         self.event_bus = EventBus[SettingsEvents]()
 
     @classmethod
@@ -88,7 +96,8 @@ class Settings(Serializable):
                 navigation_style=_navigation_style(data.get("navigation_style")),
                 pause_queue_on_failure=data.get("pause_queue_on_failure", False),
                 qemu_memory_gib=data.get("qemu_memory_gib", 4),
-                qemu_cpus=data.get("qemu_cpus", 4)
+                qemu_cpus=data.get("qemu_cpus", 4),
+                toolset_vm_engine=_toolset_vm_engine(data.get("toolset_vm_engine")),
             )
         except:
             return cls()
@@ -110,7 +119,8 @@ class Settings(Serializable):
             "navigation_style": self.navigation_style.value,
             "pause_queue_on_failure": self.pause_queue_on_failure,
             "qemu_memory_gib": self.qemu_memory_gib,
-            "qemu_cpus": self.qemu_cpus
+            "qemu_cpus": self.qemu_cpus,
+            "toolset_vm_engine": self.toolset_vm_engine.value
         }
 
     # --------------------------------------------------------------------------
@@ -358,8 +368,23 @@ class Settings(Serializable):
             self._qemu_cpus = value
             Repository.Settings.save()
 
+    @property
+    def toolset_vm_engine(self) -> ToolsetVmEngine:
+        return self._toolset_vm_engine
+    @toolset_vm_engine.setter
+    def toolset_vm_engine(self, value: ToolsetVmEngine):
+        if self._toolset_vm_engine != value:
+            self._toolset_vm_engine = value
+            Repository.Settings.save()
+
 def _navigation_style(value) -> NavigationStyle:
     try:
         return NavigationStyle(value)
     except ValueError:
         return NavigationStyle.PUSH
+
+def _toolset_vm_engine(value) -> ToolsetVmEngine:
+    try:
+        return ToolsetVmEngine(value)
+    except ValueError:
+        return ToolsetVmEngine.LIMA
