@@ -1114,14 +1114,6 @@ class StageTextListRow(StageTextSourceRow):
         self.content_navigation_view = content_navigation_view
         self.own_packages = []
         super().__init__(project_directory, stage, argument)
-        if self.uses_unmerge_picker:
-            self.connect("notify::expanded", self._on_unmerge_expanded)
-            if self.get_expanded():
-                self.unmerge_editor.load()
-
-    def _on_unmerge_expanded(self, *_):
-        if self.get_expanded() and self.uses_unmerge_picker:
-            self.unmerge_editor.load()
 
     def _create_editor_row(self) -> Gtk.Widget:
         if self.uses_package_picker:
@@ -1208,7 +1200,9 @@ class StageTextListRow(StageTextSourceRow):
         package_value = getattr(self.stage, packages_argument.name, None)
         if package_row is not None:
             package_options = package_row.inherit_options()
-            own_packages = package_row.own_value() or []
+            # Read this from the live package editor: its own_packages list is exactly
+            # what the Additional packages subtitle and picker are currently showing.
+            own_packages = package_row.get_editor_value() or []
         elif (additions := split_additions(package_value)) is not None:
             package_options, own_packages = additions
         elif isinstance(package_value, list):

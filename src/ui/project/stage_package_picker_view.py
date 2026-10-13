@@ -317,9 +317,6 @@ class StageUnmergePackagesEditor(Gtk.Box):
         self.inherited_entries = []
         self.stage_packages = []
         self._syncing = False
-        self._loaded = True
-        self._render_generation = 0
-        self._rendered_rows = []
         self.group = Adw.PreferencesGroup(title="Packages selected for this stage",
                                           description="Packages selected in Additional packages and its inheritance options.")
         self.append(self.group)
@@ -327,10 +324,6 @@ class StageUnmergePackagesEditor(Gtk.Box):
         self.status.add_css_class("dimmed")
         self.status.add_css_class("caption")
         self.append(self.status)
-    def load(self):
-        """Kept for the stage row expansion hook; inventory is now available immediately."""
-        return
-
     def set_entries(self, own_entries, inherited_entries, stage_packages=()):
         self.own_entries = list(dict.fromkeys(map(str, own_entries or [])))
         self.inherited_entries = list(dict.fromkeys(map(str, inherited_entries or [])))
@@ -338,8 +331,8 @@ class StageUnmergePackagesEditor(Gtk.Box):
         self._render()
 
     def _render(self):
-        self._render_generation += 1
-        generation = self._render_generation
+        while child := self.group.get_first_child():
+            self.group.remove(child)
         if not self.stage_packages:
             self.status.set_label("No packages selected to install in this stage.")
         else:
@@ -368,33 +361,10 @@ class StageUnmergePackagesEditor(Gtk.Box):
                 rows.append((entry, entry, "Custom Unmerge entry", False, True))
                 displayed.add(entry)
 
-        # Clearing and rebuilding thousands of GTK rows synchronously freezes stage preview.
-        # Replace the inventory in bounded main-loop batches instead.
-        GLib.idle_add(self._clear_rows, generation, rows)
-
-    def _clear_rows(self, generation, rows):
-        if generation != self._render_generation:
-            return False
-        for _ in range(100):
-            child = self.group.get_first_child()
-            if child is None:
-                break
-            self.group.remove(child)
-        if self.group.get_first_child() is not None:
-            return GLib.SOURCE_CONTINUE
-        self._rendered_rows.clear()
-        self._append_rows(generation, rows, 0)
-        return False
-
-    def _append_rows(self, generation, rows, start):
-        if generation != self._render_generation:
-            return False
-        end = min(start + 50, len(rows))
-        for atom, title, subtitle, locked, active in rows[start:end]:
+        # This inventory is limited to the selected install list, rather than every
+        # package in the built parent image, so render it immediately for reliable updates.
+        for atom, title, subtitle, locked, active in rows:
             self._add_package_row(atom, title, subtitle, locked, active)
-        if end < len(rows):
-            GLib.idle_add(self._append_rows, generation, rows, end)
-        return False
 
     def _add_package_row(self, atom, title, subtitle, locked, active):
         row = Adw.ActionRow(title=title, subtitle=subtitle)
@@ -403,7 +373,6 @@ class StageUnmergePackagesEditor(Gtk.Box):
         row.add_prefix(check)
         row.set_activatable_widget(check)
         self.group.add(row)
-        self._rendered_rows.append(row)
 
     def _toggle(self, check, atom, locked):
         if self._syncing or locked:
