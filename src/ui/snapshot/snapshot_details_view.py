@@ -45,7 +45,7 @@ class SnapshotDetailsView(Gtk.Box):
         self.used_by_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24,
                                    margin_start=24, margin_end=24, margin_top=12, margin_bottom=24)
         self.stack.add_titled_with_icon(
-            self._scrolled(self.used_by_box), "used-by", "Used by", "link-symbolic"
+            self._scrolled(self.used_by_box), "used-by", "Used by", "insert-link-symbolic"
         )
         self.stack.connect("notify::visible-child-name", self._on_page_changed)
         self.connect("map", lambda *_: self._load_usage())
@@ -91,7 +91,7 @@ class SnapshotDetailsView(Gtk.Box):
 
         if not usages:
             self.used_by_box.append(Adw.StatusPage(
-                icon_name="link-symbolic",
+                icon_name="insert-link-symbolic",
                 title="No recorded uses",
                 description="This snapshot is not selected by a project or referenced by saved stage builds.",
                 vexpand=True,
