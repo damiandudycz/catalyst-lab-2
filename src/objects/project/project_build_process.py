@@ -927,9 +927,10 @@ def _add_qemu_cpu_portage_environment(portage_path: str) -> None:
     """
     environment_path = os.path.join(portage_path, "env", "catalystlab", "qemu-user-max")
     os.makedirs(os.path.dirname(environment_path), exist_ok=True)
-    if not os.path.exists(environment_path):
-        with open(environment_path, "w", encoding="utf-8") as file:
-            file.write('QEMU_CPU="max"\n')
+    # Replace older generated versions too. They may contain shell snippets, which Portage's env-file
+    # parser rejects (it accepts variable assignments only).
+    with open(environment_path, "w", encoding="utf-8") as file:
+        file.write('QEMU_CPU="max"\n')
 
     package_env_path = os.path.join(portage_path, "package.env")
     package_env_entry = "*/* catalystlab/qemu-user-max"
