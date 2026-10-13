@@ -669,6 +669,9 @@ class StageTextSourceRow(Adw.ExpanderRow):
         self.editor_row = self._create_editor_row()
         self.add_row(self.editor_row)
         self.load_state()
+        if self.uses_package_picker:
+            self.set_enable_expansion(False)
+            self.connect("activated", self._open_package_picker)
 
     # Sources:
 
@@ -848,6 +851,18 @@ class StageTextSourceRow(Adw.ExpanderRow):
             resolved = self.resolved_values.get(value)
             parts.append(f"{display}: {resolved}" if resolved and len(options) == 1 and not self.own_value() else display)
         own = self.own_value()
+        if self.uses_package_picker:
+            parts = []
+            parts.extend(known[value.value].display for value in options if value.value in known)
+            if own:
+                parts.append(f"{len(own)} additional package{'s' if len(own) != 1 else ''}")
+            subtitle = " + ".join(parts) or "Select packages"
+            unavailable = any(known.get(value.value) is None or known[value.value].unsupported for value in options)
+            self.set_subtitle(GLib.markup_escape_text(subtitle))
+            self.warning_icon.set_visible(unavailable or self.argument.required and not parts)
+            self.warning_icon.set_tooltip_text("Selected option is not available for this stage" if unavailable else "This value is required")
+            self.project_directory.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, self.project_directory)
+            return
         if own:
             parts.append(f"own: {self.custom_value_display(own)}" if options else self.custom_value_display(own))
         subtitle = " + ".join(parts) or "(None)"
@@ -1106,7 +1121,8 @@ class StageTextListRow(StageTextSourceRow):
         if not self.content_navigation_view:
             return
         view = StagePackagePickerView(
-            self.project_directory, self.stage, self.argument, self.own_value() or [], self._apply_picker_value
+            self.project_directory, self.stage, self.argument, self.own_value() or [],
+            self._apply_picker_value, self.automatic_options + self.unsupported_options, self.inherit_options()
         )
         view.content_navigation_view = self.content_navigation_view
         self.content_navigation_view.push_view(view, title="Browse packages")
@@ -1130,9 +1146,12 @@ class StageTextListRow(StageTextSourceRow):
         view.content_navigation_view = self.content_navigation_view
         self.content_navigation_view.push_view(view, title="Installed packages")
 
-    def _apply_picker_value(self, value):
+    def _apply_picker_value(self, value, options):
+        self._custom_enabled = True
         self.set_editor_value(value)
-        self.apply_custom_value()
+        self.value = self._joined_value(options, value) if self.allows_additions else value
+        self.update_display()
+        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     def get_editor_value(self):
         buffer = self.text_view.get_buffer()

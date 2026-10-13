@@ -16,13 +16,18 @@ from .project_stage_automatic_option import StageAutomaticOption
 class StagePackagePickerView(Gtk.Box):
     """Browse package trees from the stage's Gentoo snapshot and enabled overlays."""
 
-    def __init__(self, project, stage, argument, own_packages: list[str], on_apply):
+    def __init__(self, project, stage, argument, own_packages: list[str], on_apply,
+                 source_options=(), selected_source_options=()):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.project = project
         self.stage = stage
         self.argument = argument
         self.own_packages = list(own_packages or [])
         self.on_apply = on_apply
+        self.source_options = [option for option in source_options
+                               if option.value in (StageAutomaticOption.INHERIT_FROM_PARENT,
+                                                   StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE)]
+        self.selected_source_options = list(selected_source_options)
         self._repo_views = []
         self._repo_views_by_name = {}
         self.inherited_packages = self._inherited_package_lists()
@@ -87,6 +92,22 @@ class StagePackagePickerView(Gtk.Box):
         parent, releng, installed = self.inherited_packages
         page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
                        margin_start=24, margin_end=24, margin_top=16, margin_bottom=24)
+        if self.source_options:
+            source_group = Adw.PreferencesGroup(title="Include inherited packages",
+                                                description="Choose which inherited package lists to combine with your additions.")
+            self.source_checks = {}
+            for option in self.source_options:
+                row = Adw.ActionRow(title=option.display, subtitle=option.subtitle or "")
+                if option.unsupported:
+                    row.add_css_class("warning")
+                check = Gtk.CheckButton(active=option.value in self.selected_source_options,
+                                        valign=Gtk.Align.CENTER)
+                check.connect("toggled", self._source_toggled, option.value)
+                row.add_prefix(check)
+                row.set_activatable_widget(check)
+                source_group.add(row)
+                self.source_checks[option.value] = check
+            page.append(source_group)
         for title, subtitle, values in (
             ("Parent stage", "Packages already supplied by the parent stage.", parent),
             ("Releng template", "Packages supplied by this stage's releng spec.", releng),
@@ -115,8 +136,9 @@ class StagePackagePickerView(Gtk.Box):
             self.stack.add_titled(placeholder, "empty", "Repositories")
 
     def _add_repository_page(self, title, repo_name, loader):
+        inherited = self._selected_inherited_package_lists()
         view = _SelectableRepositoryView(loader, repo_name, self.own_packages,
-                                         self.inherited_packages, self._set_own_packages)
+                                         inherited, self._set_own_packages)
         self._repo_views.append(view)
         page_name = f"repo-{len(self._repo_views)}"
         self._repo_views_by_name[page_name] = view
@@ -133,10 +155,32 @@ class StagePackagePickerView(Gtk.Box):
             view.set_selected(value)
 
     def _apply(self, *_):
-        self.on_apply(self.own_packages)
+        self.on_apply(self.own_packages, self.selected_source_options)
         navigation = getattr(self, "content_navigation_view", None)
         if navigation:
             navigation.pop()
+
+    def _source_toggled(self, check, _param, option):
+        if check.get_active():
+            if option not in self.selected_source_options:
+                self.selected_source_options.append(option)
+        else:
+            self.selected_source_options = [value for value in self.selected_source_options if value != option]
+        self._refresh_repository_selections()
+
+    def _refresh_repository_selections(self):
+        selected = self._selected_inherited_package_lists()
+        for view in self._repo_views:
+            view.set_inherited(selected)
+
+    def _selected_inherited_package_lists(self):
+        parent, releng, installed = self.inherited_packages
+        active = set(self.selected_source_options)
+        return (
+            parent if StageAutomaticOption.INHERIT_FROM_PARENT in active else [],
+            releng if StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE in active else [],
+            installed,
+        )
 
 
 class _SelectableRepositoryView(Gtk.Box):
@@ -260,6 +304,13 @@ class _SelectableRepositoryView(Gtk.Box):
 
     def set_selected(self, value):
         self.selected = list(value)
+        for category in self.rows:
+            if category.get_expanded():
+                category.set_expanded(False)
+                category.set_expanded(True)
+
+    def set_inherited(self, inherited):
+        self.parent_packages, self.releng_packages, self.installed_parent_packages = inherited
         for category in self.rows:
             if category.get_expanded():
                 category.set_expanded(False)
