@@ -131,11 +131,17 @@ def kernel_name_error(name: str, names: list[str]) -> str | None:
     return None
 
 def stage_inherits_kernels(stage) -> bool:
-    """Stage uses kernels of its releng template (boot/kernel isn't set by stage)."""
+    """Stage includes kernels from Releng, optionally with stage-specific additions."""
     value = getattr(stage, StageArgumentDetails.boot_kernel.name, None)
-    if isinstance(value, list) and len(value) == 1:
-        value = value[0]
-    return isinstance(value, StageAutomaticOption)
+    return value == StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE or (
+        isinstance(value, list) and StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE in value
+    )
+
+def own_kernel_names(stage) -> list[str]:
+    """Stage-specific kernel names, excluding names inherited from Releng."""
+    value = getattr(stage, StageArgumentDetails.boot_kernel.name, None)
+    values = value if isinstance(value, list) else [value]
+    return [item.strip() for item in values if isinstance(item, str) and item.strip()]
 
 def releng_kernel_names(project_directory, stage) -> list[str]:
     """Kernels defined by releng template of stage."""
@@ -145,17 +151,24 @@ def releng_kernel_names(project_directory, stage) -> list[str]:
     names = value if isinstance(value, list) else [value]
     return [name.strip() for name in names if isinstance(name, str) and name.strip()]
 
-def set_kernel_names(project_directory, stage, names: list[str] | None):
-    """Kernels of stage (boot/kernel), None uses kernels of releng template again."""
+def set_kernel_names(project_directory, stage, names: list[str] | None, *, inherit: bool = False):
+    """Set stage kernels, optionally keeping Releng kernels and adding stage-specific ones."""
     from .project_manager import ProjectManager
-    value = StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE if names is None else (names or None)
+    if names is None:
+        value = StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE
+    elif inherit:
+        value = [StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE, *names]
+    else:
+        value = names or None
     ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage,
                                                   argument=StageArgumentDetails.boot_kernel, value=value)
 
 def remove_kernel(project_directory, stage, name: str):
     """Removes kernel from stage, with settings stage set for it."""
     from .project_manager import ProjectManager
-    set_kernel_names(project_directory, stage, [kernel for kernel in stage_kernel_names(project_directory, stage) if kernel != name])
+    inherits = stage_inherits_kernels(stage)
+    names = own_kernel_names(stage) if inherits else stage_kernel_names(project_directory, stage)
+    set_kernel_names(project_directory, stage, [kernel for kernel in names if kernel != name], inherit=inherits)
     settings = {kernel: values for kernel, values in own_kernel_settings(stage).items() if kernel != name}
     ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
                                                   value=settings or None)
@@ -170,8 +183,10 @@ def new_kernel_name(names: list[str]) -> str:
 def rename_kernel(project_directory, stage, old_name: str, new_name: str):
     """Renames kernel, keeping its position and settings."""
     from .project_manager import ProjectManager
-    set_kernel_names(project_directory, stage, [new_name if name == old_name else name
-                                                for name in stage_kernel_names(project_directory, stage)])
+    inherits = stage_inherits_kernels(stage)
+    names = own_kernel_names(stage) if inherits else stage_kernel_names(project_directory, stage)
+    set_kernel_names(project_directory, stage, [new_name if name == old_name else name for name in names],
+                     inherit=inherits)
     settings = {new_name if kernel == old_name else kernel: values for kernel, values in own_kernel_settings(stage).items()}
     ProjectManager.shared().change_stage_argument(project=project_directory, stage=stage, argument=BOOT_KERNELS_ATTRIBUTE,
                                                   value=settings or None)

@@ -447,6 +447,14 @@ def apply_default_stage_arguments(project_directory, stage: ProjectStage) -> dic
                 has_parent=has_parent and parent_supports_argument(project_directory, stage, argument.details)))
             applied[name] = getattr(stage, argument.attribute_name)
             continue
+        if argument.details == StageArgumentDetails.boot_kernel:
+            # Releng kernel inheritance is the default only when the selected spec
+            # actually supplies kernels. Do not persist an empty inherit marker.
+            option = StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE
+            if has_template and has_value(argument.details, option):
+                setattr(stage, argument.attribute_name, option)
+                applied[name] = option
+            continue
         available = [option for option in argument.details.default_options if is_available(argument.details, option)]
         option = next((option for option in available if has_value(argument.details, option)), available[0] if available else None)
         if option is not None:

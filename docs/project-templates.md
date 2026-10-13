@@ -211,6 +211,10 @@ dracut_args = "--xz --no-hostonly -a dmsquash-live -o btrfs"
 extraversion = "ps3"
 ```
 
+Use `boot_kernel = ["@releng"]` to use the Releng kernel list as-is. A template may optionally add its own kernels
+alongside that list with `boot_kernel = ["@releng", "custom-name"]`; custom names need corresponding entries in
+`boot_kernels`. Platform templates that replace the Releng kernel list should specify only their custom names.
+
 Settings: `sources`, `distkernel`, `config`, `dracut_args`, `extraversion`, `packages`, `use`, `gk_kernargs`,
 `gk_action`, `aliases`, `console`, `initramfs_overlay`, `softlevel`. `packages`, `use`, `aliases` and `console` are
 lists, `distkernel` is a boolean (`true` writes `yes`, `false` leaves it out, as Catalyst only checks if it's set), others are

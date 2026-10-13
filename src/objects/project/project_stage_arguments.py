@@ -109,6 +109,7 @@ class StageArgumentDetails(Enum):
     livecd_fstype = 'livecd/fstype'
     livecd_gk_mainargs = 'livecd/gk_mainargs'
     livecd_iso = 'livecd/iso'
+    livecd_iso_extra_partition = 'livecd/iso_extra_partition'
     livecd_linuxrc = 'livecd/linuxrc'
     livecd_modblacklist = 'livecd/modblacklist'
     livecd_motd = 'livecd/motd'
@@ -215,6 +216,7 @@ class StageArgumentDetails(Enum):
             case StageArgumentDetails.livecd_fstype: return "FS Type"
             case StageArgumentDetails.livecd_gk_mainargs: return "GK mainargs"
             case StageArgumentDetails.livecd_iso: return "ISO"
+            case StageArgumentDetails.livecd_iso_extra_partition: return "ISO extra partition"
             case StageArgumentDetails.livecd_linuxrc: return "LinuxRC"
             case StageArgumentDetails.livecd_modblacklist: return "Modblacklist"
             case StageArgumentDetails.livecd_motd: return "Motd"
@@ -374,6 +376,7 @@ _default_options_mapping: dict[StageArgumentDetails, list[StageAutomaticOption]]
     StageArgumentDetails.catalyst_use: [_RELENG, _PARENT],
     StageArgumentDetails.decompressor_search_order: [_RELENG, _PARENT],
     StageArgumentDetails.hostuse: [_RELENG], # Usually set only for stage that needs it (stage1).
+    StageArgumentDetails.boot_kernel: [_RELENG],
     StageArgumentDetails.pkgcache_path: [_AUTO],
     StageArgumentDetails.kerncache_path: [_AUTO],
     # Target specific:
@@ -488,15 +491,16 @@ def stage_argument_level(details: StageArgumentDetails | None) -> StageArgumentL
     """Arguments not known to app (read from catalyst) are advanced."""
     return STAGE_ARGUMENT_LEVELS.get(details, StageArgumentLevel.ADVANCED) if details else StageArgumentLevel.ADVANCED
 
-# Arguments where own value is joined with inherited one: lists (packages, USE flags, services, overlays...) and
-# texts made of options (compiler flags, arguments of genkernel and bootloader). Ordered lists (decompressor search
-# order, filesystem operations), structured ones (kernels) and single values (paths, names) are not joined.
+# Arguments where own value is joined with inherited one: lists (packages, USE flags, services, overlays, kernel
+# names...) and texts made of options (compiler flags, arguments of genkernel and bootloader). Ordered lists
+# (decompressor search order, filesystem operations), kernel settings, and single values (paths, names) are not joined.
 _ARGUMENTS_WITH_ADDITIONS = {
     StageArgumentDetails.repos,
     StageArgumentDetails.stage4_users, StageArgumentDetails.stage4_groups, StageArgumentDetails.livecd_users,
     StageArgumentDetails.common_flags, StageArgumentDetails.cflags, StageArgumentDetails.cxxflags,
     StageArgumentDetails.fcflags, StageArgumentDetails.fflags, StageArgumentDetails.asflags, StageArgumentDetails.ldflags,
     StageArgumentDetails.stage4_gk_mainargs, StageArgumentDetails.livecd_gk_mainargs, StageArgumentDetails.livecd_bootargs,
+    StageArgumentDetails.boot_kernel,
     StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages,
     StageArgumentDetails.stage4_use, StageArgumentDetails.livecd_use,
     StageArgumentDetails.stage4_rcadd, StageArgumentDetails.livecd_rcadd,
