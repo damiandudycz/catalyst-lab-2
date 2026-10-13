@@ -9,7 +9,6 @@ from .toolset_application import ToolsetApplication
 from .toolset import ToolsetEvents
 from .wizard_view import WizardView
 from .project_stage import stage_target_icon
-from .item_select_view import ItemSelectionViewEvent
 from .toolset import Toolset
 from .releng_directory import RelengDirectory
 from .snapshot import Snapshot
@@ -88,13 +87,9 @@ class ProjectStageCreateView(Gtk.Box):
 
     def monitor_information_changes(self):
         """React to changes in UI and store them."""
-        subscriptions = [
-            (self.spec_type_selection_view.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_spec_type_changed),
-            (self.releng_base_selection_view.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_releng_base_changed),
-            (self.seed_list_selection_view.event_bus, ItemSelectionViewEvent.ITEM_CHANGED, self.on_seed_selected),
-        ]
-        for bus, event, handler in subscriptions:
-            bus.subscribe(event, handler)
+        self.spec_type_selection_view.connect("selection-changed", self.on_spec_type_changed)
+        self.releng_base_selection_view.connect("selection-changed", self.on_releng_base_changed)
+        self.seed_list_selection_view.connect("selection-changed", self.on_seed_selected)
 
     def on_spec_type_changed(self, data):
         self.load_releng_templates()

@@ -16,7 +16,8 @@ class ItemSelectionView(Gtk.Box):
     __gsignals__ = {
         "is-item-selectable": (GObject.SignalFlags.RUN_FIRST, bool, (GObject.TYPE_PYOBJECT,)),
         "is-item-usable": (GObject.SignalFlags.RUN_FIRST, bool, (GObject.TYPE_PYOBJECT,)),
-        "setup-items-monitoring": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,))
+        "setup-items-monitoring": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,)),
+        "selection-changed": (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,)),
     }
 
     # View elements:
@@ -77,6 +78,7 @@ class ItemSelectionView(Gtk.Box):
 
     def select(self, item):
         self.selected_item = item
+        self.emit("selection-changed", self)
         self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
 
     def refresh_items_state(self, data):
@@ -120,6 +122,7 @@ class ItemSelectionView(Gtk.Box):
                 (item for item in valid_items if self.emit("is-item-usable", item)),
                 valid_items[0] if valid_items else None
             )
+            self.emit("selection-changed", self)
             self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
         # Create rows
         items_check_buttons_group = []
@@ -175,6 +178,7 @@ class ItemSelectionView(Gtk.Box):
         """Callback for when a row's checkbox is toggled."""
         if button.get_active():
             self.selected_item = item
+            self.emit("selection-changed", self)
         else:
             if len(self.rows) == 1 and not self.display_none or len(self.rows) == 0 and self.display_none:
                 button.set_active(True)
