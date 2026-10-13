@@ -227,7 +227,7 @@ class _SelectableRepositoryView(Gtk.Box):
         check.package_versions = versions
         return row
 
-    def _toggle(self, check, _param, base, versions, button):
+    def _toggle(self, check, base, versions, button):
         if self._syncing:
             return
         own = [item for item in self.selected if not _atom_matches(item, base)]
