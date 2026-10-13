@@ -4,6 +4,7 @@ This handbook describes the GTK 4/libadwaita UI structure and the conventions fo
 
 ## Pages
 
+- [Core classes and extension points](../architecture/base-classes.md) — persistence, event, Git-directory, operation, and section-registration abstractions.
 - [Architecture overview](architecture.md) — application/window hierarchy and the division between UI, domain objects, and operations.
 - [Sections and navigation](sections-and-navigation.md) — how main sections are discovered, how pages are pushed or presented, and how to add a section.
 - [Layout and window chrome](layout-and-chrome.md) — how to structure page content and place actions in headers and bottom bars.

@@ -51,4 +51,6 @@ Views are responsible for layout, user input, navigation, and reflecting current
 
 The app event bus (`AppEvents` and `app_event_bus`) carries cross-cutting navigation requests. Use it when a screen needs to open a global section or present a flow without depending directly on `CatalystlabWindow`. Use the supplied section navigation view for local detail pages.
 
+For the shared foundations behind domain objects—especially `Repository`, `GitDirectory`, `GitManager`, and `MultiStageProcess`—see [Core classes and extension points](../architecture/base-classes.md).
+
 The event bus keeps weak subscriber references. A subscriber that must remain active should be held strongly by a long-lived owner; `CatalystlabWindowSideMenu` retains its process-list widget for this reason.
