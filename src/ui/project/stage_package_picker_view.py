@@ -227,7 +227,9 @@ class _SelectableRepositoryView(Gtk.Box):
         options = ["Any version", *versions]
         dropdown = Gtk.DropDown(model=Gtk.StringList.new(options), valign=Gtk.Align.CENTER)
         dropdown.set_enable_search(True)
-        dropdown.set_sensitive(bool(own))
+        # Let the user choose a version before checking the package. Choosing a version
+        # also selects it; packages already inherited don't need a duplicate atom.
+        dropdown.set_sensitive(bool(own) or not inherited)
         selected_version = _selected_version_for_repo(own, base, self.repo_name)
         if selected_version in versions:
             dropdown.set_selected(versions.index(selected_version) + 1)
@@ -245,7 +247,7 @@ class _SelectableRepositoryView(Gtk.Box):
 
     def _version_changed(self, dropdown, _param, base, selector, check):
         if not check.get_active():
-            return
+            check.set_active(True)
         index = selector.get_selected()
         atom = base if index == 0 else f"={base}-{selector.get_model().get_string(index)}::{self.repo_name}"
         own = [item for item in self.selected if not _atom_matches(item, base)]

@@ -654,6 +654,9 @@ class StageTextSourceRow(Adw.ExpanderRow):
         self.project_directory = project_directory
         self.stage = stage
         self.argument = argument
+        self.uses_package_picker = argument.details in (
+            StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages
+        )
         self.value = None
         self.resolved_values: dict[StageAutomaticOption, str] = {}
         self._loading = False
@@ -686,7 +689,10 @@ class StageTextSourceRow(Adw.ExpanderRow):
         if not self.automatic_options and not self.unsupported_options:
             return
         group: Gtk.CheckButton | None = None
-        for option in self.unsupported_options + self.automatic_options + [None]: # None stands for custom value.
+        options = self.unsupported_options + self.automatic_options
+        if not self.uses_package_picker:
+            options.append(None) # None stands for custom value.
+        for option in options:
             # Same rows as in option lists (eg. Profile), so unavailable options look the same.
             row = ItemRow(
                 item=option,
@@ -708,7 +714,7 @@ class StageTextSourceRow(Adw.ExpanderRow):
             self.add_row(row)
             self.source_rows[option.value if option else None] = row
             self.source_check_buttons[option.value if option else None] = check_button
-        if self.allows_additions:
+        if self.allows_additions and None in self.source_rows:
             self.source_rows[None].set_subtitle("Joined with selected inherited values")
         self._update_source_subtitles()
 
@@ -786,6 +792,8 @@ class StageTextSourceRow(Adw.ExpanderRow):
 
     def is_custom(self) -> bool:
         """Custom value is used (alone, or joined with inherited values)."""
+        if self.uses_package_picker:
+            return True
         if self.allows_additions and self.source_rows:
             return self._custom_enabled
         return not self.inherit_options()
@@ -811,6 +819,8 @@ class StageTextSourceRow(Adw.ExpanderRow):
             # Empty value with check boxes: nothing is selected.
             self._custom_enabled = not (self.allows_additions and self.source_rows and self.value is None)
             self.set_editor_value(self.value)
+        if self.uses_package_picker:
+            self._custom_enabled = True
         options = self.inherit_options()
         for option, check_button in self.source_check_buttons.items():
             check_button.set_active(self._custom_enabled if option is None else option in options)
@@ -1037,11 +1047,7 @@ class StageTextListRow(StageTextSourceRow):
                  argument: StageArgumentTargetDetails, content_navigation_view=None):
         self.content_navigation_view = content_navigation_view
         super().__init__(project_directory, stage, argument)
-        if self.argument.details in (StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages):
-            button = Gtk.Button(label="Browse…", valign=Gtk.Align.CENTER, tooltip_text="Browse package trees and versions")
-            button.connect("clicked", self._open_package_picker)
-            self.add_suffix(button)
-        elif self.argument.details in (StageArgumentDetails.stage4_unmerge, StageArgumentDetails.livecd_unmerge):
+        if self.argument.details in (StageArgumentDetails.stage4_unmerge, StageArgumentDetails.livecd_unmerge):
             button = Gtk.Button(label="Installed…", valign=Gtk.Align.CENTER, tooltip_text="Choose installed packages to unmerge")
             button.connect("clicked", self._open_installed_packages)
             self.add_suffix(button)
@@ -1075,6 +1081,11 @@ class StageTextListRow(StageTextSourceRow):
         self.apply_button.connect("clicked", lambda button: self.apply_custom_value())
         buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         buttons_box.append(hint_label)
+        if self.uses_package_picker:
+            picker_button = Gtk.Button(label="Additional packages…", valign=Gtk.Align.CENTER,
+                                       tooltip_text="Browse package trees and choose versions")
+            picker_button.connect("clicked", self._open_package_picker)
+            buttons_box.append(picker_button)
         buttons_box.append(self.revert_button)
         buttons_box.append(self.apply_button)
 
