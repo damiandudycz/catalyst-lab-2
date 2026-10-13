@@ -875,11 +875,12 @@ class StageTextSourceRow(Adw.ExpanderRow):
             self.warning_icon.set_visible(unavailable or self.argument.required and not parts)
             self.warning_icon.set_tooltip_text("Selected option is not available for this stage" if unavailable else "This value is required")
             if hasattr(self, "package_action_row"):
-                own_summary = ", ".join(own_additions[:3]) if own_additions else (
+                sorted_additions = sorted(own_additions, key=str.casefold)
+                own_summary = ", ".join(sorted_additions[:3]) if sorted_additions else (
                     "Already included through inheritance" if own else "Choose packages and versions"
                 )
-                if len(own_additions) > 3:
-                    own_summary += f" (+{len(own_additions) - 3} more)"
+                if len(sorted_additions) > 3:
+                    own_summary += f" (+{len(sorted_additions) - 3} more)"
                 self.package_action_row.set_subtitle(own_summary)
             self.project_directory.event_bus.emit(GitDirectoryEvent.CONTENT_CHANGED, self.project_directory)
             return
