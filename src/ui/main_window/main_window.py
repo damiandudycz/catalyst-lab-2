@@ -34,6 +34,11 @@ class CatalystlabWindow(Adw.ApplicationWindow):
         # Files of Git directories can change outside of app (other editors, Finder), their statuses are read again
         # when window becomes active.
         self.connect("notify::is-active", self._on_active_changed)
+        self.connect("close-request", self._on_close_request)
+
+    def _on_close_request(self, _window):
+        from .shutdown_dialog import request_shutdown
+        return request_shutdown(self)
 
     def _on_active_changed(self, window, param):
         if not self.is_active():

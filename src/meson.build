@@ -143,6 +143,7 @@ catalystlab_sources = [
   'ui/git_directory/git_directory_details_view.py',
   'ui/main_window/main_window_content.py',
   'ui/main_window/main_window.py',
+  'ui/main_window/shutdown_dialog.py',
   'ui/main_window/main_window_side_menu_button.py',
   'ui/main_window/main_window_side_menu.py',
   'ui/main_window/main_window_processes_list.py',

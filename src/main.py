@@ -22,7 +22,7 @@ class CatalystlabApplication(Adw.Application):
         super().__init__(application_id='com.damiandudycz.CatalystLab',
                          flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.restart_requested = False
-        self.create_action('quit', lambda *_: self.quit(), ['<primary>q'])
+        self.create_action('quit', self.on_quit_action, ['<primary>q'])
         self.create_action('about', self.on_about_action)
         self.create_action('preferences', self.on_preferences_action)
         scan_all_submodules("catalystlab")
@@ -65,8 +65,18 @@ class CatalystlabApplication(Adw.Application):
             win = CatalystlabWindow(application=self)
         win.present()
 
+    def on_quit_action(self, *_):
+        """Route Cmd+Q through the main window's close confirmation."""
+        if self.props.active_window:
+            self.props.active_window.close()
+        else:
+            self.quit()
+
     def do_shutdown(self):
         """Called when the application is shutting down."""
+        if getattr(self, "_shutdown_sequence_completed", False):
+            Gio.Application.do_shutdown(self)
+            return
         RootHelperClient.shared().stop_root_helper()
         # Virtual machines started automatically are stopped with app.
         from .repository import Repository
