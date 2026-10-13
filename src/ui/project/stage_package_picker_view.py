@@ -431,6 +431,7 @@ def _selected_version_for_repo(atoms, base, repo_name):
         repo = value.split("::", 1)[1] if "::" in value else None
         if repo and repo != repo_name:
             continue
+        value = value.lstrip("<>=~!")
         if "::" in value:
             value = value.split("::", 1)[0]
         if ":" in value:
