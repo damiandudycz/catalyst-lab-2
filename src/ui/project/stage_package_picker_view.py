@@ -316,65 +316,23 @@ class StageUnmergePackagesEditor(Gtk.Box):
         self.own_entries = []
         self.inherited_entries = []
         self.stage_packages = []
-        self.packages = []
         self._syncing = False
         self._loaded = False
-        self._loading = False
         self._render_generation = 0
         self._rendered_rows = []
-        self.group = Adw.PreferencesGroup(title="Packages in parent build chain",
-                                          description="Packages removed by parent Unmerge settings are omitted.")
+        self.group = Adw.PreferencesGroup(title="Packages selected for this stage",
+                                          description="Packages selected in Additional packages and its inheritance options.")
         self.append(self.group)
-        self.status = Gtk.Label(label="Collecting packages from parent builds…", xalign=0)
+        self.status = Gtk.Label(label="No packages selected to install in this stage.", xalign=0)
         self.status.add_css_class("dimmed")
         self.status.add_css_class("caption")
         self.append(self.status)
     def load(self):
-        """Load the parent build inventory on demand, when the Unmerge row is expanded."""
-        if self._loaded or self._loading:
+        """Show only packages explicitly added to this stage, on first expansion."""
+        if self._loaded:
             return
-        self._loading = True
-        self.status.set_label("Collecting packages from parent builds…")
-        threading.Thread(target=self._load, daemon=True).start()
-
-    def _load(self):
-        chain = []
-        builds = load_project_builds(self.project)
-        parent_id = getattr(self.stage, StageArgumentDetails.parent.name, None)
-        visited = set()
-        while parent_id and parent_id not in visited:
-            visited.add(parent_id)
-            parent = next((item for item in self.project.stages if item.id == parent_id), None)
-            if parent is None:
-                break
-            chain.append(parent)
-            parent_id = getattr(parent, StageArgumentDetails.parent.name, None)
-
-        # Apply each stage's removals in ancestry order. A later parent may install a
-        # package that an earlier stage removed, so filtering by the union of all Unmerge
-        # rules would incorrectly hide it.
-        packages = set()
-        for parent in reversed(chain):
-            build = next((item for item in builds if item.stage_id == parent.id
-                          and item.status == StageBuildStatus.COMPLETED and item.path
-                          and os.path.isfile(os.path.join(item.path, StageBuild.PACKAGES_FILE))), None)
-            if build:
-                try:
-                    with open(os.path.join(build.path, StageBuild.PACKAGES_FILE), encoding="utf-8") as file:
-                        packages.update(line.strip() for line in file if line.strip())
-                except OSError:
-                    pass
-            rules = _as_list(resolve_stage_argument(self.project, parent, self.argument.name))
-            packages = {package for package in packages
-                        if not any(_package_rule_matches(rule, package) for rule in rules)}
-        GLib.idle_add(self._set_inventory, sorted(packages))
-
-    def _set_inventory(self, packages):
-        self._loading = False
         self._loaded = True
-        self.packages = packages
         self._render()
-        return False
 
     def set_entries(self, own_entries, inherited_entries, stage_packages=()):
         self.own_entries = list(dict.fromkeys(map(str, own_entries or [])))
@@ -388,16 +346,12 @@ class StageUnmergePackagesEditor(Gtk.Box):
             return
         self._render_generation += 1
         generation = self._render_generation
-        if not self.packages:
-            self.status.set_label("No saved package inventory in the parent build chain.")
+        if not self.stage_packages:
+            self.status.set_label("No packages selected to install in this stage.")
         else:
             self.status.set_label("")
 
-        candidates = [(package, _installed_package_atom(package), "Installed in parent build chain")
-                      for package in self.packages]
-        for package in self.stage_packages:
-            if not any(_package_rule_matches(package, installed) for installed, _, _ in candidates):
-                candidates.append((package, package, "Selected in Packages"))
+        candidates = [(package, package, "Selected to install in this stage") for package in self.stage_packages]
         candidates.sort(key=lambda item: item[0].casefold())
         displayed = set()
         rows = []
@@ -409,8 +363,8 @@ class StageUnmergePackagesEditor(Gtk.Box):
                          inherited, inherited or own))
             displayed.add(installed)
 
-        # Keep inherited entries visible and locked even when an earlier parent Unmerge means
-        # they no longer occur in the collected package inventory.
+        # Keep inherited Unmerge entries visible and locked even when they are outside the
+        # package selection currently shown.
         for entry in self.inherited_entries:
             if not any(_package_rule_matches(entry, package) for package in displayed):
                 rows.append((entry, entry, "Selected by inherited Unmerge", True, True))
@@ -508,14 +462,6 @@ def _selected_version_for_repo(atoms, base, repo_name):
         if value.startswith(base + "-"):
             return value[len(base) + 1:]
     return None
-
-
-def _installed_package_atom(installed):
-    category, package_version = installed.split("/", 1)
-    match = re.match(r"^(.+)-(?=\d)(.+)$", package_version)
-    if not match:
-        return f"{category}/{package_version}"
-    return f"={category}/{package_version}"
 
 
 def _scrolled(child):

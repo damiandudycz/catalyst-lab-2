@@ -25,7 +25,7 @@ from .item_select_expander_row import ItemSelectionExpanderRow
 from .event_bus import EventBus
 from .project_stage_automatic_option import StageAutomaticOption
 from .project_stage_argument_descriptions import stage_argument_description
-from .project_stage_value_resolver import resolved_stage_argument_display, resolve_stage_argument, split_additions
+from .project_stage_value_resolver import UNRESOLVED, resolved_stage_argument_display, resolve_stage_argument, split_additions
 from .project_stage_portage_confdir import (
     StagePortageConfdirSource, stage_overlay_path, stage_root_overlay_path, root_overlay_values, FILE_OVERLAY_ARGUMENTS
 )
@@ -1195,9 +1195,29 @@ class StageTextListRow(StageTextSourceRow):
             if self.argument.details == StageArgumentDetails.stage4_unmerge
             else StageArgumentDetails.livecd_packages
         )
-        stage_packages = _as_list(resolve_stage_argument(
-            self.project_directory, self.stage, packages_argument.value
-        ))
+        package_value = getattr(self.stage, packages_argument.name, None)
+        if (additions := split_additions(package_value)) is not None:
+            package_options, own_packages = additions
+        elif isinstance(package_value, list):
+            package_options = [item for item in package_value if isinstance(item, StageAutomaticOption)]
+            own_packages = [item for item in package_value if not isinstance(item, StageAutomaticOption)]
+        elif isinstance(package_value, StageAutomaticOption):
+            package_options, own_packages = [package_value], []
+        elif package_value is None:
+            package_options, own_packages = [], []
+        else:
+            package_options, own_packages = [], [package_value]
+
+        # Resolve each selected source independently. One unsupported parent source should
+        # not hide valid Releng packages or this stage's own additions.
+        stage_packages = list(own_packages)
+        for option in package_options:
+            inherited = resolve_stage_argument(
+                self.project_directory, self.stage, packages_argument.value, option=option
+            )
+            if inherited is not UNRESOLVED:
+                stage_packages.extend(_as_list(inherited))
+        stage_packages = list(dict.fromkeys(map(str, stage_packages)))
         self.unmerge_editor.set_entries(self.own_value() or [], inherited_entries, stage_packages)
 
     def _on_unmerge_entries_changed(self, entries):
