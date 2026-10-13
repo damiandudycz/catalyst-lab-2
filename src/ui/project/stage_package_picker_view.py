@@ -24,6 +24,7 @@ class StagePackagePickerView(Gtk.Box):
         self.own_packages = list(own_packages or [])
         self.on_apply = on_apply
         self._repo_views = []
+        self._repo_views_by_name = {}
         self.inherited_packages = self._inherited_package_lists()
         self._append_header()
         self.stack = Adw.ViewStack(vexpand=True)
@@ -33,7 +34,8 @@ class StagePackagePickerView(Gtk.Box):
         self.append(self.stack)
         self._add_inherited_page()
         self._add_repository_pages()
-        self.stack.connect("notify::visible-child", self._page_changed)
+        self.stack.connect("notify::visible-child-name", self._page_changed)
+        self._page_changed(self.stack, None)
         action_bar = Gtk.ActionBar()
         apply_button = Gtk.Button(label="Apply selections")
         apply_button.add_css_class("suggested-action")
@@ -116,12 +118,12 @@ class StagePackagePickerView(Gtk.Box):
         view = _SelectableRepositoryView(loader, repo_name, self.own_packages,
                                          self.inherited_packages, self._set_own_packages)
         self._repo_views.append(view)
-        self.stack.add_titled(_scrolled(view), f"repo-{len(self._repo_views)}", title)
+        page_name = f"repo-{len(self._repo_views)}"
+        self._repo_views_by_name[page_name] = view
+        self.stack.add_titled(_scrolled(view), page_name, title)
 
-    def _page_changed(self, *_):
-        page = self.stack.get_visible_child()
-        view = page.get_child() if isinstance(page, Gtk.ScrolledWindow) else page
-        if isinstance(view, _SelectableRepositoryView):
+    def _page_changed(self, stack, _):
+        if view := self._repo_views_by_name.get(stack.get_visible_child_name()):
             view.load()
 
     def _set_own_packages(self, value):
