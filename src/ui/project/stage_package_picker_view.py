@@ -194,6 +194,7 @@ class _SelectableRepositoryView(Gtk.Box):
         self.on_change = on_change
         self.rows = []
         self.filtered = []
+        self._syncing = False
         self.search = Gtk.SearchEntry(placeholder_text="Search packages…", sensitive=False)
         self.search.connect("search-changed", self._filter)
         self.append(self.search)
@@ -281,17 +282,21 @@ class _SelectableRepositoryView(Gtk.Box):
         row.add_suffix(dropdown)
         row.version_dropdown = dropdown
         row.package_check = check
+        row.package_base = base
+        row.package_versions = versions
         return row
 
     def _toggle(self, check, _param, base, versions, button):
+        if self._syncing:
+            return
         own = [item for item in self.selected if not _atom_matches(item, base)]
         if button.get_active():
             own.append(base)
         self._update(own)
 
     def _version_changed(self, dropdown, _param, base, selector, check):
-        if not check.get_active():
-            check.set_active(True)
+        if self._syncing:
+            return
         index = selector.get_selected()
         atom = base if index == 0 else f"={base}-{selector.get_model().get_string(index)}::{self.repo_name}"
         own = [item for item in self.selected if not _atom_matches(item, base)]
@@ -305,16 +310,27 @@ class _SelectableRepositoryView(Gtk.Box):
     def set_selected(self, value):
         self.selected = list(value)
         for category in self.rows:
-            if category.get_expanded():
-                category.set_expanded(False)
-                category.set_expanded(True)
+            if not category.get_expanded():
+                continue
+            for row in category.children:
+                own = [item for item in self.selected if _atom_matches(item, row.package_base)]
+                inherited = any(_atom_matches(item, row.package_base) for item in (
+                    self.parent_packages + self.releng_packages + self.installed_parent_packages
+                ))
+                self._syncing = True
+                row.package_check.set_active(bool(own or inherited))
+                row.package_check.set_sensitive(bool(own) or not inherited)
+                row.version_dropdown.set_sensitive(bool(own) or not inherited)
+                selected_version = _selected_version_for_repo(own, row.package_base, self.repo_name)
+                if selected_version in row.package_versions:
+                    row.version_dropdown.set_selected(row.package_versions.index(selected_version) + 1)
+                else:
+                    row.version_dropdown.set_selected(0)
+                self._syncing = False
 
     def set_inherited(self, inherited):
         self.parent_packages, self.releng_packages, self.installed_parent_packages = inherited
-        for category in self.rows:
-            if category.get_expanded():
-                category.set_expanded(False)
-                category.set_expanded(True)
+        self.set_selected(self.selected)
 
     def _filter(self, entry):
         query = entry.get_text().strip().lower()
