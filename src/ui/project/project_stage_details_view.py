@@ -1097,8 +1097,14 @@ class StageTextListRow(StageTextSourceRow):
             self.package_action_row.set_activatable(False)
             arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
             self.package_action_row.add_suffix(arrow)
-            editor_row = Gtk.ListBoxRow(activatable=True, selectable=False, child=self.package_action_row)
-            editor_row.connect("activate", self._open_package_picker)
+            # Adw.ExpanderRow hosts these in an internal GtkListBox. A nested ListBoxRow's
+            # activate signal is not reliably emitted for pointer clicks there, so make the
+            # visible action an actual button and handle its clicked signal directly.
+            open_button = Gtk.Button(child=self.package_action_row, has_frame=False,
+                                     hexpand=True, tooltip_text="Browse package trees and choose versions")
+            open_button.add_css_class("flat")
+            open_button.connect("clicked", self._open_package_picker)
+            editor_row = Gtk.ListBoxRow(activatable=False, selectable=False, child=open_button)
             return editor_row
 
         self.text_view = Gtk.TextView()
@@ -1129,11 +1135,6 @@ class StageTextListRow(StageTextSourceRow):
         self.apply_button.connect("clicked", lambda button: self.apply_custom_value())
         buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         buttons_box.append(hint_label)
-        if self.uses_package_picker:
-            picker_button = Gtk.Button(label="Additional packages…", valign=Gtk.Align.CENTER,
-                                       tooltip_text="Browse package trees and choose versions")
-            picker_button.connect("clicked", self._open_package_picker)
-            buttons_box.append(picker_button)
         buttons_box.append(self.revert_button)
         buttons_box.append(self.apply_button)
 
