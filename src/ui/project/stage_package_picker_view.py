@@ -284,6 +284,7 @@ class _SelectableRepositoryView(Gtk.Box):
         row.package_check = check
         row.package_base = base
         row.package_versions = versions
+        check.package_versions = versions
         return row
 
     def _toggle(self, check, _param, base, versions, button):
@@ -298,9 +299,17 @@ class _SelectableRepositoryView(Gtk.Box):
         if self._syncing:
             return
         index = selector.get_selected()
-        atom = base if index == 0 else f"={base}-{selector.get_model().get_string(index)}::{self.repo_name}"
+        if index > len(check.package_versions):
+            return
+        atom = base if index == 0 else f"={base}-{check.package_versions[index - 1]}::{self.repo_name}"
         own = [item for item in self.selected if not _atom_matches(item, base)]
         own.append(atom)
+        # Choosing a version is also a package selection, including when the checkbox was
+        # previously clear. Update it under the sync guard so its toggle handler can't
+        # replace the exact version atom with the unversioned package name.
+        self._syncing = True
+        check.set_active(True)
+        self._syncing = False
         self._update(own)
 
     def _update(self, value):

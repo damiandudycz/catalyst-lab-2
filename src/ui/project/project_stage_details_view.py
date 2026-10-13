@@ -1188,7 +1188,16 @@ class StageTextListRow(StageTextSourceRow):
             check.set_active(option in selected)
         self._loading = False
         self.update_display()
-        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
+        # The picker applies its changes immediately before popping back to this row. Persist
+        # synchronously here so the stage value (and the previous view's source toggles) is
+        # already up to date when navigation returns; an idle-scheduled event can run after
+        # the pushed view transition and leave the previous row showing stale state.
+        ProjectManager.shared().change_stage_argument(
+            project=self.project_directory,
+            stage=self.stage,
+            argument=self.argument.details or self.argument.name,
+            value=self.value,
+        )
 
     def get_editor_value(self):
         if self.uses_package_picker:
