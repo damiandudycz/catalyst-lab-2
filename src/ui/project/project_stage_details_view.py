@@ -897,7 +897,7 @@ class StageTextSourceRow(Adw.ExpanderRow):
 
     # Subclass editor interface:
 
-    def _create_editor_row(self) -> Gtk.ListBoxRow:
+    def _create_editor_row(self) -> Gtk.Widget:
         raise NotImplementedError
 
     def get_editor_value(self):
@@ -1089,7 +1089,7 @@ class StageTextListRow(StageTextSourceRow):
             button.connect("clicked", self._open_installed_packages)
             self.add_suffix(button)
 
-    def _create_editor_row(self) -> Gtk.ListBoxRow:
+    def _create_editor_row(self) -> Gtk.Widget:
         if self.uses_package_picker:
             self.package_action_row = Adw.ActionRow(
                 title="Additional packages", subtitle="Choose packages and versions"
@@ -1098,11 +1098,10 @@ class StageTextListRow(StageTextSourceRow):
             self.package_action_row.connect("activated", self._open_package_picker)
             arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
             self.package_action_row.add_suffix(arrow)
-            editor_row = Gtk.ListBoxRow()
-            editor_row.set_activatable(False)
-            editor_row.set_selectable(False)
-            editor_row.set_child(self.package_action_row)
-            return editor_row
+            # Adw.ExpanderRow.add_row() wraps this row in its own list item. Wrapping
+            # it in a Gtk.ListBoxRow first intercepts activation, so the action never
+            # reaches Adw.ActionRow's "activated" handler.
+            return self.package_action_row
 
         self.text_view = Gtk.TextView()
         self.text_view.set_monospace(True)
