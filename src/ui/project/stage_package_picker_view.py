@@ -16,17 +16,14 @@ from .project_stage_automatic_option import StageAutomaticOption
 class StagePackagePickerView(Gtk.Box):
     """Browse package trees from the stage's Gentoo snapshot and enabled overlays."""
 
-    def __init__(self, project, stage, argument, own_packages: list[str], on_apply,
-                 source_options=(), selected_source_options=()):
+    def __init__(self, project, stage, argument, own_packages: list[str], on_change,
+                 selected_source_options=()):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.project = project
         self.stage = stage
         self.argument = argument
         self.own_packages = list(own_packages or [])
-        self.on_apply = on_apply
-        self.source_options = [option for option in source_options
-                               if option.value in (StageAutomaticOption.INHERIT_FROM_PARENT,
-                                                   StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE)]
+        self.on_change = on_change
         self.selected_source_options = list(selected_source_options)
         self._repo_views = []
         self._repo_views_by_name = {}
@@ -37,16 +34,9 @@ class StagePackagePickerView(Gtk.Box):
                                     margin_start=24, margin_end=24)
         self.append(switcher)
         self.append(self.stack)
-        self._add_inherited_page()
         self._add_repository_pages()
         self.stack.connect("notify::visible-child-name", self._page_changed)
         self._page_changed(self.stack, None)
-        action_bar = Gtk.ActionBar()
-        apply_button = Gtk.Button(label="Apply selections")
-        apply_button.add_css_class("suggested-action")
-        apply_button.connect("clicked", self._apply)
-        action_bar.pack_end(apply_button)
-        self.append(action_bar)
 
     def _append_header(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
@@ -88,43 +78,10 @@ class StagePackagePickerView(Gtk.Box):
             parent_id = getattr(parent, StageArgumentDetails.parent.name, None)
         return sorted(result)
 
-    def _add_inherited_page(self):
-        parent, releng, installed = self.inherited_packages
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
-                       margin_start=24, margin_end=24, margin_top=16, margin_bottom=24)
-        if self.source_options:
-            source_group = Adw.PreferencesGroup(title="Include inherited packages",
-                                                description="Choose which inherited package lists to combine with your additions.")
-            self.source_checks = {}
-            for option in self.source_options:
-                row = Adw.ActionRow(title=option.display, subtitle=option.subtitle or "")
-                if option.unsupported:
-                    row.add_css_class("warning")
-                check = Gtk.CheckButton(active=option.value in self.selected_source_options,
-                                        valign=Gtk.Align.CENTER)
-                check.connect("toggled", self._source_toggled, option.value)
-                row.add_prefix(check)
-                row.set_activatable_widget(check)
-                source_group.add(row)
-                self.source_checks[option.value] = check
-            page.append(source_group)
-        for title, subtitle, values in (
-            ("Parent stage", "Packages already supplied by the parent stage.", parent),
-            ("Releng template", "Packages supplied by this stage's releng spec.", releng),
-            ("Installed in parent build chain", "Recorded inventory from completed parent builds.", installed),
-        ):
-            group = Adw.PreferencesGroup(title=title, description=subtitle)
-            for package in values:
-                group.add(Adw.ActionRow(title=package, subtitle="Already included"))
-            if not values:
-                group.add(Adw.ActionRow(title="No packages resolved", subtitle="This source is empty or unavailable."))
-            page.append(group)
-        self.stack.add_titled_with_icon(_scrolled(page), "inherited", "Included", "content-loading-symbolic")
-
     def _add_repository_pages(self):
         snapshot = self.project.get_snapshot()
         if snapshot:
-            self._add_repository_page("Gentoo", "gentoo", snapshot.load_ebuilds)
+            self._add_repository_page("Snapshot", "gentoo", snapshot.load_ebuilds)
         repos = resolve_stage_argument(self.project, self.stage, StageArgumentDetails.repos.value)
         repo_ids = repos if isinstance(repos, list) else []
         for overlay in Repository.OverlayDirectory.value:
@@ -153,25 +110,8 @@ class StagePackagePickerView(Gtk.Box):
         self.selection_summary.set_label(f"{len(value)} custom entr{'y' if len(value) == 1 else 'ies'} selected")
         for view in self._repo_views:
             view.set_selected(value)
-
-    def _apply(self, *_):
-        self.on_apply(self.own_packages, self.selected_source_options)
-        navigation = getattr(self, "content_navigation_view", None)
-        if navigation:
-            navigation.pop()
-
-    def _source_toggled(self, check, _param, option):
-        if check.get_active():
-            if option not in self.selected_source_options:
-                self.selected_source_options.append(option)
-        else:
-            self.selected_source_options = [value for value in self.selected_source_options if value != option]
-        self._refresh_repository_selections()
-
-    def _refresh_repository_selections(self):
-        selected = self._selected_inherited_package_lists()
-        for view in self._repo_views:
-            view.set_inherited(selected)
+        # Package and version edits are saved as they happen; there is no separate Apply step.
+        self.on_change(self.own_packages, self.selected_source_options)
 
     def _selected_inherited_package_lists(self):
         parent, releng, installed = self.inherited_packages

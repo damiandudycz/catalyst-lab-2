@@ -1148,7 +1148,7 @@ class StageTextListRow(StageTextSourceRow):
             return
         view = StagePackagePickerView(
             self.project_directory, self.stage, self.argument, self.own_value() or [],
-            self._apply_picker_value, self.automatic_options + self.unsupported_options, self.inherit_options()
+            self._apply_picker_value, self.inherit_options()
         )
         view.content_navigation_view = self.content_navigation_view
         self.content_navigation_view.push_view(view, title="Browse packages")
