@@ -292,13 +292,20 @@ def remove_unsupported_parent_options(project_directory, stage) -> list[str]:
 
 def load_catalyst_stage_arguments_details(toolset: Toolset, target_name: str | None) -> dict[str, StageArgumentTargetDetails]:
     arguments_sets = load_catalyst_stage_arguments(toolset=toolset, target_name=target_name)
-    # Catalyst's stage4 target supports this argument. Keep it visible if a toolset's
-    # Python source layout defeats the AST argument extractor; otherwise the entire
-    # Unmerge row disappears from the stage editor.
-    if target_name == "stage4" and StageArgumentDetails.stage4_unmerge.value not in arguments_sets.valid:
+    # Catalyst's stage4 target supports both settings. Keep them visible if a
+    # toolset's Python source layout defeats the AST argument extractor; otherwise
+    # Unmerge disappears and the separate Kernels group has no boot/kernel row.
+    if target_name and target_name.replace("-", "_").startswith("stage4"):
+        missing_stage4_arguments = {
+            StageArgumentDetails.boot_kernel.value,
+            StageArgumentDetails.stage4_unmerge.value,
+        } - arguments_sets.valid
+    else:
+        missing_stage4_arguments = set()
+    if missing_stage4_arguments:
         arguments_sets = StageArguments(
             required=arguments_sets.required,
-            valid=arguments_sets.valid | {StageArgumentDetails.stage4_unmerge.value},
+            valid=arguments_sets.valid | missing_stage4_arguments,
         )
     arguments_details = {
         arg_name: StageArgumentTargetDetails(
