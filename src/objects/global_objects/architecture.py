@@ -23,7 +23,9 @@ class Architecture(Enum):
     s390x = "s390x"         # IBM S/390 (64-bit)
 
     def releng_base_arch(self) -> RelengBaseArch | None:
-        return RelengBaseArch[self.name]
+        # Catalyst supports architectures without a corresponding Gentoo Releng
+        # release tree (for example MIPS).
+        return RelengBaseArch.__members__.get(self.name)
 
     def releases_directory(self) -> str:
         """Folder of architecture in releases of Gentoo mirrors (releases/<folder>/autobuilds), some architectures share

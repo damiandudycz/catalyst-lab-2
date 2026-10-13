@@ -1094,10 +1094,14 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
                 continue
             setattr(stage, key, _replace_overlay_references(value, overlay_ids))
         if generated_stage.releng_template and releng_directory and architecture:
-            spec_path = os.path.join(releng_directory.directory_path(), "releases", "specs",
-                                     architecture.releng_base_arch().value, generated_stage.releng_template)
-            if not os.path.isfile(spec_path):
-                log(f"Warning: releng template {generated_stage.releng_template} not found in {releng_directory.name}")
+            base_arch = architecture.releng_base_arch()
+            if base_arch is None:
+                log(f"Warning: no Releng specs are available for {architecture.value}; skipping {generated_stage.releng_template}")
+            else:
+                spec_path = os.path.join(releng_directory.directory_path(), "releases", "specs",
+                                         base_arch.value, generated_stage.releng_template)
+                if not os.path.isfile(spec_path):
+                    log(f"Warning: releng template {generated_stage.releng_template} not found in {releng_directory.name}")
         # Parent can't give values of arguments its target doesn't have (eg. root overlay of stage3).
         from .project_stage import remove_unsupported_parent_options
         if changed := remove_unsupported_parent_options(project_directory, stage):

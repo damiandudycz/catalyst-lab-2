@@ -535,7 +535,13 @@ def _load_catalyst_arch_tables(toolset_file_path: str, toolset_mtime: float) -> 
 def load_releng_templates(releng_directory: RelengDirectory, stage_name: str, architecture: Architecture) -> list[str]:
     specs_path = os.path.join(releng_directory.directory_path(), "releases/specs")
     templates = []
-    prefix = architecture.releng_base_arch().value + "/"
+    base_arch = architecture.releng_base_arch() if architecture else None
+    if base_arch is None or not os.path.isdir(specs_path):
+        # Some Catalyst architectures (including MIPS) have no matching Releng
+        # specs. Releng is optional in the stage wizard, so keep target selection
+        # usable and show no templates for these architectures.
+        return templates
+    prefix = base_arch.value + "/"
     for root, _, files in os.walk(specs_path):
         for file in files:
             if file.endswith(".spec"):
