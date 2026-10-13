@@ -55,7 +55,7 @@
             </child>
             <child>
               <object class="AdwPreferencesGroup" id="packages_pref_group">
-                <property name="title">Packages</property>
+                <property name="title">Package management</property>
               </object>
             </child>
             <child>
