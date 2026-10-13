@@ -1094,14 +1094,12 @@ class StageTextListRow(StageTextSourceRow):
             self.package_action_row = Adw.ActionRow(
                 title="Additional packages", subtitle="Choose packages and versions"
             )
-            self.package_action_row.set_activatable(True)
-            self.package_action_row.connect("activated", self._open_package_picker)
+            self.package_action_row.set_activatable(False)
             arrow = Gtk.Image.new_from_icon_name("go-next-symbolic")
             self.package_action_row.add_suffix(arrow)
-            # Adw.ExpanderRow.add_row() wraps this row in its own list item. Wrapping
-            # it in a Gtk.ListBoxRow first intercepts activation, so the action never
-            # reaches Adw.ActionRow's "activated" handler.
-            return self.package_action_row
+            editor_row = Gtk.ListBoxRow(activatable=True, selectable=False, child=self.package_action_row)
+            editor_row.connect("activate", self._open_package_picker)
+            return editor_row
 
         self.text_view = Gtk.TextView()
         self.text_view.set_monospace(True)
