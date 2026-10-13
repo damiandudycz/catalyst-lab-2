@@ -248,12 +248,13 @@ provision:
 """
 
 # Version of machine setup, increased when setup script changes. Existing machines are updated when started.
-MACHINE_SETUP_VERSION = 5
+MACHINE_SETUP_VERSION = 6
 _MACHINE_SETUP_VERSION_FILE = "/etc/catalystlab-setup-version"
 
 # QEMU user emulators, to build stages for other architectures (like on Linux hosts, binfmt_misc with F flag makes
 # them work in chroots and namespaces).
 _QEMU_ARCHITECTURES = "x86_64 i386 arm armeb aarch64 riscv64 ppc ppc64 ppc64le s390x mips mipsel mips64 mips64el sparc sparc64 alpha m68k loongarch64 hppa sh4"
+_QEMU_X86_64_WRAPPER = "/usr/local/bin/catalystlab-qemu-x86_64"
 
 # Rules of qemu-binfmt (Alpine) for some architectures (eg. ppc64) match only ELF files with OS ABI 0 (SYSV), programs
 # marked with GNU/Linux ABI (3), like gcc and ldconfig of Gentoo ppc64 stages, fail then with Exec format error. Rules
@@ -267,16 +268,20 @@ for entry in qemu-*; do
     magic=$(sed -n 's/^magic //p' "$entry")
     mask=$(sed -n 's/^mask //p' "$entry")
     interpreter=$(sed -n 's/^interpreter //p' "$entry")
+    registered_interpreter=$interpreter
     flags=$(sed -n 's/^flags: //p' "$entry")
     [ "$offset" = 0 ] && [ -n "$magic" ] && [ -n "$mask" ] || continue
+    if [ "$entry" = qemu-x86_64 ] && [ -x @QEMU_X86_64_WRAPPER@ ]; then
+        interpreter=@QEMU_X86_64_WRAPPER@
+    fi
     # Bytes 7 and 8 of ELF header are hex digits 15-18.
     fixed_mask="$(echo "$mask" | cut -c1-14)0000$(echo "$mask" | cut -c19-)"
-    [ "$fixed_mask" = "$mask" ] && continue
+    [ "$fixed_mask" = "$mask" ] && [ "$interpreter" = "$registered_interpreter" ] && continue
     echo -1 > "$entry"
     printf ':%s:M:0:%s:%s:%s:%s\n' "$entry" "$(echo "$magic" | sed 's/../\\x&/g')" \
         "$(echo "$fixed_mask" | sed 's/../\\x&/g')" "$interpreter" "$flags" > register
 done
-"""
+""".replace("@QEMU_X86_64_WRAPPER@", _QEMU_X86_64_WRAPPER)
 
 def machine_setup_script() -> str:
     """Prepares machine (as root, idempotent): tools for working without root, subordinate ids of user, working space
@@ -314,6 +319,12 @@ done
 retry apk add $apk_options --cache-predownload bash coreutils findutils grep sed tar xz zstd bubblewrap util-linux util-linux-misc \\
     shadow-subids squashfs-tools python3 curl e2fsprogs dosfstools mtools xorriso xz qemu-openrc $emulators
 rm -rf /var/cache/catalystlab-apk
+if command -v qemu-x86_64 >/dev/null 2>&1; then
+    qemu_x86_64=$(command -v qemu-x86_64)
+    mkdir -p "$(dirname {_QEMU_X86_64_WRAPPER})"
+    printf '#!/bin/sh\\nexport QEMU_CPU=max\\nexec "%s" "$@"\\n' "$qemu_x86_64" > {_QEMU_X86_64_WRAPPER}
+    chmod +x {_QEMU_X86_64_WRAPPER}
+fi
 rc-update add qemu-binfmt default
 rc-service qemu-binfmt restart || rc-service qemu-binfmt start
 mkdir -p /etc/local.d
