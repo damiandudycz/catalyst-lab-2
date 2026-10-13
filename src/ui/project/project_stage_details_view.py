@@ -175,6 +175,7 @@ class ProjectStageDetailsView(Gtk.Box):
                 self.configuration_rows.append(row)
                 # Kernels depend on boot/kernel and releng template, refreshed after argument is saved.
                 row.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.load_kernel_rows, "kernels")
+        self._refresh_unmerge_package_rows()
         self.load_kernel_rows()
         self.apply_mode()
 
@@ -399,9 +400,18 @@ class ProjectStageDetailsView(Gtk.Box):
         self._refresh_unmerge_package_rows()
 
     def _refresh_unmerge_package_rows(self):
+        package_rows = {
+            row.argument.details: row for row in self.configuration_rows
+            if isinstance(row, StageTextListRow) and row.uses_package_picker
+        }
         for row in self.configuration_rows:
             if isinstance(row, StageTextListRow) and row.uses_unmerge_picker:
-                row.refresh_unmerge_packages()
+                packages_argument = (
+                    StageArgumentDetails.stage4_packages
+                    if row.argument.details == StageArgumentDetails.stage4_unmerge
+                    else StageArgumentDetails.livecd_packages
+                )
+                row.refresh_unmerge_packages(package_rows.get(packages_argument))
 
     def _on_unrealize(self, widget):
         if getattr(self, "_window_active_handler", None) and (root := self.get_root()):
@@ -1182,7 +1192,7 @@ class StageTextListRow(StageTextSourceRow):
         view.content_navigation_view = self.content_navigation_view
         self.content_navigation_view.push_view(view, title="Browse packages")
 
-    def refresh_unmerge_packages(self):
+    def refresh_unmerge_packages(self, package_row=None):
         if not self.uses_unmerge_picker or not hasattr(self, "unmerge_editor"):
             return
         inherited_entries = []
@@ -1196,7 +1206,10 @@ class StageTextListRow(StageTextSourceRow):
             else StageArgumentDetails.livecd_packages
         )
         package_value = getattr(self.stage, packages_argument.name, None)
-        if (additions := split_additions(package_value)) is not None:
+        if package_row is not None:
+            package_options = package_row.inherit_options()
+            own_packages = package_row.own_value() or []
+        elif (additions := split_additions(package_value)) is not None:
             package_options, own_packages = additions
         elif isinstance(package_value, list):
             package_options = [item for item in package_value if isinstance(item, StageAutomaticOption)]

@@ -317,7 +317,7 @@ class StageUnmergePackagesEditor(Gtk.Box):
         self.inherited_entries = []
         self.stage_packages = []
         self._syncing = False
-        self._loaded = False
+        self._loaded = True
         self._render_generation = 0
         self._rendered_rows = []
         self.group = Adw.PreferencesGroup(title="Packages selected for this stage",
@@ -328,22 +328,16 @@ class StageUnmergePackagesEditor(Gtk.Box):
         self.status.add_css_class("caption")
         self.append(self.status)
     def load(self):
-        """Show only packages explicitly added to this stage, on first expansion."""
-        if self._loaded:
-            return
-        self._loaded = True
-        self._render()
+        """Kept for the stage row expansion hook; inventory is now available immediately."""
+        return
 
     def set_entries(self, own_entries, inherited_entries, stage_packages=()):
         self.own_entries = list(dict.fromkeys(map(str, own_entries or [])))
         self.inherited_entries = list(dict.fromkeys(map(str, inherited_entries or [])))
         self.stage_packages = list(dict.fromkeys(map(str, stage_packages or [])))
-        if self._loaded:
-            self._render()
+        self._render()
 
     def _render(self):
-        if not self._loaded:
-            return
         self._render_generation += 1
         generation = self._render_generation
         if not self.stage_packages:
