@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 import threading
-import fnmatch
 
 from gi.repository import Gtk, Adw, GLib
 
@@ -303,88 +302,6 @@ class _SelectableRepositoryView(Gtk.Box):
         self.status.set_visible(not self.filtered)
 
 
-class StageUnmergePackagesEditor(Gtk.Box):
-    """Inline package inventory selector for Unmerge stage arguments."""
-
-    def __init__(self, project, stage, argument, on_change):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8,
-                         margin_start=12, margin_end=12, margin_top=8, margin_bottom=12)
-        self.project = project
-        self.stage = stage
-        self.argument = argument
-        self.on_change = on_change
-        self.own_entries = []
-        self.inherited_entries = []
-        self.stage_packages = []
-        self._syncing = False
-        self.group = Adw.PreferencesGroup(title="Packages selected for this stage",
-                                          description="Packages selected in Additional packages and its inheritance options.")
-        self.append(self.group)
-        self.status = Gtk.Label(label="No packages selected to install in this stage.", xalign=0)
-        self.status.add_css_class("dimmed")
-        self.status.add_css_class("caption")
-        self.append(self.status)
-    def set_entries(self, own_entries, inherited_entries, stage_packages=()):
-        self.own_entries = list(dict.fromkeys(map(str, own_entries or [])))
-        self.inherited_entries = list(dict.fromkeys(map(str, inherited_entries or [])))
-        self.stage_packages = list(dict.fromkeys(map(str, stage_packages or [])))
-        self._render()
-
-    def _render(self):
-        while child := self.group.get_first_child():
-            self.group.remove(child)
-        if not self.stage_packages:
-            self.status.set_label("No packages selected to install in this stage.")
-        else:
-            self.status.set_label("")
-
-        candidates = [(package, package, "Selected to install in this stage") for package in self.stage_packages]
-        candidates.sort(key=lambda item: item[0].casefold())
-        displayed = set()
-        rows = []
-        for installed, atom, source in candidates:
-            inherited = any(_package_rule_matches(rule, installed) for rule in self.inherited_entries)
-            own = any(_package_rule_matches(rule, installed) for rule in self.own_entries)
-            rows.append((atom, installed,
-                         "Selected by inherited Unmerge" if inherited else source,
-                         inherited, inherited or own))
-            displayed.add(installed)
-
-        # Keep inherited Unmerge entries visible and locked even when they are outside the
-        # package selection currently shown.
-        for entry in self.inherited_entries:
-            if not any(_package_rule_matches(entry, package) for package in displayed):
-                rows.append((entry, entry, "Selected by inherited Unmerge", True, True))
-                displayed.add(entry)
-        for entry in self.own_entries:
-            if not any(_package_rule_matches(entry, package) for package in displayed):
-                rows.append((entry, entry, "Custom Unmerge entry", False, True))
-                displayed.add(entry)
-
-        # This inventory is limited to the selected install list, rather than every
-        # package in the built parent image, so render it immediately for reliable updates.
-        for atom, title, subtitle, locked, active in rows:
-            self._add_package_row(atom, title, subtitle, locked, active)
-
-    def _add_package_row(self, atom, title, subtitle, locked, active):
-        row = Adw.ActionRow(title=title, subtitle=subtitle)
-        check = Gtk.CheckButton(active=active, sensitive=not locked, valign=Gtk.Align.CENTER)
-        check.connect("toggled", self._toggle, atom, locked)
-        row.add_prefix(check)
-        row.set_activatable_widget(check)
-        self.group.add(row)
-
-    def _toggle(self, check, atom, locked):
-        if self._syncing or locked:
-            return
-        self.own_entries = [entry for entry in self.own_entries
-                            if not _package_rule_matches(entry, atom.lstrip("="))]
-        if check.get_active():
-            self.own_entries.append(atom)
-        self.on_change(self.own_entries)
-        self._render()
-
-
 def _as_list(value):
     if value is UNRESOLVED or value is None:
         return []
@@ -399,14 +316,6 @@ def _atom_matches(atom: str, package: str) -> bool:
         return True
     suffix = atom[len(package):] if atom.startswith(package) else ""
     return len(suffix) > 1 and suffix[0] == "-" and suffix[1].isdigit()
-
-
-def _package_rule_matches(rule: str, installed: str) -> bool:
-    """Matches a Portage package atom or wildcard against a recorded installed package."""
-    rule = str(rule).strip().lstrip("<>=~!")
-    rule = rule.split("::", 1)[0].split("[", 1)[0].split(":", 1)[0]
-    installed = str(installed).lstrip("<>=~!").split("::", 1)[0].split("[", 1)[0].split(":", 1)[0]
-    return fnmatch.fnmatchcase(installed, rule) or _atom_matches(rule, installed)
 
 
 def _selected_version_for_repo(atoms, base, repo_name):

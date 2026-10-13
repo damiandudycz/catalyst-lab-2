@@ -55,7 +55,7 @@
             </child>
             <child>
               <object class="AdwPreferencesGroup" id="packages_pref_group">
-                <property name="title">Packages</property>
+                <property name="title">Package sources and caches</property>
               </object>
             </child>
             <child>
@@ -71,8 +71,18 @@
               </object>
             </child>
             <child>
+              <object class="AdwPreferencesGroup" id="stage_setup_pref_group">
+                <property name="title">Stage setup</property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwPreferencesGroup" id="live_image_pref_group">
+                <property name="title">Live image</property>
+              </object>
+            </child>
+            <child>
               <object class="AdwPreferencesGroup" id="configuration_pref_group">
-                <property name="title">Other</property>
+                <property name="title">Build behavior</property>
               </object>
             </child>
             <child>

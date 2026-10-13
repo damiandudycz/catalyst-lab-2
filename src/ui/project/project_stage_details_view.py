@@ -37,7 +37,7 @@ from .project_stage_kernels import (
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
 from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package, derived_distkernel
-from .stage_package_picker_view import StagePackagePickerView, StageUnmergePackagesEditor, _as_list, _package_rule_matches
+from .stage_package_picker_view import StagePackagePickerView, _as_list
 
 
 def set_row_description(row: Gtk.Widget, description: str | None):
@@ -68,6 +68,8 @@ class ProjectStageDetailsView(Gtk.Box):
     release_pref_group = Gtk.Template.Child()
     packages_pref_group = Gtk.Template.Child()
     package_contents_pref_group = Gtk.Template.Child()
+    stage_setup_pref_group = Gtk.Template.Child()
+    live_image_pref_group = Gtk.Template.Child()
     configuration_pref_group = Gtk.Template.Child()
     kernels_pref_group = Gtk.Template.Child()
 
@@ -99,7 +101,7 @@ class ProjectStageDetailsView(Gtk.Box):
         self.hidden_settings_label = Gtk.Label(wrap=True, xalign=0, margin_start=12, margin_end=12, visible=False)
         self.hidden_settings_label.add_css_class("caption")
         self.hidden_settings_label.add_css_class("dimmed")
-        self.configuration_pref_group.get_parent().insert_child_after(self.hidden_settings_label, self.configuration_pref_group)
+        self.configuration_pref_group.get_parent().insert_child_after(self.hidden_settings_label, self.live_image_pref_group)
 
     def header_bar_end_widgets(self) -> list[Gtk.Widget]:
         return [self.mode_toggle]
@@ -121,7 +123,8 @@ class ProjectStageDetailsView(Gtk.Box):
             if isinstance(row, StageKernelRow):
                 hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
         for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group,
-                      self.package_contents_pref_group, self.configuration_pref_group):
+                      self.package_contents_pref_group, self.stage_setup_pref_group,
+                      self.live_image_pref_group, self.configuration_pref_group):
             group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
         self.kernels_pref_group.set_visible(getattr(self, "boot_kernel_argument", None) is not None)
         self.hidden_settings_label.set_label(
@@ -175,7 +178,6 @@ class ProjectStageDetailsView(Gtk.Box):
                 self.configuration_rows.append(row)
                 # Kernels depend on boot/kernel and releng template, refreshed after argument is saved.
                 row.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.load_kernel_rows, "kernels")
-        self._refresh_unmerge_package_rows()
         self.load_kernel_rows()
         self.apply_mode()
 
@@ -343,12 +345,36 @@ class ProjectStageDetailsView(Gtk.Box):
                 StageArgumentDetails.binrepo_path |
                 StageArgumentDetails.pkgcache_path |
                 StageArgumentDetails.kerncache_path |
-                StageArgumentDetails.snapshot_treeish
+                StageArgumentDetails.portage_confdir
             ):
                 return self.packages_pref_group
             case (StageArgumentDetails.stage4_packages | StageArgumentDetails.stage4_unmerge |
                   StageArgumentDetails.livecd_packages | StageArgumentDetails.livecd_unmerge):
                 return self.package_contents_pref_group
+            case (StageArgumentDetails.livecd_use | StageArgumentDetails.livecd_bootargs | StageArgumentDetails.livecd_cdtar |
+                  StageArgumentDetails.livecd_depclean | StageArgumentDetails.livecd_empty |
+                  StageArgumentDetails.livecd_fsops | StageArgumentDetails.livecd_fsscript |
+                  StageArgumentDetails.livecd_fstype | StageArgumentDetails.livecd_gk_mainargs |
+                  StageArgumentDetails.livecd_iso | StageArgumentDetails.livecd_linuxrc |
+                  StageArgumentDetails.livecd_modblacklist | StageArgumentDetails.livecd_motd |
+                  StageArgumentDetails.livecd_overlay | StageArgumentDetails.livecd_readme |
+                  StageArgumentDetails.livecd_rcadd | StageArgumentDetails.livecd_rcdel |
+                  StageArgumentDetails.livecd_rm | StageArgumentDetails.livecd_root_overlay |
+                  StageArgumentDetails.livecd_type | StageArgumentDetails.livecd_users |
+                  StageArgumentDetails.livecd_verify | StageArgumentDetails.livecd_volid):
+                return self.live_image_pref_group
+            case (StageArgumentDetails.stage4_use | StageArgumentDetails.stage4_empty |
+                  StageArgumentDetails.stage4_fsscript | StageArgumentDetails.stage4_gk_mainargs |
+                  StageArgumentDetails.stage4_groups | StageArgumentDetails.stage4_linuxrc |
+                  StageArgumentDetails.stage4_rcadd | StageArgumentDetails.stage4_rcdel |
+                  StageArgumentDetails.stage4_rm | StageArgumentDetails.stage4_root_overlay |
+                  StageArgumentDetails.stage4_ssh_public_keys | StageArgumentDetails.stage4_users):
+                return self.stage_setup_pref_group
+            case (StageArgumentDetails.catalyst_use | StageArgumentDetails.decompressor_search_order |
+                  StageArgumentDetails.hostuse | StageArgumentDetails.install_mask |
+                  StageArgumentDetails.portage_prefix | StageArgumentDetails.rename_regexp |
+                  StageArgumentDetails.update_seed | StageArgumentDetails.update_seed_command):
+                return self.configuration_pref_group
             case _:
                 return self.configuration_pref_group
 
@@ -367,8 +393,6 @@ class ProjectStageDetailsView(Gtk.Box):
             for r in self.configuration_rows:
                 if r.argument != row.argument and isinstance(r, (StageTextSourceRow, StageCacheRow)):
                     r.refresh_options()
-            if row.argument.details in (StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages):
-                self._refresh_unmerge_package_rows()
             return
         if row.argument.details.type == StageArgumentType.select:
             ProjectManager.shared().change_stage_argument(
@@ -397,22 +421,6 @@ class ProjectStageDetailsView(Gtk.Box):
                 r.load_state()
             elif r.argument != row.argument and isinstance(r, (StageTextSourceRow, StageCacheRow)):
                 r.refresh_options() # Keeps possibly unapplied text, only updates availability of automatic options.
-        self._refresh_unmerge_package_rows()
-
-    def _refresh_unmerge_package_rows(self):
-        package_rows = {
-            row.argument.details: row for row in self.configuration_rows
-            if isinstance(row, StageTextListRow) and row.uses_package_picker
-        }
-        for row in self.configuration_rows:
-            if isinstance(row, StageTextListRow) and row.uses_unmerge_picker:
-                packages_argument = (
-                    StageArgumentDetails.stage4_packages
-                    if row.argument.details == StageArgumentDetails.stage4_unmerge
-                    else StageArgumentDetails.livecd_packages
-                )
-                row.refresh_unmerge_packages(package_rows.get(packages_argument))
-
     def _on_unrealize(self, widget):
         if getattr(self, "_window_active_handler", None) and (root := self.get_root()):
             root.disconnect(self._window_active_handler)
@@ -680,9 +688,6 @@ class StageTextSourceRow(Adw.ExpanderRow):
         self.uses_package_picker = argument.details in (
             StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages
         )
-        self.uses_unmerge_picker = argument.details in (
-            StageArgumentDetails.stage4_unmerge, StageArgumentDetails.livecd_unmerge
-        )
         self.value = None
         self.resolved_values: dict[StageAutomaticOption, str] = {}
         self._loading = False
@@ -716,7 +721,7 @@ class StageTextSourceRow(Adw.ExpanderRow):
             return
         group: Gtk.CheckButton | None = None
         options = self.unsupported_options + self.automatic_options
-        if not self.uses_package_picker and not self.uses_unmerge_picker:
+        if not self.uses_package_picker:
             options.append(None) # None stands for custom value.
         for option in options:
             # Same rows as in option lists (eg. Profile), so unavailable options look the same.
@@ -777,8 +782,6 @@ class StageTextSourceRow(Adw.ExpanderRow):
             options = [option for option, check_button in self.source_check_buttons.items()
                        if option is not None and check_button.get_active()]
             self.value = self._joined_value(options, self.get_editor_value() if self._custom_enabled else None)
-            if self.uses_unmerge_picker:
-                self.refresh_unmerge_packages()
         else:
             if not button.get_active():
                 return
@@ -822,8 +825,6 @@ class StageTextSourceRow(Adw.ExpanderRow):
         """Custom value is used (alone, or joined with inherited values)."""
         if self.uses_package_picker:
             return True
-        if self.uses_unmerge_picker:
-            return True
         if self.allows_additions and self.source_rows:
             return self._custom_enabled
         return not self.inherit_options()
@@ -837,8 +838,6 @@ class StageTextSourceRow(Adw.ExpanderRow):
             inherited.update(map(str, _as_list(resolve_stage_argument(
                 self.project_directory, self.stage, self.argument.name, option=option
             ))))
-        if self.uses_unmerge_picker:
-            return [item for item in own if not any(_package_rule_matches(rule, item) for rule in inherited)]
         return [item for item in own if str(item) not in inherited]
 
     # State:
@@ -862,14 +861,12 @@ class StageTextSourceRow(Adw.ExpanderRow):
             # Empty value with check boxes: nothing is selected.
             self._custom_enabled = not (self.allows_additions and self.source_rows and self.value is None)
             self.set_editor_value(self.value)
-        if self.uses_package_picker or self.uses_unmerge_picker:
+        if self.uses_package_picker:
             self._custom_enabled = True
         options = self.inherit_options()
         for option, check_button in self.source_check_buttons.items():
             check_button.set_active(self._custom_enabled if option is None else option in options)
         self._loading = False
-        if self.uses_unmerge_picker:
-            self.refresh_unmerge_packages()
         self.update_display()
 
     def apply_custom_value(self):
@@ -1124,12 +1121,6 @@ class StageTextListRow(StageTextSourceRow):
             self.package_action_row.add_suffix(arrow)
             self.package_action_row.connect("activated", self._open_package_picker)
             return self.package_action_row
-        if self.uses_unmerge_picker:
-            self.unmerge_editor = StageUnmergePackagesEditor(
-                self.project_directory, self.stage, self.argument, self._on_unmerge_entries_changed
-            )
-            return self.unmerge_editor
-
         self.text_view = Gtk.TextView()
         self.text_view.set_monospace(True)
         self.text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
@@ -1184,61 +1175,6 @@ class StageTextListRow(StageTextSourceRow):
         view.content_navigation_view = self.content_navigation_view
         self.content_navigation_view.push_view(view, title="Browse packages")
 
-    def refresh_unmerge_packages(self, package_row=None):
-        if not self.uses_unmerge_picker or not hasattr(self, "unmerge_editor"):
-            return
-        inherited_entries = []
-        for option in self.inherit_options():
-            inherited_entries.extend(_as_list(resolve_stage_argument(
-                self.project_directory, self.stage, self.argument.details.value, option=option
-            )))
-        packages_argument = (
-            StageArgumentDetails.stage4_packages
-            if self.argument.details == StageArgumentDetails.stage4_unmerge
-            else StageArgumentDetails.livecd_packages
-        )
-        package_value = getattr(self.stage, packages_argument.name, None)
-        if package_row is not None:
-            package_options = package_row.inherit_options()
-            # Read this from the live package editor: its own_packages list is exactly
-            # what the Additional packages subtitle and picker are currently showing.
-            own_packages = package_row.get_editor_value() or []
-        elif (additions := split_additions(package_value)) is not None:
-            package_options, own_packages = additions
-        elif isinstance(package_value, list):
-            package_options = [item for item in package_value if isinstance(item, StageAutomaticOption)]
-            own_packages = [item for item in package_value if not isinstance(item, StageAutomaticOption)]
-        elif isinstance(package_value, StageAutomaticOption):
-            package_options, own_packages = [package_value], []
-        elif package_value is None:
-            package_options, own_packages = [], []
-        else:
-            package_options, own_packages = [], [package_value]
-
-        # Resolve each selected source independently. One unsupported parent source should
-        # not hide valid Releng packages or this stage's own additions.
-        stage_packages = list(own_packages)
-        for option in package_options:
-            inherited = resolve_stage_argument(
-                self.project_directory, self.stage, packages_argument.value, option=option
-            )
-            if inherited is not UNRESOLVED:
-                stage_packages.extend(_as_list(inherited))
-        stage_packages = list(dict.fromkeys(map(str, stage_packages)))
-        self.unmerge_editor.set_entries(self.own_value() or [], inherited_entries, stage_packages)
-
-    def _on_unmerge_entries_changed(self, entries):
-        self._custom_enabled = True
-        self.value = self._joined_value(self.inherit_options(), entries)
-        self.update_display()
-        ProjectManager.shared().change_stage_argument(
-            project=self.project_directory,
-            stage=self.stage,
-            argument=self.argument.details or self.argument.name,
-            value=self.value,
-        )
-        self.event_bus.emit(ItemSelectionViewEvent.ITEM_CHANGED, self)
-
     def _apply_picker_value(self, value, options=None):
         if not self.uses_package_picker:
             self.set_editor_value(value)
@@ -1268,8 +1204,6 @@ class StageTextListRow(StageTextSourceRow):
     def get_editor_value(self):
         if self.uses_package_picker:
             return self.own_packages or None
-        if self.uses_unmerge_picker:
-            return self.unmerge_editor.own_entries or None
         buffer = self.text_view.get_buffer()
         text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
         return [line.strip() for line in text.splitlines() if line.strip()] or None
@@ -1277,9 +1211,6 @@ class StageTextListRow(StageTextSourceRow):
     def set_editor_value(self, value):
         if self.uses_package_picker:
             self.own_packages = list(value or [])
-            return
-        if self.uses_unmerge_picker:
-            self.unmerge_editor.set_entries(value or [], self.unmerge_editor.inherited_entries)
             return
         self.text_view.get_buffer().set_text("\n".join(value or []))
 
@@ -1309,9 +1240,8 @@ class StageTextListRow(StageTextSourceRow):
 
     def update_display(self):
         super().update_display()
-        # Package and Unmerge settings use dedicated editors; they do not create the
-        # multiline text controls used by the other list settings.
-        if self.uses_package_picker or self.uses_unmerge_picker:
+        # Package settings use a dedicated pushed view; other lists use the multiline text editor.
+        if self.uses_package_picker:
             return
         self.hint_label.set_label("Entries added to inherited ones, one per line. Ctrl+Enter to apply." if self.inherit_options()
                                   else "One entry per line. Ctrl+Enter to apply.")
