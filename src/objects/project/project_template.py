@@ -735,10 +735,13 @@ def _template_argument_value(key: str, value, context: str):
         # "@releng" and/or "@parent" in list: inherited values joined with own ones.
         details = StageArgumentDetails.__members__.get(key)
         markers = [item for item in value if isinstance(item, str) and item in _INHERIT_MARKERS]
-        if details is None or not details.allows_additions:
+        own = [item for item in value if not (isinstance(item, str) and item in _INHERIT_MARKERS)]
+        # A single inheritance marker is valid even for arguments that can't combine
+        # inherited and custom values (eg. boot_kernel). Only reject a mixed value,
+        # or multiple inherited sources, when this argument doesn't support additions.
+        if details is None or ((own or len(markers) > 1) and not details.allows_additions):
             raise TemplateError(f"{context}: own value can't be joined with inherited value of this argument")
         options = list(dict.fromkeys(_INHERIT_MARKERS[marker] for marker in markers))
-        own = [item for item in value if not (isinstance(item, str) and item in _INHERIT_MARKERS)]
         return [*options, *own] if own or len(options) > 1 else options[0]
     return value
 
