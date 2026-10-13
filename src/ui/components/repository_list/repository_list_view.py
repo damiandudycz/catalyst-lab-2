@@ -42,6 +42,7 @@ class RepositoryListView(Gtk.Box):
     show_add_button                = GObject.Property(type=bool, default=True)
     add_button_title               = GObject.Property(type=str, default="Add item")
     show_installations             = GObject.Property(type=bool, default=True) # Rows of started processes of item_installation_class.
+    preserve_item_order            = GObject.Property(type=bool, default=False)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -87,7 +88,11 @@ class RepositoryListView(Gtk.Box):
                 self.items_container.remove(row)
         self._item_rows = []
 
-        for item in self.repository.value:
+        items = self.repository.value
+        if self.preserve_item_order:
+            # Rows are inserted at index 0 below, so reverse iteration preserves the repository's order on screen.
+            items = reversed(items)
+        for item in items:
             try:
                 item_row = ItemRow(
                     item                           = item,
