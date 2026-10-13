@@ -156,7 +156,16 @@ class PackagesDirectoryDetailsView(Gtk.Box):
         def on_response(dialog, response):
             if response != "delete":
                 return
-            delete_packages_directory(self.directory)
+            try:
+                delete_packages_directory(self.directory)
+            except Exception as error:
+                error_dialog = Adw.AlertDialog(
+                    heading="Binary packages couldn't be deleted",
+                    body=f"The folder could not be removed: {error}",
+                )
+                error_dialog.add_response("close", "Close")
+                error_dialog.present(self.get_root())
+                return
             if self.content_navigation_view:
                 self.content_navigation_view.pop()
         dialog.connect("response", on_response)

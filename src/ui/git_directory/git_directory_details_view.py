@@ -298,20 +298,40 @@ class GitDirectoryDetailsView(Gtk.Box):
         def on_response(dialog, response):
             if response != "delete":
                 return
+            dialog_parent = self.get_root()
             delete_builds = builds_checkbox is not None and builds_checkbox.get_active()
             delete_binpkgs = binpkgs_checkbox is not None and binpkgs_checkbox.get_active()
             project = self.git_directory
             packages_directory = project.get_packages_directory() if delete_binpkgs else None
+            if packages_directory is not None:
+                from .packages_directory import delete_packages_directory
+                try:
+                    # Delete the selected package folder while the project still
+                    # exists in the repository. This keeps its association intact
+                    # until the filesystem removal succeeds.
+                    delete_packages_directory(packages_directory)
+                except Exception as error:
+                    def show_packages_error(error=error):
+                        error_dialog = Adw.AlertDialog(
+                            heading="Binary packages couldn't be deleted",
+                            body=f"The project was kept because its binary package folder could not be removed: {error}",
+                        )
+                        error_dialog.add_response("close", "Close")
+                        error_dialog.present(dialog_parent)
+                        return False
+                    GLib.idle_add(show_packages_error)
+                    return
             if delete_builds:
                 from .project_build import delete_project_builds
                 delete_project_builds(project)
             self.manager_class.shared().remove_directory(directory=project)
-            if packages_directory is not None:
-                from ...objects.packages.packages_directory import delete_packages_directory
-                delete_packages_directory(packages_directory)
-            if hasattr(self, "_window"):
+            close_project_view = getattr(self, "on_project_deleted", None) if is_project else None
+            if close_project_view is not None:
+                # Let the delete dialog finish responding before changing the navigation stack.
+                GLib.idle_add(close_project_view)
+            if close_project_view is None and hasattr(self, "_window"):
                 self._window.close()
-            elif hasattr(self, "content_navigation_view"):
+            elif close_project_view is None and hasattr(self, "content_navigation_view"):
                 self.content_navigation_view.pop()
 
         dialog.connect("response", on_response)

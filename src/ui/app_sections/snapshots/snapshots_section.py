@@ -57,7 +57,7 @@ class SnapshotsSection(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_installation_row_pressed(self, sender, installation):
-        app_event_bus.emit(AppEvents.PRESENT_VIEW, SnapshotCreateView(installation_in_progress=installation), "New toolset", 640, 480)
+        app_event_bus.emit(AppEvents.PRESENT_VIEW, SnapshotCreateView(installation_in_progress=installation), "New snapshot", 640, 480)
 
     @Gtk.Template.Callback()
     def on_add_new_item_pressed(self, sender):

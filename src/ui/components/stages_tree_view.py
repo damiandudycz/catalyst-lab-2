@@ -33,18 +33,26 @@ def _create_stage_card(stage, status: StageNodeStatus | None, expanded: bool) ->
     """Stage displayed as list entry (boxed list with single row). Compact card has icon and short name of target,
     expanded one also name, target and status. Also used for measuring nodes, so sizes match."""
     target = getattr(stage, "target", None) or ""
+    broken = getattr(stage, "is_broken", False)
+    warning = getattr(stage, "warning_message", None)
     if expanded:
-        subtitle = target.replace("_", "-")
+        subtitle = warning if broken else target.replace("_", "-")
         if status:
             subtitle = f"{subtitle} · {status.title}" if subtitle else status.title
-        row = Adw.ActionRow(title=stage.name, subtitle=subtitle, activatable=True)
+        row = Adw.ActionRow(title=stage.name, subtitle=subtitle, activatable=not broken)
     else:
-        row = Adw.ActionRow(title=stage_target_short_name(target), activatable=True)
+        row = Adw.ActionRow(title=stage.name if broken else stage_target_short_name(target), activatable=not broken)
     row.set_use_markup(False)
     # Single line labels, ellipsized while card grows. Wrapping labels would report minimal width and get squeezed.
     row.set_title_lines(1)
     row.set_subtitle_lines(1)
-    row.add_prefix(Gtk.Image.new_from_icon_name(stage_target_icon(target)))
+    prefix_icon = "danger-triangle-svgrepo-com-symbolic" if broken else stage_target_icon(target)
+    prefix = Gtk.Image.new_from_icon_name(prefix_icon)
+    row.add_prefix(prefix)
+    if broken:
+        row.add_css_class("warning")
+        row.set_tooltip_text(warning or "This stage is unavailable")
+        prefix.add_css_class("warning")
     if status and status.in_progress:
         spinner = Adw.Spinner(tooltip_text=status.title)
         spinner.set_size_request(16, 16)
@@ -107,7 +115,9 @@ class StagesTreeNode(Gtk.Widget):
 
     def set_status(self, status: StageNodeStatus | None):
         """Sets status and measures compact and expanded sizes of card, returning size used for layout."""
-        content_key = (self.node.value.name, getattr(self.node.value, "target", None), status)
+        content_key = (self.node.value.name, getattr(self.node.value, "target", None),
+                       getattr(self.node.value, "is_broken", False),
+                       getattr(self.node.value, "warning_message", None), status)
         if content_key == self._content_key:
             return self.layout_size
         self._content_key = content_key
@@ -139,7 +149,8 @@ class StagesTreeNode(Gtk.Widget):
             self.card.unparent()
         self.expanded_content = expanded
         self.card = _create_stage_card(self.node.value, self.status, expanded)
-        self.card.connect("row-activated", lambda *args: self.tree.emit("stage-selected", self.node.value))
+        if not getattr(self.node.value, "is_broken", False):
+            self.card.connect("row-activated", lambda *args: self.tree.emit("stage-selected", self.node.value))
         self.card.set_parent(self)
 
     def _animate_to(self, value: float):

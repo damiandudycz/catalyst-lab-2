@@ -1054,13 +1054,20 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
                 shutil.rmtree(entry_path)
             else:
                 os.remove(entry_path)
+    # Load the current stage list before copying template files. Those files can
+    # create stages/<name>/ directories (for overlays) before the stage loop
+    # writes each stage.json. Scanning after the copy would cache these
+    # intentionally incomplete directories as broken stages for this session.
+    if hasattr(project_directory, "_stages"):
+        del project_directory._stages
+    if hasattr(project_directory, "_broken_stages"):
+        del project_directory._broken_stages
+    existing_stages = project_directory.stages
     for source, destination in generated.files:
         # Template directory can be reached through symbolic link (eg. in macOS application bundle).
         log(f"Copying {os.path.relpath(source, os.path.realpath(template.path))} to {destination}")
         _copy_template_files(source, os.path.join(path, destination), names, log)
     os.makedirs(os.path.join(path, "stages"), exist_ok=True)
-    if hasattr(project_directory, "_stages"):
-        del project_directory._stages # Loaded again with files copied from template.
     releng_directory = project_directory.get_releng_directory()
     architecture = project_directory.get_architecture()
     # Ids of stages by their ids in template. Given ids are used again (template applied again when it's updated), so
@@ -1069,7 +1076,7 @@ def apply_project_template(project_directory, template: ProjectTemplate, names: 
     stage_ids: dict[str, uuid.UUID] = {}
     for generated_stage in generated.stages:
         # Stage directory can exist already, with files copied from template.
-        if any(existing.name == generated_stage.name for existing in project_directory.stages) or os.path.exists(
+        if any(existing.name == generated_stage.name for existing in existing_stages) or os.path.exists(
                 os.path.join(project_directory.stage_directory_path(generated_stage.name), "stage.json")):
             raise TemplateError(f"Stage {generated_stage.name} already exists")
         stage = ProjectStage(

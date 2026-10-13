@@ -72,6 +72,8 @@ class ProjectStageDetailsView(Gtk.Box):
     live_system_pref_group = Gtk.Template.Child()
     build_behavior_pref_group = Gtk.Template.Child()
     kernels_pref_group = Gtk.Template.Child()
+    row_warnings_group = Gtk.Template.Child()
+    row_warnings_row = Gtk.Template.Child()
 
     # Basic or advanced settings (STAGE_ARGUMENT_LEVELS), last choice is used by stages opened later while app runs.
     advanced_default = False
@@ -84,6 +86,10 @@ class ProjectStageDetailsView(Gtk.Box):
         self.advanced = ProjectStageDetailsView.advanced_default
         self._setup_mode_toggle()
         self.connect("realize", self.on_realize)
+        # Reapply the selected mode once the page is mapped. Rows are populated during
+        # realize; this second pass ensures the initial frame uses the mode shown by the
+        # header toggle, including rows whose widgets finish setup during realization.
+        self.connect("map", self._on_map)
 
     # Basic and advanced mode
     # --------------------------------------------------------------------------
@@ -111,6 +117,10 @@ class ProjectStageDetailsView(Gtk.Box):
         ProjectStageDetailsView.advanced_default = self.advanced
         self.apply_mode()
 
+    def _on_map(self, _widget):
+        self.advanced = self.mode_toggle.get_active() == 1
+        self.apply_mode()
+
     def apply_mode(self):
         """Shows rows of current mode, and groups which have any of them."""
         hidden_custom = []
@@ -126,12 +136,14 @@ class ProjectStageDetailsView(Gtk.Box):
                   self.stage_setup_pref_group, self.live_image_pref_group,
                   self.live_system_pref_group, self.build_behavior_pref_group)
         for group in groups:
+            # Determine visibility from the stage arguments and selected mode, rather than GTK's
+            # effective child visibility. That value can be false while the group is hidden and
+            # then incorrectly keep the group empty when switching back to Advanced.
             has_visible_rows = any(
-                row.pref_group is group and row.get_visible() and row.get_child_visible()
+                row.pref_group is group and (self.advanced or row.level == StageArgumentLevel.BASIC)
                 for row in self.configuration_rows
             )
             group.set_visible(has_visible_rows)
-            group.set_child_visible(has_visible_rows)
         self.kernels_pref_group.set_visible(getattr(self, "boot_kernel_argument", None) is not None)
         self.hidden_settings_label.set_label(
             f"Advanced settings set by this stage: {', '.join(hidden_custom)}. Switch to Advanced to see them." if hidden_custom else "")
@@ -158,39 +170,83 @@ class ProjectStageDetailsView(Gtk.Box):
             for row in self.configuration_rows:
                 row.pref_group.remove(row)
         self.configuration_rows = []
+        self._row_load_warnings = []
         self.boot_kernel_argument = None
         # Load arguments rows
-        arguments_details = load_catalyst_stage_arguments_details(
-            toolset=self.project_directory.get_toolset(),
-            target_name=self.stage.target
-        )
+        try:
+            arguments_details = load_catalyst_stage_arguments_details(
+                toolset=self.project_directory.get_toolset(),
+                target_name=self.stage.target
+            )
+        except Exception as error:
+            self._row_load_warnings.append(f"Could not read Catalyst settings: {self._short_error(error)}")
+            self._update_row_load_warnings()
+            self.apply_mode()
+            return
         for name, arg in arguments_details.items():
             if arg.details == StageArgumentDetails.boot_kernel:
                 # Edited as list of kernels in Kernels group (load_kernel_rows).
                 self.boot_kernel_argument = arg
                 continue
-            group = self.pref_group_for_argument(argument=arg)
-            if group:
-                row = self.create_row_for_argument(argument=arg)
-                set_row_description(row, stage_argument_description(arg.name))
-                row.pref_group = group
-                row.level = stage_argument_level(arg.details)
-                row.event_bus.subscribe(
-                    ItemSelectionViewEvent.ITEM_CHANGED,
-                    self.argument_changed,
-                    self
-                )
-                row.pref_group.add(row)
-                self.configuration_rows.append(row)
-                # Kernels depend on boot/kernel and releng template, refreshed after argument is saved.
-                row.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.load_kernel_rows, "kernels")
-        self.load_kernel_rows()
+            try:
+                group = self.pref_group_for_argument(argument=arg)
+                if group:
+                    row = self.create_row_for_argument(argument=arg)
+                    set_row_description(row, stage_argument_description(arg.name))
+                    row.pref_group = group
+                    row.level = stage_argument_level(arg.details)
+                    row.event_bus.subscribe(
+                        ItemSelectionViewEvent.ITEM_CHANGED,
+                        self.argument_changed,
+                        self
+                    )
+                    row.pref_group.add(row)
+                    self.configuration_rows.append(row)
+                    # Kernels depend on boot/kernel and releng template, refreshed after argument is saved.
+                    row.event_bus.subscribe(ItemSelectionViewEvent.ITEM_CHANGED, self.load_kernel_rows, "kernels")
+            except Exception as error:
+                # A single option editor (for example, a select list whose source is
+                # unavailable) must not prevent later Catalyst settings from loading.
+                self._row_load_warnings.append(f"{arg.display_name}: {self._short_error(error)}")
+        try:
+            self.load_kernel_rows()
+        except Exception as error:
+            self._row_load_warnings.append(f"Kernels: {self._short_error(error)}")
+        self._update_row_load_warnings()
         self.apply_mode()
+
+    @staticmethod
+    def _short_error(error: Exception) -> str:
+        message = str(error).strip() or type(error).__name__
+        return message if len(message) <= 240 else message[:237] + "..."
+
+    def _update_row_load_warnings(self):
+        warnings = getattr(self, "_row_load_warnings", [])
+        self.row_warnings_row.set_subtitle("\n".join(warnings))
+        self.row_warnings_group.set_visible(bool(warnings))
 
     def load_kernel_rows(self, *args):
         """Kernels of stage (boot/kernel of catalyst, list of names) with settings of each (boot/kernel/<name>/...).
         Kernels are added and removed one by one. Stage uses kernels of releng template until it changes them.
         Expanded kernels stay expanded."""
+        try:
+            self._load_kernel_rows(*args)
+            self._row_load_warnings = [
+                warning for warning in getattr(self, "_row_load_warnings", [])
+                if not warning.startswith("Kernels:")
+            ]
+        except Exception as error:
+            self._row_load_warnings = [
+                warning for warning in getattr(self, "_row_load_warnings", [])
+                if not warning.startswith("Kernels:")
+            ]
+            self._row_load_warnings.append(f"Kernels: {self._short_error(error)}")
+        self._update_row_load_warnings()
+        if args:
+            self.apply_mode()
+
+    def _load_kernel_rows(self, *args):
+        """Build kernel rows. Wrapped so a bad kernel setting cannot abort the rest of the stage editor."""
         expanded = {row.kernel_name for row in getattr(self, "kernel_rows", []) if isinstance(row, StageKernelRow) and row.get_expanded()}
         expanded |= getattr(self, "_expand_kernel", set())
         self._expand_kernel = set()
@@ -232,8 +288,6 @@ class ProjectStageDetailsView(Gtk.Box):
         required = "This stage needs at least one kernel. " if self.boot_kernel_argument.required and not names else ""
         self.kernels_pref_group.set_description(
             "".join(warnings) + required + "Catalyst builds these kernels with their settings. Empty settings use values of releng template.")
-        if args:
-            self.apply_mode() # Kernel rows changed after argument was saved.
 
     def _add_kernel_row(self, row):
         self.kernels_pref_group.add(row)
@@ -297,12 +351,14 @@ class ProjectStageDetailsView(Gtk.Box):
                     return StageTextEntrySourceRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
                 return StageTextEntryRow(stage=self.stage, argument=argument)
 
-    def can_change_argument(self, option: StageArgumentOption) -> bool:
+    def can_change_argument(self, row, option: StageArgumentOption) -> bool:
         match option.argument:
             case (
                 StageArgumentDetails.target
             ):
-                return False
+                # Changing a valid target would silently reinterpret its settings. If
+                # the stored target is unsupported, allow choosing a valid replacement.
+                return bool(row.selected_item and getattr(row.selected_item, "unsupported", False))
             case _:
                 return True
 
@@ -387,7 +443,7 @@ class ProjectStageDetailsView(Gtk.Box):
                 return self.build_behavior_pref_group
 
     def is_config_option_selectable(self, row, option):
-        return self.can_change_argument(option=option)
+        return self.can_change_argument(row=row, option=option)
 
     def argument_changed(self, row):
         if row.argument.type in (StageArgumentType.raw_single_line, StageArgumentType.string_list, StageArgumentType.raw):
@@ -409,6 +465,10 @@ class ProjectStageDetailsView(Gtk.Box):
                 argument=row.argument.details,
                 value=row.selected_item.value if row.selected_item else None
             )
+            if row.argument.details == StageArgumentDetails.target:
+                # Target determines which Catalyst arguments and editors are valid.
+                self.load_configuration_rows()
+                return
         if row.argument.details.type == StageArgumentType.multiselect:
             ProjectManager.shared().change_stage_argument(
                 project=self.project_directory,
@@ -550,6 +610,17 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
         self.display_none = not argument.required
         self.allow_multiselect = argument.details.type == StageArgumentType.multiselect if argument.details else False
         self.connect("is-item-selectable", is_item_selectable_handler)
+        self.unsupported_value_row = Adw.ActionRow(
+            title="Unsupported value",
+            subtitle="This saved value is not available for the current target or toolset. Select an available option below to replace it."
+        )
+        warning_icon = Gtk.Image.new_from_icon_name("danger-triangle-svgrepo-com-symbolic")
+        warning_icon.add_css_class("warning")
+        self.unsupported_value_row.add_prefix(warning_icon)
+        self.unsupported_value_row.set_visible(False)
+        # Insert before the selectable values so the reason and recovery path are
+        # immediately visible when this row is expanded.
+        self.add_row(self.unsupported_value_row)
         self.load_state()
 
     def load_state(self):
@@ -636,6 +707,7 @@ class StageOptionExpanderRow(ItemSelectionExpanderRow):
     def display_selected_item(self):
         super().display_selected_item()
         selected = (self.selected_items or []) if self.allow_multiselect else ([self.selected_item] if self.selected_item else [])
+        self.unsupported_value_row.set_visible(any(getattr(item, "unsupported", False) for item in selected))
         if any(isinstance(item.value, StageAutomaticOption) for item in selected):
             self.set_subtitle(", ".join(GLib.markup_escape_text(self._item_display(item)) for item in selected))
 
@@ -838,7 +910,12 @@ class StageTextSourceRow(Adw.ExpanderRow):
         return not self.inherit_options()
 
     def own_entries_not_inherited(self, own):
-        """Own list entries that aren't already supplied verbatim by selected sources."""
+        """Own entries that aren't already supplied verbatim by selected sources.
+
+        String-list arguments contain multiple entries, while additions to scalar text
+        arguments (eg. BOOT args) are a single string. Keep the latter intact instead
+        of iterating over its characters.
+        """
         if not own or not self.allows_additions:
             return own or []
         inherited = set()
@@ -846,7 +923,10 @@ class StageTextSourceRow(Adw.ExpanderRow):
             inherited.update(map(str, _as_list(resolve_stage_argument(
                 self.project_directory, self.stage, self.argument.name, option=option
             ))))
-        return [item for item in own if str(item) not in inherited]
+        if self.argument.details and self.argument.details.type == StageArgumentType.raw_single_line:
+            return [] if str(own) in inherited else own
+        own_items = _as_list(own)
+        return [item for item in own_items if str(item) not in inherited]
 
     # State:
 

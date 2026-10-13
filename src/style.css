@@ -52,6 +52,10 @@
   background-color: var(--window-bg-color);
   border-radius: 12px;
 }
+.stages-tree-node row.warning,
+.stages-tree-node row.warning image {
+  color: @warning_color;
+}
 
 /* Small button, eg. next to caption text (Update template in project page). */
 button.small-button {

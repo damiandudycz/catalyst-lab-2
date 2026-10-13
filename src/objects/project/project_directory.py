@@ -7,6 +7,18 @@ from .project_stage import ProjectStage
 from .stages_tree_view import TreeNode
 from .architecture import Architecture
 import uuid, json, os
+import re
+
+
+@dataclass
+class BrokenProjectStage:
+    """A stage entry that must remain visible but cannot be used for builds or editing."""
+    id: uuid.UUID
+    name: str
+    warning_message: str
+    parent: uuid.UUID | None = None
+    target: str | None = None
+    is_broken: bool = True
 
 @final
 class ProjectDirectory(GitDirectory):
@@ -29,8 +41,17 @@ class ProjectDirectory(GitDirectory):
     def stages(self) -> list[ProjectStage]:
         if not hasattr(self, '_stages'):
             self._stages = []
+            self._broken_stages = []
             stages_dir = os.path.join(self.directory_path(), "stages")
-            for item in os.listdir(stages_dir):
+            try:
+                with os.scandir(stages_dir) as entries:
+                    items = sorted(
+                        entry.name for entry in entries
+                        if not entry.name.startswith(".") and entry.is_dir()
+                    )
+            except FileNotFoundError:
+                items = []
+            for item in items:
                 stage_path = os.path.join(stages_dir, item)
                 config_path = os.path.join(stage_path, "stage.json")
                 try:
@@ -39,6 +60,41 @@ class ProjectDirectory(GitDirectory):
                         stage = ProjectStage.init_from(data=data)
                         self._stages.append(stage)
                 except Exception as e:
+                    # Recover identity/name from the raw JSON when possible. This lets children
+                    # still point to a broken parent instead of appearing to have no parent.
+                    raw = ""
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            raw = f.read()
+                    except OSError:
+                        pass
+                    def recover_string(key: str) -> str | None:
+                        # Stage properties are normally encoded as {"type": ..., "value": ...}.
+                        # Also accept plain strings so partially migrated files remain identifiable.
+                        match = re.search(
+                            rf'"{re.escape(key)}"\s*:\s*(?:\{{[^}}]*?"value"\s*:\s*"([^"]+)"|"([^"]+)")',
+                            raw,
+                            re.DOTALL,
+                        )
+                        return next((value for value in match.groups() if value is not None), None) if match else None
+                    recovered_id = recover_string("id")
+                    try:
+                        stage_id = uuid.UUID(recovered_id) if recovered_id else None
+                    except ValueError:
+                        stage_id = None
+                    stage_id = stage_id or uuid.uuid5(uuid.NAMESPACE_URL, f"{self.directory_path()}/stages/{item}")
+                    recovered_parent = recover_string("parent")
+                    try:
+                        parent_id = uuid.UUID(recovered_parent) if recovered_parent else None
+                    except ValueError:
+                        parent_id = None
+                    stage_name = recover_string("name") or item
+                    self._broken_stages.append(BrokenProjectStage(
+                        id=stage_id,
+                        name=stage_name,
+                        warning_message=f"Could not load stage: {e}",
+                        parent=parent_id,
+                    ))
                     print(f"Failed to load stage from {config_path}: {e}")
         return self._stages
     @stages.setter
@@ -51,12 +107,29 @@ class ProjectDirectory(GitDirectory):
 
     def stages_tree(self) -> list[dict]:
         """Builds a tree of stages for seeds inheritance."""
-        stage_nodes = {stage.id: TreeNode(value=stage) for stage in self.stages}
+        # Broken stage files remain visible in the project tree, but are not part of
+        # `stages`, so the build and stage-editing code only receives usable stages.
+        visible_stages = [*self.stages, *getattr(self, "_broken_stages", [])]
+        stage_nodes = {stage.id: TreeNode(value=stage) for stage in visible_stages}
         roots = []
+        missing_parents = {}
         for stage_id, node in stage_nodes.items():
             parent_id = node.value.parent
             if parent_id and parent_id in stage_nodes:
                 stage_nodes[parent_id].children.append(node)
+            elif parent_id:
+                # Keep the broken relationship visible in the tree. A synthetic warning
+                # node is intentionally not a ProjectStage and cannot be selected/edited.
+                parent_node = missing_parents.get(parent_id)
+                if parent_node is None:
+                    missing = BrokenProjectStage(
+                        id=uuid.uuid5(uuid.NAMESPACE_OID, str(parent_id)),
+                        name="?",
+                        warning_message=f"Parent stage {parent_id} was not found",
+                    )
+                    parent_node = missing_parents[parent_id] = TreeNode(value=missing)
+                    roots.append(parent_node)
+                parent_node.children.append(node)
             else:
                 roots.append(node)
         return roots

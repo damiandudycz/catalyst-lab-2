@@ -254,7 +254,7 @@ tools and Lima, so it runs on Macs without Homebrew.
 | `src/objects/` | Model and logic: projects, builds, toolsets, virtual machines, snapshots, deploy, root helper |
 | `src/ui/` | Views (`.py` + `.ui` templates) and app sections |
 | `data/` | Icons, desktop file, metainfo, GSettings schema and list of project template repositories |
-| `docs/` | Documentation, eg. [project templates](docs/project-templates.md) |
+| `docs/` | Documentation, including [project templates](docs/project-templates.md) and the [UI architecture handbook](docs/ui/README.md) |
 | `packaging/flatpak/` | Flatpak manifest, its modules (bubblewrap, squashfs-tools, Python packages) and build scripts |
 | `packaging/macos/` | macOS application bundle |
 

@@ -181,10 +181,19 @@ def create_packages_directory_for_project(project) -> PackagesDirectory:
 
 def delete_packages_directory(directory: PackagesDirectory):
     """Deletes folder with its packages. Projects using it don't have binary packages folder anymore."""
+    path = directory.directory_path()
+    # Don't hide filesystem failures: otherwise the UI removes the folder from the
+    # repository while its data remains on disk, with no way to explain the failure.
+    if os.path.lexists(path):
+        if os.path.islink(path) or not os.path.isdir(path):
+            os.remove(path)
+        else:
+            shutil.rmtree(path)
+        if os.path.lexists(path):
+            raise OSError(f"Binary package folder still exists after deletion: {path}")
     for project in directory.projects:
         project.metadata.packages_directory_id = None
     Repository.ProjectDirectory.save()
-    shutil.rmtree(directory.directory_path(), ignore_errors=True)
     Repository.PackagesDirectory.value.remove(directory)
 
 def migrate_project_packages():

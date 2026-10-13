@@ -49,6 +49,7 @@ class ProjectDetailsView(Gtk.Box):
         self.content_navigation_view = content_navigation_view
         self.apps_requirements = [ToolsetApplication.CATALYST]
         self.directory_details_view.setup(git_directory=project_directory, content_navigation_view=self.content_navigation_view)
+        self.directory_details_view.on_project_deleted = self._close_after_delete
         self.get_configuration()
         self.monitor_stages_changes()
         self.monitor_information_changes()
@@ -467,11 +468,35 @@ class ProjectDetailsView(Gtk.Box):
 
     @Gtk.Template.Callback()
     def on_stage_selected(self, sender, stage):
+        if getattr(stage, "is_broken", False):
+            return
         if error := self.project_directory.configuration_error:
             self.show_alert(message=error)
             return
         view = ProjectStageDetailsView(project_directory=self.project_directory, stage=stage, content_navigation_view=self.content_navigation_view)
         self.content_navigation_view.push_view(view, title=stage.name)
+
+    def _close_after_delete(self):
+        """Close this project page after its directory has been removed."""
+        navigation_view = self.content_navigation_view
+        page = getattr(self, "_page", None)
+        if navigation_view is not None and page is not None:
+            stack = navigation_view.get_navigation_stack()
+            pages = [stack.get_item(index) for index in range(stack.get_n_items())]
+            page_index = next((index for index, item in enumerate(pages) if item is page), None)
+            if page_index is not None:
+                if page_index > 0:
+                    navigation_view.pop_to_page(pages[page_index - 1])
+                    return
+        # Project details can also be presented in a standalone window or through a
+        # PushedViewHandle, where there is no page owned by this navigation view.
+        if window_handle := getattr(self, "_window", None):
+            close = getattr(window_handle, "close", None)
+            if close:
+                close()
+                return
+        if navigation_view is not None:
+            navigation_view.pop()
 
     def show_alert(self, message):
         dialog = Gtk.MessageDialog(
