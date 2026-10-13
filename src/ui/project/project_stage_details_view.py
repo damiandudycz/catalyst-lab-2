@@ -37,6 +37,7 @@ from .project_stage_kernels import (
     new_kernel_name, rename_kernel, KernelSettingType, kernel_setting_enabled, releng_kernel_setting
 )
 from .project_kernel_packages import load_kernel_packages, KernelPackageKind, default_kernel_package, derived_distkernel
+from .stage_package_picker_view import StagePackagePickerView, StageInstalledPackagesView, _as_list
 
 
 def set_row_description(row: Gtk.Widget, description: str | None):
@@ -275,7 +276,8 @@ class ProjectStageDetailsView(Gtk.Box):
                     is_item_selectable_handler=self.is_config_option_selectable
                 )
             case StageArgumentType.string_list | StageArgumentType.raw:
-                return StageTextListRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
+                return StageTextListRow(project_directory=self.project_directory, stage=self.stage, argument=argument,
+                                        content_navigation_view=self.content_navigation_view)
             case _ if argument.details in SCRIPT_ARGUMENTS:
                 return StageScriptRow(project_directory=self.project_directory, stage=self.stage, argument=argument)
             case _:
@@ -1031,6 +1033,19 @@ class StageTextListRow(StageTextSourceRow):
 
     SUBTITLE_MAX_ITEMS = 3
 
+    def __init__(self, project_directory: ProjectDirectory, stage: ProjectStage,
+                 argument: StageArgumentTargetDetails, content_navigation_view=None):
+        self.content_navigation_view = content_navigation_view
+        super().__init__(project_directory, stage, argument)
+        if self.argument.details in (StageArgumentDetails.stage4_packages, StageArgumentDetails.livecd_packages):
+            button = Gtk.Button(label="Browse…", valign=Gtk.Align.CENTER, tooltip_text="Browse package trees and versions")
+            button.connect("clicked", self._open_package_picker)
+            self.add_suffix(button)
+        elif self.argument.details in (StageArgumentDetails.stage4_unmerge, StageArgumentDetails.livecd_unmerge):
+            button = Gtk.Button(label="Installed…", valign=Gtk.Align.CENTER, tooltip_text="Choose installed packages to unmerge")
+            button.connect("clicked", self._open_installed_packages)
+            self.add_suffix(button)
+
     def _create_editor_row(self) -> Gtk.ListBoxRow:
         self.text_view = Gtk.TextView()
         self.text_view.set_monospace(True)
@@ -1075,6 +1090,38 @@ class StageTextListRow(StageTextSourceRow):
         editor_row.set_selectable(False)
         editor_row.set_child(editor_box)
         return editor_row
+
+    def _open_package_picker(self, *_):
+        if not self.content_navigation_view:
+            return
+        view = StagePackagePickerView(
+            self.project_directory, self.stage, self.argument, self.own_value() or [], self._apply_picker_value
+        )
+        view.content_navigation_view = self.content_navigation_view
+        self.content_navigation_view.push_view(view, title="Browse packages")
+
+    def _open_installed_packages(self, *_):
+        if not self.content_navigation_view:
+            return
+        inherited = resolve_stage_argument(
+            self.project_directory, self.stage, self.argument.details.value,
+            option=StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE
+        )
+        inherited_entries = _as_list(inherited)
+        inherited_parent = resolve_stage_argument(
+            self.project_directory, self.stage, self.argument.details.value,
+            option=StageAutomaticOption.INHERIT_FROM_PARENT
+        )
+        inherited_entries.extend(_as_list(inherited_parent))
+        view = StageInstalledPackagesView(
+            self.project_directory, self.stage, self.own_value() or [], inherited_entries, self._apply_picker_value
+        )
+        view.content_navigation_view = self.content_navigation_view
+        self.content_navigation_view.push_view(view, title="Installed packages")
+
+    def _apply_picker_value(self, value):
+        self.set_editor_value(value)
+        self.apply_custom_value()
 
     def get_editor_value(self):
         buffer = self.text_view.get_buffer()

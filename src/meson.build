@@ -159,6 +159,7 @@ catalystlab_sources = [
   'ui/components/scroll_position/scroll_position.py',
   'ui/project/project_update_view.py',
   'ui/project/project_stage_details_view.py',
+  'ui/project/stage_package_picker_view.py',
   'ui/releng/releng_details_view.py',
   'ui/releng/releng_create_view.py',
   'ui/snapshot/snapshot_create_view.py',

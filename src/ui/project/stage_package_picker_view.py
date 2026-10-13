@@ -1,0 +1,437 @@
+from __future__ import annotations
+
+import os
+import re
+import threading
+
+from gi.repository import Gtk, Adw, GLib
+
+from .project_build import StageBuild, StageBuildStatus, load_project_builds
+from .project_stage_arguments import StageArgumentDetails
+from .project_stage_value_resolver import UNRESOLVED, resolve_stage_argument
+from .repository import Repository
+from .project_stage_automatic_option import StageAutomaticOption
+
+
+class StagePackagePickerView(Gtk.Box):
+    """Browse package trees from the stage's Gentoo snapshot and enabled overlays."""
+
+    def __init__(self, project, stage, argument, own_packages: list[str], on_apply):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.project = project
+        self.stage = stage
+        self.argument = argument
+        self.own_packages = list(own_packages or [])
+        self.on_apply = on_apply
+        self._repo_views = []
+        self.inherited_packages = self._inherited_package_lists()
+        self._append_header()
+        self.stack = Adw.ViewStack(vexpand=True)
+        switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.WIDE,
+                                    margin_start=24, margin_end=24)
+        self.append(switcher)
+        self.append(self.stack)
+        self._add_inherited_page()
+        self._add_repository_pages()
+        self.stack.connect("notify::visible-child", self._page_changed)
+        action_bar = Gtk.ActionBar()
+        apply_button = Gtk.Button(label="Apply selections")
+        apply_button.add_css_class("suggested-action")
+        apply_button.connect("clicked", self._apply)
+        action_bar.pack_end(apply_button)
+        self.append(action_bar)
+
+    def _append_header(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
+                      margin_start=24, margin_end=24, margin_top=16)
+        box.append(Gtk.Label(label="Select packages by category, then choose a version if needed. Unversioned entries use the best available version.",
+                             xalign=0, wrap=True))
+        box.append(Gtk.Label(label=f"{len(self.own_packages)} custom entr{'y' if len(self.own_packages) == 1 else 'ies'} selected",
+                             xalign=0, css_classes=["dimmed", "caption"]))
+        self.selection_summary = box.get_last_child()
+        self.append(box)
+
+    def _inherited_package_lists(self):
+        argument = self.argument.details
+        parent = resolve_stage_argument(self.project, self.stage, argument.value,
+                                        option=StageAutomaticOption.INHERIT_FROM_PARENT)
+        releng = resolve_stage_argument(self.project, self.stage, argument.value,
+                                        option=StageAutomaticOption.INHERIT_FROM_RELENG_TEMPLATE)
+        return _as_list(parent), _as_list(releng), self._parent_installed_packages()
+
+    def _parent_installed_packages(self):
+        builds = load_project_builds(self.project)
+        result = set()
+        parent_id = getattr(self.stage, StageArgumentDetails.parent.name, None)
+        visited = set()
+        while parent_id and parent_id not in visited:
+            visited.add(parent_id)
+            parent = next((item for item in self.project.stages if item.id == parent_id), None)
+            if parent is None:
+                break
+            build = next((item for item in builds if item.stage_id == parent.id
+                          and item.status == StageBuildStatus.COMPLETED and item.path
+                          and os.path.isfile(os.path.join(item.path, StageBuild.PACKAGES_FILE))), None)
+            if build:
+                try:
+                    with open(os.path.join(build.path, StageBuild.PACKAGES_FILE), encoding="utf-8") as file:
+                        result.update(line.strip() for line in file if line.strip())
+                except OSError:
+                    pass
+            parent_id = getattr(parent, StageArgumentDetails.parent.name, None)
+        return sorted(result)
+
+    def _add_inherited_page(self):
+        parent, releng, installed = self.inherited_packages
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                       margin_start=24, margin_end=24, margin_top=16, margin_bottom=24)
+        for title, subtitle, values in (
+            ("Parent stage", "Packages already supplied by the parent stage.", parent),
+            ("Releng template", "Packages supplied by this stage's releng spec.", releng),
+            ("Installed in parent build chain", "Recorded inventory from completed parent builds.", installed),
+        ):
+            group = Adw.PreferencesGroup(title=title, description=subtitle)
+            for package in values:
+                group.add(Adw.ActionRow(title=package, subtitle="Already included"))
+            if not values:
+                group.add(Adw.ActionRow(title="No packages resolved", subtitle="This source is empty or unavailable."))
+            page.append(group)
+        self.stack.add_titled_with_icon(_scrolled(page), "inherited", "Included", "content-loading-symbolic")
+
+    def _add_repository_pages(self):
+        snapshot = self.project.get_snapshot()
+        if snapshot:
+            self._add_repository_page("Gentoo", "gentoo", snapshot.load_ebuilds)
+        repos = resolve_stage_argument(self.project, self.stage, StageArgumentDetails.repos.value)
+        repo_ids = repos if isinstance(repos, list) else []
+        for overlay in Repository.OverlayDirectory.value:
+            if overlay.id in repo_ids:
+                self._add_repository_page(overlay.name, overlay.repo_name(), overlay.load_ebuilds)
+        if not self._repo_views:
+            placeholder = Adw.StatusPage(title="No package repositories", description="Select a snapshot or overlay for this stage.",
+                                         icon_name="archive-minimalistic-svgrepo-com-symbolic")
+            self.stack.add_titled(placeholder, "empty", "Repositories")
+
+    def _add_repository_page(self, title, repo_name, loader):
+        view = _SelectableRepositoryView(loader, repo_name, self.own_packages,
+                                         self.inherited_packages, self._set_own_packages)
+        self._repo_views.append(view)
+        self.stack.add_titled(_scrolled(view), f"repo-{len(self._repo_views)}", title)
+
+    def _page_changed(self, *_):
+        page = self.stack.get_visible_child()
+        view = page.get_child() if isinstance(page, Gtk.ScrolledWindow) else page
+        if isinstance(view, _SelectableRepositoryView):
+            view.load()
+
+    def _set_own_packages(self, value):
+        self.own_packages = value
+        self.selection_summary.set_label(f"{len(value)} custom entr{'y' if len(value) == 1 else 'ies'} selected")
+        for view in self._repo_views:
+            view.set_selected(value)
+
+    def _apply(self, *_):
+        self.on_apply(self.own_packages)
+        navigation = getattr(self, "content_navigation_view", None)
+        if navigation:
+            navigation.pop()
+
+
+class _SelectableRepositoryView(Gtk.Box):
+    def __init__(self, loader, repo_name, selected, inherited, on_change):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                         margin_start=24, margin_end=24, margin_top=16, margin_bottom=24)
+        self.loader = loader
+        self.repo_name = repo_name
+        self.selected = list(selected)
+        self.parent_packages, self.releng_packages, self.installed_parent_packages = inherited
+        self.on_change = on_change
+        self.rows = []
+        self.filtered = []
+        self.search = Gtk.SearchEntry(placeholder_text="Search packages…", sensitive=False)
+        self.search.connect("search-changed", self._filter)
+        self.append(self.search)
+        self.group = Adw.PreferencesGroup(title=repo_name)
+        self.append(self.group)
+        self.status = Adw.StatusPage(title="Reading packages…", icon_name="system-run-symbolic")
+        self.append(self.status)
+        self.loaded = False
+
+    def load(self):
+        if self.loaded:
+            return
+        self.loaded = True
+        threading.Thread(target=self._load, daemon=True).start()
+
+    def _load(self):
+        try:
+            packages = self.loader()
+            error = None
+        except Exception as exc:
+            packages, error = {}, str(exc)
+        GLib.idle_add(self._show, packages, error)
+
+    def _show(self, packages, error):
+        if error:
+            self.status.set_title("Couldn't read packages")
+            self.status.set_description(error)
+            return False
+        for category, names in packages.items():
+            row = Adw.ExpanderRow(title=category)
+            row.category = category
+            row.packages = names
+            row.children = []
+            row.connect("notify::expanded", self._expand_category)
+            self.rows.append(row)
+        self.filtered = self.rows
+        self._display()
+        self.search.set_sensitive(True)
+        self.status.set_visible(not self.rows)
+        self.status.set_title("No packages")
+        self.status.set_description("This repository contains no readable ebuilds.")
+        return False
+
+    def _expand_category(self, row, _):
+        if row.get_expanded():
+            row.children.clear()
+            for package, versions in row.packages.items():
+                row_widget = self._package_row(row.category, package, sorted(versions, key=_version_key))
+                row.add_row(row_widget)
+                row.children.append(row_widget)
+        else:
+            for child in row.children:
+                row.remove(child)
+            row.children.clear()
+
+    def _package_row(self, category, package, versions):
+        base = f"{category}/{package}"
+        row = Adw.ActionRow(title=package)
+        sources = []
+        if any(_atom_matches(item, base) for item in self.parent_packages):
+            sources.append("Included by parent")
+        if any(_atom_matches(item, base) for item in self.releng_packages):
+            sources.append("Included by releng template")
+        if any(_atom_matches(item, base) for item in self.installed_parent_packages):
+            sources.append("Installed in parent build chain")
+        version_text = ", ".join(versions[:6]) + (f" (+{len(versions) - 6})" if len(versions) > 6 else "")
+        row.set_subtitle(" · ".join(([version_text] if version_text else []) + sources))
+        own = [item for item in self.selected if _atom_matches(item, base)]
+        inherited = bool(sources)
+        check = Gtk.CheckButton(active=bool(own or inherited), valign=Gtk.Align.CENTER)
+        check.set_sensitive(bool(own) or not inherited)
+        check.connect("toggled", self._toggle, base, versions, check)
+        row.add_prefix(check)
+        row.set_activatable_widget(check)
+        options = ["Any version", *versions]
+        dropdown = Gtk.DropDown(model=Gtk.StringList.new(options), valign=Gtk.Align.CENTER)
+        dropdown.set_enable_search(True)
+        dropdown.set_sensitive(bool(own))
+        selected_version = _selected_version_for_repo(own, base, self.repo_name)
+        if selected_version in versions:
+            dropdown.set_selected(versions.index(selected_version) + 1)
+        dropdown.connect("notify::selected", self._version_changed, base, dropdown, check)
+        row.add_suffix(dropdown)
+        row.version_dropdown = dropdown
+        row.package_check = check
+        return row
+
+    def _toggle(self, check, _param, base, versions, button):
+        own = [item for item in self.selected if not _atom_matches(item, base)]
+        if button.get_active():
+            own.append(base)
+        self._update(own)
+
+    def _version_changed(self, dropdown, _param, base, selector, check):
+        if not check.get_active():
+            return
+        index = selector.get_selected()
+        atom = base if index == 0 else f"={base}-{selector.get_model().get_string(index)}::{self.repo_name}"
+        own = [item for item in self.selected if not _atom_matches(item, base)]
+        own.append(atom)
+        self._update(own)
+
+    def _update(self, value):
+        self.selected = value
+        self.on_change(value)
+
+    def set_selected(self, value):
+        self.selected = list(value)
+        for category in self.rows:
+            if category.get_expanded():
+                category.set_expanded(False)
+                category.set_expanded(True)
+
+    def _filter(self, entry):
+        query = entry.get_text().strip().lower()
+        for row in self.filtered:
+            self.group.remove(row)
+        for row in self.rows:
+            row.set_expanded(False)
+        if len(query) < 2:
+            self.filtered = self.rows
+        else:
+            self.filtered = [row for row in self.rows if query in row.category.lower() or
+                             any(query in name.lower() for name in row.packages)]
+            for row in self.filtered:
+                row.set_expanded(True)
+        self._display()
+
+    def _display(self):
+        for row in self.filtered:
+            self.group.add(row)
+        self.status.set_visible(not self.filtered)
+
+
+class StageInstalledPackagesView(Gtk.Box):
+    """Pick packages from available parent build inventories for the stage's unmerge list."""
+
+    def __init__(self, project, stage, own_entries: list[str], inherited_entries: list[str], on_apply):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.project = project
+        self.stage = stage
+        self.entries = list(own_entries or [])
+        self.inherited_entries = list(inherited_entries or [])
+        self.on_apply = on_apply
+        self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.scroll = Gtk.ScrolledWindow(child=self.content, hexpand=True, vexpand=True,
+                                         hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.append(self.scroll)
+        inherited_group = Adw.PreferencesGroup(title="Parent and template Unmerge entries")
+        for item in dict.fromkeys(map(str, self.inherited_entries)):
+            inherited_group.add(Adw.ActionRow(title=item, subtitle="Already inherited"))
+        if not self.inherited_entries:
+            inherited_group.add(Adw.ActionRow(title="No inherited entries"))
+        self.content.append(inherited_group)
+        self.own_group = Adw.PreferencesGroup(title="This stage's Unmerge entries")
+        self.content.append(self.own_group)
+        self._render_own_entries()
+        self.list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18,
+                            margin_start=24, margin_end=24, margin_top=16, margin_bottom=24)
+        self.content.append(Gtk.Label(label="Package inventories are collected from saved parent builds. Inherited and current Unmerge entries are marked.",
+                                      xalign=0, wrap=True, margin_start=24, margin_end=24, margin_top=16))
+        self.content.append(self.list)
+        self.status = Adw.StatusPage(title="Loading installed package lists…", icon_name="system-run-symbolic")
+        self.content.append(self.status)
+        action_bar = Gtk.ActionBar()
+        apply_button = Gtk.Button(label="Apply selections")
+        apply_button.add_css_class("suggested-action")
+        apply_button.connect("clicked", self._apply)
+        action_bar.pack_end(apply_button)
+        self.append(action_bar)
+        threading.Thread(target=self._load, daemon=True).start()
+
+    def _load(self):
+        result = []
+        builds = load_project_builds(self.project)
+        current = self.stage
+        visited = set()
+        while current and current.id not in visited:
+            visited.add(current.id)
+            parent_id = getattr(current, StageArgumentDetails.parent.name, None)
+            current = next((item for item in self.project.stages if item.id == parent_id), None) if parent_id else None
+            if current is None:
+                break
+            matching_builds = [build for build in builds
+                               if build.stage_id == current.id and build.status == StageBuildStatus.COMPLETED]
+            build = next((item for item in matching_builds if item.path and os.path.isfile(os.path.join(item.path, StageBuild.PACKAGES_FILE))), None)
+            if build:
+                path = os.path.join(build.path, StageBuild.PACKAGES_FILE)
+                try:
+                    with open(path, encoding="utf-8") as file:
+                        packages = sorted({line.strip() for line in file if line.strip()})
+                    result.append((current.name, packages))
+                except OSError:
+                    pass
+        GLib.idle_add(self._show, result)
+
+    def _show(self, result):
+        if not result:
+            self.status.set_title("No saved package inventory")
+            self.status.set_description("Build a parent stage first; completed builds record installed packages when their archive contains CONTENTS metadata.")
+            return False
+        for stage_name, packages in result:
+            group = Adw.PreferencesGroup(title=stage_name)
+            for installed in packages:
+                atom = _installed_package_atom(installed)
+                inherited = any(_atom_matches(item, atom.lstrip("=")) for item in self.inherited_entries)
+                own = any(_atom_matches(item, atom.lstrip("=")) for item in self.entries)
+                row = Adw.ActionRow(title=installed, subtitle="Already included by inherited Unmerge" if inherited else "Installed in parent build")
+                check = Gtk.CheckButton(active=bool(inherited or own), sensitive=not inherited, valign=Gtk.Align.CENTER)
+                check.connect("toggled", self._toggle, atom)
+                row.add_prefix(check)
+                row.set_activatable_widget(check)
+                group.add(row)
+            self.list.add(group)
+        self.status.set_visible(False)
+        return False
+
+    def _toggle(self, check, _param, atom):
+        identity = atom.lstrip("=")
+        self.entries = [item for item in self.entries if not _atom_matches(item, identity)]
+        if check.get_active():
+            self.entries.append(atom)
+        self._render_own_entries()
+
+    def _render_own_entries(self):
+        while child := self.own_group.get_first_child():
+            self.own_group.remove(child)
+        for item in dict.fromkeys(map(str, self.entries)):
+            self.own_group.add(Adw.ActionRow(title=item, subtitle="Custom entry"))
+        if not self.entries:
+            self.own_group.add(Adw.ActionRow(title="No custom entries"))
+
+    def _apply(self, *_):
+        self.on_apply(self.entries)
+        navigation = getattr(self, "content_navigation_view", None)
+        if navigation:
+            navigation.pop()
+
+
+def _as_list(value):
+    if value is UNRESOLVED or value is None:
+        return []
+    return value if isinstance(value, list) else [str(value)]
+
+
+def _atom_matches(atom: str, package: str) -> bool:
+    atom = str(atom).lstrip("<>=~!")
+    atom = atom.split("::", 1)[0].split("[", 1)[0]
+    atom = atom.split(":", 1)[0]
+    if atom == package:
+        return True
+    suffix = atom[len(package):] if atom.startswith(package) else ""
+    return len(suffix) > 1 and suffix[0] == "-" and suffix[1].isdigit()
+
+
+def _selected_version_for_repo(atoms, base, repo_name):
+    for atom in atoms:
+        value = str(atom)
+        if not value.startswith("="):
+            continue
+        repo = value.split("::", 1)[1] if "::" in value else None
+        if repo and repo != repo_name:
+            continue
+        if "::" in value:
+            value = value.split("::", 1)[0]
+        if ":" in value:
+            value = value.split(":", 1)[0]
+        if value.startswith(base + "-"):
+            return value[len(base) + 1:]
+    return None
+
+
+def _installed_package_atom(installed):
+    category, package_version = installed.split("/", 1)
+    match = re.match(r"^(.+)-(?=\d)(.+)$", package_version)
+    if not match:
+        return f"{category}/{package_version}"
+    return f"={category}/{package_version}"
+
+
+def _scrolled(child):
+    return Gtk.ScrolledWindow(child=child, hexpand=True, vexpand=True,
+                              hscrollbar_policy=Gtk.PolicyType.NEVER)
+
+
+def _version_key(version: str):
+    return [int(part) for part in re.findall(r"\d+", version)]
