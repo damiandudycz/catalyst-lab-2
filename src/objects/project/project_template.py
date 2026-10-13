@@ -529,6 +529,16 @@ class ProjectTemplate:
             if not evaluate_condition(variable.when, names):
                 names[variable.id] = None
                 continue
+            if variable.type == TemplateVariableType.MULTIPLE:
+                # Multiple-choice options may be conditional on another option in this same variable
+                # (for example, a customized GNOME stage is available only when GNOME is selected).
+                # Seed the current selection before evaluating option conditions so its name exists.
+                current_selection = selected_value
+                if isinstance(current_selection, str):
+                    current_selection = [current_selection]
+                if not isinstance(current_selection, list):
+                    current_selection = variable.default if isinstance(variable.default, list) else []
+                names[variable.id] = current_selection
             options = [option.value for option in variable.available_options(names)]
             if variable.type == TemplateVariableType.MULTIPLE:
                 # Selection of user, or default, without options that are not available.
