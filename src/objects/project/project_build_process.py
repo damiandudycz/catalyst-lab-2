@@ -657,9 +657,6 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                 snapshot=process.snapshot,
                 path_mapper=process.container_path,
             ))
-            values = _spec_values(spec)
-            if has_confdir and os.path.basename(values.get("interpreter", "")) == "qemu-x86_64":
-                _add_qemu_cpu_portage_environment(portage_path)
             spec_path = os.path.join(work_directory, "stage.spec")
             with open(spec_path, "w", encoding="utf-8") as file:
                 file.write(spec)
@@ -918,43 +915,6 @@ def _strip_archive_extension(path: str) -> str:
         if path.endswith(extension):
             return path[:-len(extension)]
     return path
-
-def _add_qemu_cpu_portage_environment(portage_path: str) -> None:
-    """Expose QEMU's maximum x86 CPU features to package build processes under x86 user emulation.
-
-    Catalyst starts package builds inside its chroot, where the build launcher environment is not retained.
-    A Portage package.env entry ensures QEMU_CPU reaches the compiler helpers executed by binfmt_misc.
-    """
-    environment_path = os.path.join(portage_path, "env", "catalystlab", "qemu-user-max")
-    os.makedirs(os.path.dirname(environment_path), exist_ok=True)
-    # Replace older generated versions too. They may contain shell snippets, which Portage's env-file
-    # parser rejects (it accepts variable assignments only).
-    with open(environment_path, "w", encoding="utf-8") as file:
-        file.write('QEMU_CPU="max"\n')
-
-    package_env_path = os.path.join(portage_path, "package.env")
-    package_env_entry = "*/* catalystlab/qemu-user-max"
-    if os.path.isdir(package_env_path):
-        entry_path = os.path.join(package_env_path, "catalystlab-qemu-user-max")
-        existing = ""
-        if os.path.isfile(entry_path):
-            with open(entry_path, encoding="utf-8") as file:
-                existing = file.read()
-        if package_env_entry not in existing.splitlines():
-            with open(entry_path, "a", encoding="utf-8") as file:
-                if existing and not existing.endswith("\n"):
-                    file.write("\n")
-                file.write(package_env_entry + "\n")
-    else:
-        existing = ""
-        if os.path.isfile(package_env_path):
-            with open(package_env_path, encoding="utf-8") as file:
-                existing = file.read()
-        if package_env_entry not in existing.splitlines():
-            with open(package_env_path, "a", encoding="utf-8") as file:
-                if existing and not existing.endswith("\n"):
-                    file.write("\n")
-                file.write(package_env_entry + "\n")
 
 def _spec_values(spec: str) -> dict[str, str]:
     """Single line values of generated spec."""
