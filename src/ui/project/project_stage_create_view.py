@@ -93,17 +93,17 @@ class ProjectStageCreateView(Gtk.Box):
         self.releng_base_selection_view.connect("selection-changed", self.on_releng_base_changed)
         self.seed_list_selection_view.connect("selection-changed", self.on_seed_selected)
 
-    def on_spec_type_changed(self, data):
+    def on_spec_type_changed(self, sender, data):
         self.load_releng_templates()
         self.load_seed_list()
         self._update_default_stage_name()
         self.wizard_view._refresh_buttons_state()
 
-    def on_releng_base_changed(self, data):
+    def on_releng_base_changed(self, sender, data):
         self._update_default_stage_name()
         self.wizard_view._refresh_buttons_state()
 
-    def on_seed_selected(self, sender):
+    def on_seed_selected(self, sender, data):
         self.wizard_view._refresh_buttons_state()
 
     # Handle UI
