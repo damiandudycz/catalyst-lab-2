@@ -55,12 +55,7 @@
             </child>
             <child>
               <object class="AdwPreferencesGroup" id="packages_pref_group">
-                <property name="title">Package sources and caches</property>
-              </object>
-            </child>
-            <child>
-              <object class="AdwPreferencesGroup" id="package_contents_pref_group">
-                <property name="title">Packages to install / remove</property>
+                <property name="title">Packages</property>
               </object>
             </child>
             <child>

@@ -67,7 +67,6 @@ class ProjectStageDetailsView(Gtk.Box):
     architecture_pref_group = Gtk.Template.Child()
     release_pref_group = Gtk.Template.Child()
     packages_pref_group = Gtk.Template.Child()
-    package_contents_pref_group = Gtk.Template.Child()
     stage_setup_pref_group = Gtk.Template.Child()
     live_image_pref_group = Gtk.Template.Child()
     live_system_pref_group = Gtk.Template.Child()
@@ -124,7 +123,7 @@ class ProjectStageDetailsView(Gtk.Box):
             if isinstance(row, StageKernelRow):
                 hidden_custom += [f"{row.kernel_name}: {title}" for title in row.set_advanced(self.advanced)]
         for group in (self.architecture_pref_group, self.release_pref_group, self.packages_pref_group,
-                      self.package_contents_pref_group, self.stage_setup_pref_group,
+                      self.stage_setup_pref_group,
                       self.live_image_pref_group, self.live_system_pref_group,
                       self.build_behavior_pref_group):
             group.set_visible(any(row.pref_group is group and row.get_visible() for row in self.configuration_rows))
@@ -352,7 +351,7 @@ class ProjectStageDetailsView(Gtk.Box):
                 return self.packages_pref_group
             case (StageArgumentDetails.stage4_packages | StageArgumentDetails.stage4_unmerge |
                   StageArgumentDetails.livecd_packages | StageArgumentDetails.livecd_unmerge):
-                return self.package_contents_pref_group
+                return self.packages_pref_group
             case (StageArgumentDetails.livecd_bootargs | StageArgumentDetails.livecd_cdtar |
                   StageArgumentDetails.livecd_fstype | StageArgumentDetails.livecd_iso |
                   StageArgumentDetails.livecd_motd | StageArgumentDetails.livecd_overlay |
