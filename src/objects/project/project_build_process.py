@@ -841,6 +841,10 @@ def _catalyst_build_script(
     else:
         run = _CATALYST_DEV_SETUP + f'exec catalyst "${{CONFIG_ARGS[@]}}" -f "{spec_path}"'
     return f"""#!/bin/bash
+# Use QEMU's broadest CPU model for user-mode binfmt emulation. Keep this in the
+# build process environment: binfmt_misc cannot reliably use a shell script as
+# its interpreter, and this does not alter the generated stage or Portage config.
+export QEMU_CPU=max
 # Fix of older catalyst: stage1 build.py concatenates portage Atom with str (TypeError with current portage). Fixed
 # upstream, applied to toolset copy of this build session only (changes are not stored in toolset).
 for build_py in /usr/share/catalyst/targets/stage1/build.py; do
