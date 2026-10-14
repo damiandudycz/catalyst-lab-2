@@ -187,6 +187,8 @@ class ProjectBuildsView(Gtk.Box):
         icon.set_pixel_size(24)
         if css_class := _state_css_class(state):
             icon.add_css_class(css_class)
+        if state == BuildRowState.SKIPPED:
+            icon.set_tooltip_text("Skipped because a required stage failed")
         row.add_prefix(icon)
 
         actions = Gtk.Box(spacing=0, valign=Gtk.Align.CENTER)
@@ -420,7 +422,8 @@ def _state_icon(state: BuildRowState) -> str:
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error-box-svgrepo-com-symbolic"
         case BuildRowState.BUILDING: return "menu-dots-square-svgrepo-com-symbolic"
         case BuildRowState.CANCELLED | BuildRowState.STOPPED: return "stop-square-symbolic"
-        case BuildRowState.SKIPPED | BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
+        case BuildRowState.SKIPPED: return "dialog-warning-symbolic"
+        case BuildRowState.NOT_STARTED: return "square-svgrepo-com-symbolic"
         case _: return "clock-square-svgrepo-com-symbolic"
 
 def _state_css_class(state: BuildRowState) -> str | None:
@@ -428,7 +431,8 @@ def _state_css_class(state: BuildRowState) -> str | None:
         case BuildRowState.COMPLETED: return "success"
         case BuildRowState.FAILED | BuildRowState.INTERRUPTED: return "error"
         case BuildRowState.BUILDING: return "accent"
-        case BuildRowState.SCHEDULED | BuildRowState.SKIPPED | BuildRowState.CANCELLED | BuildRowState.STOPPED | BuildRowState.NOT_STARTED: return "dimmed"
+        case BuildRowState.SKIPPED: return "warning"
+        case BuildRowState.SCHEDULED | BuildRowState.CANCELLED | BuildRowState.STOPPED | BuildRowState.NOT_STARTED: return "dimmed"
     return None
 
 def _failure_summary(build) -> str | None:
