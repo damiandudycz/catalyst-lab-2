@@ -657,6 +657,7 @@ class ProjectBuildStepBuildStage(ProjectBuildStep):
                 snapshot=process.snapshot,
                 path_mapper=process.container_path,
             ))
+            values = _spec_values(spec)
             spec_path = os.path.join(work_directory, "stage.spec")
             with open(spec_path, "w", encoding="utf-8") as file:
                 file.write(spec)
